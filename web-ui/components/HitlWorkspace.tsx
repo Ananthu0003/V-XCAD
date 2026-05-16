@@ -1,14 +1,14 @@
 'use client';
 
 import JSON5 from 'json5';
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { ChatPanel } from './ChatPanel';
 import { CadViewport } from './CadViewport';
 import { EditorDrawer } from './EditorDrawer';
 import { ParameterInput } from './ParameterInput';
-import { StlMesh } from './StlMesh';
+import { StlMesh, type StlGeometryInfo } from './StlMesh';
 import { HistoryDrawer } from './HistoryDrawer';
 import { History } from 'lucide-react';
 
@@ -35,7 +35,7 @@ type RenderPayload = {
 		stl_url?: string;
 		step_url?: string;
 		dxf_url?: string;
-
+		annotations?: Record<string, { p1: [number, number, number]; p2: [number, number, number] }>;
 	};
 };
 
@@ -276,8 +276,16 @@ export default function HitlWorkspace() {
 	const [isDownloadingStep, setIsDownloadingStep] = useState(false);
 	const [isDownloadingDxf, setIsDownloadingDxf] = useState(false);
 	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+	const [isChatOpen, setIsChatOpen] = useState(true);
 
 	const [statusText, setStatusText] = useState<string>('Ready');
+	const [annotations, setAnnotations] = useState<Record<string, { p1: [number, number, number]; p2: [number, number, number] }>>({});
+	const [activeParameter, setActiveParameter] = useState<string | null>(null);
+	const [geometryInfo, setGeometryInfo] = useState<StlGeometryInfo | null>(null);
+
+	const handleGeometryReady = useCallback((info: StlGeometryInfo) => {
+		setGeometryInfo(info);
+	}, []);
 
 	const pythonScriptRef = useRef('');
 
@@ -414,7 +422,7 @@ export default function HitlWorkspace() {
 			const response = await fetch('/api/render', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'x-session-id': session },
-				body: JSON.stringify({ python_script: script, parameters: params }),
+				body: JSON.stringify({ python_script: script, parameters: params, session_id: session }),
 			});
 
 			if (!response.ok) {
@@ -426,6 +434,7 @@ export default function HitlWorkspace() {
 			if (payload.artifacts?.stl_url) setStlUrl(resolveModelUrl(payload.artifacts.stl_url, Date.now().toString()));
 			if (payload.artifacts?.step_url) setStepUrl(resolveModelUrl(payload.artifacts.step_url));
 			if (payload.artifacts?.dxf_url) setDxfUrl(resolveModelUrl(payload.artifacts.dxf_url));
+			if (payload.artifacts?.annotations) setAnnotations(payload.artifacts.annotations);
 
 
 			setStatusText('Geometry recompiled successfully.');
@@ -500,6 +509,28 @@ export default function HitlWorkspace() {
 	const hasDxf = Boolean(dxfUrl);
 
 
+	const handleClear = () => {
+		setMessages([
+			{
+				id: 'system_welcome',
+				role: 'system',
+				content: 'Upload a reference image or PDF, choose a model, and generate a parameterized build123d script.',
+			},
+		]);
+		setPrompt(DEFAULT_PROMPT);
+		setSelectedFile(null);
+		setSessionId(null);
+		updatePythonScript('');
+		setParameters({});
+		setStlUrl(null);
+		setStepUrl(null);
+		setDxfUrl(null);
+		setAnnotations({});
+		setActiveParameter(null);
+		setStatusText('Ready');
+		toast.info('Session cleared');
+	};
+
 	return (
 		<div className="dark h-screen w-full bg-black text-zinc-100 overflow-hidden">
 			<main className="flex h-full w-full gap-0">
@@ -514,18 +545,23 @@ export default function HitlWorkspace() {
 					handleFileChange={setSelectedFile}
 					isGenerating={isGenerating}
 					onSubmit={handleGenerate}
+					onClear={handleClear}
 					width={chatWidth}
+					isOpen={isChatOpen}
+					setIsOpen={setIsChatOpen}
 				/>
 
-				<div
-					className="group relative w-1 cursor-col-resize bg-zinc-900 transition-colors hover:bg-amber-500/50"
-					onMouseDown={() => {
-						isResizing.current = true;
-						document.body.style.cursor = 'col-resize';
-					}}
-				>
-					<div className="absolute inset-y-0 -left-1 w-3 opacity-0 group-hover:opacity-100" />
-				</div>
+				{isChatOpen && (
+					<div
+						className="group relative w-1 cursor-col-resize bg-zinc-900 transition-colors hover:bg-amber-500/50"
+						onMouseDown={() => {
+							isResizing.current = true;
+							document.body.style.cursor = 'col-resize';
+						}}
+					>
+						<div className="absolute inset-y-0 -left-1 w-3 opacity-0 group-hover:opacity-100" />
+					</div>
+				)}
 
 				<CadViewport
 					stlUrl={stlUrl}
@@ -540,9 +576,11 @@ export default function HitlWorkspace() {
 					onDownloadStl={() => void handleDownloadArtifact(stlUrl, 'stl')}
 					onDownloadStep={() => void handleDownloadArtifact(stepUrl, 'step')}
 					onDownloadDxf={() => void handleDownloadArtifact(dxfUrl, 'dxf')}
-
+					annotations={annotations}
+					activeParameter={activeParameter}
+					geometryInfo={geometryInfo}
 				>
-					{stlUrl ? <StlMesh url={stlUrl} /> : null}
+					{stlUrl ? <StlMesh url={stlUrl} onGeometryReady={handleGeometryReady} /> : null}
 				</CadViewport>
 
 				<EditorDrawer
@@ -559,19 +597,21 @@ export default function HitlWorkspace() {
 				>
 					<div className="space-y-4">
 						{parameterEntries.map(([key, value]) => (
-							<ParameterInput
-								key={key}
-								label={key}
-								value={value}
-								onChange={(nextValue) => {
-									const nextParams = setParameterValue(parameters, key, nextValue);
-									setParameters(nextParams);
-									const nextScript = injectParameters(pythonScript, nextParams);
-									if (nextScript !== pythonScript) {
-										updatePythonScript(nextScript);
-									}
-								}}
-							/>
+							<div key={key} className="cursor-pointer" onClick={() => setActiveParameter(key)} onFocus={() => setActiveParameter(key)}>
+								<ParameterInput
+									label={key}
+									value={value}
+									isActive={activeParameter === key}
+									onChange={(nextValue) => {
+										const nextParams = setParameterValue(parameters, key, nextValue);
+										setParameters(nextParams);
+										const nextScript = injectParameters(pythonScript, nextParams);
+										if (nextScript !== pythonScript) {
+											updatePythonScript(nextScript);
+										}
+									}}
+								/>
+							</div>
 						))}
 					</div>
 				</EditorDrawer>

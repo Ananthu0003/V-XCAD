@@ -11,6 +11,7 @@ datasource db {
 model CadSession {
   id           String   @id @default(cuid())
   prompt       String
+  fileName     String?
   pythonScript String?
   parameters   Json?
   stlUrl       String?

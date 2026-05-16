@@ -6,8 +6,7 @@ asttokens==3.0.1
 build123d==0.10.0
 cadquery-ocp==7.8.1.1.post1
 cadquery-ocp-proxy==7.9.3.1
-cadquery_vtk==9.2.6
-
+cadquery_vtk==9.3.1
 certifi==2026.4.22
 cffi==2.0.0
 charset-normalizer==3.4.7

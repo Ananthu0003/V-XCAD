@@ -125,6 +125,13 @@ function toFastApiRenderRequest(value: unknown): FastApiRenderRequest | null {
 
 export async function POST(request: Request): Promise<Response> {
 	const body = await request.json().catch(() => null);
+	const headerSessionId = request.headers.get('x-session-id');
+
+	// If body doesn't have session_id but header does, inject it.
+	if (body && typeof body === 'object' && !body.session_id && headerSessionId) {
+		body.session_id = headerSessionId;
+	}
+
 	const mappedPayload = toFastApiRenderRequest(body);
 	if (!mappedPayload) {
 		return NextResponse.json(
@@ -195,7 +202,7 @@ export async function POST(request: Request): Promise<Response> {
 		await prisma.cadSession.create({
 			data: {
 				id: mappedPayload.session_id,
-				prompt: 'render-only-session',
+				prompt: 'Scripted CAD Design',
 				pythonScript: mappedPayload.python_script,
 				parameters: parametersJson,
 				stlUrl,

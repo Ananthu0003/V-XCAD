@@ -49,6 +49,7 @@ class GeneratedCadArtifacts(StrictModel):
     step_url: str
     stl_url: str
     dxf_url: str | None = None
+    annotations: dict[str, dict[str, Any]] | None = None
 
     script_url: str
     stdout: str = ""
@@ -82,6 +83,7 @@ class RenderedCadArtifacts(StrictModel):
     step_url: str
     stl_url: str
     dxf_url: str | None = None
+    annotations: dict[str, dict[str, Any]] | None = None
 
     script_url: str
     stdout: str = ""

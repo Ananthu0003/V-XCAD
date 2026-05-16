@@ -4,9 +4,10 @@ type ParameterInputProps = {
 	label: string;
 	value: unknown;
 	onChange: (nextValue: unknown) => void;
+	isActive?: boolean;
 };
 
-export function ParameterInput({ label, value, onChange }: ParameterInputProps) {
+export function ParameterInput({ label, value, onChange, isActive = false }: ParameterInputProps) {
 	const inputBase = "w-full rounded-xl border border-zinc-800 bg-black/50 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 focus:outline-none transition-all";
 
 	const renderInput = () => {
@@ -69,8 +70,14 @@ export function ParameterInput({ label, value, onChange }: ParameterInputProps) 
 	};
 
 	return (
-		<div className="space-y-2">
-			<label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-500 pl-1">
+		<div className={`space-y-2 rounded-xl px-2 py-1.5 transition-all duration-200 ${
+			isActive
+				? 'bg-amber-500/5 ring-1 ring-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.08)]'
+				: ''
+		}`}>
+			<label className={`block text-[10px] font-bold uppercase tracking-wider pl-1 transition-colors ${
+				isActive ? 'text-amber-500' : 'text-zinc-500'
+			}`}>
 				{label.replace(/_/g, ' ')}
 			</label>
 			{renderInput()}

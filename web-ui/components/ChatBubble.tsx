@@ -46,6 +46,69 @@ export function ChatBubble({ role, content }: ChatBubbleProps) {
 								const match = /language-(\w+)/.exec(className || '');
 								const codeText = String(children).replace(/\n$/, '');
 
+								// Professional Engineering Report Transformation
+								if (match && match[1] === 'python' && codeText.includes('PARAMETERS')) {
+									const paramsMatch = codeText.match(/PARAMETERS\s*=\s*\{([\s\S]*?)\}/);
+									const params: Record<string, string> = {};
+									
+									if (paramsMatch) {
+										const lines = paramsMatch[1].split('\n');
+										lines.forEach(line => {
+											const m = line.match(/"(\w+)":\s*([\d.]+)/);
+											if (m) params[m[1]] = m[2];
+										});
+									}
+
+									return (
+										<div className="my-6 overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/40 backdrop-blur-sm shadow-2xl">
+											<div className="flex items-center justify-between bg-zinc-900/50 px-5 py-3.5 border-b border-white/5">
+												<div className="flex items-center gap-3">
+													<div className="size-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
+													<span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300">Technical Analysis Report</span>
+												</div>
+												<div className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-black/40 border border-white/5">
+													<span className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Model Fidelity: High</span>
+												</div>
+											</div>
+											
+											<div className="p-5">
+												<div className="mb-4 flex items-center gap-4">
+													<h3 className="text-[9px] font-black uppercase tracking-[0.3em] text-amber-500/80">Extracted Dimensions</h3>
+													<div className="h-px flex-1 bg-linear-to-r from-white/10 to-transparent" />
+												</div>
+												
+												<div className="grid grid-cols-2 gap-x-6 gap-y-3 mb-6">
+													{Object.entries(params).map(([key, val]) => (
+														<div key={key} className="flex items-center justify-between group/item">
+															<span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider group-hover/item:text-zinc-400 transition-colors">{key.replace(/_/g, ' ')}</span>
+															<div className="flex items-center gap-1.5">
+																<span className="text-[11px] font-mono font-bold text-amber-400">{val}</span>
+																<span className="text-[8px] font-bold text-zinc-700">mm</span>
+															</div>
+														</div>
+													))}
+												</div>
+
+												<div className="pt-4 border-t border-white/5 flex items-center justify-between">
+													<div className="flex items-center gap-4">
+														<div className="flex -space-x-1">
+															{[1,2,3].map(i => (
+																<div key={i} className="size-4 rounded-full border border-zinc-950 bg-zinc-800 flex items-center justify-center">
+																	<div className="size-1 rounded-full bg-amber-500/50" />
+																</div>
+															))}
+														</div>
+														<span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest italic">Core logic dispatched to engine</span>
+													</div>
+													<div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 border-b border-amber-500/20 pb-0.5">
+														Ready for Sync
+													</div>
+												</div>
+											</div>
+										</div>
+									);
+								}
+
 								if (match) {
 									return (
 										<div className="relative my-4 overflow-hidden rounded-xl bg-black/40 border border-white/5 shadow-inner group/code">

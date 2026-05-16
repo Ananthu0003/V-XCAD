@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useRef, useEffect } from 'react';
-import { SendHorizontal, Upload, Loader2 } from 'lucide-react';
+import { SendHorizontal, Upload, Loader2, Trash2 } from 'lucide-react';
 import { ChatBubble } from './ChatBubble';
 
 type ChatRole = 'user' | 'assistant' | 'system';
@@ -23,7 +23,10 @@ type ChatPanelProps = {
 	handleFileChange: (file: File | null) => void;
 	isGenerating: boolean;
 	onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+	onClear: () => void;
 	width: number;
+	isOpen: boolean;
+	setIsOpen: (v: boolean) => void;
 };
 
 export function ChatPanel({
@@ -37,7 +40,10 @@ export function ChatPanel({
 	handleFileChange,
 	isGenerating,
 	onSubmit,
-	width
+	onClear,
+	width,
+	isOpen,
+	setIsOpen
 }: ChatPanelProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -47,42 +53,72 @@ export function ChatPanel({
 
 	return (
 		<section
-			className="flex shrink-0 flex-col border-r border-zinc-800 bg-[#09090b] relative z-20"
-			style={{ width: `${width}px` }}
+			className={`flex shrink-0 flex-col border-r border-zinc-800 bg-[#09090b] relative z-20 transition-all duration-500 ease-[cubic-bezier(0.2,1,0.2,1)] overflow-hidden`}
+			style={{ width: isOpen ? `${width}px` : '64px' }}
 		>
+			{/* Toggle Button */}
+			<button
+				onClick={() => setIsOpen(!isOpen)}
+				className="absolute right-4 top-5 flex size-8 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-amber-500 hover:text-amber-500 transition-all z-50"
+			>
+				{isOpen ? (
+					<svg className="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+					</svg>
+				) : (
+					<svg className="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+					</svg>
+				)}
+			</button>
+
+			<div className={`flex h-full flex-1 flex-col min-h-0 transition-opacity duration-300 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+
 			{/* High-Fidelity Header */}
-			<header className="flex h-16 items-center justify-between border-b border-zinc-800/50 bg-[#09090b]/50 px-6 backdrop-blur-md">
-				<div className="flex items-center gap-3">
+			<header className={`sticky top-0 z-40 flex h-16 shrink-0 items-center justify-between border-b border-zinc-800/50 bg-[#09090b]/80 pl-6 ${isOpen ? 'pr-16' : 'pr-6'} backdrop-blur-md transition-all`}>
+				<div className="flex items-center gap-3 shrink-0">
 					<div className="flex size-7 items-center justify-center rounded-lg bg-amber-500 shadow-[0_0_20px_rgba(245,158,11,0.4)]">
 						<span className="text-sm font-black text-black">C</span>
 					</div>
-					<h1 className="text-xs font-bold tracking-widest text-zinc-100 font-sans uppercase">Cad Copilot</h1>
+					<h1 className="text-[10px] font-bold tracking-widest text-zinc-100 font-sans uppercase hidden sm:block">Cad Copilot</h1>
 				</div>
 
-				{/* Model Switcher - Hardware Module Style */}
-				<div className="relative group">
-					<div className="flex items-center gap-3 rounded-full border border-amber-500/20 bg-amber-500/5 px-4 py-1.5 transition-all hover:border-amber-500/50 hover:bg-amber-500/10 shadow-[0_0_15px_rgba(245,158,11,0.05)] cursor-pointer">
-						<div className="size-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-						<div className="flex items-center gap-2">
-							<span className="text-[9px] font-mono font-bold text-amber-500/60 uppercase tracking-[0.2em]">Core:</span>
-							<select
-								value={selectedModel}
-								onChange={(e) => setSelectedModel(e.target.value)}
-								className="bg-transparent text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-100 focus:outline-none cursor-pointer appearance-none pr-4"
-							>
-								{modelOptions.map((opt) => (
-									<option key={opt.value} value={opt.value} className="bg-[#09090b] text-zinc-100 uppercase">
-										{opt.label.split(' ')[0].replace('gemini-', '')}
-									</option>
-								))}
-							</select>
-							<div className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2">
-								<svg className="size-3 text-amber-500/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
-								</svg>
+				<div className="flex items-center gap-3">
+					{/* Model Switcher - Hardware Module Style */}
+					<div className="relative group">
+						<div className="flex items-center gap-2 rounded-full border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 transition-all hover:border-amber-500/50 hover:bg-amber-500/10 shadow-[0_0_15px_rgba(245,158,11,0.05)] cursor-pointer">
+							<div className="size-1 rounded-full bg-emerald-500 animate-pulse" />
+							<div className="flex items-center gap-1.5">
+								<select
+									value={selectedModel}
+									onChange={(e) => setSelectedModel(e.target.value)}
+									className="bg-transparent text-[9px] font-mono font-bold uppercase tracking-widest text-zinc-400 focus:outline-none cursor-pointer appearance-none pr-3"
+								>
+									{modelOptions.map((opt) => (
+										<option key={opt.value} value={opt.value} className="bg-[#09090b] text-zinc-100 uppercase">
+											{opt.label.split(' ')[0].replace('gemini-', '')}
+										</option>
+									))}
+								</select>
+								<div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+									<svg className="size-2.5 text-amber-500/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+									</svg>
+								</div>
 							</div>
 						</div>
 					</div>
+
+					<div className="h-4 w-px bg-zinc-800" />
+
+					{/* Clear Button */}
+					<button
+						onClick={onClear}
+						className="flex size-8 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50 text-zinc-500 transition-all hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-500"
+						title="Clear Session"
+					>
+						<Trash2 className="size-3.5" />
+					</button>
 				</div>
 			</header>
 
@@ -122,7 +158,7 @@ export function ChatPanel({
 					)}
 
 					<form onSubmit={onSubmit} className="relative group/form">
-						<div className="relative overflow-hidden rounded-2xl border border-zinc-800/50 bg-[#111113] shadow-[0_20px_50px_rgba(0,0,0,0.5)] transition-all duration-300 focus-within:border-amber-500/40 focus-within:shadow-[0_0_30px_rgba(245,158,11,0.05)]">
+						<div className="relative overflow-hidden rounded-2xl border border-zinc-800/50 bg-linear-to-b from-[#161618] to-[#0c0c0e] shadow-[0_20px_50px_rgba(0,0,0,0.5)] transition-all duration-300 focus-within:border-amber-500/40 focus-within:shadow-[0_0_30px_rgba(245,158,11,0.1)]">
 							<textarea
 								value={prompt}
 								onChange={(e) => setPrompt(e.target.value)}
@@ -138,7 +174,7 @@ export function ChatPanel({
 							/>
 
 							<div className="flex items-center justify-between border-t border-zinc-800/30 bg-white/2 px-4 py-3">
-								<div className="flex items-center gap-2">
+								<div className="flex items-center gap-3">
 									<label className="group/btn relative flex cursor-pointer items-center justify-center rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-amber-500 transition-all">
 										<Upload className="size-4" />
 										<input
@@ -149,15 +185,19 @@ export function ChatPanel({
 										/>
 									</label>
 									<div className="h-4 w-px bg-zinc-800/50" />
-									<span className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-zinc-600">
-										{isGenerating ? 'Engine Processing' : 'Ready'}
-									</span>
+									
+									<div className="flex items-center gap-2">
+										<div className={`size-1.5 rounded-full ${isGenerating ? 'bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'}`} />
+										<span className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-zinc-500">
+											{isGenerating ? 'Processing' : 'Ready'}
+										</span>
+									</div>
 								</div>
 
 								<button
 									type="submit"
 									disabled={isGenerating || !prompt.trim() || !selectedFile}
-									className="flex h-9 items-center gap-2.5 rounded-lg bg-amber-500 px-4 text-[10px] font-black uppercase tracking-[0.2em] text-black shadow-lg hover:bg-amber-400 hover:scale-[1.02] active:scale-[0.98] disabled:bg-zinc-800 disabled:text-zinc-600 disabled:shadow-none disabled:scale-100 transition-all"
+									className="group/btn relative flex h-9 items-center gap-2.5 rounded-lg bg-amber-500 px-5 text-[10px] font-black uppercase tracking-[0.2em] text-black shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:bg-amber-400 hover:scale-[1.02] active:scale-[0.98] disabled:bg-zinc-800/50 disabled:text-zinc-600 disabled:shadow-none disabled:scale-100 transition-all overflow-hidden"
 								>
 									{isGenerating ? (
 										<>
@@ -170,23 +210,23 @@ export function ChatPanel({
 											<span>Generate</span>
 										</>
 									)}
+									<div className="absolute inset-0 -translate-x-full bg-linear-to-r from-transparent via-white/30 to-transparent group-hover/btn:translate-x-full transition-transform duration-700" />
 								</button>
 							</div>
 						</div>
 						
-						{/* Subtle Safety Note */}
-						<div className="mt-3 flex items-center gap-2 px-1 opacity-40 hover:opacity-100 transition-opacity duration-300">
-							<svg className="size-3 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-							</svg>
-							<p className="text-[9px] font-medium uppercase tracking-[0.05em] text-zinc-400">
-								AI can make mistakes. Verify all critical dimensions against original blueprints.
-							</p>
-						</div>
-
 					</form>
 				</div>
 			</div>
+			</div>
+
+			{!isOpen && (
+				<div className="flex h-full flex-col items-center gap-6 pt-20">
+					<div className="rotate-90 whitespace-nowrap text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-700">
+						Design Assistant
+					</div>
+				</div>
+			)}
 		</section>
 	);
 }

@@ -160,16 +160,16 @@ Health check:
 curl http://127.0.0.1:8000/health
 ```
 
-### 3) Start web-ui 
+    ### 3) Start web-ui 
 
-```bash
-cd web-ui
-cp .env.example .env  # Windows: Copy-Item .env.example .env
-npm install
-npm run prisma:generate
-npm run prisma:push
-npm run dev
-```
+    ```bash
+    cd web-ui
+    cp .env.example .env  # Windows: Copy-Item .env.example .env
+    npm install
+    npm run prisma:generate
+    npm run prisma:push
+    npm run dev
+    ```
 
 Open:
 

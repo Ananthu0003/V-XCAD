@@ -174,6 +174,6 @@ def render(request: RenderRequest) -> RenderResponse:
             script_url=f"/outputs/{output_basename}.py",
             python_script=request.python_script,
             parameters=reconstructed_params,
-
+            annotations=paths.get("annotations", {}),
         )
     )

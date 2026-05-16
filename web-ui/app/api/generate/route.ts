@@ -109,6 +109,7 @@ export async function POST(request: Request): Promise<Response> {
 	const session = await prisma.cadSession.create({
 		data: {
 			prompt,
+			fileName: upload.name,
 		},
 	});
 

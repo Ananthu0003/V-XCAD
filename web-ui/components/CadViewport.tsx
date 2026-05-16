@@ -4,6 +4,13 @@ import { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stage, PerspectiveCamera } from '@react-three/drei';
 import { Loader2 } from 'lucide-react';
+import { DimensionOverlay } from './DimensionOverlay';
+import type { StlGeometryInfo } from './StlMesh';
+
+type AnnotationEntry = {
+	p1: [number, number, number];
+	p2: [number, number, number];
+};
 
 type CadViewportProps = {
 	stlUrl: string | null;
@@ -18,6 +25,9 @@ type CadViewportProps = {
 	onDownloadStl: () => void;
 	onDownloadStep: () => void;
 	onDownloadDxf: () => void;
+	annotations?: Record<string, AnnotationEntry>;
+	activeParameter?: string | null;
+	geometryInfo?: StlGeometryInfo | null;
 
 	children?: React.ReactNode; // For StlMesh
 };
@@ -35,8 +45,11 @@ export function CadViewport({
 	onDownloadStl,
 	onDownloadStep,
 	onDownloadDxf,
+	annotations = {},
+	activeParameter = null,
+	geometryInfo = null,
 
-	children
+	children,
 }: CadViewportProps) {
 	return (
 		<section className="relative flex flex-1 flex-col overflow-hidden bg-black">
@@ -92,6 +105,15 @@ export function CadViewport({
 						</Stage>
 					</Suspense>
 
+					{/* Dimension overlay - rendered at Canvas root level */}
+					{geometryInfo && activeParameter && Object.keys(annotations).length > 0 && (
+						<DimensionOverlay
+							annotations={annotations}
+							activeParameter={activeParameter}
+							geometryScale={geometryInfo.scale}
+							geometryCenter={geometryInfo.center}
+						/>
+					)}
 
 					<OrbitControls makeDefault enableDamping dampingFactor={0.05} minPolarAngle={0} maxPolarAngle={Math.PI / 1.75} />
 				</Canvas>
@@ -124,6 +146,16 @@ export function CadViewport({
 						</div>
 					</div>
 				)}
+
+				{/* Global Safety Note */}
+				<div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 rounded-full border border-zinc-800/50 bg-[#09090b]/80 px-5 py-2.5 backdrop-blur-xl transition-all hover:border-amber-500/30 whitespace-nowrap">
+					<svg className="size-3 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+					</svg>
+					<p className="text-[9px] font-bold uppercase tracking-[0.15em] text-zinc-500">
+						AI can make mistakes. Verify critical dimensions against original blueprints.
+					</p>
+				</div>
 			</div>
 		</section>
 	);

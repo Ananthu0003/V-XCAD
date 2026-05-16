@@ -26,3 +26,16 @@ export async function GET() {
         );
     }
 }
+
+export async function DELETE() {
+    try {
+        await prisma.cadSession.deleteMany({});
+        return NextResponse.json({ message: 'History cleared' });
+    } catch (error) {
+        console.error('Failed to clear sessions:', error);
+        return NextResponse.json(
+            { error: 'Failed to clear history' },
+            { status: 500 }
+        );
+    }
+}
