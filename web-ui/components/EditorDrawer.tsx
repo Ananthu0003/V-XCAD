@@ -166,7 +166,6 @@ export function EditorDrawer({
 										cursorBlinking: 'smooth',
 										cursorSmoothCaretAnimation: 'on',
 										mouseWheelZoom: true,
-										backgroundColor: '#00000000',
 									}}
 								/>
 							</div>
