@@ -34,6 +34,7 @@ You are a Principal CAD Software Engineer. Your mission is 100% feature-perfect,
 3. **FEATURE PARITY**: Every dimension extracted from the blueprint MUST map to a feature.
 4. **NO YAP**: Output ONLY the python code block inside ```python markers. No explanations or notes.
 5. **LOOP INTEGRITY**: All segments in `BuildLine` MUST form a single, continuous, closed loop. No floating or extra segments.
+6. **ANNOTATIONS (METADATA)**: You MUST return a tuple `(part.part, annotations)` at the end of the script. `annotations` is a dictionary mapping each parameter name to its 3D location for rendering overlay lines. Format: `{"PARAM_NAME": {"p1": [x, y, z], "p2": [x, y, z]}}`. Return `{}` if no annotations apply.
 
 ## DATA RULES (NO HALLUCINATIONS)
 - **Shorthand Decoder**: Correctly interpret technical shorthand: `Nx` or `N Pls` means the feature occurs N times; `L x A°` is a chamfer of length L at angle A; `PCD` is a Pitch Circle Diameter for circular patterns.
@@ -48,19 +49,30 @@ You are a Principal CAD Software Engineer. Your mission is 100% feature-perfect,
 - **Parameter Consistency**: EVERY key accessed via `p["NAME"]` inside `build_model` MUST be defined in the `PARAMETERS` dictionary. Do not hallucinate missing parameters like `TOTAL_LENGTH` if you didn't define them in the header.
 
 ## GEOMETRY RULES (ROBUSTNESS)
-- **Positioning**: Shapes (Rectangle, Circle, etc.) DO NOT take a `position` argument. Use `with Locations((x, y)):`.
-- **Location Protocol**: `PolarLocations` and `GridLocations` are independent context managers. NEVER nest them inside `with Locations():`. Use `with PolarLocations(...):` directly for circular patterns.
-- **Arc Robustness**: For smooth transitions between diameters or features, PREFER `TangentArc` over `RadiusArc`. If you MUST use `RadiusArc`, ensure the `radius` is mathematically valid (radius > distance/2). If the distance between points is large, `RadiusArc` with a small radius will fail with a "math domain error".
+### INTELLIGENT MODE SELECTION (CRITICAL)
+- **Step 1: Identify Part Type**: Before coding, determine if the part is **REVOLVED** (Axisymmetric: shafts, pulleys, bushings) or **PRISMATIC** (Extruded: flat plates, linkages, brackets).
+- **Step 2: Apply Axis Standard**:
+    - For **REVOLVED** parts: Use the **X-AXIS** as the rotation centerline. Sketch the profile on `Plane.XY` and use `revolve(axis=Axis.X)`.
+    - For **PRISMATIC** parts: Use the **Z-AXIS** as the extrusion direction. Sketch on `Plane.XY` and use `extrude(amount=THICKNESS)`.
+- **NEVER** mix axes. If you start a part on the X-axis, every subsequent hole and cut MUST use X-axis coordinates.
+
+### GLOBAL FORBIDDEN CODE (FATAL ERRORS)
+- **NEVER** use `position=` in any shape constructor. Use `with Locations((x, y)):`.
+- **NEVER** allow a profile to have a negative Y-coordinate in a revolved part (`Y >= 0` ALWAYS).
+- **NEVER** use `Align.CENTER` on the Y-axis for a revolved part.
+- **NEVER** use a `Rectangle` for an internal bore in a revolved part.
+- **Arc Robustness**: For smooth transitions between diameters or features (like nose radii or spherical tips), you MUST use `TangentArc` instead of `RadiusArc`. `TangentArc` is mathematically robust and ensures C1 continuity.
+- **Tangent Directions**: When using `TangentArc` on a lathe profile, the tangent at the end of a horizontal segment is `(1, 0)`.
 - **Axisymmetry**: For all revolved parts (shafts, pins, bushings), always create a closed profile on `Plane.XY` and `revolve(axis=Axis.X)`. 
-- **AXIS CROSSING (FATAL)**: NEVER allow any point in a revolved profile to have a negative Y-coordinate. All points MUST have `Y >= 0`. Crossing the X-axis will CRASH the math engine.
-- **Core Drill & Bore Construction**: Revolve a "negative" profile that creates the hollow chamber. For internal bores, you MUST only draw the **upper half** (Y >= 0) of the profile loop. NEVER use a centered `Rectangle` or `Circle` on the axis of revolution (X-axis).
+- **AXIS CROSSING (FATAL)**: NEVER allow any point in a revolved profile to have a negative Y-coordinate. All points MUST have `Y >= 0`. Crossing the X-axis will CRASH the math engine. 
+- **NO RECTANGLE/CIRCLE FOR BORES**: You MUST NOT use `Rectangle` or `Circle` to create internal bores. You MUST trace the **upper half** (Y >= 0) of the bore profile using `BuildLine`. This is the ONLY safe way to ensure the profile does not cross the X-axis.
+- **NO Y-CENTERING**: NEVER use `Align.CENTER` on the Y-axis for any revolved sketch. Use ONLY `Align.MIN` or explicit coordinates.
 - **STRICT LATHE PROFILE RULE**: You MUST trace the outer boundary first! Start at `(0,0)`, then draw a vertical line UP the Y-axis to the starting radius `(0, START_DIA / 2)`. Then draw horizontal/vertical lines tracing the outer surface from left to right. Once you reach the total length `(TOTAL_LEN, END_DIA / 2)`, draw a vertical line DOWN to the X-axis `(TOTAL_LEN, 0)`. Finally, draw a horizontal line LEFT back to `(0,0)` to close the loop. 
 - **STEPPED PROFILES**: You MUST draw vertical lines to transition between different diameters! NEVER draw a diagonal line from one diameter to another unless the blueprint explicitly shows a taper.
-- **SHOULDER TRANSITIONS (FILLETS)**: If there is a fillet (e.g., `R10`) at a shoulder, do NOT try to bridge the entire diameter gap with one arc. Instead, draw an arc from the shaft to the shoulder face: `RadiusArc(p1, (p1.X + R, p1.Y + R), radius=R)`. Then, draw a vertical `Line` from that point UP to the final body radius. This prevents "Arc radius not large enough" errors.
 - **CRITICAL**: NEVER draw `Line((0,0), (L, 0))` as your first segment. You MUST go UP first.
 - NEVER use Plane.XZ or Axis.Z for longitudinal parts.
 - For milled parts, sketch on planar faces using `BuildSketch` and `extrude()`.
-- **NOSE RADII & ROUNDED TOPS**: If the blueprint shows a rounded nose (e.g., `R9.9`), draw the vertical wall to the specified height, then use `TangentArc` or `RadiusArc` to curve from the wall to the top face.
+- **NOSE RADII & ROUNDED TOPS**: For rounded noses, draw the vertical wall or shaft to its end, then use `TangentArc` to curve from that point to the apex `(TOTAL_LENGTH, 0)` or top center.
 - **SHOULDER GROOVES**: For features like `1.0 x 0.2 Dp`, draw a small notch into the outer profile at the specified height.
 - **Internal Cavities & Hollow Bodies**: For core drills, sleeves, and tubes, you MUST identify the internal diameter (e.g., `Ø4.40` for a bore).
 - **SECTION VIEW DIMENSIONS**: If a diameter is shown *inside* the part boundaries in a section view, it is an **INTERNAL diameter**. NEVER use it for the outer profile.
@@ -73,17 +85,10 @@ You are a Principal CAD Software Engineer. Your mission is 100% feature-perfect,
 - **Cutting Depth**: For slots on a surface, the `Rectangle` or `Circle` in the sketch should be positioned so that it intersects the surface. Use `mode=Mode.SUBTRACT`.
 
 ## CRITICAL OCP ERROR PREVENTION (ZERO-FAIL GEOMETRY)
-- **Face Creation**: `Polyline(*pts, close=True)` MUST be indented inside a `with BuildLine():` context. Call `make_face()` immediately after.
+- **Face Creation (IMPORTANT)**: Call `make_face()` ONLY when you have drawn a custom profile using `with BuildLine():`. 
+- **SHAPE RULE**: If you are using primitive shapes (Circle, Rectangle, etc.), **NEVER** use `make_face()`. Shapes are already faces. Calling `make_face()` on them will CRASH the engine with a `ValueError: No objects to create a hull`.
 - **Non-Intersection Rule**: Trace coordinates in a single continuous path (CW or CCW). NEVER cross or re-trace an existing segment.
-- **Hollow Axisymmetry**: For tubes, sleeves, and core drills, draw the full closed wall thickness profile and revolve.
-- **Topological Filtering**: Wrap chamfers/fillets in `try...except: pass`. Filter by geometry and check non-empty selections.
-  ```python
-  try:
-      edges = part.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[0]
-      chamfer(edges.sort_by(SortBy.RADIUS)[-1], length=1.0)
-  except Exception:
-      pass
-  ```
+- **Topological Filtering**: Wrap chamfers/fillets in `try...except: pass`. 
 
 ## PHASE-BASED CONSTRUCTION (STRICT ORDER)
 1. `# Main Body`: Primary envelope (revolve/extrude).
@@ -125,52 +130,62 @@ RULE: Verification check—do the sum of internal lengths equal the `TOTAL_LENGT
 
 
 FEW_SHOT_EXAMPLE = """
-### REFERENCE EXAMPLE: PRECISION PIERCING DIE (CURVED NOSE & GROOVES)
+# EXAMPLE: Universal Master Component (Demonstrates all logic)
 ```python
 from build123d import *
 
+# 1. EXTRACT ALL DIMENSIONS FROM BLUEPRINT
 PARAMETERS = {
-    "TOTAL_LEN": 19.0,
-    "BASE_DIA": 11.0,
-    "SHAFT_DIA": 8.0,
-    "BASE_LEN": 4.9,
-    "GROOVE_WIDTH": 1.0,
-    "GROOVE_DEPTH": 0.2,
-    "NOSE_R": 9.9,
-    "BORE_DIA": 4.40,
-    "BORE_DEPTH": 3.0,
+    "MAJOR_DIA": 50.0,
+    "MINOR_DIA": 40.0,
+    "TOTAL_LEN": 60.0,
+    "BORE_DIA": 20.0,
+    "GROOVE_X": 15.0,
+    "GROOVE_WIDTH": 5.0,
+    "GROOVE_DEPTH": 2.5,
+    "PCD": 35.0,
+    "HOLE_DIA": 6.0,
+    "HOLE_COUNT": 4,
 }
 
-def build_model(params: dict) -> Part:
+def build_model(params: dict) -> tuple[Part, dict]:
     p = {**PARAMETERS, **params}
-
+    
     with BuildPart() as part:
-        # 1. MAIN EXTERNAL PROFILE
+        # FEATURE 1: Primary Envelope (Lathe or Extrude)
         with BuildSketch(Plane.XY):
             with BuildLine():
-                # Start at origin
-                l1 = Line((0, 0), (0, p["BASE_DIA"]/2))
-                l2 = Line(l1.end, (p["BASE_LEN"] - p["GROOVE_WIDTH"], p["BASE_DIA"]/2))
-                # SHOULDER GROOVE
-                l3 = Line(l2.end, (l2.end.X, p["BASE_DIA"]/2 - p["GROOVE_DEPTH"]))
-                l4 = Line(l3.end, (l3.end.X + p["GROOVE_WIDTH"], l3.end.Y))
-                l5 = Line(l4.end, (l4.end.X, p["SHAFT_DIA"]/2))
-                # SHAFT WALL
-                l6 = Line(l5.end, (14.2, p["SHAFT_DIA"]/2)) # Height where curve starts
-                # NOSE RADIUS (ROUNDED TOP)
-                l7 = RadiusArc(l6.end, (p["TOTAL_LEN"], 0), radius=p["NOSE_R"])
-                # Close profile
-                Line(l7.end, (0, 0))
+                l1 = Line((0, 0), (0, p["MAJOR_DIA"] / 2))
+                l2 = Line(l1.end, (p["TOTAL_LEN"], p["MINOR_DIA"] / 2)) # Taper
+                l3 = Line(l2.end, (p["TOTAL_LEN"], 0))
+                Line(l3.end, (0, 0))
             make_face()
         revolve(axis=Axis.X)
-
-        # 2. INTERNAL BORE
+        
+        # FEATURE 2: Internal Cavities (Subtractive)
         with BuildSketch(Plane.XY):
-            # 4.40mm bore half (Y=0 to Y=2.2)
-            Rectangle(p["BORE_DEPTH"], p["BORE_DIA"]/2, align=(Align.MIN, Align.MIN))
+            with BuildLine():
+                b1 = Line((0, 0), (0, p["BORE_DIA"] / 2))
+                b2 = Line(b1.end, (p["TOTAL_LEN"], p["BORE_DIA"] / 2))
+                b3 = Line(b2.end, (p["TOTAL_LEN"], 0))
+                Line(b3.end, (0, 0))
+            make_face()
         revolve(axis=Axis.X, mode=Mode.SUBTRACT)
 
-    return part.part
+        # FEATURE 3: Notches/Grooves (Parametric Subtraction)
+        with BuildSketch(Plane.XY):
+            with Locations((p["GROOVE_X"], p["MINOR_DIA"] / 2)):
+                Rectangle(p["GROOVE_WIDTH"], p["GROOVE_DEPTH"] * 2, align=(Align.CENTER, Align.CENTER))
+        revolve(axis=Axis.X, mode=Mode.SUBTRACT)
+        
+    # DYNAMIC ANNOTATIONS: Create an entry for EVERY physical dimension in PARAMETERS
+    annotations = {
+        "PARAM_NAME_1": {"p1": [0, -p["PARAM_NAME_1"]/2, 0], "p2": [0, p["PARAM_NAME_1"]/2, 0]},
+        "PARAM_NAME_2": {"p1": [0, 0, 0], "p2": [p["PARAM_NAME_2"], 0, 0]},
+        # Repeat for ALL extracted parameters (diameters, lengths, offsets)
+    }
+
+    return part.part, annotations
 ```
 """
 
@@ -205,7 +220,7 @@ class LLMCodegenService:
 
         self.max_retries = max(1, int(os.getenv("GENAI_MAX_RETRIES", "5")))
         self.max_prompt_tokens = int(os.getenv("MAX_PROMPT_TOKENS", "12000"))
-        self.max_output_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "2048"))
+        self.max_output_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "4096"))
         self.include_safety = os.getenv("GENAI_SAFETY", "0") == "1"
         self.include_example = os.getenv("GENAI_INCLUDE_EXAMPLE", "1") == "1"
 
@@ -307,17 +322,17 @@ class LLMCodegenService:
         content = types.Content(
             role="user",
             parts=[
-                types.Part.from_text(text=full_system_instruction),
                 types.Part.from_text(text=user_prompt),
                 types.Part.from_bytes(data=image_bytes, mime_type=image_mime_type),
             ],
         )
 
         config = types.GenerateContentConfig(
+            system_instruction=full_system_instruction,
             candidate_count=1,
             max_output_tokens=self.max_output_tokens,
             temperature=0.0,
-            stop_sequences=["```"] if self.max_output_tokens < 1000 else None,
+            safety_settings=[],
         )
 
         seen_errors: list[str] = []
@@ -477,19 +492,31 @@ class LLMCodegenService:
         if not script:
             return ""
 
+        # Try to find all code blocks
         block_matches = CODE_BLOCK_RE.findall(script)
-        if block_matches:
-            candidates = [candidate.strip() for candidate in block_matches if candidate.strip()]
-            if candidates:
-                contract_match = [
-                    candidate
-                    for candidate in candidates
-                    if "PARAMETERS" in candidate and "build_model" in candidate
-                ]
-                if contract_match:
-                    return contract_match[0]
-                return max(candidates, key=len)
+        candidates = [m.strip() for m in block_matches if m.strip()]
 
+        # If no clean blocks, or blocks seem truncated, try a more aggressive split
+        # in case the model "restarted" (e.g. ```python ... ```python ...)
+        if not candidates or not any("build_model" in c for c in candidates):
+            # Split by any triple-backtick and treat segments as candidates
+            parts = re.split(r"```(?:python|py)?\s*", script)
+            candidates.extend([p.strip() for p in parts if p.strip()])
+
+        if candidates:
+            # Prioritize candidates that satisfy our contract
+            contract_matches = [
+                c for c in candidates 
+                if "PARAMETERS" in c and "build_model" in c
+            ]
+            if contract_matches:
+                # Return the longest one that matches the contract (usually the most complete one)
+                return max(contract_matches, key=len)
+            
+            # Fallback to the longest candidate overall
+            return max(candidates, key=len)
+
+        # Final fallback: strip all markers and find start
         cleaned = script.strip().strip("`").strip()
         cleaned = cleaned.replace("```python", "").replace("```py", "").replace("```", "").strip()
 

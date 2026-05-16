@@ -259,10 +259,14 @@ def run():
         sys.exit(1)
 
     shape = None
+    annotations = {}
     if "build_model" in ns and callable(ns["build_model"]):
         try:
             res = ns["build_model"](params)
-            shape = reduce(operator.add, res) if isinstance(res, (list, tuple)) else res
+            if isinstance(res, tuple) and len(res) == 2 and isinstance(res[1], dict):
+                shape, annotations = res
+            else:
+                shape = reduce(operator.add, res) if isinstance(res, (list, tuple)) else res
         except Exception:
             import traceback
             print("\n---TRACEBACK_START---", flush=True)
@@ -295,6 +299,10 @@ def run():
             dxf_exporter.write(str(out_dir / f"{basename}.dxf"))
         except Exception as dxf_exc:
             print(f"DXF_WARNING: Could not export DXF: {dxf_exc}")
+
+
+        with open(out_dir / f"{basename}_annotations.json", "w") as f:
+            json.dump(annotations, f)
 
         print(f"RENDER_SUCCESS: Exported {basename}.step, {basename}.stl, and {basename}.dxf", flush=True)
 
@@ -376,11 +384,20 @@ class ParameterRenderService:
         if not stl_path.exists() or not step_path.exists():
             raise RuntimeError("Render finished but artifacts are missing.")
 
+        annotations_path = self.outputs_dir / f"{output_basename}_annotations.json"
+        annotations = {}
+        if annotations_path.exists():
+            try:
+                with open(annotations_path, "r") as f:
+                    annotations = json.load(f)
+            except Exception:
+                pass
+
         return {
             "stl_path": str(stl_path),
             "step_path": str(step_path),
             "dxf_path": str(dxf_path) if dxf_path.exists() else None,
-
+            "annotations": annotations,
         }
 
     def _parse_worker_error(self, log: str) -> str:
