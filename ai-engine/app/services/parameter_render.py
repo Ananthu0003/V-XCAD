@@ -5,6 +5,7 @@ This module executes generated build123d scripts in an isolated subprocess
 and exports the resulting 3D models to STEP and STL formats.
 """
 
+import asyncio
 import json
 import os
 import re
@@ -119,8 +120,53 @@ def run():
         build123d.Edge.start = property(lambda self: self @ 0)
         build123d.Edge.end = property(lambda self: self @ 1)
 
+    if hasattr(build123d, "ShapeList") and hasattr(build123d.ShapeList, "filter_by_position"):
+        _orig_filter = build123d.ShapeList.filter_by_position
+        def safe_filter_by_position(self, axis, minimum, maximum=None, *args, **kwargs):
+            if maximum is None:
+                maximum = minimum
+            return _orig_filter(self, axis, minimum, maximum, *args, **kwargs)
+        build123d.ShapeList.filter_by_position = safe_filter_by_position
+
+    if hasattr(build123d, "BuildPart"):
+        def _get_active_sketch(self):
+            if hasattr(build123d, "BuildSketch") and getattr(build123d.BuildSketch, "active", None) is not None:
+                active_sketch = build123d.BuildSketch.active
+                if hasattr(active_sketch, "sketch"):
+                    return active_sketch.sketch
+                return active_sketch
+            if hasattr(self, "part") and hasattr(self.part, "sketch"):
+                return self.part.sketch
+            return None
+        build123d.BuildPart.sketch = property(_get_active_sketch)
+
     # Sync patched objects to namespace
     ns.update({k: getattr(build123d, k) for k in dir(build123d) if not k.startswith('_')})
+
+    def _safe_rectangle(width, height, *args, **kwargs):
+        radius = kwargs.pop("radius", None)
+        face = build123d.Rectangle(width, height, *args, **kwargs)
+        if radius is not None:
+            try:
+                face = build123d.fillet(face.vertices(), radius)
+            except Exception:
+                pass
+        return face
+
+    def _safe_square(size, *args, **kwargs):
+        radius = kwargs.pop("radius", None)
+        face = build123d.Square(size, *args, **kwargs)
+        if radius is not None:
+            try:
+                face = build123d.fillet(face.vertices(), radius)
+            except Exception:
+                pass
+        return face
+
+    ns.update({
+        "Rectangle": _safe_rectangle,
+        "Square": _safe_square,
+    })
 
     if hasattr(build123d, "Part") and not hasattr(build123d.Part, "export_step"):
         def _part_export_step(self, path):
@@ -244,6 +290,38 @@ def run():
     build123d.extrude = safe_extrude
     ns["extrude"] = safe_extrude
 
+    _orig_solid_revolve = build123d.Solid.revolve
+    @classmethod
+    def safe_solid_revolve(cls, section, angle, axis, inner_wires=None):
+        try:
+            is_x_axis = False
+            if hasattr(axis, "direction"):
+                is_x_axis = abs(axis.direction.X) > 0.99 and abs(axis.direction.Y) < 0.01 and abs(axis.direction.Z) < 0.01
+            
+            if is_x_axis:
+                half_plane_ge = build123d.Face.make_rect(20000, 20000).translate((0, 10000, 0))
+                half_plane_le = build123d.Face.make_rect(20000, 20000).translate((0, -10000, 0))
+                
+                if isinstance(section, build123d.Wire):
+                    section_face = build123d.Face(section, inner_wires or [])
+                else:
+                    section_face = section
+                
+                part_ge = section_face & half_plane_ge
+                part_le = section_face & half_plane_le
+                
+                area_ge = part_ge.area if hasattr(part_ge, "area") else 0.0
+                area_le = part_le.area if hasattr(part_le, "area") else 0.0
+                
+                if area_ge > 1e-5 and area_le > 1e-5:
+                    section = part_ge
+                    inner_wires = []
+        except Exception:
+            pass
+        return _orig_solid_revolve(section, angle, axis, inner_wires)
+    build123d.Solid.revolve = safe_solid_revolve
+
+
     try:
         script_content = Path("user_script.py").read_text(encoding="utf-8")
         script_content = re.sub(r"Polygon\((.*?),\s*close=(?:True|False)\)", r"Polygon(\1)", script_content)
@@ -321,13 +399,17 @@ class ParameterRenderService:
         self.outputs_dir = outputs_dir or (project_root / "outputs")
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
 
-    def render_to_outputs(
+    async def render_to_outputs(
         self,
         parameters: Dict[str, Any],
         script: str,
         output_basename: str,
     ) -> Dict[str, str]:
-        self.clear_outputs()
+        self.clear_outputs(prefix=output_basename)
+        is_secure, sec_err = validate_script_security(script)
+        if not is_secure:
+            raise ValueError(sec_err)
+
         parameters = _coerce_jsonable(parameters)
 
         max_render_retries = max(1, int(os.getenv("RENDER_MAX_RETRIES", "1")))
@@ -347,22 +429,65 @@ class ParameterRenderService:
                 env["OUTPUT_BASENAME"] = output_basename
 
                 try:
-                    proc = subprocess.run(
-                        [sys.executable, "harness.py"],
-                        capture_output=True,
-                        text=True,
-                        cwd=temp_dir,
-                        env=env,
-                        timeout=timeout_seconds,
-                    )
-                except subprocess.TimeoutExpired:
-                    last_error = "Render Engine timed out. Geometry might be too complex."
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            sys.executable,
+                            "harness.py",
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=temp_dir,
+                            env=env,
+                        )
+                        try:
+                            stdout, stderr = await asyncio.wait_for(
+                                proc.communicate(),
+                                timeout=timeout_seconds,
+                            )
+                            returncode = proc.returncode
+                        except asyncio.TimeoutError:
+                            try:
+                                proc.kill()
+                            except Exception:
+                                pass
+                            try:
+                                await proc.communicate()
+                            except Exception:
+                                pass
+                            last_error = "Render Engine timed out. Geometry might be too complex."
+                            if attempt >= max_render_retries:
+                                raise RuntimeError(last_error)
+                            continue
+                    except NotImplementedError:
+                        # Fallback for event loops (like SelectorEventLoop on Windows) that do not support subprocesses
+                        def run_sync():
+                            return subprocess.run(
+                                [sys.executable, "harness.py"],
+                                capture_output=True,
+                                text=True,
+                                cwd=temp_dir,
+                                env=env,
+                                timeout=timeout_seconds,
+                            )
+                        try:
+                            proc_sync = await asyncio.to_thread(run_sync)
+                            returncode = proc_sync.returncode
+                            stdout = proc_sync.stdout.encode("utf-8") if isinstance(proc_sync.stdout, str) else proc_sync.stdout
+                            stderr = proc_sync.stderr.encode("utf-8") if isinstance(proc_sync.stderr, str) else proc_sync.stderr
+                        except subprocess.TimeoutExpired:
+                            last_error = "Render Engine timed out. Geometry might be too complex."
+                            if attempt >= max_render_retries:
+                                raise RuntimeError(last_error)
+                            continue
+                except Exception as exc:
+                    last_error = f"Failed to run render subprocess: {type(exc).__name__} - {str(exc)}"
                     if attempt >= max_render_retries:
                         raise RuntimeError(last_error)
                     continue
 
-                if proc.returncode != 0:
-                    full_log = (proc.stdout or "") + (proc.stderr or "")
+                if returncode != 0:
+                    stdout_str = stdout.decode("utf-8", errors="replace")
+                    stderr_str = stderr.decode("utf-8", errors="replace")
+                    full_log = stdout_str + stderr_str
                     error_msg = self._parse_worker_error(full_log)
                     self._log_fail(script, parameters, full_log)
                     last_error = error_msg or "Render subprocess failed."
@@ -375,6 +500,12 @@ class ParameterRenderService:
 
         if last_error:
             raise RuntimeError(last_error)
+
+        # Write python script to outputs folder so it can be served
+        try:
+            (self.outputs_dir / f"{output_basename}.py").write_text(script, encoding="utf-8")
+        except Exception:
+            pass
 
         stl_path = self.outputs_dir / f"{output_basename}.stl"
         step_path = self.outputs_dir / f"{output_basename}.step"
@@ -428,9 +559,13 @@ class ParameterRenderService:
 
         return "Geometry engine failed. Review script logic and parameter values."
 
-    def clear_outputs(self) -> None:
+    def clear_outputs(self, prefix: Optional[str] = None) -> None:
+        if not self.outputs_dir.exists():
+            return
         for item in self.outputs_dir.iterdir():
             try:
+                if prefix and not item.name.startswith(prefix):
+                    continue
                 if item.is_file():
                     item.unlink()
                 elif item.is_dir():
@@ -487,6 +622,55 @@ def validate_script_syntax(script: str) -> tuple[bool, Optional[str]]:
         return False, f"Syntax error at line {exc.lineno}: {exc.msg}"
     except Exception as exc:
         return False, f"Validation error: {str(exc)}"
+
+
+def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
+    try:
+        import ast
+
+        tree = ast.parse(script)
+        
+        # Whitelisted top-level modules
+        ALLOWED_MODULES = {"build123d", "math"}
+        
+        # Blacklisted built-ins that could be used for execution or system access
+        FORBIDDEN_FUNCTIONS = {
+            "eval", "exec", "open", "compile", "globals", "locals", "__import__",
+            "getattr", "setattr", "delattr", "input", "breakpoint"
+        }
+
+        for node in ast.walk(tree):
+            # 1. Enforce Module Import Whitelist
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    base_module = alias.name.split('.')[0]
+                    if base_module not in ALLOWED_MODULES:
+                        return False, f"Security Violation: Import of module '{alias.name}' is forbidden. Only {ALLOWED_MODULES} imports are permitted."
+            
+            elif isinstance(node, ast.ImportFrom):
+                if not node.module:
+                    return False, "Security Violation: Relative imports are forbidden."
+                base_module = node.module.split('.')[0]
+                if base_module not in ALLOWED_MODULES:
+                    return False, f"Security Violation: Import from module '{node.module}' is forbidden. Only {ALLOWED_MODULES} imports are permitted."
+            
+            # 2. Block dunder attribute access to prevent sandbox escapes
+            elif isinstance(node, ast.Attribute):
+                if "__" in node.attr:
+                    return False, f"Security Violation: Access to attribute '{node.attr}' is forbidden."
+            
+            # 3. Block forbidden built-in calls and dynamic dunder accesses via functions
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    if node.func.id in FORBIDDEN_FUNCTIONS:
+                        return False, f"Security Violation: Call to built-in function '{node.func.id}' is forbidden."
+                elif isinstance(node.func, ast.Attribute):
+                    if "__" in node.func.attr:
+                        return False, f"Security Violation: Access to attribute '{node.func.attr}' is forbidden."
+                    
+        return True, None
+    except Exception as exc:
+        return False, f"Security validation failed: {str(exc)}"
 
 
 def get_build123d_version() -> str:

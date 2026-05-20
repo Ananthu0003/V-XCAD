@@ -100,7 +100,7 @@ export function CadViewport({
 					<color attach="background" args={['#000000']} />
 					
 					<Suspense fallback={null}>
-						<Stage intensity={0.5} environment="city" adjustCamera={false} shadows="contact">
+						<Stage intensity={0.8} adjustCamera={false} shadows="contact">
 							{children}
 						</Stage>
 					</Suspense>
@@ -120,28 +120,89 @@ export function CadViewport({
 
 				{!stlUrl && !isRecompiling && (
 					<div className="pointer-events-none absolute inset-0 flex items-center justify-center p-12">
-						<div className="max-w-md rounded-2xl border border-zinc-800/50 bg-zinc-900/30 backdrop-blur-xl p-8 text-center shadow-2xl">
-							<div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-zinc-800/50 text-zinc-500">
-								<Loader2 className="size-6 opacity-20" />
+						<div className="relative max-w-sm w-full">
+							{/* Outer glow aura */}
+							<div className="absolute inset-0 rounded-3xl bg-amber-500/5 blur-2xl scale-110" />
+							
+							{/* Main card */}
+							<div className="relative rounded-3xl border border-white/8 bg-gradient-to-b from-zinc-900/70 to-zinc-950/90 p-10 text-center shadow-[0_32px_80px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur-2xl">
+								
+								{/* Top accent line */}
+								<div className="absolute inset-x-0 top-0 h-px rounded-t-3xl bg-gradient-to-r from-transparent via-amber-500/40 to-transparent" />
+								
+								{/* Rotating wireframe icon */}
+								<div className="mx-auto mb-7 relative flex size-20 items-center justify-center">
+									{/* Orbit ring */}
+									<div className="absolute inset-0 rounded-full border border-amber-500/15 animate-spin" style={{ animationDuration: '8s' }} />
+									<div className="absolute inset-2 rounded-full border border-dashed border-amber-500/10 animate-spin" style={{ animationDuration: '12s', animationDirection: 'reverse' }} />
+									{/* Center glow */}
+									<div className="absolute size-10 rounded-full bg-amber-500/8 blur-md" />
+									{/* Isometric 3D wireframe cube SVG */}
+									<svg
+										viewBox="0 0 48 48"
+										fill="none"
+										className="size-9 animate-spin drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]"
+										style={{ animationDuration: '20s', animationTimingFunction: 'linear' }}
+									>
+										{/* Top face */}
+										<polygon points="24,4 40,14 24,24 8,14" stroke="rgb(245,158,11)" strokeWidth="1.2" strokeLinejoin="round" fill="rgba(245,158,11,0.04)" />
+										{/* Left face */}
+										<polygon points="8,14 24,24 24,44 8,34" stroke="rgb(245,158,11)" strokeWidth="1.2" strokeLinejoin="round" fill="rgba(245,158,11,0.02)" />
+										{/* Right face */}
+										<polygon points="40,14 24,24 24,44 40,34" stroke="rgb(245,158,11)" strokeWidth="1.2" strokeLinejoin="round" fill="rgba(245,158,11,0.06)" />
+										{/* Interior guide lines */}
+										<line x1="24" y1="24" x2="24" y2="4" stroke="rgb(245,158,11)" strokeWidth="0.5" strokeDasharray="2,3" strokeOpacity="0.3" />
+										<line x1="24" y1="24" x2="8" y2="14" stroke="rgb(245,158,11)" strokeWidth="0.5" strokeDasharray="2,3" strokeOpacity="0.3" />
+										<line x1="24" y1="24" x2="40" y2="14" stroke="rgb(245,158,11)" strokeWidth="0.5" strokeDasharray="2,3" strokeOpacity="0.3" />
+									</svg>
+								</div>
+								
+								{/* Status badge */}
+								<div className="mx-auto mb-5 flex w-fit items-center gap-2 rounded-full border border-zinc-700/50 bg-zinc-900/80 px-3 py-1">
+									<div className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+									<span className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-zinc-500">Geometry Engine — Idle</span>
+								</div>
+								
+								<h3 className="mb-3 text-base font-bold tracking-tight text-zinc-100">Awaiting Parameters</h3>
+								<p className="mx-auto max-w-[220px] text-[11px] text-zinc-500 leading-relaxed">
+									Upload a technical blueprint and generate a script to render your parametric 3D model here.
+								</p>
+								
+								{/* Step indicators */}
+								<div className="mt-7 flex items-center justify-center gap-3">
+									{[['01', 'Upload'], ['02', 'Generate'], ['03', 'Render']].map(([num, label], i) => (
+										<div key={num} className="flex items-center gap-3">
+											<div className="flex flex-col items-center gap-1">
+												<div className="flex size-6 items-center justify-center rounded-full border border-zinc-700/50 bg-zinc-900/80">
+													<span className="text-[8px] font-black text-zinc-600">{num}</span>
+												</div>
+												<span className="text-[8px] font-bold uppercase tracking-wider text-zinc-700">{label}</span>
+											</div>
+											{i < 2 && <div className="h-px w-6 bg-zinc-800 mb-3" />}
+										</div>
+									))}
+								</div>
 							</div>
-							<h3 className="mb-2 text-sm font-bold text-zinc-100">Waiting for CAD Parameters</h3>
-							<p className="text-xs text-zinc-500 leading-relaxed">
-								Upload a technical drawing and generate a script. Once generated, we'll render your 3D model here.
-							</p>
 						</div>
 					</div>
 				)}
 
 				{isRecompiling && (
-					<div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-20 transition-all">
-						<div className="flex items-center gap-3 rounded-2xl border border-amber-500/30 bg-zinc-950 p-6 shadow-[0_0_30px_rgba(245,158,11,0.1)]">
-							<div className="relative">
-								<div className="absolute inset-0 size-5 animate-ping rounded-full bg-amber-500/20" />
-								<Loader2 className="size-5 animate-spin text-amber-500" />
-							</div>
-							<div className="flex flex-col">
-								<span className="text-xs font-bold uppercase tracking-widest text-zinc-100">Engine Active</span>
-								<span className="text-[10px] text-zinc-500">Recomputing Geometry Topology...</span>
+					<div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-md z-20">
+						<div className="relative">
+							{/* Glow behind card */}
+							<div className="absolute inset-0 rounded-2xl bg-amber-500/10 blur-xl scale-150" />
+							<div className="relative flex items-center gap-4 rounded-2xl border border-amber-500/25 bg-zinc-950/95 px-7 py-5 shadow-[0_0_40px_rgba(245,158,11,0.12)]">
+								<div className="relative shrink-0">
+									<div className="absolute inset-0 animate-ping rounded-full bg-amber-500/20" />
+									<div className="relative flex size-9 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10">
+										<Loader2 className="size-4 animate-spin text-amber-500" />
+									</div>
+								</div>
+								<div className="flex flex-col">
+									<span className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-100">Engine Active</span>
+									<span className="mt-0.5 text-[10px] text-zinc-500">Recomputing Geometry Topology…</span>
+								</div>
 							</div>
 						</div>
 					</div>

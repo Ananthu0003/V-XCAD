@@ -275,6 +275,28 @@ export default function HitlWorkspace() {
 	const [isDownloadingStl, setIsDownloadingStl] = useState(false);
 	const [isDownloadingStep, setIsDownloadingStep] = useState(false);
 	const [isDownloadingDxf, setIsDownloadingDxf] = useState(false);
+
+	const [isDeveloper, setIsDeveloper] = useState(false);
+	const [developerUsername, setDeveloperUsername] = useState('');
+	const [developerPassword, setDeveloperPassword] = useState('');
+	const [developerAuthError, setDeveloperAuthError] = useState<string | null>(null);
+
+	const handleDeveloperLogin = () => {
+		if (developerUsername === 'admin' && developerPassword === 'admin') {
+			setIsDeveloper(true);
+			setDeveloperAuthError(null);
+			setDeveloperUsername('');
+			setDeveloperPassword('');
+		} else {
+			setDeveloperAuthError('Invalid credentials');
+		}
+	};
+
+	const handleDeveloperLogout = () => {
+		setIsDeveloper(false);
+		setActiveDrawerTab('parameters');
+	};
+
 	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 	const [isChatOpen, setIsChatOpen] = useState(true);
 
@@ -594,26 +616,73 @@ export default function HitlWorkspace() {
 					isRecompiling={isRecompiling}
 					hasSession={Boolean(sessionId)}
 					onHistoryClick={() => setIsHistoryOpen(true)}
+					isDeveloper={isDeveloper}
+					developerUsername={developerUsername}
+					developerPassword={developerPassword}
+					developerAuthError={developerAuthError}
+					onDeveloperUsernameChange={setDeveloperUsername}
+					onDeveloperPasswordChange={setDeveloperPassword}
+					onDeveloperLogin={handleDeveloperLogin}
+					onDeveloperLogout={handleDeveloperLogout}
 				>
-					<div className="space-y-4">
-						{parameterEntries.map(([key, value]) => (
-							<div key={key} className="cursor-pointer" onClick={() => setActiveParameter(key)} onFocus={() => setActiveParameter(key)}>
-								<ParameterInput
-									label={key}
-									value={value}
-									isActive={activeParameter === key}
-									onChange={(nextValue) => {
-										const nextParams = setParameterValue(parameters, key, nextValue);
-										setParameters(nextParams);
-										const nextScript = injectParameters(pythonScript, nextParams);
-										if (nextScript !== pythonScript) {
-											updatePythonScript(nextScript);
-										}
-									}}
-								/>
+					{parameterEntries.length === 0 ? (
+						<div className="flex flex-col items-center justify-center py-6 px-2 text-center animate-message">
+							{/* Dashed bounding box */}
+							<div className="w-full rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/50 p-7 flex flex-col items-center gap-5">
+								{/* Icon container */}
+								<div className="relative flex size-14 items-center justify-center">
+									<div className="absolute inset-0 rounded-full bg-amber-500/5 blur-lg" />
+									<div className="relative flex size-14 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/80">
+										<svg className="size-6 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+										</svg>
+									</div>
+								</div>
+
+								{/* Text */}
+								<div>
+									<p className="text-[11px] font-bold uppercase tracking-[0.2em] text-zinc-600">No Parameters Yet</p>
+									<p className="mt-2 text-[10px] leading-relaxed text-zinc-700">
+										Generate a script from a blueprint to auto-extract dynamic variables.
+									</p>
+								</div>
+
+								{/* Micro-steps */}
+								<div className="w-full space-y-2">
+									{[
+										{ step: '01', text: 'Upload a technical drawing or PDF' },
+										{ step: '02', text: 'Generate a parameterized build123d script' },
+										{ step: '03', text: 'Adjust dimensions here in real time' },
+									].map(({ step, text }) => (
+										<div key={step} className="flex items-start gap-3 rounded-xl border border-zinc-800/60 bg-zinc-900/40 px-3 py-2.5 text-left">
+											<span className="mt-px shrink-0 text-[8px] font-black uppercase tracking-[0.2em] text-zinc-700">{step}</span>
+											<span className="text-[10px] leading-snug text-zinc-600">{text}</span>
+										</div>
+									))}
+								</div>
 							</div>
-						))}
-					</div>
+						</div>
+					) : (
+						<div className="space-y-4">
+							{parameterEntries.map(([key, value]) => (
+								<div key={key} className="cursor-pointer" onClick={() => setActiveParameter(key)} onFocus={() => setActiveParameter(key)}>
+									<ParameterInput
+										label={key}
+										value={value}
+										isActive={activeParameter === key}
+										onChange={(nextValue) => {
+											const nextParams = setParameterValue(parameters, key, nextValue);
+											setParameters(nextParams);
+											const nextScript = injectParameters(pythonScript, nextParams);
+											if (nextScript !== pythonScript) {
+												updatePythonScript(nextScript);
+											}
+										}}
+									/>
+								</div>
+							))}
+						</div>
+					)}
 				</EditorDrawer>
 
 				<HistoryDrawer 

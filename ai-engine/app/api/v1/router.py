@@ -36,6 +36,7 @@ async def generate(
     request: Request,
     prompt: str = Form(...),
     image: UploadFile = File(...),
+    details: list[UploadFile] = File(default=[]),
     model_name: str = Form(DEFAULT_MODEL),
 ) -> StreamingResponse:
 
@@ -51,8 +52,23 @@ async def generate(
             detail=_error_payload("Uploaded file must be an image or PDF."),
         )
 
+    # Load main image
     image_bytes = await image.read()
     mime_type = content_type if content_type else ("application/pdf" if image.filename and image.filename.lower().endswith(".pdf") else "image/png")
+    
+    images_payload = [(image_bytes, mime_type)]
+
+    # Load detail crops if provided
+    for detail_file in details:
+        det_content_type = (detail_file.content_type or "").lower()
+        det_is_image = det_content_type.startswith("image/")
+        det_is_pdf = det_content_type == "application/pdf" or (
+            bool(detail_file.filename) and detail_file.filename.lower().endswith(".pdf")
+        )
+        if det_content_type and (det_is_image or det_is_pdf):
+            det_bytes = await detail_file.read()
+            det_mime = det_content_type if det_content_type else ("application/pdf" if detail_file.filename and detail_file.filename.lower().endswith(".pdf") else "image/png")
+            images_payload.append((det_bytes, det_mime))
 
     try:
         codegen_service = LLMCodegenService(model=model_name)
@@ -76,8 +92,7 @@ async def generate(
             try:
                 summary = await asyncio.to_thread(
                     codegen_service.summarise_blueprint,
-                    image_bytes,
-                    mime_type
+                    images_payload
                 )
                 yield _as_sse("status", {"message": "Analysis complete. Generating precision script..."})
             except Exception:
@@ -88,8 +103,7 @@ async def generate(
 
             for chunk in codegen_service.stream_build123d_script(
                 prompt=prompt,
-                image_bytes=image_bytes,
-                image_mime_type=mime_type,
+                images=images_payload,
                 summary=summary,
             ):
                 if await request.is_disconnected():
@@ -128,14 +142,14 @@ async def generate(
 
 
 @router.post("/render", response_model=RenderResponse)
-def render(request: RenderRequest) -> RenderResponse:
+async def render(request: RenderRequest) -> RenderResponse:
     # 1. Generate IDs
     job_id = request.session_id or uuid.uuid4().hex
     output_basename = f"cad_{job_id}"
 
-    # 2. Block and execute the render synchronously (Zero 404 race conditions)
+    # 2. Execute the render asynchronously (Zero 404 race conditions)
     try:
-        paths = render_service.render_to_outputs(
+        paths = await render_service.render_to_outputs(
             parameters=request.parameters,
             script=request.python_script,
             output_basename=output_basename,

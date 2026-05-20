@@ -12,7 +12,6 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _load_env_file() -> None:
-    # Import lazily so the app can still start if dependency sync is pending.
     try:
         import importlib
 
@@ -22,9 +21,10 @@ def _load_env_file() -> None:
         return
 
 
-# Load ai-engine/.env so runtime secrets like GOOGLE_API_KEY are available.
 _load_env_file()
 
+import asyncio
+from app.services.outputs_cleanup import start_cleanup_task
 from app.api.v1.router import router as v1_router
 
 app = FastAPI(title="Docs-to-CAD API", version="0.1.0")
@@ -39,6 +39,19 @@ app.add_middleware(
 
 app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
 app.include_router(v1_router, prefix="/api/v1")
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    # Start rolling garbage collection background task
+    asyncio.create_task(
+        start_cleanup_task(
+            outputs_dir=OUTPUT_DIR,
+            interval_seconds=3600,
+            max_age_seconds=86400,
+            max_size_bytes=2 * 1024 * 1024 * 1024,
+        )
+    )
 
 
 def _error_payload(message: str, hint: str | None = None) -> dict[str, dict[str, str]]:

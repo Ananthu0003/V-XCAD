@@ -146,6 +146,7 @@ export function ChatPanel({
 									</p>
 								</div>
 								<button
+									type="button"
 									onClick={() => handleFileChange(null)}
 									className="p-1 text-zinc-500 hover:text-zinc-100 transition-colors"
 								>
@@ -175,46 +176,57 @@ export function ChatPanel({
 
 							<div className="flex items-center justify-between border-t border-zinc-800/30 bg-white/2 px-4 py-3">
 								<div className="flex items-center gap-3">
-									<label className="group/btn relative flex cursor-pointer items-center justify-center rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-amber-500 transition-all">
-										<Upload className="size-4" />
+									{/* Main blueprint upload */}
+									<label 
+										className={`group/btn relative flex cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[10px] font-mono font-bold uppercase tracking-wider transition-all duration-200 ${
+											selectedFile 
+												? 'border border-amber-500/20 bg-amber-500/5 text-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.05)]' 
+												: 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200'
+										}`}
+										title="Upload engineering blueprint drawing"
+									>
+										<Upload className="size-3.5 shrink-0" />
+										<span className="whitespace-nowrap">{selectedFile ? 'Blueprint' : 'Upload'}</span>
 										<input
 											type="file"
 											accept="image/*,.pdf"
 											className="hidden"
-											onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
+											onChange={(e) => {
+												const file = e.target.files?.[0] || null;
+												if (file) handleFileChange(file);
+											}}
 										/>
 									</label>
-									<div className="h-4 w-px bg-zinc-800/50" />
-									
-									<div className="flex items-center gap-2">
-										<div className={`size-1.5 rounded-full ${isGenerating ? 'bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'}`} />
-										<span className="text-[9px] font-mono font-bold uppercase tracking-[0.2em] text-zinc-500">
-											{isGenerating ? 'Processing' : 'Ready'}
-										</span>
-									</div>
 								</div>
 
 								<button
 									type="submit"
 									disabled={isGenerating || !prompt.trim() || !selectedFile}
-									className="group/btn relative flex h-9 items-center gap-2.5 rounded-lg bg-amber-500 px-5 text-[10px] font-black uppercase tracking-[0.2em] text-black shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:bg-amber-400 hover:scale-[1.02] active:scale-[0.98] disabled:bg-zinc-800/50 disabled:text-zinc-600 disabled:shadow-none disabled:scale-100 transition-all overflow-hidden"
+									className={`group/btn relative flex h-9 items-center gap-2 rounded-lg px-4 text-[10px] font-black uppercase tracking-[0.25em] transition-all overflow-hidden ${
+										isGenerating
+											? 'border border-amber-500/30 bg-amber-500/10 text-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.15)] animate-pulse'
+											: !prompt.trim() || !selectedFile
+												? 'bg-zinc-900/50 text-zinc-600 border border-zinc-850 cursor-not-allowed'
+												: 'bg-amber-500 text-black shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:bg-amber-400 hover:scale-[1.02] active:scale-[0.98]'
+									}`}
 								>
 									{isGenerating ? (
 										<>
-											<Loader2 className="size-3.5 animate-spin" />
-											<span>Processing</span>
+											<Loader2 className="size-3.5 animate-spin shrink-0 text-amber-500" />
+											<span className="whitespace-nowrap tracking-widest text-[9px] text-amber-500">Running</span>
 										</>
 									) : (
 										<>
-											<SendHorizontal className="size-3.5" />
-											<span>Generate</span>
+											<SendHorizontal className="size-3.5 shrink-0" />
+											<span className="whitespace-nowrap">Generate</span>
 										</>
 									)}
-									<div className="absolute inset-0 -translate-x-full bg-linear-to-r from-transparent via-white/30 to-transparent group-hover/btn:translate-x-full transition-transform duration-700" />
+									{!isGenerating && (
+										<div className="absolute inset-0 -translate-x-full bg-linear-to-r from-transparent via-white/30 to-transparent group-hover/btn:translate-x-full transition-transform duration-700" />
+									)}
 								</button>
 							</div>
 						</div>
-						
 					</form>
 				</div>
 			</div>
