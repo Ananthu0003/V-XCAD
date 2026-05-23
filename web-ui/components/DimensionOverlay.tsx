@@ -117,7 +117,7 @@ function DimensionLine({
 				<div
 					style={{
 						background: 'rgba(0,0,0,0.85)',
-						border: '1px solid rgba(245,158,11,0.6)',
+						border: '1px solid rgba(59,130,246,0.6)',
 						borderRadius: '6px',
 						padding: '3px 8px',
 						display: 'flex',
@@ -125,7 +125,7 @@ function DimensionLine({
 						alignItems: 'center',
 						gap: '1px',
 						backdropFilter: 'blur(8px)',
-						boxShadow: '0 0 12px rgba(245,158,11,0.15)',
+						boxShadow: '0 0 12px rgba(59,130,246,0.15)',
 						transform: 'translateY(-24px)',
 						whiteSpace: 'nowrap',
 					}}

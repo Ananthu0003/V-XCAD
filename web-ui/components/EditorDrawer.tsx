@@ -472,29 +472,29 @@ export function EditorDrawer({
 		navigator.clipboard.writeText(pythonScript);
 		setCopied(true);
 		setTimeout(() => setCopied(false), 2000);
-	};
+	}; 
 
-	const parametersTabClassName = `flex items-center gap-2 rounded-lg px-4 py-2 text-[10px] font-black uppercase tracking-[0.15em] transition-all duration-300 ${
+	const parametersTabClassName = `flex items-center gap-2 rounded-lg px-4 py-2 text-[11px] font-bold uppercase tracking-[0.15em] transition-all duration-300 ${
 		activeTab === 'parameters'
-			? 'bg-amber-500 text-black shadow-[0_0_15px_rgba(245,158,11,0.4)]'
-			: 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+			? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]'
+			: 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
 	}`;
 
-	const codeTabClassName = `flex items-center gap-2 rounded-lg px-4 py-2 text-[10px] font-black uppercase tracking-[0.15em] transition-all duration-300 ${
+	const codeTabClassName = `flex items-center gap-2 rounded-lg px-4 py-2 text-[11px] font-bold uppercase tracking-[0.15em] transition-all duration-300 ${
 		activeTab === 'code' && isDeveloper
-			? 'bg-amber-500 text-black shadow-[0_0_15px_rgba(245,158,11,0.4)]'
-			: 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+			? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]'
+			: 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
 	} ${!isDeveloper ? 'opacity-50 cursor-not-allowed' : ''}`;
 
 	return (
 		<aside
-			className={`relative shrink-0 overflow-hidden border-l border-white/5 bg-zinc-950/80 backdrop-blur-xl transition-all duration-700 ease-[cubic-bezier(0.2,1,0.2,1)] ${
+			className={`relative shrink-0 overflow-hidden border-l border-border bg-zinc-50/90 dark:bg-background/80 backdrop-blur-2xl transition-all duration-700 ease-[cubic-bezier(0.2,1,0.2,1)] font-sans shadow-[-4px_0_24px_rgba(0,0,0,0.02)] dark:shadow-none ${
 				isOpen ? 'w-112.5' : 'w-16'
 			}`}
 		>
 			<button
 				onClick={() => setIsOpen(!isOpen)}
-				className="absolute left-4 top-5 flex size-8 items-center justify-center rounded-lg border border-white/10 bg-zinc-900/50 text-zinc-500 hover:border-amber-500/50 hover:text-amber-400 hover:bg-amber-500/10 transition-all z-20 group"
+				className="absolute left-4 top-5 flex size-8 items-center justify-center rounded-lg border border-border dark:border-white/10 bg-background/50 dark:bg-zinc-900/50 text-muted-foreground hover:border-blue-500/50 hover:text-blue-500 hover:bg-blue-500/10 transition-all z-20 group"
 			>
 				{isOpen ? (
 					<ChevronRight className="size-4 group-hover:translate-x-0.5 transition-transform" />
@@ -504,8 +504,8 @@ export function EditorDrawer({
 			</button>
 
 			<div className={`flex h-full flex-col ${!isOpen ? 'opacity-0' : 'opacity-100'} transition-opacity duration-500`}>
-				<header className="flex h-16 items-center justify-between border-b border-white/5 bg-black/40 px-6 pl-16">
-					<div className="flex p-1 bg-zinc-900/50 rounded-xl border border-white/5">
+				<header className="flex h-16 items-center justify-between border-b border-border bg-transparent px-6 pl-16">
+					<div className="flex p-1 bg-black/5 dark:bg-white/5 rounded-xl border border-border dark:border-white/5 shadow-inner">
 						<button
 							onClick={() => setActiveTab('parameters')}
 							className={parametersTabClassName}
@@ -525,10 +525,10 @@ export function EditorDrawer({
 					<div className="flex items-center gap-1.5">
 						<button
 							onClick={onHistoryClick}
-							className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-zinc-500 hover:text-amber-400 hover:bg-amber-500/8 transition-all active:scale-95"
+							className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-widest text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all active:scale-95"
 							title="View history"
 						>
-							<History className="size-3.5 text-amber-500/70" />
+							<History className="size-3.5 text-blue-500/70" />
 							<span className="hidden xl:block">History</span>
 						</button>
 						{isDeveloper ? (
@@ -550,39 +550,39 @@ export function EditorDrawer({
 					{activeTab === 'parameters' ? (
 						<div className="space-y-8">
 							<div className="flex items-center gap-4">
-								<div className="size-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,1)]" />
-								<h2 className="text-[11px] font-black uppercase tracking-[0.3em] text-zinc-400">Dynamic Props</h2>
-								<div className="h-px flex-1 bg-linear-to-r from-white/10 to-transparent" />
+								<div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,1)]" />
+								<h2 className="text-[11px] font-black uppercase tracking-[0.3em] text-muted-foreground">Dynamic Props</h2>
+								<div className="h-px flex-1 bg-linear-to-r from-border dark:from-white/10 to-transparent" />
 							</div>
 							<div className="space-y-2">
 								{children}
 							</div>
 						</div>
 					) : !isDeveloper ? (
-						<div className="flex h-full flex-col items-center justify-center rounded-3xl border border-amber-500/20 bg-zinc-950/90 p-8 text-center shadow-2xl">
+						<div className="flex h-full flex-col items-center justify-center rounded-3xl border border-blue-500/20 bg-background dark:bg-zinc-950/90 p-8 text-center shadow-2xl">
 							<div className="mb-6 flex items-center justify-center gap-3">
-								<div className="size-2 rounded-full bg-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.5)]" />
+								<div className="size-2 rounded-full bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.5)]" />
 								<div>
-									<h2 className="text-sm font-black uppercase tracking-[0.35em] text-amber-300">Admin Login</h2>
-									<p className="mt-2 text-[11px] leading-6 text-zinc-400">Enter your admin username and password to view the CAD engine script.</p>
+									<h2 className="text-sm font-black uppercase tracking-[0.35em] text-blue-600 dark:text-blue-400">Admin Login</h2>
+									<p className="mt-2 text-[11px] leading-6 text-muted-foreground">Enter your admin username and password to view the CAD engine script.</p>
 								</div>
 							</div>
 							<input
 								value={developerUsername}
 								onChange={(e) => onDeveloperUsernameChange(e.target.value)}
 								placeholder="Admin username"
-								className="mb-4 w-full rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-sm text-white placeholder:text-zinc-500 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+								className="mb-4 w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/70 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
 							/>
 							<input
 								value={developerPassword}
 								onChange={(e) => onDeveloperPasswordChange(e.target.value)}
 								placeholder="Admin password"
 								type="password"
-								className="mb-4 w-full rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-sm text-white placeholder:text-zinc-500 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+								className="mb-4 w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/70 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
 							/>
 							<button
 								onClick={onDeveloperLogin}
-								className="w-full rounded-2xl bg-amber-500 px-4 py-3 text-sm font-black uppercase tracking-[0.2em] text-black shadow-[0_0_20px_rgba(245,158,11,0.2)] transition hover:bg-amber-400 active:scale-[0.98]"
+								className="w-full rounded-2xl bg-gradient-to-b from-blue-500 to-blue-700 px-4 py-3 text-sm font-bold uppercase tracking-[0.2em] text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] transition hover:from-blue-400 hover:to-blue-600 hover:scale-[1.02] active:scale-[0.98]"
 							>
 								Unlock Code
 							</button>
@@ -594,37 +594,37 @@ export function EditorDrawer({
 						<div className="h-full flex flex-col">
 							<div className="mb-6 flex items-center justify-between">
 								<div className="flex items-center gap-4">
-									<div className="size-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,1)]" />
-									<h2 className="text-[11px] font-black uppercase tracking-[0.3em] text-zinc-400">Core Script</h2>
+									<div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,1)]" />
+									<h2 className="text-[11px] font-black uppercase tracking-[0.3em] text-muted-foreground">Core Script</h2>
 								</div>
-								<div className="flex items-center gap-2 px-3 py-1 rounded-full bg-black/40 border border-white/5">
-									<div className={`size-1 rounded-full ${monacoFailed ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,1)]' : 'bg-emerald-500 animate-pulse'}`} />
-									<span className="text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-widest">
+								<div className="flex items-center gap-2 px-3 py-1 rounded-full bg-accent dark:bg-black/40 border border-border dark:border-white/5">
+									<div className={`size-1 rounded-full ${monacoFailed ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,1)]' : 'bg-cyan-500 animate-pulse'}`} />
+									<span className="text-[9px] font-mono font-bold text-muted-foreground uppercase tracking-widest">
 										{monacoFailed ? 'PY 3.13 // STANDARD' : 'PY 3.13 // BUILD123D'}
 									</span>
 								</div>
 							</div>
 							
-							<div className="flex-1 overflow-hidden rounded-2xl border border-white/5 bg-black/20 backdrop-blur-sm shadow-2xl relative group/editor">
+							<div className="flex-1 overflow-hidden rounded-2xl border border-border dark:border-white/5 bg-background dark:bg-black/20 backdrop-blur-sm shadow-2xl relative group/editor">
 								<button
 									onClick={handleCopy}
 									className={`absolute right-4 top-4 z-10 flex items-center gap-2 rounded-lg border px-3 py-2 text-[9px] font-black uppercase tracking-widest transition-all duration-300 ${
 										copied
-											? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
-											: 'border-white/10 bg-zinc-900/80 text-zinc-400 hover:border-amber-500/50 hover:text-amber-400 opacity-0 group-hover/editor:opacity-100 translate-y-2 group-hover/editor:translate-y-0'
+											? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.2)]'
+											: 'border-border dark:border-white/10 bg-background dark:bg-zinc-900/80 text-muted-foreground hover:border-blue-500/50 hover:text-blue-500 dark:hover:text-blue-400 opacity-0 group-hover/editor:opacity-100 translate-y-2 group-hover/editor:translate-y-0'
 									}`}
 								>
 									{copied ? <Check className="size-3" /> : <Copy className="size-3" />}
 									{copied ? 'Copied' : 'Copy'}
 								</button>
 								
-								<div className="absolute inset-0 bg-linear-to-b from-amber-500/5 to-transparent opacity-0 group-hover/editor:opacity-100 transition-opacity duration-700 pointer-events-none" />
+								<div className="absolute inset-0 bg-linear-to-b from-blue-500/5 to-transparent opacity-0 group-hover/editor:opacity-100 transition-opacity duration-700 pointer-events-none" />
 								
 								{monacoFailed ? (
 									<textarea
 										value={pythonScript}
 										onChange={(e) => onScriptChange(e.target.value)}
-										className="w-full h-full p-6 bg-zinc-950/40 text-zinc-100 font-mono text-sm border-0 focus:ring-0 focus:outline-hidden resize-none scrollbar-thin rounded-2xl"
+										className="w-full h-full p-6 bg-accent dark:bg-zinc-950/40 text-foreground font-mono text-sm border-0 focus:ring-0 focus:outline-hidden resize-none scrollbar-thin rounded-2xl"
 										style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}
 										placeholder="# Write your build123d script here..."
 									/>
@@ -658,11 +658,11 @@ export function EditorDrawer({
 					)}
 				</div>
 
-				<div className="border-t border-white/5 p-6 bg-black/40 backdrop-blur-xl">
+				<div className="border-t border-border dark:border-white/5 p-6 bg-transparent">
 					<button
 						onClick={onRenderSync}
 						disabled={isRecompiling || !hasSession || !pythonScript}
-						className="group relative flex w-full items-center justify-center gap-4 overflow-hidden rounded-2xl bg-emerald-500 py-4 text-[11px] font-black uppercase tracking-[0.2em] text-black shadow-[0_0_30px_rgba(16,185,129,0.2)] hover:bg-emerald-400 hover:shadow-[0_0_40px_rgba(16,185,129,0.4)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 disabled:opacity-20 disabled:grayscale disabled:scale-100 disabled:shadow-none"
+						className="group relative flex w-full items-center justify-center gap-4 overflow-hidden rounded-2xl bg-gradient-to-b from-cyan-500 to-cyan-700 border border-cyan-400/30 py-4 text-[12px] font-bold uppercase tracking-[0.2em] text-white shadow-[0_0_30px_rgba(6,182,212,0.4)] hover:from-cyan-400 hover:to-cyan-600 hover:shadow-[0_0_40px_rgba(6,182,212,0.6)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 disabled:opacity-40 disabled:dark:opacity-20 disabled:grayscale disabled:scale-100 disabled:shadow-none"
 					>
 						<div className="absolute inset-0 bg-linear-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] pointer-events-none" />
 						
@@ -676,19 +676,19 @@ export function EditorDrawer({
 					</button>
 					
 					<div className="mt-4 flex items-center justify-center gap-4 opacity-30">
-						<div className="h-px w-8 bg-white/20" />
-						<span className="text-[8px] font-bold uppercase tracking-[0.3em] text-zinc-500">Authorized Access Only</span>
-						<div className="h-px w-8 bg-white/20" />
+						<div className="h-px w-8 bg-foreground/20 dark:bg-white/20" />
+						<span className="text-[8px] font-bold uppercase tracking-[0.3em] text-muted-foreground">Authorized Access Only</span>
+						<div className="h-px w-8 bg-foreground/20 dark:bg-white/20" />
 					</div>
 				</div>
 			</div>
 
 			{!isOpen && (
 				<div className="flex h-full flex-col items-center gap-8 pt-24">
-					<div className="rotate-90 whitespace-nowrap text-[9px] font-black uppercase tracking-[0.5em] text-zinc-600/50">
+					<div className="rotate-90 whitespace-nowrap text-[9px] font-black uppercase tracking-[0.5em] text-muted-foreground/50">
 						Logic & System Params
 					</div>
-					<div className="w-px h-12 bg-linear-to-b from-zinc-800 to-transparent" />
+					<div className="w-px h-12 bg-linear-to-b from-border dark:from-zinc-800 to-transparent" />
 				</div>
 			)}
 		</aside>

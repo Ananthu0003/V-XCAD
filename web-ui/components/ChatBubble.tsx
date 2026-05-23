@@ -2,7 +2,7 @@
 
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
-import { User, Cpu, Copy, Check } from 'lucide-react';
+import { User, Cpu, Copy, Check, Info, FileImage } from 'lucide-react';
 import { useState } from 'react';
 
 type ChatRole = 'user' | 'assistant' | 'system';
@@ -11,16 +11,27 @@ type ChatBubbleProps = {
 	role: ChatRole;
 	content: string;
 	id: string;
+	fileName?: string;
 };
 
-export function ChatBubble({ role, content }: ChatBubbleProps) {
+export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 	const [copied, setCopied] = useState(false);
 	const isUser = role === 'user';
 	const isAssistant = role === 'assistant';
 
+	// System messages render as a compact inline hint strip
+	if (role === 'system') {
+		return (
+			<div className="flex items-center gap-2.5 rounded-xl border border-border/50 dark:border-white/5 bg-background dark:bg-white/5 shadow-sm px-3.5 py-2.5 animate-message">
+				<Info className="size-3.5 shrink-0 text-blue-500/60" />
+				<p className="text-[11px] leading-snug text-muted-foreground font-sans">{content}</p>
+			</div>
+		);
+	}
+
 	const bubbleClass = isUser
-		? 'bg-gradient-to-br from-amber-500 to-amber-600 text-black shadow-[0_4px_20px_rgba(245,158,11,0.25)]'
-		: 'bg-[#18181b]/80 backdrop-blur-xl text-zinc-200 border border-zinc-800/50 shadow-[0_8px_30px_rgb(0,0,0,0.5)]';
+		? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white dark:text-black shadow-[0_4px_20px_rgba(59,130,246,0.25)]'
+		: 'bg-background/90 dark:bg-[#18181b]/80 backdrop-blur-xl text-foreground border border-border dark:border-zinc-800/50 shadow-[0_8px_30px_rgba(0,0,0,0.1)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.5)]';
 
 	const handleCopy = (text: string) => {
 		navigator.clipboard.writeText(text);
@@ -31,15 +42,21 @@ export function ChatBubble({ role, content }: ChatBubbleProps) {
 
 	return (
 		<div className={`group flex w-full flex-col gap-2.5 animate-message ${isUser ? 'items-end' : 'items-start'}`}>
-			<div className={`flex items-center gap-2.5 px-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 ${isUser ? 'flex-row-reverse' : ''}`}>
-				<div className={`flex size-6 items-center justify-center rounded-lg shadow-lg ${isUser ? 'bg-amber-400 text-black' : 'bg-zinc-800 text-amber-500'}`}>
+			<div className={`flex items-center gap-2.5 px-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground ${isUser ? 'flex-row-reverse' : ''}`}>
+				<div className={`flex size-6 items-center justify-center rounded-lg shadow-lg ${isUser ? 'bg-blue-500 dark:bg-blue-400 text-white dark:text-black' : 'bg-background dark:bg-zinc-800 text-blue-500 border border-border dark:border-none'}`}>
 					{isUser ? <User className="size-3.5" /> : <Cpu className="size-3.5" />}
 				</div>
 				<span className="opacity-60">{role}</span>
 			</div>
 
 			<div className={`relative max-w-[88%] rounded-2xl px-5 py-4 text-sm leading-[1.6] ${bubbleClass} ${isUser ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
-				<div className="prose prose-invert prose-sm max-w-none wrap-break-word font-sans">
+				{fileName && isUser && (
+					<div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-black/5 dark:bg-black/20 border border-border dark:border-white/10 w-fit backdrop-blur-sm shadow-inner">
+						<FileImage className="size-3.5 text-blue-400" />
+						<span className="text-[10px] font-mono font-bold text-blue-200 uppercase tracking-wider truncate max-w-[200px]">{fileName}</span>
+					</div>
+				)}
+				<div className="prose prose-sm dark:prose-invert max-w-none wrap-break-word font-sans">
 					<ReactMarkdown
 						components={{
 							code({ node, className, children, ...props }) {
@@ -60,47 +77,49 @@ export function ChatBubble({ role, content }: ChatBubbleProps) {
 									}
 
 									return (
-										<div className="my-6 overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/40 backdrop-blur-sm shadow-2xl">
-											<div className="flex items-center justify-between bg-zinc-900/50 px-5 py-3.5 border-b border-white/5">
+										<div className="my-6 overflow-hidden rounded-2xl border border-border dark:border-white/10 bg-accent/50 dark:bg-zinc-950/40 backdrop-blur-sm shadow-2xl">
+											<div className="flex items-center justify-between bg-background dark:bg-zinc-900/50 px-5 py-3.5 border-b border-border dark:border-white/5">
 												<div className="flex items-center gap-3">
-													<div className="size-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
-													<span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300">Technical Analysis Report</span>
+													<div className="size-2 rounded-full bg-cyan-500 animate-pulse shadow-[0_0_10px_rgba(6,182,212,0.5)]" />
+													<span className="text-[10px] font-black uppercase tracking-[0.2em] text-foreground dark:text-zinc-300">Technical Analysis Report</span>
 												</div>
-												<div className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-black/40 border border-white/5">
-													<span className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">Model Fidelity: High</span>
+												<div className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-black/5 dark:bg-black/40 border border-border dark:border-white/5">
+													<span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest">Model Fidelity: High</span>
 												</div>
 											</div>
 											
 											<div className="p-5">
 												<div className="mb-4 flex items-center gap-4">
-													<h3 className="text-[9px] font-black uppercase tracking-[0.3em] text-amber-500/80">Extracted Dimensions</h3>
+													<h3 className="text-[9px] font-black uppercase tracking-[0.3em] text-blue-500/80">Extracted Dimensions</h3>
 													<div className="h-px flex-1 bg-linear-to-r from-white/10 to-transparent" />
 												</div>
 												
-												<div className="grid grid-cols-2 gap-x-6 gap-y-3 mb-6">
+												<div className="grid grid-cols-1 gap-3 mb-6">
 													{Object.entries(params).map(([key, val]) => (
-														<div key={key} className="flex items-center justify-between group/item">
-															<span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider group-hover/item:text-zinc-400 transition-colors">{key.replace(/_/g, ' ')}</span>
+														<div key={key} className="flex items-center justify-between group/item gap-4">
+															<span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider group-hover/item:text-foreground transition-colors truncate" title={key.replace(/_/g, ' ')}>
+																{key.replace(/_/g, ' ')}
+															</span>
 															<div className="flex items-center gap-1.5">
-																<span className="text-[11px] font-mono font-bold text-amber-400">{val}</span>
-																<span className="text-[8px] font-bold text-zinc-700">mm</span>
+																<span className="text-[11px] font-mono font-bold text-blue-500 dark:text-blue-400">{val}</span>
+																<span className="text-[8px] font-bold text-muted-foreground">mm</span>
 															</div>
 														</div>
 													))}
 												</div>
 
-												<div className="pt-4 border-t border-white/5 flex items-center justify-between">
+												<div className="pt-4 border-t border-border dark:border-white/5 flex items-center justify-between">
 													<div className="flex items-center gap-4">
 														<div className="flex -space-x-1">
 															{[1,2,3].map(i => (
-																<div key={i} className="size-4 rounded-full border border-zinc-950 bg-zinc-800 flex items-center justify-center">
-																	<div className="size-1 rounded-full bg-amber-500/50" />
+																<div key={i} className="size-4 rounded-full border border-background dark:border-zinc-950 bg-accent dark:bg-zinc-800 flex items-center justify-center">
+																	<div className="size-1 rounded-full bg-blue-500/50" />
 																</div>
 															))}
 														</div>
-														<span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest italic">Core logic dispatched to engine</span>
+														<span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest italic">Core logic dispatched to engine</span>
 													</div>
-													<div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 border-b border-amber-500/20 pb-0.5">
+													<div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground border-b border-blue-500/20 pb-0.5">
 														Ready for Sync
 													</div>
 												</div>
@@ -111,15 +130,15 @@ export function ChatBubble({ role, content }: ChatBubbleProps) {
 
 								if (match) {
 									return (
-										<div className="relative my-4 overflow-hidden rounded-xl bg-black/40 border border-white/5 shadow-inner group/code">
-											<div className="flex items-center justify-between bg-white/3 px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 border-b border-white/5">
+										<div className="relative my-4 overflow-hidden rounded-xl bg-black/5 dark:bg-black/40 border border-border dark:border-white/5 shadow-inner group/code">
+											<div className="flex items-center justify-between bg-black/5 dark:bg-white/3 px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground border-b border-border dark:border-white/5">
 												<span className="flex items-center gap-2">
-													<div className="size-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
+													<div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
 													{match[1]}
 												</span>
 												<button
 													onClick={() => handleCopy(codeText)}
-													className="flex items-center gap-1.5 hover:text-amber-400 transition-colors opacity-0 group-hover/code:opacity-100 duration-200"
+													className="flex items-center gap-1.5 hover:text-blue-400 transition-colors opacity-0 group-hover/code:opacity-100 duration-200"
 												>
 													{copied ? <Check className="size-3" /> : <Copy className="size-3" />}
 													{copied ? 'Copied' : 'Copy'}
@@ -134,15 +153,15 @@ export function ChatBubble({ role, content }: ChatBubbleProps) {
 									);
 								}
 								return (
-									<code className="rounded-md bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[11px] text-amber-300 border border-zinc-700/50" {...props}>
+									<code className="rounded-md bg-accent dark:bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[11px] text-blue-600 dark:text-blue-400 border border-border dark:border-zinc-700/50" {...props}>
 										{children}
 									</code>
 								);
 							},
 							p: ({ children }) => <p className="mb-3 last:mb-0 font-light">{children}</p>,
-							ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0 marker:text-amber-500/50">{children}</ul>,
-							ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0 marker:text-amber-500/50">{children}</ol>,
-							strong: ({ children }) => <strong className="font-bold text-amber-400/90 tracking-tight">{children}</strong>,
+							ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0 marker:text-blue-500/50">{children}</ul>,
+							ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0 marker:text-blue-500/50">{children}</ol>,
+							strong: ({ children }) => <strong className="font-bold text-blue-400/90 tracking-tight">{children}</strong>,
 						}}
 					>
 						{content || '...'}

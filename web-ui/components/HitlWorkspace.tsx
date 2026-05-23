@@ -18,6 +18,7 @@ type ChatMessage = {
 	id: string;
 	role: ChatRole;
 	content: string;
+	fileName?: string;
 };
 
 type RenderPayload = {
@@ -256,7 +257,7 @@ export default function HitlWorkspace() {
 		{
 			id: 'system_welcome',
 			role: 'system',
-			content: 'Upload a reference image or PDF, choose a model, and generate a parameterized build123d script.',
+			content: 'Upload a blueprint, pick a model, and hit Generate.',
 		},
 	]);
 	const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
@@ -357,7 +358,7 @@ export default function HitlWorkspace() {
 		}
 
 		const assistantMessageId = makeId('assistant');
-		setMessages((prev) => [...prev, { id: makeId('user'), role: 'user', content: prompt }, { id: assistantMessageId, role: 'assistant', content: '' }]);
+		setMessages((prev) => [...prev, { id: makeId('user'), role: 'user', content: prompt, fileName: selectedFile.name }, { id: assistantMessageId, role: 'assistant', content: '' }]);
 		setIsGenerating(true);
 
 		const formData = new FormData();
@@ -536,7 +537,7 @@ export default function HitlWorkspace() {
 			{
 				id: 'system_welcome',
 				role: 'system',
-				content: 'Upload a reference image or PDF, choose a model, and generate a parameterized build123d script.',
+				content: 'Upload a blueprint, pick a model, and hit Generate.',
 			},
 		]);
 		setPrompt(DEFAULT_PROMPT);
@@ -554,7 +555,7 @@ export default function HitlWorkspace() {
 	};
 
 	return (
-		<div className="dark h-screen w-full bg-black text-zinc-100 overflow-hidden">
+		<div className="h-screen w-full bg-background text-foreground overflow-hidden">
 			<main className="flex h-full w-full gap-0">
 				<ChatPanel
 					messages={messages}
@@ -575,29 +576,30 @@ export default function HitlWorkspace() {
 
 				{isChatOpen && (
 					<div
-						className="group relative w-1 cursor-col-resize bg-zinc-900 transition-colors hover:bg-amber-500/50"
+						className="group relative w-[1px] cursor-col-resize bg-border hover:bg-blue-500/50 transition-colors z-30"
 						onMouseDown={() => {
 							isResizing.current = true;
 							document.body.style.cursor = 'col-resize';
 						}}
 					>
-						<div className="absolute inset-y-0 -left-1 w-3 opacity-0 group-hover:opacity-100" />
+						<div className="absolute inset-y-0 -left-1.5 w-4 opacity-0 group-hover:opacity-100" />
 					</div>
 				)}
 
 				<CadViewport
-					stlUrl={stlUrl}
-					statusText={statusText}
-					isRecompiling={isRecompiling}
-					hasStl={hasStl}
-					hasStep={hasStep}
-					hasDxf={hasDxf}
-					isDownloadingStl={isDownloadingStl}
-					isDownloadingStep={isDownloadingStep}
-					isDownloadingDxf={isDownloadingDxf}
-					onDownloadStl={() => void handleDownloadArtifact(stlUrl, 'stl')}
-					onDownloadStep={() => void handleDownloadArtifact(stepUrl, 'step')}
-					onDownloadDxf={() => void handleDownloadArtifact(dxfUrl, 'dxf')}
+				stlUrl={stlUrl}
+				statusText={statusText}
+				isRecompiling={isRecompiling}
+				hasStl={hasStl}
+				hasStep={hasStep}
+				hasDxf={hasDxf}
+				isDeveloper={isDeveloper}
+				isDownloadingStl={isDownloadingStl}
+				isDownloadingStep={isDownloadingStep}
+				isDownloadingDxf={isDownloadingDxf}
+				onDownloadStl={() => void handleDownloadArtifact(stlUrl, 'stl')}
+				onDownloadStep={() => void handleDownloadArtifact(stepUrl, 'step')}
+				onDownloadDxf={() => void handleDownloadArtifact(dxfUrl, 'dxf')}
 					annotations={annotations}
 					activeParameter={activeParameter}
 					geometryInfo={geometryInfo}
@@ -628,12 +630,12 @@ export default function HitlWorkspace() {
 					{parameterEntries.length === 0 ? (
 						<div className="flex flex-col items-center justify-center py-6 px-2 text-center animate-message">
 							{/* Dashed bounding box */}
-							<div className="w-full rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/50 p-7 flex flex-col items-center gap-5">
+							<div className="w-full rounded-2xl border border-dashed border-border bg-black/5 dark:bg-white/5 backdrop-blur-md p-7 flex flex-col items-center gap-5">
 								{/* Icon container */}
 								<div className="relative flex size-14 items-center justify-center">
-									<div className="absolute inset-0 rounded-full bg-amber-500/5 blur-lg" />
-									<div className="relative flex size-14 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/80">
-										<svg className="size-6 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<div className="absolute inset-0 rounded-full bg-blue-500/10 blur-xl" />
+									<div className="relative flex size-14 items-center justify-center rounded-2xl border border-border dark:border-white/10 bg-background shadow-lg text-muted-foreground">
+										<svg className="size-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 											<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
 										</svg>
 									</div>
@@ -641,24 +643,10 @@ export default function HitlWorkspace() {
 
 								{/* Text */}
 								<div>
-									<p className="text-[11px] font-bold uppercase tracking-[0.2em] text-zinc-600">No Parameters Yet</p>
-									<p className="mt-2 text-[10px] leading-relaxed text-zinc-700">
+									<p className="text-[12px] font-bold uppercase tracking-[0.2em] text-foreground">No Parameters Yet</p>
+									<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground font-sans">
 										Generate a script from a blueprint to auto-extract dynamic variables.
 									</p>
-								</div>
-
-								{/* Micro-steps */}
-								<div className="w-full space-y-2">
-									{[
-										{ step: '01', text: 'Upload a technical drawing or PDF' },
-										{ step: '02', text: 'Generate a parameterized build123d script' },
-										{ step: '03', text: 'Adjust dimensions here in real time' },
-									].map(({ step, text }) => (
-										<div key={step} className="flex items-start gap-3 rounded-xl border border-zinc-800/60 bg-zinc-900/40 px-3 py-2.5 text-left">
-											<span className="mt-px shrink-0 text-[8px] font-black uppercase tracking-[0.2em] text-zinc-700">{step}</span>
-											<span className="text-[10px] leading-snug text-zinc-600">{text}</span>
-										</div>
-									))}
 								</div>
 							</div>
 						</div>

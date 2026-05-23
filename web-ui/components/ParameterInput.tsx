@@ -8,7 +8,7 @@ type ParameterInputProps = {
 };
 
 export function ParameterInput({ label, value, onChange, isActive = false }: ParameterInputProps) {
-	const inputBase = "w-full rounded-xl border border-zinc-800 bg-black/50 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-amber-500/50 focus:outline-none transition-all";
+	const inputBase = "w-full rounded-xl border border-zinc-800 bg-black/50 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-blue-500/50 focus:outline-none transition-all";
 
 	const renderInput = () => {
 		if (typeof value === 'number') {
@@ -30,7 +30,7 @@ export function ParameterInput({ label, value, onChange, isActive = false }: Par
 							type="checkbox"
 							checked={value}
 							onChange={(e) => onChange(e.target.checked)}
-							className="peer size-full cursor-pointer appearance-none rounded border border-zinc-700 bg-zinc-900 transition-all checked:bg-amber-500 checked:border-amber-400"
+							className="peer size-full cursor-pointer appearance-none rounded border border-zinc-700 bg-zinc-900 transition-all checked:bg-blue-500 checked:border-blue-400"
 						/>
 						<div className="pointer-events-none absolute scale-0 opacity-0 peer-checked:scale-100 peer-checked:opacity-100 transition-all text-black font-bold text-[10px]">
 							✓
@@ -72,11 +72,11 @@ export function ParameterInput({ label, value, onChange, isActive = false }: Par
 	return (
 		<div className={`space-y-2 rounded-xl px-2 py-1.5 transition-all duration-200 ${
 			isActive
-				? 'bg-amber-500/5 ring-1 ring-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.08)]'
+				? 'bg-blue-500/5 ring-1 ring-blue-500/30 shadow-[0_0_12px_rgba(59,130,246,0.08)]'
 				: ''
 		}`}>
 			<label className={`block text-[10px] font-bold uppercase tracking-wider pl-1 transition-colors ${
-				isActive ? 'text-amber-500' : 'text-zinc-500'
+				isActive ? 'text-blue-500' : 'text-zinc-500'
 			}`}>
 				{label.replace(/_/g, ' ')}
 			</label>
