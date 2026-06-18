@@ -2,7 +2,9 @@
 ai-engine/venv/
 ai-engine/logs/
 ai-engine/outputs/
-
+ai-engine/__pycache__/
+scratch/
+ai-engine/scratch/
 # Node / Next.js
 web-ui/.next/
 web-ui/node_modules/

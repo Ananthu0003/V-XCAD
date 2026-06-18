@@ -22,7 +22,7 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 	// System messages render as a compact inline hint strip
 	if (role === 'system') {
 		return (
-			<div className="flex items-center gap-2.5 rounded-xl border border-border/50 dark:border-white/5 bg-background dark:bg-white/5 shadow-sm px-3.5 py-2.5 animate-message">
+			<div className="flex items-center gap-2.5 rounded-xl border border-transparent/50 dark:border-white/5 bg-background dark:bg-white/5 shadow-sm px-3.5 py-2.5 animate-message">
 				<Info className="size-3.5 shrink-0 text-blue-500/60" />
 				<p className="text-[11px] leading-snug text-muted-foreground font-sans">{content}</p>
 			</div>
@@ -30,8 +30,8 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 	}
 
 	const bubbleClass = isUser
-		? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white dark:text-black shadow-[0_4px_20px_rgba(59,130,246,0.25)]'
-		: 'bg-background/90 dark:bg-[#18181b]/80 backdrop-blur-xl text-foreground border border-border dark:border-zinc-800/50 shadow-[0_8px_30px_rgba(0,0,0,0.1)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.5)]';
+		? 'bg-gradient-to-br from-[#1e293b] to-[#0f172a] border border-[#334155] text-white shadow-xl'
+		: 'bg-[#030408]/80 backdrop-blur-md text-blue-50 border border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.15)]';
 
 	const handleCopy = (text: string) => {
 		navigator.clipboard.writeText(text);
@@ -42,16 +42,17 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 
 	return (
 		<div className={`group flex w-full flex-col gap-2.5 animate-message ${isUser ? 'items-end' : 'items-start'}`}>
-			<div className={`flex items-center gap-2.5 px-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground ${isUser ? 'flex-row-reverse' : ''}`}>
-				<div className={`flex size-6 items-center justify-center rounded-lg shadow-lg ${isUser ? 'bg-blue-500 dark:bg-blue-400 text-white dark:text-black' : 'bg-background dark:bg-zinc-800 text-blue-500 border border-border dark:border-none'}`}>
-					{isUser ? <User className="size-3.5" /> : <Cpu className="size-3.5" />}
+			<div className={`flex items-center gap-2 px-1.5 text-[9px] font-bold uppercase tracking-[0.1em] ${isUser ? 'flex-row-reverse text-slate-400' : 'text-blue-400'}`}>
+				<div className={`flex size-6 items-center justify-center rounded-lg shadow-lg ${isUser ? 'bg-slate-800 text-slate-300 border border-slate-700' : 'bg-blue-950/50 text-blue-400 border border-blue-500/50 relative'}`}>
+					{!isUser && <div className="absolute inset-0 bg-blue-500/20 animate-pulse rounded-lg" />}
+					{isUser ? <User className="size-3.5" /> : <Cpu className="size-3.5 relative z-10" />}
 				</div>
-				<span className="opacity-60">{role}</span>
+				<span className="opacity-80">{role === 'assistant' ? 'AI Co-Pilot' : 'Engineer'}</span>
 			</div>
 
 			<div className={`relative max-w-[88%] rounded-2xl px-5 py-4 text-sm leading-[1.6] ${bubbleClass} ${isUser ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
 				{fileName && isUser && (
-					<div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-black/5 dark:bg-black/20 border border-border dark:border-white/10 w-fit backdrop-blur-sm shadow-inner">
+					<div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-black/5 dark:bg-black/20 border border-transparent dark:border-white/10 w-fit backdrop-blur-sm shadow-inner">
 						<FileImage className="size-3.5 text-blue-400" />
 						<span className="text-[10px] font-mono font-bold text-blue-200 uppercase tracking-wider truncate max-w-[200px]">{fileName}</span>
 					</div>
@@ -77,20 +78,20 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 									}
 
 									return (
-										<div className="my-6 overflow-hidden rounded-2xl border border-border dark:border-white/10 bg-accent/50 dark:bg-zinc-950/40 backdrop-blur-sm shadow-2xl">
-											<div className="flex items-center justify-between bg-background dark:bg-zinc-900/50 px-5 py-3.5 border-b border-border dark:border-white/5">
+										<div className="my-6 overflow-hidden rounded-2xl border border-transparent dark:border-white/10 bg-accent/50 dark:bg-zinc-950/40 backdrop-blur-sm shadow-2xl">
+											<div className="flex items-center justify-between bg-background dark:bg-zinc-900/50 px-5 py-3.5 border-b border-transparent dark:border-white/5">
 												<div className="flex items-center gap-3">
-													<div className="size-2 rounded-full bg-cyan-500 animate-pulse shadow-[0_0_10px_rgba(6,182,212,0.5)]" />
-													<span className="text-[10px] font-black uppercase tracking-[0.2em] text-foreground dark:text-zinc-300">Technical Analysis Report</span>
+													<div className="size-2 rounded-full bg-cyan-500 animate-pulse shadow-[0_0_10px_rgba(6,182,212,0.25)]" />
+													<span className="text-[10px] font-black uppercase tracking-[0.05em] text-foreground dark:text-zinc-300">Technical Analysis Report</span>
 												</div>
-												<div className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-black/5 dark:bg-black/40 border border-border dark:border-white/5">
-													<span className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest">Model Fidelity: High</span>
+												<div className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-black/5 dark:bg-black/40 border border-transparent dark:border-white/5">
+													<span className="text-[8px] font-bold text-muted-foreground uppercase tracking-wide">Model Fidelity: High</span>
 												</div>
 											</div>
 											
 											<div className="p-5">
 												<div className="mb-4 flex items-center gap-4">
-													<h3 className="text-[9px] font-black uppercase tracking-[0.3em] text-blue-500/80">Extracted Dimensions</h3>
+													<h3 className="text-[9px] font-black uppercase tracking-[0.1em] text-blue-500/80">Extracted Dimensions</h3>
 													<div className="h-px flex-1 bg-linear-to-r from-white/10 to-transparent" />
 												</div>
 												
@@ -108,7 +109,7 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 													))}
 												</div>
 
-												<div className="pt-4 border-t border-border dark:border-white/5 flex items-center justify-between">
+												<div className="pt-4 border-t border-transparent dark:border-white/5 flex items-center justify-between">
 													<div className="flex items-center gap-4">
 														<div className="flex -space-x-1">
 															{[1,2,3].map(i => (
@@ -117,9 +118,9 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 																</div>
 															))}
 														</div>
-														<span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest italic">Core logic dispatched to engine</span>
+														<span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide italic">Core logic dispatched to engine</span>
 													</div>
-													<div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground border-b border-blue-500/20 pb-0.5">
+													<div className="text-[10px] font-black uppercase tracking-wide text-muted-foreground border-b border-blue-500/20 pb-0.5">
 														Ready for Sync
 													</div>
 												</div>
@@ -130,10 +131,10 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 
 								if (match) {
 									return (
-										<div className="relative my-4 overflow-hidden rounded-xl bg-black/5 dark:bg-black/40 border border-border dark:border-white/5 shadow-inner group/code">
-											<div className="flex items-center justify-between bg-black/5 dark:bg-white/3 px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground border-b border-border dark:border-white/5">
+										<div className="relative my-4 overflow-hidden rounded-xl bg-black/5 dark:bg-black/40 border border-transparent dark:border-white/5 shadow-inner group/code">
+											<div className="flex items-center justify-between bg-black/5 dark:bg-white/3 px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground border-b border-transparent dark:border-white/5">
 												<span className="flex items-center gap-2">
-													<div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+													<div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.25)]" />
 													{match[1]}
 												</span>
 												<button
@@ -153,7 +154,7 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 									);
 								}
 								return (
-									<code className="rounded-md bg-accent dark:bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[11px] text-blue-600 dark:text-blue-400 border border-border dark:border-zinc-700/50" {...props}>
+									<code className="rounded-md bg-accent dark:bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[11px] text-blue-600 dark:text-blue-400 border border-transparent dark:border-zinc-700/50" {...props}>
 										{children}
 									</code>
 								);

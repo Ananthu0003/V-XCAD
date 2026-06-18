@@ -1,15 +1,20 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
     try {
+        const authSession = await getSession();
+        if (!authSession?.userId) {
+            return NextResponse.json([], { status: 200 });
+        }
+
         const sessions = await prisma.cadSession.findMany({
             where: {
-                pythonScript: { not: null },
-                stlUrl: { not: null }
+                userId: authSession.userId,
             },
             orderBy: {
                 createdAt: 'desc'
@@ -29,7 +34,16 @@ export async function GET() {
 
 export async function DELETE() {
     try {
-        await prisma.cadSession.deleteMany({});
+        const authSession = await getSession();
+        if (!authSession?.userId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        await prisma.cadSession.deleteMany({
+            where: {
+                userId: authSession.userId
+            }
+        });
         return NextResponse.json({ message: 'History cleared' });
     } catch (error) {
         console.error('Failed to clear sessions:', error);

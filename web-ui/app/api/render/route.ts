@@ -25,6 +25,7 @@ type FastApiRenderRequest = {
 	python_script: string;
 	parameters: Record<string, unknown>;
 	session_id: string;
+	cam_parameters?: Record<string, unknown>;
 };
 
 function buildError(message: string, hint?: string): ErrorPayload {
@@ -120,6 +121,7 @@ function toFastApiRenderRequest(value: unknown): FastApiRenderRequest | null {
 		python_script: pythonScriptSource,
 		parameters: body.parameters as Record<string, unknown>,
 		session_id: sessionSource,
+		cam_parameters: (body as any).cam_parameters,
 	};
 }
 

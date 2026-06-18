@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -94,24 +95,43 @@ export async function POST(request: Request): Promise<Response> {
 	}
 
 	const upload = formData.get('image');
-	if (!(upload instanceof File)) {
-		return NextResponse.json(buildError('Image or PDF file is required.'), { status: 400 });
+	if (upload && !(upload instanceof File)) {
+		return NextResponse.json(buildError('Uploaded file must be an image or PDF.'), { status: 400 });
 	}
 
-	if (!isSupportedUpload(upload)) {
+	if (upload && upload instanceof File && !isSupportedUpload(upload)) {
 		return NextResponse.json(buildError('Uploaded file must be an image or PDF.'), { status: 400 });
 	}
 
 	const modelRaw = formData.get('model_name');
-	const modelName = typeof modelRaw === 'string' && modelRaw.trim() ? modelRaw.trim() : 'gemini-2.0-flash';
-	formData.set('model_name', modelName);
+	const modelName = typeof modelRaw === 'string' && modelRaw.trim() ? modelRaw.trim() : 'gemini-3.5-flash';
+	// FastAPI expects the field named 'model' (alias), not 'model_name'
+	formData.delete('model_name');
+	formData.set('model', modelName);
+
+	const authSession = await getSession();
+	let validUserId: string | null = null;
+	if (authSession?.userId) {
+		const userExists = await prisma.user.findUnique({
+			where: { id: authSession.userId }
+		});
+		if (userExists) {
+			validUserId = authSession.userId;
+		}
+	}
 
 	const session = await prisma.cadSession.create({
 		data: {
 			prompt,
-			fileName: upload.name,
+			fileName: (upload instanceof File) ? upload.name : null,
+			userId: validUserId,
 		},
 	});
+
+	// If no file was uploaded, remove the empty image field so FastAPI treats it as optional
+	if (!(upload instanceof File)) {
+		formData.delete('image');
+	}
 
 	let upstream: Response;
 	try {

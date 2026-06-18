@@ -1,0 +1,40 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Dev/test artifacts
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+tests/
+logs/
+
+# Outputs are mounted as a Docker volume — don't bake them in
+outputs/
+
+# IDE / OS
+.idea/
+.vscode/
+*.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+ARCHITECTURE.md
+docs/
+
+# Local env files (secrets are injected via docker-compose environment:)
+.env
+.env.*

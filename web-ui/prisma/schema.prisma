@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
@@ -14,17 +14,105 @@ model CadSession {
   fileName     String?
   pythonScript String?
   parameters   Json?
+  featureMap   Json?
   stlUrl       String?
   stepUrl      String?
+  isShared     Boolean  @default(false)
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id])
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
 
+
 model User {
   id        String   @id @default(cuid())
-  name      String
   email     String   @unique
-  password  String
+  name      String   @default("User")
+  password  String   @default("")
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
+
+  sessions CadSession[]
+}
+
+model ToolMaterial {
+  id                            String   @id @default(cuid())
+  material_code                 String   @unique
+  material_name                 String
+  description                   String?
+  recommended_workpiece_materials String[]
+  max_surface_speed             Float
+  default_feed_multiplier       Float
+  cost_factor                   Float
+  is_active                     Boolean  @default(true)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
+  tools         ToolDefinition[]
+  cuttingData   CuttingData[]
+}
+
+model ToolCoating {
+  id                       String   @id @default(cuid())
+  coating_code             String   @unique
+  coating_name             String
+  description              String?
+  recommended_materials    String[]
+  surface_speed_multiplier Float
+  wear_resistance_factor   Float
+  is_active                Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  tools         ToolDefinition[]
+  cuttingData   CuttingData[]
+}
+
+model ToolHolder {
+  id          String   @id @default(cuid())
+  holder_name String   @unique
+  holder_type String
+  description String?
+  max_rpm     Int
+  is_active   Boolean  @default(true)
+
+  tools ToolDefinition[]
+}
+
+model ToolDefinition {
+  id             String   @id @default(cuid())
+  name           String
+  type           String
+  diameter       Float
+  flutes         Int
+  stickout       Float
+  manufacturer   String?
+  material_id    String
+  material       ToolMaterial @relation(fields: [material_id], references: [id])
+  coating_id     String?
+  coating        ToolCoating? @relation(fields: [coating_id], references: [id])
+  holder_id      String?
+  holder         ToolHolder?  @relation(fields: [holder_id], references: [id])
+  is_active      Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model CuttingData {
+  id                    String   @id @default(cuid())
+  tool_material_id      String
+  tool_material         ToolMaterial @relation(fields: [tool_material_id], references: [id])
+  coating_id            String?
+  coating               ToolCoating? @relation(fields: [coating_id], references: [id])
+  workpiece_material    String // 'aluminum_6061', 'mild_steel', etc.
+  surface_speed         Float
+  feed_per_tooth        Float
+  plunge_multiplier     Float
+  rpm_formula           String?
+  feed_formula          String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([tool_material_id, coating_id, workpiece_material])
 }

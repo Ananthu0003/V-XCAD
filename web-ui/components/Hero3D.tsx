@@ -88,7 +88,7 @@ function CadAssembly() {
 export function Hero3D() {
   return (
     <div className="w-full h-full min-h-[400px] flex items-center justify-center">
-      <Canvas camera={{ position: [3, 2, 5], fov: 45 }}>
+      <Canvas camera={{ position: [2.5, 1.8, 4.2], fov: 42 }}>
         <ambientLight intensity={1.2} />
         <directionalLight position={[10, 10, 10]} intensity={2.5} castShadow />
         <directionalLight position={[-10, -10, -10]} intensity={1.5} color="#06b6d4" />

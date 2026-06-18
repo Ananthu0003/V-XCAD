@@ -5,10 +5,11 @@ type ParameterInputProps = {
 	value: unknown;
 	onChange: (nextValue: unknown) => void;
 	isActive?: boolean;
+	description?: string;
 };
 
-export function ParameterInput({ label, value, onChange, isActive = false }: ParameterInputProps) {
-	const inputBase = "w-full rounded-xl border border-zinc-800 bg-black/50 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-blue-500/50 focus:outline-none transition-all";
+export function ParameterInput({ label, value, onChange, isActive = false, description }: ParameterInputProps) {
+	const inputBase = "w-full rounded-lg border border-border dark:border-white/10 bg-background/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 focus:outline-none transition-all group-hover:border-blue-500/30";
 
 	const renderInput = () => {
 		if (typeof value === 'number') {
@@ -70,16 +71,23 @@ export function ParameterInput({ label, value, onChange, isActive = false }: Par
 	};
 
 	return (
-		<div className={`space-y-2 rounded-xl px-2 py-1.5 transition-all duration-200 ${
+		<div className={`space-y-1.5 rounded-xl px-3 py-2.5 transition-all duration-200 group border ${
 			isActive
-				? 'bg-blue-500/5 ring-1 ring-blue-500/30 shadow-[0_0_12px_rgba(59,130,246,0.08)]'
-				: ''
+				? 'bg-blue-500/5 border-blue-500/30 shadow-[0_0_12px_rgba(59,130,246,0.05)]'
+				: 'border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:border-border dark:hover:border-white/10'
 		}`}>
-			<label className={`block text-[10px] font-bold uppercase tracking-wider pl-1 transition-colors ${
-				isActive ? 'text-blue-500' : 'text-zinc-500'
-			}`}>
-				{label.replace(/_/g, ' ')}
-			</label>
+			<div className="flex items-center justify-between pl-1">
+				<label className={`block text-[10px] font-bold uppercase tracking-wider transition-colors ${
+					isActive ? 'text-blue-500' : 'text-muted-foreground group-hover:text-foreground'
+				}`}>
+					{label.replace(/_/g, ' ')}
+				</label>
+			</div>
+			{description && (
+				<p className="text-[10px] text-muted-foreground/70 pl-1 leading-snug">
+					{description}
+				</p>
+			)}
 			{renderInput()}
 		</div>
 	);

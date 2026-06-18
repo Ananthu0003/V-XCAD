@@ -1,19 +1,80 @@
 version: "3.9"
 
 services:
+  # ─────────────────────────────────────────────
+  # 1. PostgreSQL Database
+  # ─────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: cad_postgres
+    container_name: vexcad_postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: cad_db
       POSTGRES_USER: cad_user
       POSTGRES_PASSWORD: cad_pass
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - cad_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cad_user -d cad_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # 2. Python AI Engine (FastAPI + build123d)
+  # ─────────────────────────────────────────────
+  ai-engine:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile
+    container_name: vexcad_ai_engine
+    restart: unless-stopped
+    ports:
+      - "8005:8000"
+    environment:
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GENAI_MODEL: ${GENAI_MODEL:-gemini-2.0-flash-lite}
+      GENAI_MAX_RETRIES: ${GENAI_MAX_RETRIES:-5}
+      GENAI_RETRY_BASE_DELAY: ${GENAI_RETRY_BASE_DELAY:-1.5}
+      GENAI_MAX_RETRY_DELAY: ${GENAI_MAX_RETRY_DELAY:-75}
+    volumes:
+      # Persist generated CAD outputs (STL, STEP, G-code, etc.)
+      - cad_outputs:/app/outputs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ─────────────────────────────────────────────
+  # 3. Next.js Web UI
+  # ─────────────────────────────────────────────
+  web-ui:
+    build:
+      context: ./web-ui
+      dockerfile: Dockerfile
+    container_name: vexcad_web_ui
+    restart: unless-stopped
+    ports:
+      - "3005:3000"
+    environment:
+      # Point to the ai-engine service by its container name
+      FASTAPI_URL: http://ai-engine:8000/api/v1
+      # PostgreSQL connection (Prisma)
+      DATABASE_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
+      DIRECT_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
+      # JWT secret for auth
+      JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-engine:
+        condition: service_healthy
 
 volumes:
   cad_postgres_data:
-
+  cad_outputs:

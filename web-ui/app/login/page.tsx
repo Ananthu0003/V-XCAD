@@ -52,7 +52,7 @@ export default function LoginPage() {
               <Cuboid className="w-7 h-7 text-blue-400 relative z-10" />
             </div>
             <span className="text-3xl font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-500 dark:from-gray-100 dark:to-gray-500">
-              CADVΞX
+              VΞXCAD
             </span>
           </Link>
           

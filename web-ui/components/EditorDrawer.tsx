@@ -11,10 +11,18 @@ import {
 	Sliders, 
 	History,
 	Copy,
-	Check
+	Check,
+	ChevronDown
 } from 'lucide-react';
+import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, OperationType, CamFeature } from '@/types/cam';
+import { SetupSection } from './cam/SetupSection';
+import { ToolLibrarySection } from './cam/ToolLibrarySection';
+import { FeatureOverviewSection } from './cam/FeatureOverviewSection';
+import { OperationTreeSection } from './cam/OperationTreeSection';
+import { CuttingParametersSection } from './cam/CuttingParametersSection';
+import { SimulationControls } from './cam/SimulationControls';
 
-type DrawerTab = 'parameters' | 'code';
+type DrawerTab = 'parameters' | 'code' | 'cam';
 
 type EditorDrawerProps = {
 	isOpen: boolean;
@@ -35,6 +43,38 @@ type EditorDrawerProps = {
 	onDeveloperPasswordChange: (value: string) => void;
 	onDeveloperLogin: () => void;
 	onDeveloperLogout: () => void;
+
+	// CAM Props
+	camSetup: SetupSettings;
+	setCamSetup: (v: SetupSettings) => void;
+	camFeatures: CamFeature[];
+	setCamFeatures: (v: CamFeature[]) => void;
+	activeFeatureId: string | null;
+	setActiveFeatureId: (v: string | null) => void;
+	onAutoGenerateOperations: () => void;
+	camTools: Tool[];
+	setCamTools: (v: Tool[]) => void;
+	camOperations: CamOperation[];
+	setCamOperations: (v: CamOperation[]) => void;
+	activeOperationId: string;
+	setActiveOperationId: (v: string) => void;
+	camSimulation: SimulationState;
+	setCamSimulation: (v: SimulationState) => void;
+	camViewport: ViewportSettings;
+	setCamViewport: (v: ViewportSettings) => void;
+	controller: string;
+	setController: (v: string) => void;
+	gcodeUrl: string | null;
+	onDownloadGcode: () => void;
+	isDownloadingGcode: boolean;
+	onOpenAuthModal?: () => void;
+
+	camStats?: {
+		estimated_time_mins?: number;
+		gcode_lines?: number;
+		cutting_distance_mm?: number;
+	} | null;
+
 	children?: React.ReactNode; // For ParameterInputs
 };
 
@@ -446,6 +486,32 @@ export function EditorDrawer({
 	onDeveloperPasswordChange,
 	onDeveloperLogin,
 	onDeveloperLogout,
+
+	// CAM Props
+	camSetup,
+	setCamSetup,
+	camFeatures,
+	setCamFeatures,
+	activeFeatureId,
+	setActiveFeatureId,
+	onAutoGenerateOperations,
+	camTools,
+	setCamTools,
+	camOperations,
+	setCamOperations,
+	activeOperationId,
+	setActiveOperationId,
+	camSimulation,
+	setCamSimulation,
+	camViewport,
+	setCamViewport,
+	controller,
+	setController,
+	gcodeUrl,
+	onDownloadGcode,
+	isDownloadingGcode,
+	onOpenAuthModal,
+	camStats,
 	children
 }: EditorDrawerProps) {
 	const [copied, setCopied] = useState(false);
@@ -474,37 +540,30 @@ export function EditorDrawer({
 		setTimeout(() => setCopied(false), 2000);
 	}; 
 
-	const parametersTabClassName = `flex items-center gap-2 rounded-lg px-4 py-2 text-[11px] font-bold uppercase tracking-[0.15em] transition-all duration-300 ${
+	const parametersTabClassName = `flex items-center gap-2 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] transition-all duration-300 ${
 		activeTab === 'parameters'
-			? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]'
+			? 'bg-blue-600 text-white shadow-sm'
 			: 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
 	}`;
 
-	const codeTabClassName = `flex items-center gap-2 rounded-lg px-4 py-2 text-[11px] font-bold uppercase tracking-[0.15em] transition-all duration-300 ${
-		activeTab === 'code' && isDeveloper
-			? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]'
+	const codeTabClassName = `flex items-center gap-2 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] transition-all duration-300 ${
+		activeTab === 'code'
+			? 'bg-blue-600 text-white shadow-sm'
 			: 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
-	} ${!isDeveloper ? 'opacity-50 cursor-not-allowed' : ''}`;
+	}`;
+
+	const camTabClassName = `flex items-center gap-2 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] transition-all duration-300 ${
+		activeTab === 'cam'
+			? 'bg-blue-600 text-white shadow-sm'
+			: 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+	}`;
 
 	return (
-		<aside
-			className={`relative shrink-0 overflow-hidden border-l border-border bg-zinc-50/90 dark:bg-background/80 backdrop-blur-2xl transition-all duration-700 ease-[cubic-bezier(0.2,1,0.2,1)] font-sans shadow-[-4px_0_24px_rgba(0,0,0,0.02)] dark:shadow-none ${
-				isOpen ? 'w-112.5' : 'w-16'
-			}`}
-		>
-			<button
-				onClick={() => setIsOpen(!isOpen)}
-				className="absolute left-4 top-5 flex size-8 items-center justify-center rounded-lg border border-border dark:border-white/10 bg-background/50 dark:bg-zinc-900/50 text-muted-foreground hover:border-blue-500/50 hover:text-blue-500 hover:bg-blue-500/10 transition-all z-20 group"
-			>
-				{isOpen ? (
-					<ChevronRight className="size-4 group-hover:translate-x-0.5 transition-transform" />
-				) : (
-					<ChevronLeft className="size-4 group-hover:-translate-x-0.5 transition-transform" />
-				)}
-			</button>
+		<aside className="relative flex flex-col h-full w-full border-l border-border bg-zinc-50/90 dark:bg-background/80 font-sans overflow-hidden">
+
 
 			<div className={`flex h-full flex-col ${!isOpen ? 'opacity-0' : 'opacity-100'} transition-opacity duration-500`}>
-				<header className="flex h-16 items-center justify-between border-b border-border bg-transparent px-6 pl-16">
+				<header className="flex h-16 items-center justify-between border-b border-border bg-transparent px-6">
 					<div className="flex p-1 bg-black/5 dark:bg-white/5 rounded-xl border border-border dark:border-white/5 shadow-inner">
 						<button
 							onClick={() => setActiveTab('parameters')}
@@ -520,27 +579,32 @@ export function EditorDrawer({
 							<Code2 className={`size-3.5 ${activeTab === 'code' ? 'animate-pulse' : ''}`} />
 							Engine
 						</button>
+						<button
+							onClick={() => setActiveTab('cam')}
+							className={camTabClassName}
+						>
+							<Wrench className={`size-3.5 ${activeTab === 'cam' ? 'animate-pulse' : ''}`} />
+							CAM
+						</button>
 					</div>
 
 					<div className="flex items-center gap-1.5">
 						<button
 							onClick={onHistoryClick}
-							className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-widest text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 transition-all active:scale-95"
-							title="View history"
+							className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border dark:border-white/10 bg-black/5 dark:bg-white/5 text-muted-foreground transition-all hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-500"
+							title="View History"
 						>
-							<History className="size-3.5 text-blue-500/70" />
-							<span className="hidden xl:block">History</span>
+							<History className="size-3.5" />
 						</button>
 						{isDeveloper ? (
 							<button
 								onClick={onDeveloperLogout}
-								className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-rose-500/8 border border-rose-500/15 text-rose-400/80 hover:text-rose-300 hover:border-rose-400/40 transition-all active:scale-95"
-								title="Revoke admin access"
+								className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border dark:border-white/10 bg-black/5 dark:bg-white/5 text-muted-foreground transition-all hover:border-rose-500/50 hover:bg-rose-500/10 hover:text-rose-500"
+								title="Revoke Admin Access"
 							>
-								<svg className="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+								<svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013 3v1" />
 								</svg>
-								<span className="hidden xl:block">Logout</span>
 							</button>
 						) : null}
 					</div>
@@ -550,56 +614,195 @@ export function EditorDrawer({
 					{activeTab === 'parameters' ? (
 						<div className="space-y-8">
 							<div className="flex items-center gap-4">
-								<div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,1)]" />
-								<h2 className="text-[11px] font-black uppercase tracking-[0.3em] text-muted-foreground">Dynamic Props</h2>
-								<div className="h-px flex-1 bg-linear-to-r from-border dark:from-white/10 to-transparent" />
+								<div className="size-1.5 rounded-full bg-blue-500" />
+								<h2 className="text-[12px] font-bold uppercase tracking-wider text-foreground">Dynamic Props</h2>
+								<div className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
 							</div>
 							<div className="space-y-2">
 								{children}
 							</div>
 						</div>
-					) : !isDeveloper ? (
+					) : activeTab === 'cam' ? (
+						<div className="space-y-8 animate-message">
+							<div className="flex items-center gap-4">
+								<div className="size-1.5 rounded-full bg-blue-500" />
+								<h2 className="text-[12px] font-bold uppercase tracking-wider text-foreground">CAM Operations</h2>
+								<div className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
+							</div>
+							
+							<div className="space-y-6">
+								<div className="flex flex-col gap-2">
+									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Setup & Stock</label>
+									<SetupSection setup={camSetup} onChange={setCamSetup} />
+								</div>
+								
+								<div className="flex flex-col gap-2">
+									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex justify-between items-center">
+										<span>Feature Overview</span>
+										{camFeatures.length > 0 && (
+											<button onClick={onAutoGenerateOperations} className="text-blue-500 hover:text-blue-400 capitalize bg-blue-500/10 px-2 py-0.5 rounded text-[10px]">
+												Auto Generate Operations
+											</button>
+										)}
+									</label>
+									<FeatureOverviewSection 
+										features={camFeatures}
+										activeFeatureId={activeFeatureId}
+										onFeatureSelect={setActiveFeatureId}
+									/>
+								</div>
+
+								<hr className="border-border dark:border-white/5" />
+								
+								<div className="flex flex-col gap-2">
+									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Tool Library</label>
+									<ToolLibrarySection 
+										tool={camTools[0]} 
+										onChange={(t) => setCamTools([t])} 
+										workpieceMaterial={camSetup.material}
+									/>
+								</div>
+								<hr className="border-border dark:border-white/5" />
+
+								<div className="flex flex-col gap-2">
+									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Operations Tree</label>
+									<OperationTreeSection 
+										operations={camOperations}
+										activeOperationId={activeOperationId}
+										onSelect={setActiveOperationId}
+										onAdd={(type: OperationType) => {
+											const id = 'op' + Date.now();
+											setCamOperations([...camOperations, {
+												id,
+												name: `New ${type}`,
+												type,
+												toolId: camTools[0].id,
+												parameters: { feedRate: 800, plungeRate: 200, maxStepdown: 1.0, totalDepth: 5.0, spindleSpeed: 12000, stepoverPercentage: 40, tolerance: 0.01, coolant: 'off' }
+											}]);
+											setActiveOperationId(id);
+										}}
+										onDelete={(id: string) => {
+											if (camOperations.length <= 1) return;
+											const newOps = camOperations.filter(op => op.id !== id);
+											setCamOperations(newOps);
+											if (activeOperationId === id) setActiveOperationId(newOps[0].id);
+										}}
+									/>
+								</div>
+								<hr className="border-border dark:border-white/5" />
+
+								{camOperations.find(op => op.id === activeOperationId) && (
+									<div className="flex flex-col gap-2">
+										<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Cutting Parameters</label>
+										<CuttingParametersSection 
+											parameters={camOperations.find(op => op.id === activeOperationId)!.parameters} 
+											onChange={(p) => {
+												setCamOperations(camOperations.map(op => op.id === activeOperationId ? { ...op, parameters: p } : op));
+											}} 
+										/>
+									</div>
+								)}
+								<hr className="border-border dark:border-white/5" />
+
+								<div className="flex flex-col gap-2">
+									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Controller Dialect</label>
+									<select
+										value={controller}
+										onChange={(e) => setController(e.target.value)}
+										className="w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/60 px-4 py-3 text-sm text-foreground focus:border-blue-500 focus:outline-none"
+									>
+										<option value="iso">Standard ISO (RS-274)</option>
+										<option value="fanuc">Fanuc</option>
+										<option value="haas">Haas</option>
+										<option value="siemens">Siemens Sinumerik</option>
+										<option value="heidenhain">Heidenhain</option>
+										<option value="grbl">GRBL</option>
+									</select>
+								</div>
+								
+								<hr className="border-border dark:border-white/5" />
+
+								<div className="flex flex-col gap-2">
+									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Simulation</label>
+									<SimulationControls 
+										state={camSimulation} 
+										onChange={setCamSimulation} 
+										onGenerateToolpath={onRenderSync}
+										isGenerating={isRecompiling}
+									/>
+								</div>
+
+								{/* Show Toolpaths Toggle */}
+								<div className="flex items-center justify-between p-4 rounded-2xl border border-border dark:border-white/5 bg-accent/40 dark:bg-black/20">
+									<span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Render Toolpath Lines</span>
+									<button
+										onClick={() => setCamViewport({ ...camViewport, showToolpath: !camViewport.showToolpath })}
+										className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+											camViewport.showToolpath ? 'bg-blue-600' : 'bg-zinc-700'
+										}`}
+									>
+										<span
+											className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+												camViewport.showToolpath ? 'translate-x-5' : 'translate-x-0'
+											}`}
+										/>
+									</button>
+								</div>
+
+								{/* G-code Download Section */}
+								{gcodeUrl && (
+									<div className="pt-4 border-t border-border dark:border-white/5">
+										<button
+											onClick={() => {
+												if (!isDeveloper) {
+													onOpenAuthModal?.();
+												} else if (activeTab === 'cam') {
+													onDownloadGcode();
+												}
+											}}
+											disabled={isDownloadingGcode}	
+											title={!isDeveloper ? 'Login as admin to download' : undefined}
+											className="flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 py-3.5 text-[11px] font-black uppercase tracking-widest text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.1)] transition hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40"
+										>
+											{isDownloadingGcode ? (
+												<Loader2 className="size-4 animate-spin" />
+											) : (
+												<svg className="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+													<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+												</svg>
+											)}
+											<span>Download G-code (.nc)</span>
+										</button>
+									</div>
+								)}
+							</div>
+						</div>
+					) : !isDeveloper && activeTab === 'code' ? (
 						<div className="flex h-full flex-col items-center justify-center rounded-3xl border border-blue-500/20 bg-background dark:bg-zinc-950/90 p-8 text-center shadow-2xl">
 							<div className="mb-6 flex items-center justify-center gap-3">
 								<div className="size-2 rounded-full bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.5)]" />
 								<div>
-									<h2 className="text-sm font-black uppercase tracking-[0.35em] text-blue-600 dark:text-blue-400">Admin Login</h2>
-									<p className="mt-2 text-[11px] leading-6 text-muted-foreground">Enter your admin username and password to view the CAD engine script.</p>
+									<h2 className="text-sm font-black uppercase tracking-[0.35em] text-blue-600 dark:text-blue-400">Admin Area Locked</h2>
+									<p className="mt-2 text-[11px] leading-6 text-muted-foreground">The CAD engine script is restricted to developers.</p>
 								</div>
 							</div>
-							<input
-								value={developerUsername}
-								onChange={(e) => onDeveloperUsernameChange(e.target.value)}
-								placeholder="Admin username"
-								className="mb-4 w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/70 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-							/>
-							<input
-								value={developerPassword}
-								onChange={(e) => onDeveloperPasswordChange(e.target.value)}
-								placeholder="Admin password"
-								type="password"
-								className="mb-4 w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/70 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-							/>
 							<button
-								onClick={onDeveloperLogin}
-								className="w-full rounded-2xl bg-gradient-to-b from-blue-500 to-blue-700 px-4 py-3 text-sm font-bold uppercase tracking-[0.2em] text-white shadow-[0_0_20px_rgba(37,99,235,0.4)] transition hover:from-blue-400 hover:to-blue-600 hover:scale-[1.02] active:scale-[0.98]"
+								onClick={onOpenAuthModal}
+								className="w-full rounded-2xl bg-blue-600 px-4 py-3 text-sm font-bold uppercase tracking-wider text-white hover:bg-blue-500 transition-colors"
 							>
-								Unlock Code
+								Login as Admin
 							</button>
-							{developerAuthError ? (
-								<p className="mt-4 text-xs font-bold uppercase tracking-[0.2em] text-rose-500">{developerAuthError}</p>
-							) : null}
 						</div>
 					) : (
 						<div className="h-full flex flex-col">
 							<div className="mb-6 flex items-center justify-between">
 								<div className="flex items-center gap-4">
-									<div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,1)]" />
-									<h2 className="text-[11px] font-black uppercase tracking-[0.3em] text-muted-foreground">Core Script</h2>
+									<div className="size-1.5 rounded-full bg-blue-500" />
+									<h2 className="text-[12px] font-bold uppercase tracking-wider text-foreground">Core Script</h2>
 								</div>
-								<div className="flex items-center gap-2 px-3 py-1 rounded-full bg-accent dark:bg-black/40 border border-border dark:border-white/5">
-									<div className={`size-1 rounded-full ${monacoFailed ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,1)]' : 'bg-cyan-500 animate-pulse'}`} />
-									<span className="text-[9px] font-mono font-bold text-muted-foreground uppercase tracking-widest">
+								<div className="flex items-center gap-2 px-3 py-1 rounded-full bg-accent dark:bg-black/40 border border-border">
+									<div className={`size-1 rounded-full ${monacoFailed ? 'bg-blue-500' : 'bg-blue-500 animate-pulse'}`} />
+									<span className="text-[10px] font-mono font-bold text-muted-foreground uppercase tracking-wider">
 										{monacoFailed ? 'PY 3.13 // STANDARD' : 'PY 3.13 // BUILD123D'}
 									</span>
 								</div>
@@ -684,7 +887,7 @@ export function EditorDrawer({
 			</div>
 
 			{!isOpen && (
-				<div className="flex h-full flex-col items-center gap-8 pt-24">
+				<div className="absolute top-0 left-0 right-0 h-1/2 flex flex-col items-center justify-center gap-8 pointer-events-none animate-in fade-in duration-300">
 					<div className="rotate-90 whitespace-nowrap text-[9px] font-black uppercase tracking-[0.5em] text-muted-foreground/50">
 						Logic & System Params
 					</div>

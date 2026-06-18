@@ -1,220 +1,187 @@
-# CAD Copilot AI Engine
+# ⚙️ CAD Copilot AI Engine (FastAPI Backend)
 
-A Python backend service that converts engineering drawings (PDF/images) into precise 3D CAD models using Google's Gemini AI and the build123d library.
+The Python FastAPI backend service that orchestrates the machine-intelligence layer of CAD Copilot. It converts natural language prompts, hand-drawn sketches, and blueprint drawings (PDF/images) into clean, parameterized OpenSCAD CAD scripts utilizing the **Google Gemini API**.
 
-## Features
+---
 
-- **Two-Stage Generation**: Blueprint analysis (Vision) → Code generation (Text)
-- **Streaming Output**: SSE-based token streaming for real-time feedback
-- **Isolated Rendering**: Subprocess execution for stability
-- **Comprehensive Error Handling**: Specific error messages for debugging
-- **STEP/STL Export**: Professional CAD format output
+## 🏗️ Backend Service Architecture
 
-## Architecture
+The service acts as a stateless, high-performance API endpoint that isolates heavy LLM context parsing, image reasoning, and codegen sanitization.
 
-```
-User Prompt + Image
-      ↓
-Stage 1: Gemini Vision (Analysis)
-      ↓
-Stage 2: Gemini Text (Code Generation)
-      ↓
-build123d Script + Parameters
-      ↓
-Subprocess Execution
-      ↓
-STEP + STL Files
-```
-
-## Quick Start
-
-### 1. Install Dependencies
-
-```bash
-cd ai-engine
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 2. Configure Environment
-
-```bash
-cp .env.example .env
-# Edit .env with your Google AI API key
-GOOGLE_API_KEY=your_api_key_here
+```text
+               ┌──────────────────────────────────────────────┐
+               │              FastAPI Router                  │ (router.py)
+               └──────────────────────┬───────────────────────┘
+                                      │
+                      ┌───────────────┴───────────────┐
+                      ▼                               ▼
+             ┌─────────────────┐             ┌─────────────────┐
+             │ POST /generate  │             │   POST /edit    │
+             └────────┬────────┘             └────────┬────────┘
+                      │                               │
+                      ▼                               ▼
+             ┌─────────────────┐             ┌─────────────────┐
+             │  Stage 1 Audit  │             │   Target Coord  │
+             │  Stage 2 Code   │             │   Injected Code │
+             └────────┬────────┘             └────────┬────────┘
+                      │                               │
+                      └───────────────┬───────────────┘
+                                      ▼
+                             ┌─────────────────┐
+                             │  Gemini SDK     │ (llm_codegen.py)
+                             └────────┬────────┘
+                                      │
+                                      ▼
+                             ┌─────────────────┐
+                             │  Regex Sanitizer│ (Manifold Stability Guards)
+                             └─────────────────┘
 ```
 
-### 3. Run the API Server
+### 1. Two-Stage Generation Pipeline (`/generate`)
+To ensure high accuracy when translating raw files (sketches/PDF blueprints) to 3D code, the engine divides generation into two logical LLM calls:
+- **Stage 1: Blueprint Audit**: The image is analyzed using Gemini Vision with `AUDIT_INSTRUCTION`. It extracts a normalized JSON feature-map detailing dimensions, coordinate systems, stack order, and references, checking confidence ratings.
+- **Stage 2: Script Synthesis**: The feature-map is combined with the user's prompt and fed into Gemini Text with `SYSTEM_INSTRUCTION`. The LLM synthesizes a clean, standard OpenSCAD script conforming to parameter blocks.
 
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
+### 2. Isolated Surgical Refinement (`/edit`)
+Editing existing code presents different context requirements than creating a model from scratch. To prevent prompt dilution, editing is decoupled:
+- **State Constraints**: Takes the current active code and prompt. The model is guided by `EDIT_SYSTEM_PROMPT` to surgically modify existing modules, keeping parameter headers (`// PARAMETERS_START/END`) intact, and returning the entire updated file.
+- **Spatial Injection**: If click-coordinates are passed, the backend automatically formats and injects them as an absolute spatial boundary override: `[System Context: The user clicked X, Y, Z. Use as origin/target]`.
 
-### 4. Test the Pipeline
+### 3. Manifold Stability Safety Guards
+LLM-generated code can occasionally contain syntax errors or unstable boolean geometries. Before returning code to the client, a regular-expression safety net is run:
+- **$fn Cap**: Caps any resolution setting (`$fn = N`) that exceeds `32` down to `32` to prevent browser freezes in the client's WebAssembly thread.
+- **$fn Injection**: If the model forgot to declare `$fn`, `"$fn = 32;"` is automatically prepended.
+- **Epsilon Injection**: If a subtractive operation (`difference()`) is found without an `eps` variable, `eps = 0.02;` is injected to prevent co-planar face z-fighting crashes.
 
-```bash
-# Using the demo script
-python end_to_end_demo.py --image test_image.png --prompt "Generate this part"
-```
+---
 
-## API Endpoints
+## 📂 Directory Layout
 
-### POST `/api/v1/generate`
-
-Generate a build123d script from an image.
-
-**Request** (multipart/form-data):
-- `prompt` (form): Description of what to build
-- `image` (file): Engineering drawing (PNG, JPEG, PDF)
-- `model_name` (form, optional): Gemini model name
-
-**Response** (SSE):
-- `metadata`: Token budget information
-- `status`: Processing status messages
-- `token`: Code generation chunks
-- `done`: Final script and parameters
-- `error`: Error details if failed
-
-### POST `/api/v1/render`
-
-Render the generated script to 3D model files.
-
-**Request** (JSON):
-```json
-{
-    "python_script": "from build123d import * ...",
-    "parameters": {"diameter": 10.0, "height": 20.0},
-    "session_id": "optional_id"
-}
-```
-
-**Response** (JSON):
-```json
-{
-    "status": "SUCCESS",
-    "artifacts": {
-        "step_file_path": ".../cad_xxx.step",
-        "stl_file_path": ".../cad_xxx.stl"
-    }
-}
-```
-
-## Project Structure
-
-```
+```text
 ai-engine/
 ├── app/
 │   ├── api/
 │   │   └── v1/
 │   │       ├── __init__.py
-│   │       └── router.py      # FastAPI routes
+│   │       └── router.py      # API Endpoint handlers (/generate, /edit)
 │   ├── models/
 │   │   ├── __init__.py
-│   │   └── schemas.py         # Pydantic schemas
+│   │   └── schemas.py         # Pydantic Request/Response validation models
 │   ├── services/
 │   │   ├── __init__.py
-│   │   ├── llm_codegen.py     # AI code generation
-│   │   └── parameter_render.py # 3D rendering
-│   ├── main.py                # FastAPI app
-│   └── __init__.py
-├── logs/                      # Diagnostic logs
-├── outputs/                   # Generated 3D models
+│   │   └── llm_codegen.py     # GenAI Client, system prompts, and regex normalization
+│   ├── __init__.py
+│   └── main.py                # FastAPI Application startup and CORS configuration
+├── logs/                      # Service runtime logs
+├── outputs/                   # Standard folder for generated STEP/STL assets
 ├── scripts/
-│   └── validate.py            # CLI validation tool
-├── end_to_end_demo.py         # Complete pipeline demo
-├── ARCHITECTURE.md            # Detailed architecture
-├── IMPROVEMENTS.md            # Technical improvements
-├── requirements.txt
-└── .env.example
+│   └── validate.py            # CLI script to test blueprint audits and codegen locally
+├── requirements.txt           # Python library dependencies
+└── .env.example               # Environment variables configuration template
 ```
 
-## Configuration
+---
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `GOOGLE_API_KEY` | Google AI API key | Required |
-| `GENAI_MODEL` | Gemini model to use | `gemini-3.1-flash-lite` |
-| `GENAI_MAX_RETRIES` | Max retry attempts | `5` |
-| `MAX_PROMPT_TOKENS` | Token budget | `12000` |
-| `MAX_OUTPUT_TOKENS` | Max output tokens | `2048` |
-| `GENAI_RETRY_BASE_DELAY` | Retry base delay (s) | `1.5` |
-| `GENAI_MAX_RETRY_DELAY` | Max retry delay (s) | `60` |
+## 🔌 API Reference & Schema Definitions
 
-## Usage Example
+### 1. `POST /api/v1/generate`
+Used to generate new models from scratch.
 
-```python
-from app.services.llm_codegen import LLMCodegenService
-from app.services.parameter_render import ParameterRenderService, extract_parameters_from_script
+* **Content-Type**: `multipart/form-data`
+* **Parameters**:
+  * `prompt` (Form Parameter, Required): Sizing/functional request.
+  * `model` (Form Parameter, Optional): Model override (defaults to `gemini-3.1-flash-lite`).
+  * `image` (File Upload, Optional): PDF blueprint or blueprint drawing (PNG, JPEG).
+* **Response** (`GenerateResponse`):
+  ```json
+  {
+    "openscad_script": "/* planning and code */",
+    "parameters": {
+      "base_height": 20.0,
+      "bore_diameter": 10.0
+    }
+  }
+  ```
 
-# Initialize services
-codegen = LLMCodegenService()
-render = ParameterRenderService()
+### 2. `POST /api/v1/edit`
+Surgically edits active code.
 
-# Load image
-with open("drawing.png", "rb") as f:
-    image_bytes = f.read()
+* **Content-Type**: `application/json`
+* **JSON Request Body** (`EditRequest`):
+  ```json
+  {
+    "prompt": "Increase the shaft height",
+    "current_code": "$fn = 32;\nbase_height = 20;\n...",
+    "target_point": [0.0, 0.0, 20.0],
+    "model": "gemini-3.1-flash-lite"
+  }
+  ```
+* **Response** (`GenerateResponse`):
+  ```json
+  {
+    "openscad_script": "/* Updated OpenSCAD code */",
+    "parameters": {
+      "base_height": 20.0,
+      "bore_diameter": 10.0,
+      "shaft_height": 40.0
+    }
+  }
+  ```
 
-# Stage 1: Analyze
-summary = codegen.summarise_blueprint(image_bytes, "image/png")
+### 3. `GET /health`
+* **Response**: `{"status": "ok", "version": "2.0.0"}`
 
-# Stage 2: Generate
-script = "".join(codegen.stream_build123d_script(
-    prompt="Generate a housing with 4 mounting holes",
-    image_bytes=image_bytes,
-    image_mime_type="image/png",
-    summary=summary
-))
+---
 
-# Stage 3: Extract parameters
-params = extract_parameters_from_script(script)
+## 🛠️ Installation & Setup
 
-# Stage 4: Render
-paths = render.render_to_outputs(
-    parameters=params,
-    script=codegen.normalize_script(script),
-    output_basename="my_part"
-)
-
-print(f"Generated: {paths['stl_path']}")
-```
-
-## Error Handling
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `GOOGLE_API_KEY not set` | Missing API key | Configure `.env` |
-| `Prompt too large` | Exceeds token budget | Simplify prompt/image |
-| `Model quota exhausted` | Daily limit reached | Wait or upgrade API tier |
-| `Render Engine timed out` | Complex geometry | Simplify model or increase timeout |
-| `No exportable shape found` | Script execution failed | Check script syntax |
-
-## Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `build123d` | 0.10.0 | CAD kernel |
-| `google-genai` | 1.73.1 | Gemini AI client |
-| `fastapi` | 0.136.0 | REST API framework |
-| `python-dotenv` | 1.2.2 | Environment config |
-| `uvicorn` | 0.44.0 | ASGI server |
-
-## Development
-
-### Running Tests
-
+### 1. Configure the Environment
+Ensure you have Python 3.11+ installed. Create a virtual environment and load the dependencies:
 ```bash
-# Validate with a test image
-python scripts/validate.py --image path/to/image.png
+python -m venv .venv
+
+# Activate venv:
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+# macOS/Linux
+# source .venv/bin/activate
+
+pip install -r requirements.txt
 ```
 
-### Linting
-
+### 2. Set Up Local Environment Variables
+Create a `.env` file from the provided example:
 ```bash
-# Check code style
-ruff check .
+cp .env.example .env
+```
+Fill in your Google AI key:
+```env
+GOOGLE_API_KEY=AIzaSy...
+GENAI_MODEL=gemini-3.1-flash-lite
 ```
 
-## License
+### 3. Run the Development Server
+```bash
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+Test the setup by curling `http://127.0.0.1:8000/health`.
 
-MIT License - See LICENSE file for details.
+---
+
+## 💻 Tech Stack & Dependencies
+
+* **fastapi & uvicorn**: ASGI web server routing and execution.
+* **google-genai**: Official Google GenAI SDK interfacing with Gemini 3.1/3.5 models.
+* **pydantic**: Request/Response models parsing.
+* **python-dotenv**: Environment configuration manager.
+
+---
+
+## 🔮 Backend Roadmap
+
+Future backend features currently planned:
+
+- **[ ] OpenCASCADE STEP conversion service**: A FastAPI service routing compiled CSG nodes to STEP file configurations.
+- **[ ] Local G-Code compilation**: Lightweight parser transforming OpenSCAD coordinates to sliced extrusion lines.
+- **[ ] Offline LLM / Ollama Connector**: Integration of local models (e.g. Qwen-Coder-32B) for offline blueprint auditing.
+- **[ ] Multi-Part Assembly Parser**: Engine capability to coordinate multiple separate files under a parent assembly manifest.

@@ -1,7 +1,6 @@
+"""Pydantic schemas for the CAD Copilot API."""
 from __future__ import annotations
-
-from typing import Literal, Any
-
+from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -9,90 +8,47 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class UploadedDrawingInfo(StrictModel):
-    session_id: str
-    file_name: str
-    mime_type: str
-    image_format: str
-    width: int
-    height: int
-
-
-class GeneratedCadParameter(StrictModel):
-    name: str
-    value: str
-    kind: Literal["number", "string"]
-
-
-class PromptUsage(StrictModel):
-    user_prompt_chars: int
-    context_chars: int
-    chat_turn_count: int
-    parameter_hint_count: int
-    max_output_tokens: int
-    intent: Literal["generate", "modify", "analyze", "repair"]
-    include_raw_response: bool
-
-
-class GeneratedCadArtifacts(StrictModel):
-    session_id: str
-    provider: Literal["gemini"]
-    model_name: str
-    file_name: str
-    mime_type: str
-    image_format: str
-    width: int
-    height: int
-    step_file_path: str
-    stl_file_path: str
-    dxf_file_path: str | None = None
-    step_url: str
-    stl_url: str
-    dxf_url: str | None = None
-    annotations: dict[str, dict[str, Any]] | None = None
-
-    script_url: str
-    stdout: str = ""
-    stderr: str = ""
-    raw_response: str = ""
-    python_script: str = ""
-    parameters: list[GeneratedCadParameter] = Field(default_factory=list)
-    prompt_usage: PromptUsage | None = None
-
-
-class GeneratedCadResponse(StrictModel):
-    session_id: str
-    status: Literal["SUCCESS"]
-    provider: Literal["gemini"]
-    model_name: str
-    drawing: UploadedDrawingInfo
-    artifacts: GeneratedCadArtifacts
-
-
-class RenderRequest(StrictModel):
-    python_script: str = Field(min_length=1)
+class GenerateResponse(StrictModel):
+    """Payload returned after a successful two-stage generation run."""
+    openscad_script: str
     parameters: dict[str, Any] = Field(default_factory=dict)
-    session_id: str | None = None
 
 
-class RenderedCadArtifacts(StrictModel):
-    session_id: str
-    step_file_path: str
-    stl_file_path: str
-    dxf_file_path: str | None = None
-    step_url: str
-    stl_url: str
-    dxf_url: str | None = None
-    annotations: dict[str, dict[str, Any]] | None = None
+class EditRequest(StrictModel):
+    """Payload sent to request surgical editing of existing code."""
+    prompt: str
+    current_code: str
+    target_point: list[float] | None = None
+    model: str = "gemini-3.5-flash"
 
-    script_url: str
-    stdout: str = ""
-    stderr: str = ""
+
+class StepRequest(StrictModel):
+    """Payload containing compiled CSG tree to convert to STEP."""
+    csg_tree: str
+
+
+class RenderRequest(BaseModel):
+    """Payload sent to /api/v1/render to execute and export a CAD script."""
     python_script: str
-    parameters: list[GeneratedCadParameter] = Field(default_factory=list)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    session_id: Optional[str] = None
+    cam_parameters: Optional[dict[str, Any]] = None
 
 
-class RenderResponse(StrictModel):
+class RenderArtifacts(BaseModel):
+    """URLs and inline data for all exported artifacts."""
+    stl_url: Optional[str] = None
+    step_url: Optional[str] = None
+    dxf_url: Optional[str] = None
+    gcode_url: Optional[str] = None
+    gcode_content: Optional[str] = None
+    toolpaths: Optional[list] = None
+    annotations: Optional[dict[str, Any]] = None
+
+
+class RenderResponse(BaseModel):
+    """Payload returned after a successful /api/v1/render call."""
+    status: str = "ok"
     session_id: str
-    status: Literal["SUCCESS"]
-    artifacts: RenderedCadArtifacts
+    artifacts: RenderArtifacts
+

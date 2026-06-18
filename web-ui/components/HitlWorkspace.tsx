@@ -2,15 +2,20 @@
 
 import JSON5 from 'json5';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { AuthModal } from './AuthModal';
 import { toast } from 'sonner';
 
-import { ChatPanel } from './ChatPanel';
 import { CadViewport } from './CadViewport';
-import { EditorDrawer } from './EditorDrawer';
-import { ParameterInput } from './ParameterInput';
 import { StlMesh, type StlGeometryInfo } from './StlMesh';
 import { HistoryDrawer } from './HistoryDrawer';
+import { WorkflowNav } from './WorkflowNav';
+import { WorkspaceSettings } from './WorkspaceSettings';
+import { EngineeringConsole } from './EngineeringConsole';
+import { ChatPanel } from './ChatPanel';
+import { SessionBrowserModal } from './SessionBrowserModal';
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { History } from 'lucide-react';
+import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, CamFeature, PostProcessor, OperationType, ToolType, ToolMaterial, CoolantType } from '@/types/cam';
 
 type ChatRole = 'user' | 'assistant' | 'system';
 
@@ -25,6 +30,7 @@ type RenderPayload = {
 	stl_url?: string;
 	step_url?: string;
 	dxf_url?: string;
+	gcode_url?: string;
 
 	status?: string;
 	job_id?: string;
@@ -36,6 +42,9 @@ type RenderPayload = {
 		stl_url?: string;
 		step_url?: string;
 		dxf_url?: string;
+		gcode_url?: string;
+		gcode_content?: string;
+		toolpaths?: number[][][];
 		annotations?: Record<string, { p1: [number, number, number]; p2: [number, number, number] }>;
 	};
 };
@@ -49,15 +58,13 @@ type ApiErrorEnvelope = {
 	detail?: unknown;
 };
 
-type DrawerTab = 'parameters' | 'code';
+type DrawerTab = 'parameters' | 'code' | 'cam';
 
 const DEFAULT_PROMPT = 'generate a 3D model of the attached file.';
-const DEFAULT_MODEL = 'gemini-3.1-flash-lite-preview';
+const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
 const MODEL_OPTIONS = [
-	{ value: 'gemini-3.1-flash-lite-preview', label: 'gemini-3.1-flash-lite (Default / Recommended)' },
-	{ value: 'gemini-3-flash-preview', label: 'gemini-3-flash' },
-	{ value: 'gemini-2.5-flash-lite', label: 'gemini-2.5-flash-lite' },
-	{ value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
+	{ value: 'gemini-3.1-flash-lite', label: 'gemini-3.1-flash-lite' },
+	{ value: 'gemini-3.5-flash', label: 'gemini-3.5-flash' },
 ];
 
 function makeId(prefix: string): string {
@@ -252,7 +259,11 @@ async function readErrorFromResponse(response: Response, fallback: string): Prom
 
 export default function HitlWorkspace() {
 	const [chatWidth, setChatWidth] = useState(400);
+	const [isSessionBrowserOpen, setIsSessionBrowserOpen] = useState(false);
+	const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
 	const isResizing = useRef(false);
+	const fileUploadRef = useRef<HTMLInputElement>(null);
+	const stepUploadRef = useRef<HTMLInputElement>(null);
 	const [messages, setMessages] = useState<ChatMessage[]>([
 		{
 			id: 'system_welcome',
@@ -273,9 +284,48 @@ export default function HitlWorkspace() {
 	const [stlUrl, setStlUrl] = useState<string | null>(null);
 	const [stepUrl, setStepUrl] = useState<string | null>(null);
 	const [dxfUrl, setDxfUrl] = useState<string | null>(null);
+	const [gcodeUrl, setGcodeUrl] = useState<string | null>(null);
+	const [toolpaths, setToolpaths] = useState<number[][][] | null>(null);
 	const [isDownloadingStl, setIsDownloadingStl] = useState(false);
 	const [isDownloadingStep, setIsDownloadingStep] = useState(false);
 	const [isDownloadingDxf, setIsDownloadingDxf] = useState(false);
+	const [isDownloadingGcode, setIsDownloadingGcode] = useState(false);
+
+	// CAM Parameters State
+	const [camSetup, setCamSetup] = useState<SetupSettings>({
+		units: 'mm',
+		machine: 'Haas VF-2 (3-Axis)',
+		stockType: 'box',
+		material: 'aluminum_6061',
+		stockDimensions: [100, 100, 20],
+		wcs: 'G54',
+		originPosition: 'top_center',
+		tolerance: 0.01,
+		stockOffset: 2,
+	});
+	const [camTools, setCamTools] = useState<Tool[]>([
+		{ id: 't1', number: 'T1', type: 'flat_end_mill', diameter: 3.175, flutes: 2, stickout: 15, material: 'carbide' }
+	]);
+	const [camOperations, setCamOperations] = useState<CamOperation[]>([
+		{
+			id: 'op1',
+			name: 'Profile',
+			type: '2d_contour',
+			toolId: 't1',
+			parameters: { feedRate: 800, plungeRate: 200, maxStepdown: 1.0, totalDepth: 5.0, spindleSpeed: 12000, stepoverPercentage: 40, tolerance: 0.01, coolant: 'off' }
+		}
+	]);
+	const [activeOperationId, setActiveOperationId] = useState<string>('op1');
+	const [camFeatures, setCamFeatures] = useState<CamFeature[]>([]);
+	const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
+	const [camSimulation, setCamSimulation] = useState<SimulationState>({ isPlaying: false, progress: 0, speed: 1 });
+	const [camViewport, setCamViewport] = useState<ViewportSettings>({ showStock: false, showTool: true, showToolpath: true, showOrigin: true, showAxes: true });
+	const [controller, setController] = useState<string>('grbl');
+	const [gcodeContent, setGcodeContent] = useState<string | null>(null);
+	const [isGeneratingGcode, setIsGeneratingGcode] = useState(false);
+
+	const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+	const [isSharing, setIsSharing] = useState(false);
 
 	const [isDeveloper, setIsDeveloper] = useState(false);
 	const [developerUsername, setDeveloperUsername] = useState('');
@@ -299,12 +349,34 @@ export default function HitlWorkspace() {
 	};
 
 	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-	const [isChatOpen, setIsChatOpen] = useState(true);
+	const [isChatOpen, setIsChatOpen] = useState(false);
 
 	const [statusText, setStatusText] = useState<string>('Ready');
+	const [workflowStage, setWorkflowStage] = useState<'blueprint' | 'extraction' | 'cad' | 'cam' | 'gcode'>('blueprint');
 	const [annotations, setAnnotations] = useState<Record<string, { p1: [number, number, number]; p2: [number, number, number] }>>({});
+	const [parameterMetadata, setParameterMetadata] = useState<Record<string, any>>({});
 	const [activeParameter, setActiveParameter] = useState<string | null>(null);
 	const [geometryInfo, setGeometryInfo] = useState<StlGeometryInfo | null>(null);
+	const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+	const parameterEntries = Object.entries(parameters).filter(([_, v]) => typeof v === 'number' || typeof v === 'string');
+
+	const handleShare = async () => {
+		if (!sessionId) return;
+		setIsSharing(true);
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/share`, { method: 'POST' });
+			if (!res.ok) throw new Error('Failed to create share link');
+			const data = await res.json();
+			const url = `${window.location.origin}/share/${data.id}`;
+			await navigator.clipboard.writeText(url);
+			toast.success('Share link copied to clipboard!');
+		} catch (error: any) {
+			toast.error('Failed to share model', { description: error.message });
+		} finally {
+			setIsSharing(false);
+		}
+	};
 
 	const handleGeometryReady = useCallback((info: StlGeometryInfo) => {
 		setGeometryInfo(info);
@@ -350,21 +422,107 @@ export default function HitlWorkspace() {
 		return () => clearTimeout(timeout);
 	}, [pythonScript]);
 
+	const handleStepUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+		const file = event.target.files?.[0];
+		if (!file) return;
+
+		setStatusText('Importing STEP File...');
+		setWorkflowStage('cad');
+		setIsRecompiling(true);
+		
+		const formData = new FormData();
+		formData.append('file', file);
+
+		try {
+			// Proxy the request through our Next.js API route to save to DB
+			const response = await fetch('/api/import_step', {
+				method: 'POST',
+				body: formData
+			});
+
+			if (!response.ok) throw new Error('Failed to import STEP file');
+			
+			const data = await response.json();
+			if (data.session_id) setSessionId(data.session_id);
+			if (data.script) updatePythonScript(data.script);
+			
+			if (data.artifacts) {
+				const backendUrl = 'http://localhost:8000';
+				if (data.artifacts.stl_url) setStlUrl(backendUrl + data.artifacts.stl_url);
+				if (data.artifacts.step_url) setStepUrl(backendUrl + data.artifacts.step_url);
+				if (data.artifacts.dxf_url) setDxfUrl(backendUrl + data.artifacts.dxf_url);
+				if (data.artifacts.gcode_url) setGcodeUrl(backendUrl + data.artifacts.gcode_url);
+				if (data.artifacts.annotations) {
+					setAnnotations(data.artifacts.annotations);
+					const annotationsAny = data.artifacts.annotations as any;
+					const featuresUrl = annotationsAny.cam_features_url as string | undefined;
+					if (featuresUrl) {
+						try {
+							const resolvedUrl = backendUrl + featuresUrl;
+							const featuresRes = await fetch(resolvedUrl);
+							if (featuresRes.ok) {
+								const featuresData = await featuresRes.json();
+								setCamFeatures(featuresData || []);
+							} else {
+								setCamFeatures([]);
+							}
+						} catch (e) {
+							console.error("Failed to load CAM features:", e);
+							setCamFeatures([]);
+						}
+					} else {
+						setCamFeatures([]);
+					}
+				} else {
+					setCamFeatures([]);
+				}
+				
+				setCamOperations([
+					{
+						id: 'op1',
+						name: 'Profile',
+						type: '2d_contour',
+						toolId: 't1',
+						parameters: { feedRate: 800, plungeRate: 200, maxStepdown: 1.0, totalDepth: 5.0, spindleSpeed: 12000, stepoverPercentage: 40, tolerance: 0.01, coolant: 'off' }
+					}
+				]);
+				setActiveOperationId('op1');
+				setGcodeContent(null);
+			}
+			
+			toast.success('STEP file imported successfully');
+			setStatusText('Ready');
+		} catch (error: any) {
+			toast.error('Failed to import STEP', { description: error.message });
+			setStatusText('Failed to import STEP');
+		} finally {
+			setIsRecompiling(false);
+			if (stepUploadRef.current) stepUploadRef.current.value = '';
+		}
+	};
+
 	async function handleGenerate(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
-		if (!prompt.trim() || !selectedFile) {
-			setStatusText('Please provide a prompt and file.');
+		if (!prompt.trim()) {
+			setStatusText('Please provide a prompt.');
 			return;
 		}
 
 		const assistantMessageId = makeId('assistant');
-		setMessages((prev) => [...prev, { id: makeId('user'), role: 'user', content: prompt, fileName: selectedFile.name }, { id: assistantMessageId, role: 'assistant', content: '' }]);
+		setMessages((prev) => [...prev, { id: makeId('user'), role: 'user', content: prompt, fileName: selectedFile?.name }, { id: assistantMessageId, role: 'assistant', content: '' }]);
 		setIsGenerating(true);
+		setWorkflowStage('extraction');
 
 		const formData = new FormData();
 		formData.append('prompt', prompt.trim());
-		formData.append('image', selectedFile);
+		if (selectedFile) {
+			formData.append('image', selectedFile);
+		}
 		formData.append('model_name', selectedModel);
+
+		// Clear input fields after securing the payload
+		setPrompt('');
+		setSelectedFile(null);
 
 		try {
 			const response = await fetch('/api/generate', { method: 'POST', body: formData });
@@ -401,6 +559,13 @@ export default function HitlWorkspace() {
 							throw new Error(`${msg}${hint}`);
 						}
 
+						if (rawData.status === 'generating_cad') {
+							setStatusText('Generating CAD...');
+							setWorkflowStage('cad');
+						} else if (rawData.status === 'completed') {
+							setWorkflowStage('cam');
+						}
+
 						if (rawData.chunk) {
 							accumulated += rawData.chunk;
 							setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, content: accumulated } : m)));
@@ -410,7 +575,10 @@ export default function HitlWorkspace() {
 							finalParams = rawData.parameters;
 							setParameters(rawData.parameters);
 						}
-					} catch {}
+						if (rawData.metadata) {
+							setParameterMetadata(rawData.metadata);
+						}
+					} catch { }
 				}
 			}
 
@@ -438,14 +606,27 @@ export default function HitlWorkspace() {
 	}
 
 	async function performSync(script: string, params: Record<string, any>, session: string) {
-		setIsRecompiling(true);
+		setIsGenerating(true);
 		setStatusText('Syncing to backend engine...');
 
 		try {
+			const activeOp = camOperations.find(o => o.id === activeOperationId) || camOperations[0];
+			const activeTool = camTools.find(t => t.id === activeOp.toolId) || camTools[0];
+
 			const response = await fetch('/api/render', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', 'x-session-id': session },
-				body: JSON.stringify({ python_script: script, parameters: params, session_id: session }),
+				body: JSON.stringify({
+					python_script: script,
+					parameters: params,
+					session_id: session,
+					cam_parameters: {
+						controller: controller,
+						setup: camSetup,
+						tools: camTools,
+						operations: camOperations,
+					}
+				}),
 			});
 
 			if (!response.ok) {
@@ -454,12 +635,34 @@ export default function HitlWorkspace() {
 			}
 
 			const payload = (await response.json()) as RenderPayload;
-			if (payload.artifacts?.stl_url) setStlUrl(resolveModelUrl(payload.artifacts.stl_url, Date.now().toString()));
+			if (payload.artifacts?.stl_url) {
+				setStlUrl(resolveModelUrl(payload.artifacts.stl_url, Date.now().toString()));
+				setWorkflowStage(prev => (prev === 'blueprint' || prev === 'extraction' ? 'cad' : prev));
+			}
 			if (payload.artifacts?.step_url) setStepUrl(resolveModelUrl(payload.artifacts.step_url));
 			if (payload.artifacts?.dxf_url) setDxfUrl(resolveModelUrl(payload.artifacts.dxf_url));
-			if (payload.artifacts?.annotations) setAnnotations(payload.artifacts.annotations);
+			// NOTE: G-code from normal sync is intentionally NOT displayed.
+			// The user must explicitly click "Generate G-Code" after configuring CAM settings.
+			if (payload.artifacts?.toolpaths) setToolpaths(payload.artifacts.toolpaths);
+			if (payload.artifacts?.annotations) {
+				setAnnotations(payload.artifacts.annotations);
 
-
+				// Fetch features if URL is present
+				const annotationsAny = payload.artifacts.annotations as any;
+				const featuresUrl = annotationsAny.cam_features_url as string | undefined;
+				if (featuresUrl) {
+					try {
+						const resolvedUrl = resolveModelUrl(featuresUrl, Date.now().toString());
+						const featuresRes = await fetch(resolvedUrl);
+						if (featuresRes.ok) {
+							const data = await featuresRes.json();
+							setCamFeatures(data || []);
+						}
+					} catch (e) {
+						console.error("Failed to load CAM features:", e);
+					}
+				}
+			}
 			setStatusText('Geometry recompiled successfully.');
 			toast.success('Sync successful');
 		} catch (error) {
@@ -467,7 +670,7 @@ export default function HitlWorkspace() {
 			setStatusText(`Sync failed: ${errorText}`);
 			toast.error('Sync failed', { description: errorText });
 		} finally {
-			setIsRecompiling(false);
+			setIsGenerating(false);
 		}
 	}
 
@@ -476,11 +679,188 @@ export default function HitlWorkspace() {
 		await performSync(pythonScript, parameters, sessionId);
 	}
 
+	async function handleGenerateGCode() {
+		if (!sessionId || !pythonScript) {
+			toast.error('Generate a 3D model first before generating G-Code.');
+			return;
+		}
+		if (!stepUrl) {
+			toast.error('No STEP file available. Generate a 3D model first.');
+			return;
+		}
+
+		setIsGeneratingGcode(true);
+		setWorkflowStage('cam');
+		setStatusText('Generating G-Code with CAM parameters...');
+
+		try {
+			const response = await fetch('/api/render', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+				body: JSON.stringify({
+					python_script: pythonScript,
+					parameters: parameters,
+					session_id: sessionId,
+					cam_parameters: {
+						controller: controller,
+						setup: camSetup,
+						tools: camTools,
+						operations: camOperations,
+					}
+				}),
+			});
+
+			if (!response.ok) {
+				const errorMsg = await readErrorFromResponse(response, 'G-Code generation failed.');
+				throw new Error(errorMsg);
+			}
+
+			const payload = (await response.json()) as RenderPayload;
+
+			// Update model artifacts if returned
+			if (payload.artifacts?.stl_url) setStlUrl(resolveModelUrl(payload.artifacts.stl_url, Date.now().toString()));
+			if (payload.artifacts?.step_url) setStepUrl(resolveModelUrl(payload.artifacts.step_url));
+			if (payload.artifacts?.dxf_url) setDxfUrl(resolveModelUrl(payload.artifacts.dxf_url));
+			if (payload.artifacts?.toolpaths) setToolpaths(payload.artifacts.toolpaths);
+
+			// NOW store G-code since user explicitly requested it
+			if (payload.artifacts?.gcode_content) {
+				// Prefer inline G-code content from API response
+				setGcodeContent(payload.artifacts.gcode_content);
+			}
+
+			if (payload.artifacts?.gcode_url) {
+				const resolvedUrl = resolveModelUrl(payload.artifacts.gcode_url, Date.now().toString());
+				setGcodeUrl(resolvedUrl);
+
+				// Fallback: fetch content from URL if not provided inline
+				if (!payload.artifacts?.gcode_content) {
+					try {
+						const gcodeRes = await fetch(resolvedUrl);
+						if (gcodeRes.ok) {
+							const content = await gcodeRes.text();
+							setGcodeContent(content);
+						}
+					} catch (e) {
+						console.error('Failed to fetch G-Code content:', e);
+					}
+				}
+			}
+
+			setWorkflowStage('gcode');
+			setStatusText('G-Code generated successfully.');
+			toast.success('G-Code generated with full CAM configuration');
+		} catch (error) {
+			const errorText = error instanceof Error ? error.message : String(error);
+			setStatusText(`G-Code generation failed: ${errorText}`);
+			toast.error('G-Code generation failed', { description: errorText });
+		} finally {
+			setIsGeneratingGcode(false);
+		}
+	}
+
+	async function handleAutoGenerateOperations() {
+		const newOperations: CamOperation[] = [];
+		let addedTools: Tool[] = [];
+
+		for (let index = 0; index < camFeatures.length; index++) {
+			const feat = camFeatures[index];
+			let defaultDepth = feat.dimensions.depth || 5.0;
+			if (defaultDepth <= 0) defaultDepth = 5.0;
+
+			// Fetch recommendation
+			let toolParams = {
+				feedRate: 1000,
+				plungeRate: 300,
+				maxStepdown: 2.0,
+				totalDepth: defaultDepth,
+				spindleSpeed: 10000,
+				stepoverPercentage: 40,
+				tolerance: 0.01,
+				coolant: 'flood' as CoolantType
+			};
+			let recommendedToolId = 't1';
+
+			try {
+				const res = await fetch('/api/cam/recommendations', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						featureType: feat.type,
+						workpieceMaterial: camSetup.material,
+						diameterHint: feat.dimensions.diameter
+					})
+				});
+
+				if (res.ok) {
+					const data = await res.json();
+					if (data.tool) {
+						// Add tool to workspace tools if not present
+						const existingTool = camTools.find(t => t.dbId === data.tool.id) || addedTools.find(t => t.dbId === data.tool.id);
+						if (existingTool) {
+							recommendedToolId = existingTool.id;
+						} else {
+							const newToolId = `tool_${Date.now()}_${index}`;
+							const newTool: Tool = {
+								id: newToolId,
+								dbId: data.tool.id,
+								name: data.tool.name,
+								number: `T${camTools.length + addedTools.length + 1}`,
+								type: data.tool.type as ToolType,
+								diameter: data.tool.diameter,
+								flutes: data.tool.flutes,
+								stickout: data.tool.stickout,
+								material: data.tool.material?.material_code as ToolMaterial,
+								coating: data.tool.coating?.coating_name,
+							};
+							addedTools.push(newTool);
+							recommendedToolId = newToolId;
+						}
+					}
+					if (data.feedsAndSpeeds) {
+						toolParams.feedRate = data.feedsAndSpeeds.feedRate;
+						toolParams.plungeRate = data.feedsAndSpeeds.plungeRate;
+						toolParams.spindleSpeed = data.feedsAndSpeeds.spindleSpeed;
+						toolParams.coolant = data.feedsAndSpeeds.coolant;
+					}
+				}
+			} catch (e) {
+				console.error('Failed to fetch recommendation for feature', feat.id, e);
+			}
+
+			newOperations.push({
+				id: `op_auto_${Date.now()}_${index}`,
+				name: `${feat.type.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())} Operation`,
+				type: feat.recommendedOperation,
+				toolId: recommendedToolId,
+				parameters: toolParams
+			});
+		}
+
+		if (addedTools.length > 0) {
+			setCamTools(prev => [...prev, ...addedTools]);
+		}
+
+		if (newOperations.length > 0) {
+			setCamOperations((prev) => [...prev, ...newOperations]);
+			setActiveOperationId(newOperations[0].id);
+			toast.success(`Auto-generated ${newOperations.length} operations`);
+		} else {
+			toast.error('No features available to generate operations from');
+		}
+	}
+
 	async function handleDownloadArtifact(url: string | null, label: string) {
 		if (!url) return;
 
 
-		const setBusy = label === 'stl' ? setIsDownloadingStl : label === 'step' ? setIsDownloadingStep : setIsDownloadingDxf;
+		const setBusy = label === 'stl'
+			? setIsDownloadingStl
+			: label === 'step'
+				? setIsDownloadingStep
+				: label === 'gcode'
+					? setIsDownloadingGcode
+					: setIsDownloadingDxf;
 		setBusy(true);
 
 		try {
@@ -509,24 +889,23 @@ export default function HitlWorkspace() {
 		setSessionId(session.id);
 		updatePythonScript(session.pythonScript);
 		setParameters(session.parameters || {});
-		
+
 		setMessages((prev) => [
-			...prev, 
+			...prev,
 			{ id: makeId('system'), role: 'system', content: `Restoring session: ${session.prompt}` }
 		]);
-		
+
 		setIsHistoryOpen(false);
 		setActiveDrawerTab('parameters');
 		setIsDrawerOpen(true);
 		setStatusText('Restoring session and rebuilding geometry...');
-		
+
 		// Always trigger a sync to ensure the environment matches the script
 		await performSync(session.pythonScript, session.parameters || {}, session.id);
-		
+
 		toast.success('Session restored');
 	};
 
-	const parameterEntries = Object.entries(parameters);
 	const hasStl = Boolean(stlUrl);
 	const hasStep = Boolean(stepUrl);
 	const hasDxf = Boolean(dxfUrl);
@@ -548,137 +927,445 @@ export default function HitlWorkspace() {
 		setStlUrl(null);
 		setStepUrl(null);
 		setDxfUrl(null);
+		setGcodeUrl(null);
+		setGcodeContent(null);
 		setAnnotations({});
+		setParameterMetadata({});
+		setActiveParameter(null);
 		setActiveParameter(null);
 		setStatusText('Ready');
+		setWorkflowStage('blueprint');
 		toast.info('Session cleared');
 	};
 
 	return (
-		<div className="h-screen w-full bg-background text-foreground overflow-hidden">
-			<main className="flex h-full w-full gap-0">
-				<ChatPanel
-					messages={messages}
-					prompt={prompt}
-					setPrompt={setPrompt}
-					selectedModel={selectedModel}
-					setSelectedModel={setSelectedModel}
-					modelOptions={MODEL_OPTIONS}
-					selectedFile={selectedFile}
-					handleFileChange={setSelectedFile}
-					isGenerating={isGenerating}
-					onSubmit={handleGenerate}
-					onClear={handleClear}
-					width={chatWidth}
-					isOpen={isChatOpen}
-					setIsOpen={setIsChatOpen}
-				/>
+		<div className="h-screen w-full bg-[#050814] text-foreground overflow-hidden flex flex-col p-3">
+			<main className="flex-1 flex overflow-hidden w-full gap-0 relative">
+				<PanelGroup id="workspace-layout-v5" orientation="vertical">
+					{/* Top: Navigation + Viewport + Settings */}
+					<Panel defaultSize={70} minSize={40}>
+						<div className="h-full w-full flex">
 
-				{isChatOpen && (
-					<div
-						className="group relative w-[1px] cursor-col-resize bg-border hover:bg-blue-500/50 transition-colors z-30"
-						onMouseDown={() => {
-							isResizing.current = true;
-							document.body.style.cursor = 'col-resize';
-						}}
-					>
-						<div className="absolute inset-y-0 -left-1.5 w-4 opacity-0 group-hover:opacity-100" />
-					</div>
-				)}
+							{/* 1. Left Navigation (Fixed Width) */}
+							<div className="w-[260px] shrink-0 h-full overflow-hidden flex flex-col z-10 border-r border-white/5 bg-[#050814]">
+								<WorkflowNav
+									workflowStage={workflowStage}
+									setWorkflowStage={setWorkflowStage}
+								/>
+							</div>
 
-				<CadViewport
-				stlUrl={stlUrl}
-				statusText={statusText}
-				isRecompiling={isRecompiling}
-				hasStl={hasStl}
-				hasStep={hasStep}
-				hasDxf={hasDxf}
-				isDeveloper={isDeveloper}
-				isDownloadingStl={isDownloadingStl}
-				isDownloadingStep={isDownloadingStep}
-				isDownloadingDxf={isDownloadingDxf}
-				onDownloadStl={() => void handleDownloadArtifact(stlUrl, 'stl')}
-				onDownloadStep={() => void handleDownloadArtifact(stepUrl, 'step')}
-				onDownloadDxf={() => void handleDownloadArtifact(dxfUrl, 'dxf')}
-					annotations={annotations}
-					activeParameter={activeParameter}
-					geometryInfo={geometryInfo}
-				>
-					{stlUrl ? <StlMesh url={stlUrl} onGeometryReady={handleGeometryReady} /> : null}
-				</CadViewport>
+							{/* 2. Resizable Viewport and Settings */}
+							<div className="flex-1 h-full overflow-hidden pl-3">
+								<PanelGroup id="top-horizontal-v4" orientation="horizontal">
 
-				<EditorDrawer
-					isOpen={isDrawerOpen}
-					setIsOpen={setIsDrawerOpen}
-					activeTab={activeDrawerTab}
-					setActiveTab={setActiveDrawerTab}
-					pythonScript={pythonScript}
-					onScriptChange={updatePythonScript}
-					onRenderSync={handleRenderSync}
-					isRecompiling={isRecompiling}
-					hasSession={Boolean(sessionId)}
-					onHistoryClick={() => setIsHistoryOpen(true)}
-					isDeveloper={isDeveloper}
-					developerUsername={developerUsername}
-					developerPassword={developerPassword}
-					developerAuthError={developerAuthError}
-					onDeveloperUsernameChange={setDeveloperUsername}
-					onDeveloperPasswordChange={setDeveloperPassword}
-					onDeveloperLogin={handleDeveloperLogin}
-					onDeveloperLogout={handleDeveloperLogout}
-				>
-					{parameterEntries.length === 0 ? (
-						<div className="flex flex-col items-center justify-center py-6 px-2 text-center animate-message">
-							{/* Dashed bounding box */}
-							<div className="w-full rounded-2xl border border-dashed border-border bg-black/5 dark:bg-white/5 backdrop-blur-md p-7 flex flex-col items-center gap-5">
-								{/* Icon container */}
-								<div className="relative flex size-14 items-center justify-center">
-									<div className="absolute inset-0 rounded-full bg-blue-500/10 blur-xl" />
-									<div className="relative flex size-14 items-center justify-center rounded-2xl border border-border dark:border-white/10 bg-background shadow-lg text-muted-foreground">
-										<svg className="size-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-										</svg>
-									</div>
-								</div>
+									{/* Center: CAD/CAM Viewport */}
+									<Panel defaultSize={70} minSize={40}>
+										<div className="h-full w-full bg-[#0a0f1c] rounded-xl border border-[#1e293b] shadow-2xl overflow-hidden relative">
+											{workflowStage === 'blueprint' ? (
+												<div
+													className="h-full flex flex-col items-center justify-center bg-[#070b14] relative overflow-hidden"
+													onMouseMove={(e) => {
+														const rect = e.currentTarget.getBoundingClientRect();
+														const x = (e.clientX - rect.left) / rect.width - 0.5;
+														const y = (e.clientY - rect.top) / rect.height - 0.5;
+														setMousePos({ x, y });
+													}}
+												>
+													<div className="absolute inset-0 bg-[url('/grid.svg')] opacity-5" />
 
-								{/* Text */}
-								<div>
-									<p className="text-[12px] font-bold uppercase tracking-[0.2em] text-foreground">No Parameters Yet</p>
-									<p className="mt-2 text-[11px] leading-relaxed text-muted-foreground font-sans">
-										Generate a script from a blueprint to auto-extract dynamic variables.
-									</p>
-								</div>
+													{/* AI Assistant Button in Empty State */}
+													<div className="absolute top-4 right-4 z-50">
+														<button
+															onClick={() => setIsChatOpen(true)}
+															className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600/90 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)] transition-all pointer-events-auto"
+														>
+															<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+																<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+															</svg>
+															<span className="text-[10px] font-bold uppercase tracking-widest">AI Assistant</span>
+														</button>
+													</div>
+
+													{/* Faint Hexagon Watermark */}
+													<div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-5 flex items-center justify-center">
+														<svg width="600" height="600" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="0.5" strokeLinecap="round" strokeLinejoin="round">
+															<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+															<polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+															<line x1="12" y1="22.08" x2="12" y2="12"></line>
+														</svg>
+													</div>
+
+													<div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-500/5 rounded-full blur-[120px] pointer-events-none" />
+
+													<div className="z-10 flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-500">
+														<div className="flex items-center gap-3 mb-4">
+															<div className="size-2 rounded-full bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.5)]" />
+															<h2 className="text-[11px] font-bold uppercase tracking-[0.3em] text-blue-400">NO BLUEPRINT LOADED</h2>
+														</div>
+
+														<div className="flex flex-col gap-3 w-[320px]">
+															<button
+																onClick={() => {
+																	setIsChatOpen(true);
+																	setTimeout(() => fileUploadRef.current?.click(), 100);
+																}}
+																className="flex items-center gap-4 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-blue-500/30 transition-all text-left group"
+															>
+																<div className="size-8 rounded-lg bg-black/50 border border-white/5 flex items-center justify-center shrink-0">
+																	<svg className="size-4 text-muted-foreground group-hover:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																		<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+																	</svg>
+																</div>
+																<div>
+																	<div className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors">Upload Blueprint</div>
+																	<div className="text-[10px] text-muted-foreground">PDF, PNG, JPG</div>
+																</div>
+															</button>
+															<button
+																onClick={() => stepUploadRef.current?.click()}
+																className="flex items-center gap-4 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-blue-500/30 transition-all text-left group"
+															>
+																<div className="size-8 rounded-lg bg-black/50 border border-white/5 flex items-center justify-center shrink-0">
+																	<svg className="size-4 text-muted-foreground group-hover:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																		<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+																	</svg>
+																</div>
+																<div>
+																	<div className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors">Import STEP File</div>
+																	<div className="text-[10px] text-muted-foreground">Direct 3D import</div>
+																</div>
+															</button>
+															<button
+																onClick={() => setIsSessionBrowserOpen(true)}
+																className="flex items-center gap-4 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-blue-500/30 transition-all text-left group"
+															>
+																<div className="size-8 rounded-lg bg-black/50 border border-white/5 flex items-center justify-center shrink-0">
+																	<History className="size-4 text-muted-foreground group-hover:text-blue-400" />
+																</div>
+																<div>
+																	<div className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors">Recent Projects</div>
+																	<div className="text-[10px] text-muted-foreground">Resume work</div>
+																</div>
+															</button>
+														</div>
+													</div>
+													
+												</div>
+											) : (
+												<CadViewport
+													stlUrl={stlUrl}
+													statusText={statusText}
+													workflowStage={workflowStage}
+													isRecompiling={isGenerating}
+													hasStl={Boolean(stlUrl)}
+													hasStep={Boolean(stepUrl)}
+													hasDxf={Boolean(dxfUrl)}
+													isDeveloper={false}
+													isDownloadingStl={false}
+													isDownloadingStep={false}
+													isDownloadingDxf={false}
+													onDownloadStl={() => { }}
+													onDownloadStep={() => { }}
+													onDownloadDxf={() => { }}
+													annotations={annotations}
+													activeParameter={null}
+													geometryInfo={null}
+													hasGcode={Boolean(false)}
+													isDownloadingGcode={false}
+													onDownloadGcode={() => { }}
+													isSharing={false}
+													onShare={undefined}
+													toolpaths={[]}
+													showToolpaths={camViewport.showToolpath}
+													camFeatures={camFeatures}
+													activeFeatureId={activeFeatureId}
+													headerActions={
+														<div className="flex items-center gap-2">
+															<div className="relative">
+																<button
+																	onClick={() => setIsWorkspaceMenuOpen(!isWorkspaceMenuOpen)}
+																	className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-white transition-all pointer-events-auto"
+																>
+																	<svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																		<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+																	</svg>
+																	<span className="text-[10px] font-bold uppercase tracking-widest">Project</span>
+																</button>
+																{isWorkspaceMenuOpen && (
+																	<div className="absolute right-0 mt-2 w-56 rounded-xl border border-white/10 bg-[#0a0f1c]/95 backdrop-blur-md shadow-xl overflow-hidden z-50 py-1 pointer-events-auto">
+																		<button
+																			onClick={() => {
+																				setIsWorkspaceMenuOpen(false);
+																				setIsChatOpen(true);
+																				setTimeout(() => fileUploadRef.current?.click(), 100);
+																			}}
+																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-white/10 transition-colors"
+																		>
+																			<svg className="size-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																				<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+																			</svg>
+																			<div className="flex flex-col">
+																				<span className="text-[11px] font-bold uppercase tracking-wider text-white">Upload Blueprint</span>
+																			</div>
+																		</button>
+																		<button
+																			onClick={() => {
+																				setIsWorkspaceMenuOpen(false);
+																				stepUploadRef.current?.click();
+																			}}
+																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-white/10 transition-colors"
+																		>
+																			<svg className="size-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																				<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+																			</svg>
+																			<div className="flex flex-col">
+																				<span className="text-[11px] font-bold uppercase tracking-wider text-white">Import STEP File</span>
+																			</div>
+																		</button>
+																		<button
+																			onClick={() => {
+																				setIsWorkspaceMenuOpen(false);
+																				setIsSessionBrowserOpen(true);
+																			}}
+																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-white/10 transition-colors border-t border-white/5 mt-1 pt-2"
+																		>
+																			<History className="size-4 text-muted-foreground" />
+																			<div className="flex flex-col">
+																				<span className="text-[11px] font-bold uppercase tracking-wider text-white">Recent Projects</span>
+																			</div>
+																		</button>
+																	</div>
+																)}
+															</div>
+															<button
+																onClick={() => setIsChatOpen(true)}
+																className="flex items-center gap-2 px-4 py-2 mr-2 rounded-lg bg-blue-600/90 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)] transition-all pointer-events-auto"
+															>
+																<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+																	<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+																</svg>
+																<span className="text-[10px] font-bold uppercase tracking-widest">AI Assistant</span>
+															</button>
+														</div>
+													}
+												>
+													{stlUrl ? <StlMesh url={stlUrl} onGeometryReady={() => { }} /> : null}
+												</CadViewport>
+											)}
+											{/* Top Header Overlay with CAM Metrics */}
+											<div className="absolute top-16 left-0 right-0 pointer-events-none z-30 flex flex-col p-4 gap-4">
+												{/* CAM Metrics Pill */}
+												{(workflowStage === 'cam' || workflowStage === 'gcode') && (
+													<div className="flex items-center justify-center pointer-events-auto mt-2">
+														<div className="relative group">
+															{/* Glowing blue underline */}
+															<div className="absolute -bottom-[1px] left-8 right-8 h-[2px] bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,1)] z-10" />
+
+															<div className="flex items-center gap-8 bg-[#030408]/90 backdrop-blur-md border border-[#1e293b] px-8 py-3 rounded-xl shadow-2xl relative z-0">
+
+																<div className="flex flex-col gap-1 items-start min-w-[80px]">
+																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
+																		Material
+																	</span>
+																	<span className="text-[11px] font-bold text-blue-500 uppercase">{camSetup.material.replace('_', ' ')}</span>
+																</div>
+
+																<div className="w-px h-8 bg-white/5" />
+
+																<div className="flex flex-col gap-1 items-start min-w-[80px]">
+																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
+																		<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
+																		Machine
+																	</span>
+																	<span className="text-[11px] font-bold text-white uppercase">{camSetup.machine}</span>
+																</div>
+
+																<div className="w-px h-8 bg-white/5" />
+
+																<div className="flex flex-col gap-1 items-start min-w-[80px]">
+																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
+																		<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
+																		Controller
+																	</span>
+																	<span className="text-[11px] font-bold text-white uppercase">{controller}</span>
+																</div>
+
+																<div className="w-px h-8 bg-white/5" />
+
+																<div className="flex flex-col gap-1 items-center min-w-[60px]">
+																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Features</span>
+																	<span className="text-[12px] font-bold text-cyan-400">{camFeatures.length}</span>
+																</div>
+
+																<div className="flex flex-col gap-1 items-center min-w-[60px]">
+																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Tools</span>
+																	<span className="text-[12px] font-bold text-green-500">{camTools.length}</span>
+																</div>
+
+																<div className="flex flex-col gap-1 items-center min-w-[60px]">
+																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Ops</span>
+																	<span className="text-[12px] font-bold text-purple-500">{camOperations.length}</span>
+																</div>
+
+																<div className="w-px h-8 bg-white/5" />
+
+																<div className="flex flex-col gap-1 items-start min-w-[80px]">
+																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
+																		<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+																		Cycle Time
+																	</span>
+																	<span className="text-[11px] font-bold text-yellow-500 uppercase">06:24</span>
+																</div>
+
+																<div className="flex flex-col gap-1 items-start min-w-[80px]">
+																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
+																		<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg>
+																		Removal
+																	</span>
+																	<span className="text-[11px] font-bold text-white uppercase">82%</span>
+																</div>
+
+																<div className="ml-4 flex items-center">
+																	<button className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-green-500/30 bg-green-500/10 text-green-500 hover:bg-green-500/20 transition-colors">
+																		<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+																			<polyline points="20 6 9 17 4 12" />
+																		</svg>
+																		<span className="text-[10px] font-bold uppercase tracking-widest">Ready</span>
+																	</button>
+																</div>
+															</div>
+														</div>
+													</div>
+												)}
+											</div>
+
+											{/* Modals & Overlays */}
+											<input
+												type="file"
+												ref={stepUploadRef}
+												accept=".step,.stp"
+												className="hidden"
+												onChange={handleStepUpload}
+											/>
+											<ChatPanel
+												messages={messages}
+												prompt={prompt}
+												setPrompt={setPrompt}
+												selectedModel={selectedModel}
+												setSelectedModel={setSelectedModel}
+												modelOptions={MODEL_OPTIONS}
+												selectedFile={selectedFile}
+												handleFileChange={setSelectedFile}
+												isGenerating={isGenerating}
+												onSubmit={handleGenerate}
+												onClear={() => {
+													setMessages([{ id: makeId('system'), role: 'system', content: 'Upload a blueprint, pick a model, and hit Generate.' }]);
+													setPrompt(DEFAULT_PROMPT);
+													setSelectedFile(null);
+													setWorkflowStage('blueprint');
+												}}
+												width={chatWidth}
+												isOpen={isChatOpen}
+												setIsOpen={setIsChatOpen}
+												fileInputRef={fileUploadRef}
+												onOpenAuthModal={() => setIsAuthModalOpen(true)}
+											/>
+										</div>
+									</Panel>
+
+									<PanelResizeHandle className="w-3 relative group flex items-center justify-center cursor-col-resize z-50">
+										<div className="w-1 h-8 rounded-full bg-transparent group-hover:bg-blue-500/50 transition-colors" />
+									</PanelResizeHandle>
+
+									{/* Right: Workspace Settings */}
+									<Panel defaultSize={30} minSize={20}>
+										<div className="h-full w-full bg-[#0a0f1c] rounded-xl border border-white/5 overflow-hidden relative">
+											<WorkspaceSettings
+												workflowStage={workflowStage}
+												parameters={parameters}
+												onParameterChange={(key, val) => {
+													const newParams = setParameterValue(parameters, key, val);
+													setParameters(newParams);
+													const newScript = injectParameters(pythonScript, newParams);
+													updatePythonScript(newScript);
+													void performSync(newScript, newParams, sessionId || '');
+												}}
+												parameterMetadata={parameterMetadata}
+												camSetup={camSetup}
+												setCamSetup={setCamSetup}
+												controller={controller}
+												setController={setController}
+												pythonScript={pythonScript}
+											/>
+										</div>
+									</Panel>
+								</PanelGroup>
 							</div>
 						</div>
-					) : (
-						<div className="space-y-4">
-							{parameterEntries.map(([key, value]) => (
-								<div key={key} className="cursor-pointer" onClick={() => setActiveParameter(key)} onFocus={() => setActiveParameter(key)}>
-									<ParameterInput
-										label={key}
-										value={value}
-										isActive={activeParameter === key}
-										onChange={(nextValue) => {
-											const nextParams = setParameterValue(parameters, key, nextValue);
-											setParameters(nextParams);
-											const nextScript = injectParameters(pythonScript, nextParams);
-											if (nextScript !== pythonScript) {
-												updatePythonScript(nextScript);
-											}
-										}}
-									/>
-								</div>
-							))}
-						</div>
-					)}
-				</EditorDrawer>
+					</Panel>
 
-				<HistoryDrawer 
+					<PanelResizeHandle className="h-3 relative group flex items-center justify-center cursor-row-resize z-50">
+						<div className="h-1 w-8 rounded-full bg-white/10 group-hover:bg-blue-500/50 transition-colors" />
+					</PanelResizeHandle>
+
+					{/* Bottom: Engineering Console */}
+					<Panel defaultSize={25} minSize={10}>
+						<div className="h-full w-full bg-[#0a0f1c] rounded-xl border border-[#1e293b] overflow-hidden relative">
+							<EngineeringConsole
+								workflowStage={workflowStage}
+								camSetup={camSetup}
+								setCamSetup={setCamSetup}
+								controller={controller}
+								setController={setController}
+								camTools={camTools}
+								setCamTools={setCamTools}
+								onGenerateGCode={handleGenerateGCode}
+								isGeneratingGcode={isGeneratingGcode}
+								gcodeContent={gcodeContent}
+								camFeatures={camFeatures}
+								setCamFeatures={setCamFeatures}
+								activeFeatureId={activeFeatureId}
+								setActiveFeatureId={setActiveFeatureId}
+								onAutoGenerateOperations={handleAutoGenerateOperations}
+								camOperations={camOperations}
+								setCamOperations={setCamOperations}
+								activeOperationId={activeOperationId}
+								setActiveOperationId={setActiveOperationId}
+								camSimulation={camSimulation}
+								setCamSimulation={setCamSimulation}
+							/>
+						</div>
+					</Panel>
+				</PanelGroup>
+
+				<input
+					type="file"
+					ref={stepUploadRef}
+					accept=".step,.stp"
+					className="hidden"
+					onChange={handleStepUpload}
+				/>
+				<SessionBrowserModal
+					isOpen={isSessionBrowserOpen}
+					onClose={() => setIsSessionBrowserOpen(false)}
+					onSelectSession={handleRestoreSession}
+				/>
+				<HistoryDrawer
 					isOpen={isHistoryOpen}
 					onClose={() => setIsHistoryOpen(false)}
 					onRestore={handleRestoreSession}
 				/>
 			</main>
+			<AuthModal
+				isOpen={isAuthModalOpen}
+				onClose={() => setIsAuthModalOpen(false)}
+				developerUsername={developerUsername}
+				developerPassword={developerPassword}
+				developerAuthError={developerAuthError}
+				onDeveloperUsernameChange={setDeveloperUsername}
+				onDeveloperPasswordChange={setDeveloperPassword}
+				onDeveloperLogin={handleDeveloperLogin}
+			/>
 		</div>
 	);
 }

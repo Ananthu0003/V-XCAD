@@ -12,7 +12,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-	title: 'CADVΞX Tactical Workspace',
+	title: 'VΞXCAD Tactical Workspace',
 	description: 'Generate and refine CAD from documents with HITL controls.',
 };
 
