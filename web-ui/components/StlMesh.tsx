@@ -8,6 +8,10 @@ import { Box3, BufferGeometry, Color, MeshStandardMaterial, Vector3 } from 'thre
 export type StlGeometryInfo = {
 	scale: number;
 	center: [number, number, number];
+	bounding_box?: {
+		min: [number, number, number];
+		max: [number, number, number];
+	};
 };
 
 type StlMeshProps = {
@@ -18,31 +22,31 @@ type StlMeshProps = {
 export function StlMesh({ url, onGeometryReady }: StlMeshProps) {
 	const geometry = useLoader(STLLoader, url);
 
-	const { centeredGeometry, scale } = useMemo(() => {
+	const { centeredGeometry, scale, center } = useMemo(() => {
 		const cloned = geometry.clone() as BufferGeometry;
 		cloned.computeVertexNormals();
 		cloned.computeBoundingBox();
 
-		const box = cloned.boundingBox ?? new Box3();
-		const size = new Vector3();
-		box.getSize(size);
-		const maxDim = Math.max(size.x || 0, size.y || 0, size.z || 0);
-		const safeScale = maxDim > 0 ? 1.8 / maxDim : 1;
-
+		// Do NOT center or scale the mesh. We want true 1:1 CAD coordinates.
+		const safeScale = 1.0;
 		const centerVec = new Vector3();
+		const box = cloned.boundingBox ?? new Box3();
 		box.getCenter(centerVec);
-
-		cloned.center();
 
 		// Notify parent of the computed geometry metrics
 		onGeometryReady?.({
 			scale: safeScale,
 			center: [centerVec.x, centerVec.y, centerVec.z],
+			bounding_box: cloned.boundingBox ? {
+				min: [cloned.boundingBox.min.x, cloned.boundingBox.min.y, cloned.boundingBox.min.z],
+				max: [cloned.boundingBox.max.x, cloned.boundingBox.max.y, cloned.boundingBox.max.z]
+			} : undefined
 		});
 
 		return {
 			centeredGeometry: cloned,
 			scale: safeScale,
+			center: centerVec
 		};
 	}, [geometry]);
 

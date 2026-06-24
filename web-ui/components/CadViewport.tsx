@@ -1,7 +1,8 @@
 'use client';
 
-import { Suspense, useState, useRef, useEffect } from 'react';
+import { Suspense, useState, useRef, useEffect, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
+import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewport, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { DimensionOverlay } from './DimensionOverlay';
@@ -10,6 +11,24 @@ import type { StlGeometryInfo } from './StlMesh';
 type AnnotationEntry = {
 	p1: [number, number, number];
 	p2: [number, number, number];
+};
+
+type RenderToolpathSegment = {
+	type: 'rapid' | 'cut' | 'arc' | 'plunge' | 'retract' | 'lead_in' | 'lead_out';
+	start: { x: number; y: number; z: number };
+	end: { x: number; y: number; z: number };
+	feedrate?: number;
+	spindle?: number;
+	toolId: string;
+	operationId: string;
+	featureId: string;
+	coordinateMode?: 'mill_xyz' | 'lathe_xz';
+	center?: { x: number; y: number; z: number };
+	radius?: number;
+	clockwise?: boolean;
+	plane?: string;
+	gcodeLineStart?: number;
+	gcodeLineEnd?: number;
 };
 
 type CadViewportProps = {
@@ -36,11 +55,14 @@ type CadViewportProps = {
 	geometryInfo?: StlGeometryInfo | null;
 	
 	// CAM/G-code
-	toolpaths?: number[][][] | null;
+	toolpaths?: RenderToolpathSegment[] | null;
 	showToolpaths?: boolean;
 	workflowStage?: 'blueprint' | 'extraction' | 'cad' | 'cam' | 'gcode';
 	camFeatures?: { id: string; location: [number, number, number] }[];
 	activeFeatureId?: string | null;
+
+	simulationState?: any;
+	camTools?: any[];
 
 	children?: React.ReactNode; // For StlMesh
 	headerActions?: React.ReactNode;
@@ -73,6 +95,8 @@ export function CadViewport({
 	workflowStage = 'blueprint',
 	camFeatures = [],
 	activeFeatureId = null,
+	simulationState,
+	camTools,
 	children,
 	headerActions,
 }: CadViewportProps) {
@@ -93,6 +117,52 @@ export function CadViewport({
 
 	const isSolidVisible = viewMode === 'both' || viewMode === 'solid';
 	const isWireframeVisible = (viewMode === 'both' || viewMode === 'wireframe') && showToolpaths;
+
+	const groupedToolpaths = useMemo(() => {
+		if (!toolpaths || toolpaths.length === 0) return null;
+		
+		const groups: Record<string, THREE.Vector3[]> = {
+			rapid: [],
+			cut: [],
+			arc: [],
+			plunge: [],
+			retract: [],
+			other: []
+		};
+		
+		toolpaths.forEach((seg) => {
+			const type = seg.type || 'other';
+			const targetGroup = groups[type] || groups.other;
+			targetGroup.push(new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z));
+			targetGroup.push(new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z));
+		});
+
+		const colors: Record<string, number> = {
+			rapid: 0xf43f5e,    // rose-500
+			cut: 0x3b82f6,      // blue-500
+			arc: 0x0ea5e9,      // sky-500
+			plunge: 0x10b981,   // emerald-500
+			retract: 0xf59e0b,  // amber-500
+			other: 0x64748b     // slate-500
+		};
+
+		return (
+			<group>
+				{Object.entries(groups).map(([type, points]) => {
+					if (points.length === 0) return null;
+					const geometry = new THREE.BufferGeometry().setFromPoints(points);
+					const material = new THREE.LineBasicMaterial({
+						color: colors[type] || colors.other,
+						linewidth: type === 'cut' || type === 'arc' ? 2 : 1.5,
+						opacity: type === 'rapid' ? 0.4 : 0.8,
+						transparent: true,
+						depthTest: true,
+					});
+					return <primitive key={type} object={new THREE.LineSegments(geometry, material)} />;
+				})}
+			</group>
+		);
+	}, [toolpaths]);
 
 	return (
 		<section className="relative flex h-full w-full flex-col overflow-hidden bg-background font-sans">
@@ -139,9 +209,9 @@ export function CadViewport({
 								<div className="absolute right-0 mt-2 w-52 rounded-xl border border-transparent bg-background/95 backdrop-blur-md shadow-xl overflow-hidden z-50 py-1">
 									{hasStl && (
 										<button
-											onClick={() => { setExportOpen(false); if (isDeveloper) onDownloadStl(); }}
-											disabled={isDownloadingStl || !isDeveloper}
-											title={!isDeveloper ? 'Export is restricted to admins' : undefined}
+											onClick={() => { setExportOpen(false); onDownloadStl(); }}
+											disabled={isDownloadingStl}
+											title={undefined}
 											className="flex w-full items-start gap-3 px-4 py-2.5 text-left hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed group transition-colors"
 										>
 											{isDownloadingStl ? <Loader2 className="size-4 animate-spin mt-0.5 text-foreground" /> : <Layers className="size-4 mt-0.5 text-foreground group-hover:text-blue-500 transition-colors" />}
@@ -153,9 +223,9 @@ export function CadViewport({
 									)}
 									{hasStep && (
 										<button
-											onClick={() => { setExportOpen(false); if (isDeveloper) onDownloadStep(); }}
-											disabled={isDownloadingStep || !isDeveloper}
-											title={!isDeveloper ? 'Export is restricted to admins' : undefined}
+											onClick={() => { setExportOpen(false); onDownloadStep(); }}
+											disabled={isDownloadingStep}
+											title={undefined}
 											className="flex w-full items-start gap-3 px-4 py-2.5 text-left hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed group transition-colors"
 										>
 											{isDownloadingStep ? <Loader2 className="size-4 animate-spin mt-0.5 text-blue-500" /> : <Box className="size-4 mt-0.5 text-blue-500" />}
@@ -167,9 +237,9 @@ export function CadViewport({
 									)}
 									{hasDxf && (
 										<button
-											onClick={() => { setExportOpen(false); if (isDeveloper) onDownloadDxf(); }}
-											disabled={isDownloadingDxf || !isDeveloper}
-											title={!isDeveloper ? 'Export is restricted to admins' : undefined}
+											onClick={() => { setExportOpen(false); onDownloadDxf(); }}
+											disabled={isDownloadingDxf}
+											title={undefined}
 											className="flex w-full items-start gap-3 px-4 py-2.5 text-left hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed group transition-colors"
 										>
 											{isDownloadingDxf ? <Loader2 className="size-4 animate-spin mt-0.5 text-foreground" /> : <Layers className="size-4 mt-0.5 text-foreground group-hover:text-cyan-400 transition-colors" />}
@@ -229,49 +299,145 @@ export function CadViewport({
 					<Suspense fallback={null}>
 						<Environment preset="city" />
 						<Grid infiniteGrid fadeDistance={50} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={1} sectionSize={10} position={[0, -0.01, 0]} />
-						<Stage intensity={0.8} adjustCamera={false} shadows="contact">
+						<Stage intensity={0.8} adjustCamera={true} shadows="contact">
 							{isSolidVisible && children}
 							{isWireframeVisible && (
 								<group
-									scale={geometryInfo?.scale || 1}
-									position={
-										geometryInfo?.center
-											? [
-													-geometryInfo.center[0] * (geometryInfo.scale || 1),
-													-geometryInfo.center[1] * (geometryInfo.scale || 1),
-													-geometryInfo.center[2] * (geometryInfo.scale || 1),
-											  ]
-											: [0, 0, 0]
-									}
+									scale={1}
+									position={[0, 0, 0]}
 								>
-									{/* Render CAM Toolpaths */}
-									{showToolpaths && toolpaths && toolpaths.map((path, idx) => (
-										<Line
-											key={idx}
-											points={path as [number, number, number][]}
-											color="#3b82f6"
-											lineWidth={1.5}
-											dashed={false}
-										/>
-									))}
+									{/* Render CAM Toolpaths using optimized buffer geometry */}
+									{groupedToolpaths}
 
 									{/* Render Active Feature Indicator */}
 									{activeFeatureId && camFeatures && (
 										camFeatures.filter(f => f.id === activeFeatureId).map(f => {
-											// If we have faceIds, we would highlight them here (requires STEP/glTF with face groups)
-											// For now, if no faceIds are present, we just show a subtle center marker
-											const hasFaceIds = (f as any).faceIds || (f as any).meshGroupIds;
+											const positions = (f as any).sub_positions || [{ center: (f as any).position?.center || f.location, normal: (f as any).position?.normal, bounding_box: (f as any).position?.bounding_box }];
+											const bSizeX = geometryInfo?.bounding_box ? (geometryInfo.bounding_box.max[0] - geometryInfo.bounding_box.min[0]) : 80;
+											const markerRadius = Math.max(3.0, bSizeX * 0.04);
 											
-											if (!hasFaceIds) {
-												return (
-													<mesh key={`feature-${f.id}`} position={f.location}>
-														<sphereGeometry args={[0.2, 8, 8]} />
-														<meshBasicMaterial color="#ef4444" wireframe opacity={0.5} transparent />
-													</mesh>
-												);
-											}
-											return null;
+											return (
+												<group key={`feature-${f.id}`}>
+													{positions.map((posObj: any, idx: number) => {
+														const pos = posObj.center || f.location;
+														if (!pos) return null;
+
+														// Fallback bounding box dimensions if the backend didn't provide strict min/max
+														const boxW = posObj.bounding_box ? (posObj.bounding_box.max[0] - posObj.bounding_box.min[0]) : ((f as any).dimensions?.diameter || (f as any).dimensions?.width || markerRadius * 4);
+														const boxH = posObj.bounding_box ? (posObj.bounding_box.max[1] - posObj.bounding_box.min[1]) : ((f as any).dimensions?.diameter || (f as any).dimensions?.height || markerRadius * 4);
+														const boxD = posObj.bounding_box ? (posObj.bounding_box.max[2] - posObj.bounding_box.min[2]) : ((f as any).dimensions?.depth || markerRadius * 4);
+
+														const boxCenterX = posObj.bounding_box ? ((posObj.bounding_box.min[0] + posObj.bounding_box.max[0]) / 2) + pos[0] : pos[0];
+														const boxCenterY = posObj.bounding_box ? ((posObj.bounding_box.min[1] + posObj.bounding_box.max[1]) / 2) + pos[1] : pos[1];
+														const boxCenterZ = posObj.bounding_box ? ((posObj.bounding_box.min[2] + posObj.bounding_box.max[2]) / 2) + pos[2] : pos[2];
+														
+														return (
+															<group key={`pos-${idx}`}>
+																<mesh position={pos}>
+																	<sphereGeometry args={[markerRadius, 32, 32]} />
+																	<meshBasicMaterial color={(f as any).type === 'pocket' || (f as any).type === 'contour' || (f as any).type === 'large_center_hole' ? '#22c55e' : '#eab308'} depthTest={false} opacity={0.6} transparent />
+																</mesh>
+																
+																{/* Guaranteed Bounding Box Debug or Raw Contour */}
+																{(f as any).raw_points && (f as any).raw_points.length > 0 ? (
+																	<Line
+																		points={(f as any).raw_points.map((pt: any) => [pt[0], pt[1], ((f as any).z_top || pos[2])])}
+																		color="#3b82f6"
+																		lineWidth={2}
+																	/>
+																) : (
+																	<mesh position={[boxCenterX, boxCenterY, boxCenterZ]}>
+																		<boxGeometry args={[Math.max(0.1, boxW), Math.max(0.1, boxH), Math.max(0.1, boxD)]} />
+																		<meshBasicMaterial color="#3b82f6" wireframe opacity={0.4} transparent depthTest={false} />
+																	</mesh>
+																)}
+																
+																{/* Access Direction Normal */}
+																{posObj.normal && (
+																	<Line
+																		points={[
+																			pos,
+																			[pos[0] + posObj.normal[0] * markerRadius * 4, pos[1] + posObj.normal[1] * markerRadius * 4, pos[2] + posObj.normal[2] * markerRadius * 4]
+																		]}
+																		color="#ef4444"
+																		lineWidth={4}
+																		depthTest={false}
+																	/>
+																)}
+															</group>
+														);
+													})}
+												</group>
+											);
 										})
+									)}
+
+									{/* Render Active Tool for Simulation INSIDE the scaled/translated group */}
+									{showToolpaths && simulationState?.showTool !== false && simulationState?.segments && simulationState.activeSegmentIndex !== undefined && camTools && (
+										(() => {
+											const activeSegment = simulationState.segments[simulationState.activeSegmentIndex];
+											if (!activeSegment) return null;
+											const activeTool = camTools.find(t => t.id === activeSegment.tool_id);
+											if (!activeTool) return null;
+											
+											const stickout = activeTool.stickout || 40;
+											const radius = (activeTool.diameter || 6) / 2;
+
+											let i = activeSegment.end_i ?? 0;
+											let j = activeSegment.end_j ?? 0;
+											let k = activeSegment.end_k ?? -1;
+											if (i === 0 && j === 0 && k === 0) k = -1;
+											
+											const targetVec = new THREE.Vector3(-i, -j, -k).normalize();
+											const upVec = new THREE.Vector3(0, 1, 0);
+											const quaternion = new THREE.Quaternion().setFromUnitVectors(upVec, targetVec);
+
+											return (
+												<group position={[activeSegment.end_x, activeSegment.end_y, activeSegment.end_z]} quaternion={quaternion}>
+													{/* Cutting Tool / End Mill */}
+													<mesh position={[0, stickout / 2, 0]}>
+														<cylinderGeometry 
+															args={[radius, radius, stickout, 32]} 
+															ref={(geom) => {
+																if (geom) {
+																	geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
+																	geom.boundingBox = new THREE.Box3();
+																}
+															}}
+														/>
+														<meshStandardMaterial color="#cbd5e1" metalness={0.8} roughness={0.2} transparent opacity={0.9} />
+													</mesh>
+													
+													{/* CNC Spindle / Tool Holder */}
+													<mesh position={[0, stickout + 10, 0]}>
+														<cylinderGeometry 
+															args={[radius * 4, radius * 2.5, 20, 32]} 
+															ref={(geom) => {
+																if (geom) {
+																	geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
+																	geom.boundingBox = new THREE.Box3();
+																}
+															}}
+														/>
+														<meshStandardMaterial color="#334155" metalness={0.5} roughness={0.6} />
+													</mesh>
+
+													{/* Tool tip point */}
+													<mesh position={[0, 0, 0]}>
+														<sphereGeometry 
+															args={[Math.max(0.5, radius * 0.2), 16, 16]} 
+															ref={(geom) => {
+																if (geom) {
+																	geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
+																	geom.boundingBox = new THREE.Box3();
+																}
+															}}
+														/>
+														<meshBasicMaterial color="#ef4444" depthTest={false} />
+													</mesh>
+												</group>
+											);
+										})()
 									)}
 								</group>
 							)}

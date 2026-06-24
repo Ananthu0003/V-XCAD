@@ -131,7 +131,7 @@ export function ChatPanel({
 			user={user}
 		/>
 		<aside 
-			className={`absolute right-0 top-0 bottom-0 z-50 flex flex-col border-l border-white/10 bg-[#0a0f1c]/95 backdrop-blur-xl shadow-2xl transition-all duration-300 ease-in-out font-sans overflow-hidden`}
+			className={`absolute right-0 top-0 bottom-0 z-50 flex flex-col border-l border-border bg-popover/95 backdrop-blur-xl shadow-2xl transition-all duration-300 ease-in-out font-sans overflow-hidden`}
 			style={{ 
 				width, 
 				transform: isOpen ? 'translateX(0)' : 'translateX(120%)',

@@ -9,12 +9,14 @@ interface Session {
 	stlUrl: string | null;
 	stepUrl: string | null;
 	prompt: string | null;
+	pythonScript?: string;
+	parameters?: any;
 }
 
 interface SessionBrowserModalProps {
 	isOpen: boolean;
 	onClose: () => void;
-	onSelectSession: (id: string) => void;
+	onSelectSession: (session: Session) => void;
 }
 
 export function SessionBrowserModal({ isOpen, onClose, onSelectSession }: SessionBrowserModalProps) {
@@ -83,7 +85,7 @@ export function SessionBrowserModal({ isOpen, onClose, onSelectSession }: Sessio
 
 	return (
 		<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-			<div className="flex flex-col w-full max-w-2xl bg-[#0a0f1c] border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+			<div className="flex flex-col w-full max-w-2xl bg-popover border border-border rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
 				
 				{/* Header */}
 				<div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5">
@@ -121,7 +123,7 @@ export function SessionBrowserModal({ isOpen, onClose, onSelectSession }: Sessio
 							<button
 								key={session.id}
 								onClick={() => {
-									onSelectSession(session.id);
+									onSelectSession(session);
 									onClose();
 								}}
 								className="w-full flex items-center gap-4 p-4 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 hover:border-blue-500/30 transition-all group text-left"

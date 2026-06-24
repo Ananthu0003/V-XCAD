@@ -19,88 +19,58 @@ except ImportError:
 
 AUDIT_INSTRUCTION = """
 # ROLE: Senior CAD Reconstruction Engineer
-You specialize in translating precision engineering blueprints into structured JSON with 100% accuracy.
+You specialize in translating precision engineering blueprints into a detailed Spatial & Geometric Audit Report.
 You must analyze the provided technical drawing with tolerance-aware rigor.
 The generated output must match the engineering drawing exactly. No dimension guessing. No hallucinated features. No invented measurements. No hardcoded assumptions.
 
 --------------------------------------------------
-NEW EXTRACTION STRATEGY
+NEW EXTRACTION STRATEGY (CHAIN OF THOUGHT)
 --------------------------------------------------
-Before extracting dimensions:
+Before outputting any code, you must perform a deep visual audit of the blueprint.
+# ROLE: Precision Mechanical CAD Auditor & Spatial Topologist
+Analyze the provided multi-view technical drawing with tolerance-aware manufacturing rigor. Output ONLY a valid JSON feature-map matching the exact schema below.
 
-STEP 1: Classify drawing type
-- Single View, Orthographic, Third Angle Projection, First Angle Projection, Section View, Detail View, Assembly Drawing
+## 1. COORDINATE SYSTEM CONSTRAINTS
+- **Origin**: Place (0,0,0) at the absolute bottom-center of the primary datum body for symmetric stability.
+- **Z-Axis**: Points UPWARD (+Z). Face pockets, blind steps, and through-boring occur relative to this axis.
+- **Rationale**: State the exact placement logic in `origin_rationale`.
 
-STEP 2: Detect and separate all views
-- e.g., Front View, Top View, Side View, Section A-A, Detail B. Store each view independently.
+## 2. FEATURE TAXONOMY
+- **ADDITIVE**: `base_prismoid`, `base_cylinder`, `mounting_ear`, `alignment_boss`, `reinforcement_rib`
+- **SUBTRACTIVE**: `pocket_interior`, `step_shoulder`, `counterbore`, `hole_through`, `hole_blind`, `oring_groove`
+- **EDGE_MODIFIER**: `fillet_interior`, `chamfer_exterior`
 
-STEP 3: Determine feature ownership
-- e.g., Hole visible in Front View, Diameter visible in Section View, Location visible in Top View. Merge into one feature.
+## 3. MACHINING & DIMENSIONAL RULES
+- **Profile Decompositions**: For parts with asymmetric or multi-angular walls (e.g., specific draft angles like 33°, 40°, 22° shifts), capture the exact 2D coordinate paths outlining the perimeter.
+- **Z-Reference**: Every feature must declare an exact `z_reference`: `"bottom_of_feature"`, `"top_of_feature"`, or `"absolute_zero"`.
 
---------------------------------------------------
-FEATURE-FIRST EXTRACTION
---------------------------------------------------
-Do NOT start with dimensions. First detect features.
-Required features: Hole, Blind Hole, Through Hole, Counterbore, Countersink, Pocket, Slot, Boss, Rib, Fillet, Chamfer, Thread, Groove, Keyway, Step, Revolved Feature, Pattern.
-
-For each feature, generate:
-{ "feature_id", "feature_type", "dimensions", "coordinates", "parent_feature", "source_views" }
-
---------------------------------------------------
-DIMENSION VALIDATION & MULTI-VIEW CONSISTENCY
---------------------------------------------------
-Every extracted dimension must include:
-{ "value", "unit", "confidence", "source_view", "source_text" }
-If confidence < 0.90, mark as: "REQUIRES_VERIFICATION". Do NOT use uncertain dimensions directly.
-Cross-check dimensions across views. If Front View Width=100 and Top View Width=98, flag inconsistency. Do not silently choose one.
-
---------------------------------------------------
-ZERO-HALLUCINATION RULE
---------------------------------------------------
-If a dimension is not visible: Do NOT guess.
-Store: { "status": "missing_dimension" } instead of inventing values.
-
---------------------------------------------------
-STRICT JSON SCHEMA OUTPUT
---------------------------------------------------
-Output ONLY valid JSON matching this exact structure:
-
+## 4. STRICT JSON SCHEMA
 ```json
 {
-  "view_analysis": {
-    "drawing_type": "Orthographic",
-    "detected_views": ["Front View", "Top View"]
-  },
-  "extracted_features": [
+  "units": "mm",
+  "origin_point": [0, 0, 0],
+  "origin_rationale": "Symmetric center anchoring of primary geometric envelope.",
+  "envelope": { "x_total": 116.50, "y_total": 78.61, "z_total": 14.00 },
+  "primary_datum": { "id": "body_main", "type": "base_prismoid" },
+  "features": [
     {
-      "feature_id": "hole_001",
-      "feature_type": "Through Hole",
-      "dimensions": [
-        { "type": "diameter", "value": 10.0, "unit": "mm", "confidence": 0.98, "source_view": "Front View", "source_text": "Ø10" }
-      ],
-      "coordinates": { "x": 0.0, "y": 0.0, "z": 0.0 },
-      "parent_feature": "base_001",
-      "source_views": ["Front View", "Top View"]
+      "id": "body_main",
+      "type": "base_prismoid",
+      "description": "Main tapered outer housing with profile boundaries.",
+      "dims": { "length": 116.50, "width": 78.61, "height": 14.00, "corner_radius": 4.50 },
+      "location": { "x": 0.0, "y": 0.0, "z": 0.0, "z_reference": "bottom_of_feature" },
+      "is_subtractive": false,
+      "parent_id": null,
+      "confidence": "verified"
     }
   ],
-  "feature_graph": {
-    "base_001": ["hole_001"]
-  },
-  "dimension_validation_report": {
-    "inconsistencies": [],
-    "missing_dimensions": []
-  },
-  "geometric_self_check": {
-    "hole_count": 1,
-    "slot_count": 0,
-    "pocket_count": 0,
-    "chamfer_count": 0,
-    "fillet_count": 0,
-    "overall_bounding_box": {"x": 100, "y": 50, "z": 20}
-  },
-  "overall_confidence_score": 0.95
+  "patterns": []
 }
 ```
+
+## 5. SEVERE VALIDATION GATE
+
+* Do not output any markdown code fences, conversational prose, or warning summaries. Return pure, parsable JSON text only.
 """.strip()
 
 
@@ -109,18 +79,26 @@ SYSTEM_INSTRUCTION = """
 Generate production-grade, mathematically robust, parametric CAD code using the `build123d` Python library.
 
 ## 🎯 GOLDEN RULES
-1. **Blueprint Adherence**: You MUST strictly follow the provided `FEATURE_MAP`. Do not invent new features or ignore existing ones. Ensure all dimensions match the `dims` field exactly.
-2. **Manifold Stability**: Every boolean operation must resolve cleanly. Avoid coincident face intersections by extending subtractive cuts slightly.
-3. **Parametric Stacking**: No hardcoded values. Derive downstream coordinates explicitly.
+1. **Blueprint Adherence**: You MUST strictly follow the provided `FEATURE_MAP`. Do not invent new features or ignore existing ones. Ensure every single topological feature (chamfers, cutouts, ribs, holes) described in the map is modeled.
+2. **Manifold Stability & The Epsilon Protocol**: Every boolean operation must resolve cleanly. To prevent zero-thickness faces, you MUST declare `eps = 0.01` in your `PARAMETERS` dictionary. For all through-holes or subtractive cutouts, extend the depth/height by `eps` (or `2*eps`) and adjust placement by `eps` to guarantee a clean pierce through the boundary.
+3. **Parametric Stacking (NO MAGIC NUMBERS)**: You may NOT use hardcoded float literals for dimensions anywhere in the `BuildPart` block! EVERY single measurement (radii, lengths, heights, chamfers, fillets, hole offsets) MUST be extracted into the `PARAMETERS` dictionary at the top of the script. Derive downstream coordinates explicitly using these variables.
 4. **Pythonic Structure**: Use the declarative `with BuildPart() as part:` syntax wherever possible.
 5. **Metadata Mapping**: You MUST generate a `PARAMETER_METADATA` dictionary matching the `PARAMETERS` exactly, providing a `"group"`, `"confidence"` (0.0 to 1.0), and `"description"` for every parameter.
 
-## 🧠 MANDATORY SPATIAL PLANNING (CRITICAL FOR ACCURACY)
-Before writing the `with bd.BuildPart()` block, you MUST write a multi-line python comment block detailing the spatial coordinates for every single feature. Calculate exact X, Y, Z centers and alignments based on the `PARAMETERS`. 
+## 🧠 MANDATORY SPATIAL PLANNING & MENTAL WALKTHROUGH (CRITICAL FOR ACCURACY)
+Before writing the `with bd.BuildPart()` block, you MUST write a multi-line python comment block detailing the spatial coordinates for every single feature. Calculate exact X, Y, Z centers and alignments based on the `PARAMETERS`.
+After the spatial plan, write a MENTAL WALKTHROUGH tracing the exact boolean operations:
+- Check if all branches, ribs, and flanges structurally OVERLAP the main body to guarantee fusion. (If a rib just touches the outer tangent of a cylinder, it will fail to fuse. Extend it slightly INTO the body).
+- Check if subtractive holes are cut in the correct direction. (e.g., if a plane's z_dir points outward, `bd.Hole` cuts along -Z, meaning it cuts INTO the body).
+
 Example:
 # --- SPATIAL PLAN ---
 # Base Block: size=(width, length, height), centered at (0, 0, height/2)
 # Main Hole: offset from center by (width/2 - hole_margin, 0, 0), radius=hole_rad, depth=height
+# --- MENTAL WALKTHROUGH ---
+# The base block is created first. 
+# The rib connects the branch to the base. To ensure fusion, the rib polygon's vertices are pushed 2mm inside the base cylinder.
+# The branch flange plane faces outward (+X). The bolt holes will use bd.Hole() which cuts inward (-X), successfully penetrating the flange.
 # --------------------
 
 ## 📚 STRICT BUILD123D API CHEAT SHEET
@@ -154,9 +132,38 @@ You may ONLY use the following exact signatures. DO NOT INVENT kwargs.
 **🚫 ANTI-HALLUCINATION RULES (NEVER DO THESE):**
 - NEVER use `size=(...)` anywhere. Use explicit length/width/height.
 - NEVER use `sides=...`. Use `side_count=...`.
+- NEVER use `edges=...` as a keyword argument in chamfer or fillet. Pass edges positionally.
+- NEVER use `NearestToPoint`.
 - NEVER write CadQuery code (e.g., `cq.Workplane()`, `part.cut()`, `part.fuse()`). You are writing purely declarative `build123d`.
-- NEVER call context functions as methods. (e.g., WRONG: `part.extrude()`. RIGHT: `bd.extrude()`).
+- NEVER call context functions as methods. (e.g., WRONG: `part.extrude()`, `edge.chamfer()`, `edges[0].fillet()`. RIGHT: `bd.extrude()`, `bd.chamfer(edge, ...)`).
 - NEVER use `with bd.Rotation(...):`. Use `with bd.Locations(bd.Rotation(...)):`.
+- NEVER revolve a profile that crosses the axis of revolution. (e.g., If revolving around Z, the sketch must be entirely on `X >= 0`. Use `bd.Align.MIN` for X, NOT `bd.Align.CENTER`).
+- NEVER write multiple `with bd.BuildPart():` blocks or restart your approach mid-script. Think it through in the SPATIAL PLAN and write it once.
+- NEVER nest `with bd.BuildSketch():` inside another `BuildSketch`.
+- NEVER call 3D operations (`bd.extrude`, `bd.revolve`, `bd.sweep`, `bd.loft`) inside a `BuildSketch`. They MUST be called directly under `with bd.BuildPart():`.
+- NEVER use `axis=...` or `rotation=...` in 3D Primitives (like `bd.Cylinder` or `bd.Box`). Use `with bd.Locations(bd.Rotation(...)):` instead.
+- **CRITICAL**: 3D Primitives (`bd.Cylinder`, `bd.Box`, etc.) default to `bd.Align.CENTER` on all axes. If you want a part to sit *on top* of a plane and grow upwards, you MUST explicitly pass `align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN)`. Otherwise, your parts will float mid-air or intersect the floor!
+- NEVER use `part.sketch` or `part.sketch.vertices()`. To fillet a 2D sketch, capture the object explicitly (e.g., `rect = bd.Rectangle(...)`; `bd.fillet(rect.vertices(), ...)`).
+- NEVER filter cylinder edges by `bd.Axis.Z` to find circular top/bottom edges. Circular edges of a Z-extruded cylinder are in the XY plane. Use `.filter_by(bd.GeomType.CIRCLE)` instead.
+- NEVER use `bd.GeomType.ARC`. It does not exist in `build123d`. Use `bd.GeomType.CIRCLE` for all circular curves and arcs.
+- ALWAYS extract your variables from the `PARAMETERS` dictionary explicitly before using them (e.g., `base_flange_dia = PARAMETERS["base_flange_dia"]`). DO NOT assume they are auto-injected.
+- NEVER use `normal=` in `bd.Plane(...)`. Use `z_dir=` instead.
+- NEVER use `length=` in `bd.Rectangle(...)`. The correct arguments are `width=` and `height=`.
+- NEVER use `bd.GeomType.POINT`. Vertices are inherently points. If you need to fillet a rectangle's corners, just use `bd.fillet(rect.vertices(), radius=...)`.
+- NEVER nest `bd.PolarLocations` inside `bd.Locations` (e.g., `with bd.Locations(bd.PolarLocations(...))`). `bd.PolarLocations` is already a context manager. Use it directly: `with bd.PolarLocations(...):`.
+- NEVER pass a 3D Solid (like `bd.Box`, `bd.Cylinder`, `bd.Sphere`) into `bd.extrude()`. `bd.extrude` is ONLY for 2D Sketches or Faces. To subtract a 3D solid, just instantiate it with the subtract mode: e.g., `bd.Box(..., mode=bd.Mode.SUBTRACT)`.
+- NEVER use `bd.Hull()`. The correct function in build123d is `bd.make_hull()`. Also, NEVER pass objects manually to `bd.make_hull([c1, c2])` as this triggers a bug in build123d. Just call `bd.make_hull()` with NO ARGUMENTS to automatically hull the active sketch context.
+- NEVER use `plane=...` in `bd.PolarLocations`, `bd.GridLocations`, or `bd.HexLocations`. These do not accept a plane argument. To evaluate locations on a specific plane, chain the contexts: e.g., `with bd.Locations(my_plane): with bd.PolarLocations(...):`.
+- NEVER use `Plane.shifted()`. The correct method to offset a plane in build123d is `Plane.offset()`.
+- NEVER use `Plane.z_axis`, `Plane.x_axis`, or `Plane.y_axis`. Planes use `z_dir` and `x_dir`. (DO NOT pass `y_dir` into `bd.Plane(...)`, as it is automatically computed).
+- NEVER use `.at_coords(...)` to select faces or edges. It does not exist. Use `.filter_by_position(...)` or `.sort_by_distance(...)` instead.
+- NEVER place polygon vertices exactly on the boundary of another shape if you intend to fuse them. (e.g., If attaching a rib to a cylinder of radius R, place the vertex at R-2, NOT R, to guarantee structural overlap and prevent zero-thickness boolean failures).
+- **CRITICAL**: `bd.Hole(depth=D)` ALWAYS cuts in the `-Z` direction of the active Location/Plane. If you place a `bd.Hole` at `Z=0` and your part grows upwards, the hole will cut DOWN into empty space! To cut upwards from the bottom, you must chain a rotation: `with bd.Locations((0, 0, 0)): with bd.Locations(bd.Rotation(180, 0, 0)): bd.Hole(...)`. Also, if your flange extrudes in `+Z` of a plane, a `bd.Hole` on that same plane will cut `-Z` into empty space! Ensure your holes cut *into* the material.
+- **CRITICAL**: NEVER subtract a shape whose boundary is EXACTLY coincident with the outer boundary of the part (e.g., subtracting a bore of radius R from a cylinder of radius R). This creates zero-thickness walls and crashes the engine (`StdFail_NotDone`). If a bore cuts completely to the outside edge, make the subtractive shape slightly LARGER (e.g., radius `R + eps`) to ensure a clean cut through the boundary.
+- **CRITICAL**: NEVER pass edges or faces from a primitive object (like `cyl.edges()`) into `bd.fillet()` or `bd.chamfer()` after it has been added to the active `BuildPart`. Once a primitive is unioned into a part, its original edges are destroyed! This causes a fatal C++ `NCollection_IndexedDataMap::FindFromKey` crash. ALWAYS extract edges from the active part itself using `part.edges().filter_by(...).sort_by(...)`.
+- **Edge Treatments**: Actively apply `bd.fillet` and `bd.chamfer` to 3D edges as dictated by the blueprint. Use precise edge selection (e.g. `part.edges().filter_by(bd.GeomType.CIRCLE).sort_by(bd.Axis.Z)`).
+- **NO MAGIC NUMBERS**: NEVER use hardcoded float literals (like `15.0`, `bd.extrude(6.0)`, or `bd.Polygon([(10.0, 20.0)...])`) anywhere in your construction logic. Extract every dimension to the `PARAMETERS` dict at the top.
+- ALWAYS write the `# --- MENTAL WALKTHROUGH ---` block right after the SPATIAL PLAN. DO NOT SKIP IT.
 
 ## 📦 COMPACT STRUCTURE
 Your output script must follow this exact structure. Ensure the SPATIAL PLAN comment block is INSIDE the python code block, AFTER the parameter definitions.
@@ -187,6 +194,10 @@ body_height = PARAMETERS["body_height"]
 # Shank: centered at origin (0,0,0), extrudes UP (+Z) to shank_height.
 # Body: sits on top of shank at Z=shank_height, extrudes UP (+Z) to body_height.
 # Through Hole: drilled from Z=0 through entire height.
+# --- MENTAL WALKTHROUGH ---
+# 1. The Shank is built first.
+# 2. The Body connects to the Shank. To guarantee fusion, the Body's Z-origin is pushed 1mm down into the Shank (overlap).
+# 3. The Through Hole is cut along -Z, correctly penetrating both solids.
 # --------------------
 
 with bd.BuildPart() as part:
@@ -254,7 +265,7 @@ class LLMCodegenService:
             raise RuntimeError("GOOGLE_API_KEY environment variable not set.")
 
         self.client = genai.Client(api_key=api_key)
-        self.model  = model or os.getenv("GENAI_MODEL", "gemini-3.1-flash-lite")
+        self.model  = model or os.getenv("GENAI_MODEL", "gemini-3.5-flash")
 
     # -- Private helpers ---------------------------------------------------------
 
@@ -316,24 +327,26 @@ class LLMCodegenService:
         mime_type: str,
     ) -> dict[str, Any]:
         """
-        Stage 1 - Analyse a blueprint image/PDF and return a structured
-        feature-map dictionary.
+        Stage 1 - Analyse a blueprint image/PDF and return a detailed structured JSON feature map.
         """
         def _call() -> Any:
+            config_params = {
+                "temperature": 0.0,
+                "response_mime_type": "application/json",
+            }
+            if "3.5" in self.model:
+                config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
+                
             return self.client.models.generate_content(
                 model=self.model,
                 contents=[
                     types.Part.from_text(text=AUDIT_INSTRUCTION),
                     types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 ],
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                ),
+                config=types.GenerateContentConfig(**config_params),
             )
 
         raw = self._call_with_retry(_call, "audit")
-
         try:
             cleaned = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             return json.loads(cleaned)
@@ -345,7 +358,7 @@ class LLMCodegenService:
         prompt: str,
         image_bytes: bytes | None = None,
         mime_type: str | None = None,
-        feature_map: dict[str, Any] | None = None,
+        feature_map: dict[str, Any] | str | None = None,
         base_code: str | None = None,
         selection_context: str | None = None,
     ) -> str:
@@ -360,7 +373,10 @@ class LLMCodegenService:
         parts: list[str] = [f"REQUEST: {prompt}"]
 
         if feature_map:
-            parts.append(f"FEATURE_MAP:\n{json.dumps(feature_map, indent=2)}")
+            if isinstance(feature_map, dict):
+                parts.append(f"FEATURE_MAP:\n{json.dumps(feature_map, indent=2)}")
+            else:
+                parts.append(f"BLUEPRINT_AUDIT_REPORT:\n{feature_map}")
 
         if base_code:
             parts.append(f"EXISTING_CODE_TO_REFINE:\n{base_code}")
@@ -391,7 +407,7 @@ class LLMCodegenService:
         prompt: str,
         image_bytes: bytes | None = None,
         mime_type: str | None = None,
-        feature_map: dict[str, Any] | None = None,
+        feature_map: dict[str, Any] | str | None = None,
         base_code: str | None = None,
         selection_context: str | None = None,
     ):
@@ -402,7 +418,10 @@ class LLMCodegenService:
 
         parts: list[str] = [f"REQUEST: {prompt}"]
         if feature_map:
-            parts.append(f"FEATURE_MAP:\n{json.dumps(feature_map, indent=2)}")
+            if isinstance(feature_map, dict):
+                parts.append(f"FEATURE_MAP:\n{json.dumps(feature_map, indent=2)}")
+            else:
+                parts.append(f"BLUEPRINT_AUDIT_REPORT:\n{feature_map}")
         if base_code:
             parts.append(f"EXISTING_CODE_TO_REFINE:\n{base_code}")
         if selection_context:
@@ -436,10 +455,21 @@ class LLMCodegenService:
         if not response_stream:
             raise RuntimeError(f"[codegen_stream] failed after {self.MAX_RETRIES} attempts: {last_exc}")
 
+        complete_text = ""
         for chunk in response_stream:
             if chunk.text:
+                complete_text += chunk.text
                 yield chunk.text
 
+        # Save the complete generated script to a debug file so we can inspect it
+        try:
+            from pathlib import Path
+            outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
+            outputs_dir.mkdir(parents=True, exist_ok=True)
+            with open(outputs_dir / "latest_generated_script.py", "w", encoding="utf-8") as f:
+                f.write(complete_text)
+        except Exception as e:
+            print(f"Failed to write debug script: {e}")
     def edit_script(
         self,
         prompt: str,

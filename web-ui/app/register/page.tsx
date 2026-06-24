@@ -50,7 +50,7 @@ export default function RegisterPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
       {/* Background Effects */}
       <div className="absolute inset-0 z-0">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-blue-600/10 rounded-full blur-[120px] pointer-events-none" />
+        {/* Removed glow */}
       </div>
 
       <div className="relative z-10 w-full max-w-md mt-10 mb-10">

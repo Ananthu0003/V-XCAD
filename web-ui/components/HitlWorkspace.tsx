@@ -5,6 +5,7 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { AuthModal } from './AuthModal';
 import { toast } from 'sonner';
 
+import { CamSummaryPanel } from './cam/CamSummaryPanel';
 import { CadViewport } from './CadViewport';
 import { StlMesh, type StlGeometryInfo } from './StlMesh';
 import { HistoryDrawer } from './HistoryDrawer';
@@ -39,6 +40,7 @@ type RenderPayload = {
 		hint?: string;
 	};
 	artifacts?: {
+		model_hash?: string;
 		stl_url?: string;
 		step_url?: string;
 		dxf_url?: string;
@@ -286,6 +288,9 @@ export default function HitlWorkspace() {
 	const [dxfUrl, setDxfUrl] = useState<string | null>(null);
 	const [gcodeUrl, setGcodeUrl] = useState<string | null>(null);
 	const [toolpaths, setToolpaths] = useState<number[][][] | null>(null);
+	const [camModelHash, setCamModelHash] = useState<string | null>(null);
+	const [cadModelHash, setCadModelHash] = useState<string | null>(null);
+	const latestCamRunId = useRef<string | null>(null);
 	const [isDownloadingStl, setIsDownloadingStl] = useState(false);
 	const [isDownloadingStep, setIsDownloadingStep] = useState(false);
 	const [isDownloadingDxf, setIsDownloadingDxf] = useState(false);
@@ -318,6 +323,7 @@ export default function HitlWorkspace() {
 	const [activeOperationId, setActiveOperationId] = useState<string>('op1');
 	const [camFeatures, setCamFeatures] = useState<CamFeature[]>([]);
 	const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
+	const [coordValidation, setCoordValidation] = useState<any>(null);
 	const [camSimulation, setCamSimulation] = useState<SimulationState>({ isPlaying: false, progress: 0, speed: 1 });
 	const [camViewport, setCamViewport] = useState<ViewportSettings>({ showStock: false, showTool: true, showToolpath: true, showOrigin: true, showAxes: true });
 	const [controller, setController] = useState<string>('grbl');
@@ -421,6 +427,18 @@ export default function HitlWorkspace() {
 
 		return () => clearTimeout(timeout);
 	}, [pythonScript]);
+
+	useEffect(() => {
+		if (toolpaths) {
+			setCamSimulation(prev => ({
+				...prev,
+				segments: toolpaths,
+				progress: 0,
+				activeSegmentIndex: 0,
+				isPlaying: false
+			}));
+		}
+	}, [toolpaths]);
 
 	const handleStepUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
 		const file = event.target.files?.[0];
@@ -638,16 +656,20 @@ export default function HitlWorkspace() {
 			if (payload.artifacts?.stl_url) {
 				setStlUrl(resolveModelUrl(payload.artifacts.stl_url, Date.now().toString()));
 				setWorkflowStage(prev => (prev === 'blueprint' || prev === 'extraction' ? 'cad' : prev));
+				
+				// Clear CAM state on new CAD model
+				setCamModelHash(null);
+				setCadModelHash(payload.artifacts?.model_hash || null);
+				setToolpaths(null);
+				setCamFeatures([]);
+				setCamOperations([]);
 			}
 			if (payload.artifacts?.step_url) setStepUrl(resolveModelUrl(payload.artifacts.step_url));
 			if (payload.artifacts?.dxf_url) setDxfUrl(resolveModelUrl(payload.artifacts.dxf_url));
-			// NOTE: G-code from normal sync is intentionally NOT displayed.
-			// The user must explicitly click "Generate G-Code" after configuring CAM settings.
 			if (payload.artifacts?.toolpaths) setToolpaths(payload.artifacts.toolpaths);
 			if (payload.artifacts?.annotations) {
 				setAnnotations(payload.artifacts.annotations);
 
-				// Fetch features if URL is present
 				const annotationsAny = payload.artifacts.annotations as any;
 				const featuresUrl = annotationsAny.cam_features_url as string | undefined;
 				if (featuresUrl) {
@@ -722,6 +744,7 @@ export default function HitlWorkspace() {
 			if (payload.artifacts?.step_url) setStepUrl(resolveModelUrl(payload.artifacts.step_url));
 			if (payload.artifacts?.dxf_url) setDxfUrl(resolveModelUrl(payload.artifacts.dxf_url));
 			if (payload.artifacts?.toolpaths) setToolpaths(payload.artifacts.toolpaths);
+			if (payload.artifacts?.model_hash) setCadModelHash(payload.artifacts.model_hash);
 
 			// NOW store G-code since user explicitly requested it
 			if (payload.artifacts?.gcode_content) {
@@ -756,6 +779,103 @@ export default function HitlWorkspace() {
 			toast.error('G-Code generation failed', { description: errorText });
 		} finally {
 			setIsGeneratingGcode(false);
+		}
+	}
+
+	async function handleGenerateToolpaths() {
+		if (!sessionId) {
+			toast.error('No session ID available.');
+			return;
+		}
+
+		setIsGenerating(true);
+		setStatusText('Generating toolpaths...');
+
+		const runId = makeId('cam_run');
+		latestCamRunId.current = runId;
+
+		try {
+			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+			const res = await fetch(`${backendUrl}/api/v1/cam/generate-toolpaths`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					session_id: sessionId,
+					job_id: sessionId,
+					cam_run_id: runId,
+					setup: camSetup,
+					tools: camTools,
+					operations: camOperations,
+				})
+			});
+
+			if (!res.ok) {
+				const errorMsg = await readErrorFromResponse(res, 'Toolpath generation failed.');
+				throw new Error(errorMsg);
+			}
+
+			const data = await res.json();
+			if (latestCamRunId.current === runId) {
+				setToolpaths(data.toolpaths || []);
+				if (data.operations) {
+					setCamOperations(data.operations);
+				}
+				if (data.coordinate_validation) {
+					setCoordValidation(data.coordinate_validation);
+				}
+				if (data.camModelHash) {
+					setCamModelHash(data.camModelHash);
+				}
+				setStatusText('Toolpaths generated successfully.');
+				toast.success('Toolpaths generated');
+			}
+		} catch (error) {
+			if (latestCamRunId.current === runId) {
+				const errorText = error instanceof Error ? error.message : String(error);
+				setStatusText(`Toolpath generation failed: ${errorText}`);
+				toast.error('Toolpath generation failed', { description: errorText });
+				setToolpaths(null);
+			}
+		} finally {
+			if (latestCamRunId.current === runId) {
+				setIsGenerating(false);
+			}
+		}
+	}
+
+	async function handleAnalyzeFeatures() {
+		if (!sessionId) {
+			toast.error('No 3D model available to analyze.');
+			return;
+		}
+		
+		setIsGenerating(true);
+		setStatusText('Analyzing 3D geometry for features...');
+		
+		try {
+			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+			const res = await fetch(`${backendUrl}/api/v1/cam/analyze`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ session_id: sessionId })
+			});
+			
+			if (!res.ok) {
+				const errorMsg = await readErrorFromResponse(res, 'Feature analysis failed.');
+				throw new Error(errorMsg);
+			}
+			
+			const data = await res.json();
+			setCamFeatures(data.features || []);
+			setStatusText('Feature analysis complete.');
+			toast.success('Features analyzed successfully');
+			setWorkflowStage('cam');
+		} catch (error) {
+			const errorText = error instanceof Error ? error.message : String(error);
+			setStatusText(`Analysis failed: ${errorText}`);
+			toast.error('Analysis failed', { description: errorText });
+		} finally {
+			setIsGenerating(false);
 		}
 	}
 
@@ -831,8 +951,9 @@ export default function HitlWorkspace() {
 			newOperations.push({
 				id: `op_auto_${Date.now()}_${index}`,
 				name: `${feat.type.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())} Operation`,
-				type: feat.recommendedOperation,
+				type: feat.recommendedOperation as OperationType,
 				toolId: recommendedToolId,
+				feature_id: feat.id,
 				parameters: toolParams
 			});
 		}
@@ -1075,10 +1196,12 @@ export default function HitlWorkspace() {
 													onDownloadGcode={() => { }}
 													isSharing={false}
 													onShare={undefined}
-													toolpaths={[]}
+													toolpaths={toolpaths as any}
 													showToolpaths={camViewport.showToolpath}
 													camFeatures={camFeatures}
 													activeFeatureId={activeFeatureId}
+													simulationState={camSimulation}
+													camTools={camTools}
 													headerActions={
 														<div className="flex items-center gap-2">
 															<div className="relative">
@@ -1152,8 +1275,8 @@ export default function HitlWorkspace() {
 													{stlUrl ? <StlMesh url={stlUrl} onGeometryReady={() => { }} /> : null}
 												</CadViewport>
 											)}
-											{/* Top Header Overlay with CAM Metrics */}
-											<div className="absolute top-16 left-0 right-0 pointer-events-none z-30 flex flex-col p-4 gap-4">
+											{/* Bottom Overlay with CAM Metrics */}
+											<div className="absolute bottom-4 left-0 right-0 pointer-events-none z-30 flex flex-col p-4 gap-4">
 												{/* CAM Metrics Pill */}
 												{(workflowStage === 'cam' || workflowStage === 'gcode') && (
 													<div className="flex items-center justify-center pointer-events-auto mt-2">
@@ -1161,7 +1284,7 @@ export default function HitlWorkspace() {
 															{/* Glowing blue underline */}
 															<div className="absolute -bottom-[1px] left-8 right-8 h-[2px] bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,1)] z-10" />
 
-															<div className="flex items-center gap-8 bg-[#030408]/90 backdrop-blur-md border border-[#1e293b] px-8 py-3 rounded-xl shadow-2xl relative z-0">
+															<div className="flex items-center gap-8 bg-[#030408]/40 backdrop-blur-md border border-[#1e293b]/50 px-8 py-3 rounded-xl shadow-2xl relative z-0">
 
 																<div className="flex flex-col gap-1 items-start min-w-[80px]">
 																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
@@ -1296,6 +1419,18 @@ export default function HitlWorkspace() {
 												controller={controller}
 												setController={setController}
 												pythonScript={pythonScript}
+												camSummaryElement={
+													(workflowStage === 'cam' || workflowStage === 'gcode') ? (
+														<CamSummaryPanel 
+															setup={camSetup as any} 
+															tools={camTools} 
+															operations={camOperations}
+															features={camFeatures}
+															coordValidation={coordValidation}
+															onClickSection={() => {}}
+														/>
+													) : undefined
+												}
 											/>
 										</div>
 									</Panel>
@@ -1320,6 +1455,7 @@ export default function HitlWorkspace() {
 								camTools={camTools}
 								setCamTools={setCamTools}
 								onGenerateGCode={handleGenerateGCode}
+								onGenerateToolpaths={handleGenerateToolpaths}
 								isGeneratingGcode={isGeneratingGcode}
 								gcodeContent={gcodeContent}
 								camFeatures={camFeatures}
@@ -1327,12 +1463,14 @@ export default function HitlWorkspace() {
 								activeFeatureId={activeFeatureId}
 								setActiveFeatureId={setActiveFeatureId}
 								onAutoGenerateOperations={handleAutoGenerateOperations}
+								onRunFeatureRecognition={handleAnalyzeFeatures}
 								camOperations={camOperations}
 								setCamOperations={setCamOperations}
 								activeOperationId={activeOperationId}
 								setActiveOperationId={setActiveOperationId}
 								camSimulation={camSimulation}
 								setCamSimulation={setCamSimulation}
+								coordValidation={coordValidation}
 							/>
 						</div>
 					</Panel>

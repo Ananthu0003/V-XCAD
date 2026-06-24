@@ -37,9 +37,9 @@ class BasePostProcessor:
         tool = op.get("tool", {})
         
         if params.get("feedRate", 0) <= 0:
-            raise ValueError(f"Operation '{op.get('name')}' must have a feed rate > 0")
+            params["feedRate"] = 1000.0
         if params.get("spindleSpeed", 0) <= 0:
-            raise ValueError(f"Operation '{op.get('name')}' must have spindle speed > 0")
+            params["spindleSpeed"] = 12000
             
         tool_num_raw = tool.get("number", 0)
         tool_num = 0
@@ -113,46 +113,44 @@ class BasePostProcessor:
         return lines
 
     def generate_gcode(self, toolpaths_or_operations: List[Any]) -> str:
-        # Check if legacy flat list was passed
-        if toolpaths_or_operations and isinstance(toolpaths_or_operations[0], list):
-            self.operations[0]["toolpaths"] = toolpaths_or_operations
-            ops = self.operations
-        else:
-            ops = toolpaths_or_operations
+        ops = toolpaths_or_operations
 
         self.gcode_lines = self.format_program_header()
         
-        # Determine Work Coordinate System
         wcs = self.setup.get("wcs", "G54")
         self.gcode_lines.append(f"{wcs} (WORK OFFSET)")
 
         current_tool = -1
 
         for op in ops:
-            self.validate_operation(op)
-            tool = op.get("tool", {})
+            if op.get('status') == 'error':
+                self.gcode_lines.append(f"(ERROR: Operation skipped due to validation failure)")
+                continue
+                
+            tool_id = op.get("toolId", op.get("tool_id", "T1"))
             params = op.get("parameters", {})
-            safe_z = params.get("safeHeight", 50.0)
+            safe_heights = op.get("safe_heights", {})
+            safe_z = safe_heights.get("clearance", 50.0)
             
-            tool_num_raw = tool.get("number", 1)
             tool_number = 1
-            if isinstance(tool_num_raw, str):
+            if isinstance(tool_id, str):
                 try:
-                    tool_number = int(tool_num_raw.replace('T', '').replace('t', '').strip())
+                    num_part = "".join(c for c in tool_id if c.isdigit())
+                    if num_part:
+                        tool_number = int(num_part)
                 except ValueError:
                     pass
-            elif isinstance(tool_num_raw, (int, float)):
-                tool_number = int(tool_num_raw)
                 
             if tool_number != current_tool:
                 self.gcode_lines.extend(self.format_tool_change(
                     tool_number=tool_number, 
-                    length_offset=tool.get("lengthOffset", tool_number), 
+                    length_offset=tool_number, 
                     safe_z=safe_z
                 ))
                 current_tool = tool_number
             
-            self.gcode_lines.append(f"({op.get('name').upper()})")
+            op_name = op.get('type', 'UNKNOWN').upper()
+            self.gcode_lines.append(f"({op_name})")
             
             self.gcode_lines.extend(self.format_spindle_coolant(
                 rpm=params.get("spindleSpeed", 12000), 
@@ -162,24 +160,46 @@ class BasePostProcessor:
             feed_rate = params.get("feedRate", 1000.0)
             plunge_rate = params.get("plungeRate", 300.0)
 
-            for idx, path in enumerate(op.get("toolpaths", [])):
-                if not path:
-                    continue
+            for path_segment in op.get("toolpaths", []):
+                start_line_idx = len(self.gcode_lines)
                 
-                # Rapid to start pos above Z
-                start_x, start_y, start_z = path[0]
-                self.gcode_lines.append(self.format_rapid_move(x=start_x, y=start_y, z=safe_z))
-                
-                # Plunge
-                self.gcode_lines.append(self.format_linear_feed(z=start_z, feed=plunge_rate))
-                
-                # Cutting Feed
-                for pt in path[1:]:
-                    pt_x, pt_y, pt_z = pt
-                    self.gcode_lines.append(self.format_linear_feed(x=pt_x, y=pt_y, z=pt_z, feed=feed_rate))
-                
-                # Retract
-                self.gcode_lines.append(self.format_rapid_move(x=pt_x, y=pt_y, z=safe_z))
+                if isinstance(path_segment, list):
+                    # Legacy format: list of coordinates (x,y,z)
+                    if not path_segment:
+                        continue
+                        
+                    start_x, start_y, start_z = path_segment[0]
+                    self.gcode_lines.append(self.format_rapid_move(x=start_x, y=start_y, z=safe_z))
+                    self.gcode_lines.append(self.format_linear_feed(z=start_z, feed=plunge_rate))
+                    
+                    for pt in path_segment[1:]:
+                        pt_x, pt_y, pt_z = pt
+                        self.gcode_lines.append(self.format_linear_feed(x=pt_x, y=pt_y, z=pt_z, feed=feed_rate))
+                        
+                    self.gcode_lines.append(self.format_rapid_move(x=pt_x, y=pt_y, z=safe_z))
+                else:
+                    # New format: dict (ToolpathSegment)
+                    seg_type = path_segment.get("type")
+                    end_pt = path_segment.get("end", {})
+                    
+                    x = end_pt.get("x")
+                    y = end_pt.get("y")
+                    z = end_pt.get("z")
+                    
+                    if seg_type == "rapid":
+                        self.gcode_lines.append(self.format_rapid_move(x=x, y=y, z=z))
+                    elif seg_type == "plunge":
+                        self.gcode_lines.append(self.format_linear_feed(x=x, y=y, z=z, feed=plunge_rate))
+                    elif seg_type == "cut":
+                        self.gcode_lines.append(self.format_linear_feed(x=x, y=y, z=z, feed=feed_rate))
+                    elif seg_type == "retract":
+                        self.gcode_lines.append(self.format_rapid_move(x=x, y=y, z=z))
+                    else:
+                        self.gcode_lines.append(self.format_linear_feed(x=x, y=y, z=z, feed=feed_rate))
+                    
+                    end_line_idx = len(self.gcode_lines) - 1
+                    path_segment["gcodeLineStart"] = start_line_idx + 1 # 1-indexed for text editors typically
+                    path_segment["gcodeLineEnd"] = end_line_idx + 1
         
         self.gcode_lines.extend(self.format_program_footer())
         return "\n".join(self.gcode_lines)

@@ -102,11 +102,7 @@ export default function SharedModelPage({ params }: { params: Promise<{ id: stri
 			
 			{/* ── 3D Viewport Background ── */}
 			<div className="absolute inset-0 z-0">
-				{/* Ambient background glows (adaptable to light/dark via opacity) */}
-				<div className="absolute inset-0 pointer-events-none opacity-50 dark:opacity-100">
-					<div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 dark:bg-blue-600/10 rounded-full blur-[128px]" />
-					<div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyan-500/10 dark:bg-cyan-600/5 rounded-full blur-[128px]" />
-				</div>
+				{/* Ambient background glows removed for a cleaner CAD look */}
 
 				{session.stlUrl ? (
 					<CanvasErrorBoundary

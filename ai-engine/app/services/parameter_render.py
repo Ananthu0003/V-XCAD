@@ -40,6 +40,7 @@ import re
 from pathlib import Path
 from functools import reduce
 import operator
+import uuid
 import faulthandler
 faulthandler.enable()
 
@@ -96,49 +97,91 @@ except ImportError:
 _orig_chamfer = chamfer
 _orig_fillet  = fillet
 
-def _safe_chamfer(objects_or_edges, length, length2=None, angle=None, mode=None):
-    # Retry chamfer with a smaller value if the geometry rejects it.
-    kwargs = {}
-    if length2 is not None: kwargs['length2'] = length2
-    if angle    is not None: kwargs['angle']   = angle
-    if mode     is not None: kwargs['mode']    = mode
+def _safe_chamfer(*args, **kwargs):
+    if 'edges' in kwargs:
+        if args:
+            # If args exists, just pop edges and hope it works
+            kwargs['objects'] = kwargs.pop('edges')
+        else:
+            args = (kwargs.pop('edges'),)
+            
+    # Try to extract the primary value to shrink during retries
+    length = kwargs.get('length')
+    if length is None and len(args) >= 2:
+        length = args[1]
+        
     v = length
     for _ in range(5):
         try:
-            return _orig_chamfer(objects_or_edges, v, **kwargs)
+            if len(args) >= 2:
+                new_args = (args[0], v) + args[2:]
+                return _orig_chamfer(*new_args, **kwargs)
+            else:
+                kwargs['length'] = v
+                return _orig_chamfer(*args, **kwargs)
         except (ValueError, Exception) as exc:
-            if "chamfer" in str(exc).lower() or "smaller" in str(exc).lower():
+            msg = str(exc).lower()
+            if "chamfer" in msg or "smaller" in msg:
                 v = v / 2.0
                 if v < 1e-4:
                     print("[chamfer] Skipped - value too small after retries.")
                     return
+            elif "findfromkey" in msg or "nosuchobject" in msg or "chfi3d" in msg or "stdfail" in msg or "brep_api" in msg or "invalid" in msg:
+                print(f"[chamfer] Skipped - stale edge reference or topological failure.")
+                return
             else:
                 raise
     print("[chamfer] Skipped after 5 retries.")
 
-def _safe_fillet(objects_or_edges, radius, mode=None):
-    # Retry fillet with a smaller value if the geometry rejects it.
-    kwargs = {}
-    if mode is not None: kwargs['mode'] = mode
+def _safe_fillet(*args, **kwargs):
+    if 'edges' in kwargs:
+        if args:
+            kwargs['objects'] = kwargs.pop('edges')
+        else:
+            args = (kwargs.pop('edges'),)
+
+    radius = kwargs.get('radius')
+    if radius is None and len(args) >= 2:
+        radius = args[1]
+
     v = radius
     for _ in range(5):
         try:
-            return _orig_fillet(objects_or_edges, v, **kwargs)
+            if len(args) >= 2:
+                new_args = (args[0], v) + args[2:]
+                return _orig_fillet(*new_args, **kwargs)
+            else:
+                kwargs['radius'] = v
+                return _orig_fillet(*args, **kwargs)
         except (ValueError, Exception) as exc:
-            if "fillet" in str(exc).lower() or "smaller" in str(exc).lower():
+            msg = str(exc).lower()
+            if "fillet" in msg or "smaller" in msg:
                 v = v / 2.0
                 if v < 1e-4:
                     print("[fillet] Skipped - value too small after retries.")
                     return
+            elif "findfromkey" in msg or "nosuchobject" in msg or "chfi3d" in msg or "stdfail" in msg or "brep_api" in msg or "invalid" in msg:
+                print(f"[fillet] Skipped - stale edge reference or topological failure.")
+                return
             else:
                 raise
     print("[fillet] Skipped after 5 retries.")
 
 chamfer = _safe_chamfer
 fillet  = _safe_fillet
+
+_orig_rectangle = Rectangle
+def _safe_rectangle(*args, **kwargs):
+    if 'length' in kwargs and 'height' not in kwargs:
+        kwargs['height'] = kwargs.pop('length')
+    return _orig_rectangle(*args, **kwargs)
+
+Rectangle = _safe_rectangle
+
 # Also patch the module object so `bd.chamfer(...)` / `bd.fillet(...)` are covered
 _bd123.chamfer = _safe_chamfer
 _bd123.fillet  = _safe_fillet
+_bd123.Rectangle = _safe_rectangle
 # ---------------------------------------------------------------------------
 
 def _coerce_params(value):
@@ -199,6 +242,10 @@ def run():
         "__name__": "__main__",
         "math": math,
     }
+    
+    # Auto-inject all parameters directly into the namespace 
+    # to protect against LLMs forgetting to unpack them
+    ns.update(params)
 
     try:
         exec("from build123d import *", ns)
@@ -214,12 +261,31 @@ def run():
     elif hasattr(build123d, "Edge"):
         build123d.Edge.start = property(lambda self: self @ 0)
         build123d.Edge.end = property(lambda self: self @ 1)
+        
+    if hasattr(build123d, "GeomType"):
+        build123d.GeomType.ARC = build123d.GeomType.CIRCLE
+
+    if hasattr(build123d, "Plane"):
+        _orig_plane_init = build123d.Plane.__init__
+        def _safe_plane_init(self, *args, **kwargs):
+            if "normal" in kwargs:
+                kwargs["z_dir"] = kwargs.pop("normal")
+            if "z_dir" in kwargs and not args and "origin" not in kwargs:
+                kwargs["origin"] = (0, 0, 0)
+            return _orig_plane_init(self, *args, **kwargs)
+        build123d.Plane.__init__ = _safe_plane_init
 
     if hasattr(build123d, "ShapeList") and hasattr(build123d.ShapeList, "filter_by_position"):
         _orig_filter_pos = build123d.ShapeList.filter_by_position
-        def safe_filter_by_position(self, axis, minimum, maximum=None, *args, **kwargs):
+        def safe_filter_by_position(self, axis, minimum=None, maximum=None, *args, **kwargs):
+            if minimum is None:
+                # LLM likely hallucinated filter_by_position(Axis.Z) instead of filter_by(Axis.Z)
+                if hasattr(self, "filter_by"):
+                    return self.filter_by(axis)
+                return self
             if maximum is None:
                 maximum = minimum
+            kwargs.pop("tolerance", None)
             return _orig_filter_pos(self, axis, minimum, maximum, *args, **kwargs)
         build123d.ShapeList.filter_by_position = safe_filter_by_position
 
@@ -243,7 +309,26 @@ def run():
             if hasattr(self, "part") and hasattr(self.part, "sketch"):
                 return self.part.sketch
             return None
+        build123d.BuildPart.sketch = property(_get_active_sketch)
+
+        def _buildpart_fillet(self, *args, **kwargs):
+            return build123d.fillet(*args, **kwargs)
+        build123d.BuildPart.fillet = _buildpart_fillet
+
+        def _buildpart_chamfer(self, *args, **kwargs):
+            return build123d.chamfer(*args, **kwargs)
+        build123d.BuildPart.chamfer = _buildpart_chamfer
     if hasattr(build123d, "ShapeList"):
+        _orig_getitem = build123d.ShapeList.__getitem__
+        def _safe_getitem(self, index):
+            try:
+                return _orig_getitem(self, index)
+            except IndexError:
+                # Return a dummy edge so the script doesn't crash.
+                # Safe fillet/chamfer wrappers will ignore the dummy edge.
+                return build123d.Edge.make_line((0,0,0), (0,0,0.001))
+        build123d.ShapeList.__getitem__ = _safe_getitem
+
         def _shapelist_fillet(self, radius, *args, **kwargs):
             return build123d.fillet(self, radius, *args, **kwargs)
         build123d.ShapeList.fillet = _shapelist_fillet
@@ -251,6 +336,15 @@ def run():
         def _shapelist_chamfer(self, length, length2=None, *args, **kwargs):
             return build123d.chamfer(self, length, length2, *args, **kwargs)
         build123d.ShapeList.chamfer = _shapelist_chamfer
+
+    if hasattr(build123d, "Shape"):
+        def _shape_fillet(self, radius, *args, **kwargs):
+            return build123d.fillet(self, radius, *args, **kwargs)
+        build123d.Shape.fillet = _shape_fillet
+
+        def _shape_chamfer(self, length, length2=None, *args, **kwargs):
+            return build123d.chamfer(self, length, length2, *args, **kwargs)
+        build123d.Shape.chamfer = _shape_chamfer
 
     # Patch boolean operations to ignore topological failures
     def _make_safe_bool(orig):
@@ -447,7 +541,7 @@ def run():
             raise
         except Exception as exc:
             # In validation mode, propagate real geometry failures so the AI can see and fix them
-            if not _VALIDATION_MODE and any(x in str(exc).lower() for x in ["invalid", "empty", "degenerate", "tolerance", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+            if not _VALIDATION_MODE and any(x in str(exc).lower() for x in ["topods_frozenshape", "builder::add", "invalid", "empty", "degenerate", "tolerance", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
                 return objs
             raise
     build123d.fillet = smart_fillet
@@ -471,7 +565,7 @@ def run():
                 return None
             raise
         except Exception as exc:
-            if not _VALIDATION_MODE and any(x in str(exc).lower() for x in ["invalid", "empty", "degenerate", "tolerance", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+            if not _VALIDATION_MODE and any(x in str(exc).lower() for x in ["topods_frozenshape", "builder::add", "invalid", "empty", "degenerate", "tolerance", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
                 return objs
             raise
     build123d.chamfer = smart_chamfer
@@ -549,7 +643,7 @@ def run():
             return _orig_extrude(*new_args, **kwargs)
         except Exception as exc:
             msg = str(exc).lower()
-            if not _VALIDATION_MODE and any(x in msg for x in ["empty", "invalid", "degenerate", "self-intersect", "zero norm", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+            if not _VALIDATION_MODE and any(x in msg for x in ["either amount or until", "face or sketch must be provided", "empty", "invalid", "degenerate", "self-intersect", "zero norm", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
                 return new_args[0] if new_args else kwargs.get("to_extrude")
             raise
     build123d.extrude = safe_extrude
@@ -572,6 +666,77 @@ def run():
             return _orig_centerarc(*args, **kwargs)
         build123d.CenterArc = safe_centerarc
         ns["CenterArc"] = safe_centerarc
+
+    if hasattr(build123d, "PolarLocations"):
+        _orig_polarlocations = build123d.PolarLocations.__init__
+        def safe_polarlocations(self, *args, **kwargs):
+            if "angular_span" in kwargs:
+                kwargs["angular_range"] = kwargs.pop("angular_span")
+            plane = kwargs.pop("plane", None)
+            _orig_polarlocations(self, *args, **kwargs)
+            if plane is not None and hasattr(self, "local_locations"):
+                self.local_locations = [plane.location * loc for loc in self.local_locations]
+        build123d.PolarLocations.__init__ = safe_polarlocations
+
+    if hasattr(build123d, "GridLocations"):
+        _orig_gridlocations = build123d.GridLocations.__init__
+        def safe_gridlocations(self, *args, **kwargs):
+            plane = kwargs.pop("plane", None)
+            _orig_gridlocations(self, *args, **kwargs)
+            if plane is not None and hasattr(self, "local_locations"):
+                self.local_locations = [plane.location * loc for loc in self.local_locations]
+        build123d.GridLocations.__init__ = safe_gridlocations
+
+    if hasattr(build123d, "HexLocations"):
+        _orig_hexlocations = build123d.HexLocations.__init__
+        def safe_hexlocations(self, *args, **kwargs):
+            plane = kwargs.pop("plane", None)
+            _orig_hexlocations(self, *args, **kwargs)
+            if plane is not None and hasattr(self, "local_locations"):
+                self.local_locations = [plane.location * loc for loc in self.local_locations]
+        build123d.HexLocations.__init__ = safe_hexlocations
+
+    if hasattr(build123d, "Locations"):
+        _orig_locations_init = build123d.Locations.__init__
+        def safe_locations_init(self, *args, **kwargs):
+            if len(args) == 1 and type(args[0]).__name__ in ["PolarLocations", "HexLocations", "GridLocations"]:
+                # The LLM incorrectly nested PolarLocations inside Locations.
+                # Unwrap it into positional arguments so bd.Locations accepts it.
+                args = tuple(list(args[0]))
+            return _orig_locations_init(self, *args, **kwargs)
+        build123d.Locations.__init__ = safe_locations_init
+
+    if hasattr(build123d, "make_hull"):
+        _orig_make_hull = build123d.make_hull
+        def safe_make_hull(*args, **kwargs):
+            try:
+                return _orig_make_hull(*args, **kwargs)
+            except AttributeError:
+                # build123d has a bug where passing Face objects like bd.Circle() crashes
+                # during edge extraction. Fall back to hulling the active context.
+                return _orig_make_hull()
+        build123d.make_hull = safe_make_hull
+        ns["make_hull"] = safe_make_hull
+        build123d.Hull = safe_make_hull
+        ns["Hull"] = safe_make_hull
+
+    if hasattr(build123d, "Plane"):
+        if hasattr(build123d.Plane, "offset"):
+            build123d.Plane.shifted = build123d.Plane.offset
+        if hasattr(build123d.Plane, "x_dir"):
+            build123d.Plane.x_axis = property(lambda self: self.x_dir)
+            build123d.Plane.y_axis = property(lambda self: self.y_dir)
+            build123d.Plane.z_axis = property(lambda self: self.z_dir)
+
+    if hasattr(build123d, "ShapeList"):
+        # Polyfill for hallucinatory .at_coords()
+        def safe_at_coords(self, coords):
+            return self.sort_by_distance(coords)[0:1]
+        build123d.ShapeList.at_coords = safe_at_coords
+
+        # Polyfill for hallucinatory .sort_by_position() which should be .filter_by_position()
+        if hasattr(build123d.ShapeList, "filter_by_position"):
+            build123d.ShapeList.sort_by_position = build123d.ShapeList.filter_by_position
 
     _orig_solid_revolve = build123d.Solid.revolve
     @classmethod
@@ -610,6 +775,8 @@ def run():
         script_content = re.sub(r"Polygon\((.*?),\s*close=(?:True|False)\)", r"Polygon(\1)", script_content)
         script_content = re.sub(r"(\s+)extrude\s*\(\s*", r"\1# extrude_placeholder(", script_content)
         script_content = re.sub(r"# extrude_placeholder", r"extrude", script_content)
+        # Prevent hallucinated GeomType.POINT from crashing by removing the filter entirely
+        script_content = re.sub(r"\.filter_by\(\s*(?:bd|build123d)\.GeomType\.POINT\s*\)", "", script_content)
 
         exec(script_content, ns)
     except Exception:
@@ -700,253 +867,7 @@ def run():
         except Exception as dxf_exc:
             print(f"DXF_WARNING: Could not export DXF: {dxf_exc}")
 
-        # G-code / CAM Generation
-        try:
-            raw_cam_json = os.getenv("CAD_CAM_PARAMETERS_JSON", "{}")
-            cam_params = json.loads(raw_cam_json) if raw_cam_json else {}
-            
-            # The new structured cam_parameters includes:
-            # - setup
-            # - tools
-            # - operations
-            operations_input = cam_params.get("operations", [])
-            tools_input = {t["id"]: t for t in cam_params.get("tools", [])}
-            
-            # Fallback for old flat schema
-            if not operations_input:
-                operations_input = [{
-                    "id": "op_default",
-                    "name": "Default Profile",
-                    "type": cam_params.get("strategy", "profile"),
-                    "toolId": "t1",
-                    "parameters": {
-                        "maxStepdown": float(cam_params.get("stepdown", 1.0)),
-                        "totalDepth": float(cam_params.get("cutting_depth", 5.0)),
-                        "feedRate": float(cam_params.get("feedRate", 1000.0)),
-                        "plungeRate": float(cam_params.get("plungeRate", 300.0)),
-                        "spindleSpeed": 12000,
-                        "coolant": "flood"
-                    }
-                }]
-                tools_input = {
-                    "t1": {
-                        "id": "t1",
-                        "number": 1,
-                        "type": "endmill",
-                        "diameter": float(cam_params.get("tool_diameter", 3.175)),
-                        "flutes": 2,
-                        "lengthOffset": 1
-                    }
-                }
-
-            # Geometry extraction (global for now, ideally per operation)
-            wires = []
-            faces = []
-            if hasattr(shape, "faces"):
-                f_list = shape.faces() if callable(shape.faces) else shape.faces
-                for f in f_list:
-                    try:
-                        n = f.normal_at() if callable(f.normal_at) else f.normal_at
-                        if abs(n.Z) > 0.9:
-                            faces.append(f)
-                    except Exception:
-                        pass
-
-            if faces:
-                for f in faces:
-                    if hasattr(f, "outer_wire"):
-                        wires.append(f.outer_wire())
-                    elif hasattr(f, "wires"):
-                        w_list = f.wires() if callable(f.wires) else f.wires
-                        wires.extend(w_list)
-            else:
-                if hasattr(shape, "wires"):
-                    wires = shape.wires() if callable(shape.wires) else shape.wires
-
-            extracted_paths = []
-            for idx, wire in enumerate(wires):
-                points_3d = []
-                try:
-                    steps = 60
-                    for s in range(steps + 1):
-                        t = s / float(steps)
-                        pt = wire.position_at(t) if hasattr(wire, "position_at") else (wire @ t)
-                        points_3d.append((pt.X, pt.Y, pt.Z))
-                except Exception:
-                    try:
-                        verts = wire.vertices() if callable(wire.vertices) else wire.vertices
-                        points_3d = [(v.X, v.Y, v.Z) for v in verts]
-                        if points_3d:
-                            points_3d.append(points_3d[0])
-                    except Exception:
-                        pass
-                if points_3d:
-                    extracted_paths.append(points_3d)
-
-            # --- Feature Extraction Heuristics ---
-            detected_features = []
-            
-            if not extracted_paths:
-                # Fallback to simple bounding box path if topological extraction fails
-                bbox = shape.bounding_box() if callable(getattr(shape, "bounding_box", None)) else getattr(shape, "bounding_box", None)
-                if bbox:
-                    extracted_paths.append([
-                        (bbox.min.X, bbox.min.Y, bbox.max.Z),
-                        (bbox.max.X, bbox.min.Y, bbox.max.Z),
-                        (bbox.max.X, bbox.max.Y, bbox.max.Z),
-                        (bbox.min.X, bbox.max.Y, bbox.max.Z),
-                        (bbox.min.X, bbox.min.Y, bbox.max.Z)
-                    ])
-                else:
-                    extracted_paths.append([
-                        (-10, -10, 0), (10, -10, 0), (10, 10, 0), (-10, 10, 0), (-10, -10, 0)
-                    ])
-            
-            try:
-                if hasattr(shape, "faces"):
-                    import uuid
-                    faces_list = shape.faces() if callable(shape.faces) else shape.faces
-                    for f in faces_list:
-                        try:
-                            geom_type_raw = f.geom_type() if callable(f.geom_type) else f.geom_type
-                            geom_type = getattr(geom_type_raw, "name", str(geom_type_raw)).upper().split('.')[-1]
-                            if geom_type == "CYLINDER":
-                                # Very basic hole heuristic
-                                center = f.center() if callable(f.center) else f.center
-                                bbox = f.bounding_box() if callable(f.bounding_box) else f.bounding_box
-                                radius = 0
-                                try:
-                                    # build123d cylinder face radius
-                                    edges = f.edges() if callable(f.edges) else f.edges
-                                    for e in edges:
-                                        e_geom_raw = e.geom_type() if callable(e.geom_type) else e.geom_type
-                                        e_geom = getattr(e_geom_raw, "name", str(e_geom_raw)).upper().split('.')[-1]
-                                        if e_geom == "CIRCLE":
-                                            radius = e.radius() if callable(e.radius) else e.radius
-                                            break
-                                except:
-                                    pass
-                                
-                                depth = (bbox.max.Z - bbox.min.Z) if bbox else 10.0
-                                
-                                detected_features.append({
-                                    "id": f"feat_hole_{uuid.uuid4().hex[:6]}",
-                                    "type": "through_hole",
-                                    "dimensions": { "diameter": round((radius * 2) if radius > 0 else 5.0, 2), "depth": round(depth, 2) },
-                                    "location": [round(center.X, 2), round(center.Y, 2), round(center.Z, 2)],
-                                    "status": "machinable",
-                                    "recommendedToolType": "drill",
-                                    "recommendedOperation": "drilling"
-                                })
-                            elif geom_type == "PLANE":
-                                n = f.normal_at() if callable(f.normal_at) else f.normal_at
-                                if abs(n.Z) < 0.1:
-                                    # vertical face, maybe a pocket wall or contour
-                                    pass
-                        except Exception:
-                            pass
-            except Exception as feat_exc:
-                print(f"FEATURE_WARNING: {feat_exc}")
-
-            # Ensure we have at least one contour feature for the overall part
-            if not detected_features:
-                detected_features.append({
-                    "id": "feat_contour_001",
-                    "type": "contour",
-                    "dimensions": { "depth": 10.0 },
-                    "location": [0, 0, 0],
-                    "status": "machinable",
-                    "recommendedToolType": "flat_end_mill",
-                    "recommendedOperation": "2d_contour"
-                })
-
-            with open(out_dir / f"{basename}_features.json", "w") as f:
-                json.dump(detected_features, f)
-            # -------------------------------------
-
-
-            # Generate structured operations output
-            generated_operations = []
-            total_cutting_dist = 0.0
-            total_plunge_dist = 0.0
-            total_gcode_lines = 5 # header/footer overhead
-
-            all_toolpaths = [] # for legacy visualizer
-
-            for op in operations_input:
-                op_params = op.get("parameters", {})
-                stepdown = float(op_params.get("maxStepdown", 1.0))
-                cutting_depth = float(op_params.get("totalDepth", 5.0))
-                feed_rate = float(op_params.get("feedRate", 1000.0))
-                plunge_rate = float(op_params.get("plungeRate", 300.0))
-                
-                op_toolpaths = []
-                for points_3d in extracted_paths:
-                    z_coords = [pt[2] for pt in points_3d]
-                    z_min, z_max = min(z_coords), max(z_coords)
-                    is_xy_planar = (z_max - z_min) <= 0.1
-                    
-                    if is_xy_planar:
-                        num_passes = max(1, int(math.ceil(cutting_depth / stepdown)))
-                        for pass_idx in range(num_passes):
-                            current_z = -min((pass_idx + 1) * stepdown, cutting_depth)
-                            current_pass_path = []
-                            pass_dist = 0.0
-                            prev_pt = None
-                            for pt_x, pt_y, _ in points_3d:
-                                current_pass_path.append((pt_x, pt_y, current_z))
-                                if prev_pt is not None:
-                                    pass_dist += math.dist((prev_pt[0], prev_pt[1]), (pt_x, pt_y))
-                                prev_pt = (pt_x, pt_y)
-                                total_gcode_lines += 1
-
-                            op_toolpaths.append(current_pass_path)
-                            total_cutting_dist += pass_dist
-                            total_plunge_dist += stepdown
-                            total_gcode_lines += 2
-                    else:
-                        current_pass_path = []
-                        pass_dist = 0.0
-                        prev_pt = None
-                        for pt_x, pt_y, pt_z in points_3d:
-                            current_pass_path.append((pt_x, pt_y, pt_z))
-                            if prev_pt is not None:
-                                pass_dist += math.dist(prev_pt, (pt_x, pt_y, pt_z))
-                            prev_pt = (pt_x, pt_y, pt_z)
-                            total_gcode_lines += 1
-                            
-                        op_toolpaths.append(current_pass_path)
-                        total_cutting_dist += pass_dist
-                        total_gcode_lines += 2
-
-                tool_info = tools_input.get(op.get("toolId"), {})
-                generated_operations.append({
-                    "name": op.get("name", "Operation"),
-                    "type": op.get("type", "profile"),
-                    "tool": tool_info,
-                    "parameters": op_params,
-                    "toolpaths": op_toolpaths
-                })
-                all_toolpaths.extend(op_toolpaths)
-
-            with open(out_dir / f"{basename}_toolpaths.json", "w") as f:
-                json.dump(all_toolpaths, f)
-
-            with open(out_dir / f"{basename}_operations.json", "w") as f:
-                json.dump(generated_operations, f)
-
-            machining_time = total_cutting_dist / 1000.0 + total_plunge_dist / 300.0
-            
-            if "cam_stats" not in annotations:
-                annotations["cam_stats"] = {
-                    "estimated_time_mins": machining_time,
-                    "gcode_lines": total_gcode_lines,
-                    "cutting_distance_mm": total_cutting_dist
-                }
-            annotations["cam_features_url"] = f"/outputs/{basename}_features.json"
-
-        except Exception as cam_exc:
-            print(f"CAM_WARNING: Could not generate G-code/toolpaths: {cam_exc}")
+        # G-code / CAM Generation (Removed, moved to CamPipelineManager)
 
         try:
             with open(out_dir / f"{basename}_annotations.json", "w") as f:
@@ -1004,10 +925,16 @@ class ParameterRenderService:
             env["OUTPUT_BASENAME"] = "val_check"
             env["VALIDATION_MODE"] = "1"   # ← key: activate strict geometry checking
 
+            python_exe = sys.executable
+            if os.path.exists(".venv/Scripts/python.exe"):
+                python_exe = os.path.abspath(".venv/Scripts/python.exe")
+            elif os.path.exists(".venv/bin/python"):
+                python_exe = os.path.abspath(".venv/bin/python")
+
             try:
                 try:
                     proc = await asyncio.create_subprocess_exec(
-                        sys.executable,
+                        python_exe,
                         "harness.py",
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
@@ -1028,7 +955,7 @@ class ParameterRenderService:
                 except NotImplementedError:
                     def _run_sync():
                         return subprocess.run(
-                            [sys.executable, "harness.py"],
+                            [python_exe, "harness.py"],
                             capture_output=True,
                             text=True,
                             cwd=temp_dir,
@@ -1100,10 +1027,16 @@ class ParameterRenderService:
                 env["OUTPUT_DIR"] = str(self.outputs_dir)
                 env["OUTPUT_BASENAME"] = output_basename
 
+                python_exe = sys.executable
+                if os.path.exists(".venv/Scripts/python.exe"):
+                    python_exe = os.path.abspath(".venv/Scripts/python.exe")
+                elif os.path.exists(".venv/bin/python"):
+                    python_exe = os.path.abspath(".venv/bin/python")
+
                 try:
                     try:
                         proc = await asyncio.create_subprocess_exec(
-                            sys.executable,
+                            python_exe,
                             "harness.py",
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
@@ -1132,7 +1065,7 @@ class ParameterRenderService:
                     except NotImplementedError:
                         def run_sync():
                             return subprocess.run(
-                                [sys.executable, "harness.py"],
+                                [python_exe, "harness.py"],
                                 capture_output=True,
                                 text=True,
                                 cwd=temp_dir,
@@ -1201,44 +1134,21 @@ class ParameterRenderService:
 
         gcode_content = None
         toolpaths = None
-        if toolpaths_path.exists():
-            try:
-                with open(toolpaths_path, "r") as f:
-                    toolpaths = json.load(f)
-                    
-                # Load the generated operations
-                ops_path = self.outputs_dir / f"{output_basename}_operations.json"
-                generated_operations = []
-                if ops_path.exists():
-                    with open(ops_path, "r") as f:
-                        generated_operations = json.load(f)
-                    
-                # Generate G-code using post processors
-                if toolpaths is not None and generated_operations is not None:
-                    from app.cam.posts import get_post_processor
-                    controller = cam_parameters.get("controller", "iso") if cam_parameters else "iso"
-                    
-                    post_data = {
-                        "setup": (cam_parameters or {}).get("setup", {}),
-                        "operations": generated_operations
-                    }
-                    post = get_post_processor(controller, post_data)
-                    gcode_content = post.generate_gcode(post_data["operations"])
-                    
-                    with open(gcode_path, "w") as fg:
-                        fg.write(gcode_content)
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                print(f"Error during post processing: {e}")
+        features = None
+        operations = None
+        
+        # Calculate modelHash from STEP file
+        import hashlib
+        model_hash = None
+        if step_path.exists():
+            with open(step_path, "rb") as f:
+                model_hash = hashlib.sha256(f.read()).hexdigest()
 
         return {
+            "modelHash": model_hash,
             "stl_path": str(stl_path),
             "step_path": str(step_path),
             "dxf_path": str(dxf_path) if dxf_path.exists() else None,
-            "gcode_path": str(gcode_path) if gcode_path.exists() else None,
-            "gcode_content": gcode_content,
-            "toolpaths": toolpaths,
             "annotations": annotations,
         }
 
@@ -1275,7 +1185,7 @@ class ParameterRenderService:
             except Exception:
                 pass
 
-        return "Geometry engine failed. Review script logic and parameter values."
+        return f"Geometry engine failed. Review script logic and parameter values. \n\nRAW LOG:\n{log}"
 
     def clear_outputs(self, prefix: Optional[str] = None) -> None:
         if not self.outputs_dir.exists():

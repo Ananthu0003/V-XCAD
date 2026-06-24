@@ -94,7 +94,7 @@ export function GCodeViewer({ content, onDownload }: GCodeViewerProps) {
 	return (
 		<div className="flex flex-col gap-4 h-full">
 			{/* Stats Bar */}
-			<div className="flex items-center gap-6 px-4 py-3 bg-[#050814] rounded-xl border border-white/5">
+			<div className="flex items-center gap-6 px-4 py-3 bg-background rounded-xl border border-white/5">
 				<div className="flex items-center gap-2">
 					<Hash className="size-3.5 text-blue-400" />
 					<span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Lines</span>
@@ -140,7 +140,7 @@ export function GCodeViewer({ content, onDownload }: GCodeViewerProps) {
 				)}
 			</div>
 
-			<div className="flex-1 overflow-auto rounded-xl border border-white/5 bg-[#050814]">
+			<div className="flex-1 overflow-auto rounded-xl border border-white/5 bg-background">
 				<table className="w-full border-collapse font-mono text-[11px] leading-[1.8]">
 					<tbody>
 						{lines.map((line, idx) => (

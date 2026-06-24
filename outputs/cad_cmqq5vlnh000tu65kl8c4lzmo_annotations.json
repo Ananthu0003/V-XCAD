@@ -1,0 +1,1 @@
+{"stats": {"bounding_box": {"x": 78.61, "y": 65.0, "z": 118.0}, "volume": 73904.78021753005, "faces": 25, "vertices": 36}, "cam_stats": {"estimated_time_mins": 55.36217584794735, "gcode_lines": 101243, "cutting_distance_mm": 49985.509181280686}, "cam_features_url": "/outputs/cad_cmqq5vlnh000tu65kl8c4lzmo_features.json"}

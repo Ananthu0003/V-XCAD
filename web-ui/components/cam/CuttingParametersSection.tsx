@@ -20,7 +20,7 @@ export function CuttingParametersSection({ parameters, onChange }: CuttingParame
 						type="number"
 						value={parameters.spindleSpeed}
 						onChange={(e) => update('spindleSpeed', parseFloat(e.target.value) || 0)}
-						className="w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/60 px-4 py-3 text-sm text-foreground focus:border-blue-500 focus:outline-none"
+						className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner"
 					/>
 				</div>
 				{/* Coolant */}
@@ -29,7 +29,7 @@ export function CuttingParametersSection({ parameters, onChange }: CuttingParame
 					<select
 						value={parameters.coolant}
 						onChange={(e) => update('coolant', e.target.value as CoolantType)}
-						className="w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/60 px-4 py-3 text-sm text-foreground focus:border-blue-500 focus:outline-none"
+						className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner"
 					>
 						<option value="off">Off</option>
 						<option value="flood">Flood</option>
@@ -46,7 +46,7 @@ export function CuttingParametersSection({ parameters, onChange }: CuttingParame
 						type="number"
 						value={parameters.feedRate}
 						onChange={(e) => update('feedRate', parseFloat(e.target.value) || 0)}
-						className="w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/60 px-4 py-3 text-sm text-foreground focus:border-blue-500 focus:outline-none"
+						className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner"
 					/>
 				</div>
 				{/* Plunge Rate */}
@@ -56,7 +56,7 @@ export function CuttingParametersSection({ parameters, onChange }: CuttingParame
 						type="number"
 						value={parameters.plungeRate}
 						onChange={(e) => update('plungeRate', parseFloat(e.target.value) || 0)}
-						className="w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/60 px-4 py-3 text-sm text-foreground focus:border-blue-500 focus:outline-none"
+						className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner"
 					/>
 				</div>
 			</div>
@@ -89,7 +89,7 @@ export function CuttingParametersSection({ parameters, onChange }: CuttingParame
 						min="1"
 						max="100"
 						onChange={(e) => update('stepoverPercentage', parseFloat(e.target.value) || 40)}
-						className="w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/60 px-4 py-3 text-sm text-foreground focus:border-blue-500 focus:outline-none"
+						className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner"
 					/>
 				</div>
 				{/* Tolerance */}
@@ -100,7 +100,7 @@ export function CuttingParametersSection({ parameters, onChange }: CuttingParame
 						value={parameters.tolerance}
 						step="0.001"
 						onChange={(e) => update('tolerance', parseFloat(e.target.value) || 0.01)}
-						className="w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/60 px-4 py-3 text-sm text-foreground focus:border-blue-500 focus:outline-none"
+						className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner"
 					/>
 				</div>
 			</div>

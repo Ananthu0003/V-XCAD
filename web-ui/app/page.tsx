@@ -20,9 +20,7 @@ export default async function LandingPage() {
 
       {/* ── Ambient background glows ── */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[600px] bg-blue-600/10 rounded-full blur-[160px]" />
-        <div className="absolute top-[60%] left-[10%] w-[500px] h-[500px] bg-cyan-500/5 rounded-full blur-[140px]" />
-        <div className="absolute top-[40%] right-[5%] w-[400px] h-[400px] bg-violet-500/5 rounded-full blur-[120px]" />
+        {/* Ambient background glows removed for a cleaner CAD look */}
         {/* Grid overlay */}
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:48px_48px]" />
       </div>
@@ -82,7 +80,7 @@ export default async function LandingPage() {
         <AnimatedSection delay={0.1} direction="up" duration={0.9}>
           <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight leading-[1.05] mb-6">
             <span className="block text-zinc-900 dark:text-white mb-1">Describe It.</span>
-            <span className="block text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-400 to-blue-500 drop-shadow-[0_0_35px_rgba(59,130,246,0.5)]">Generate It.</span>
+            <span className="block text-primary">Generate It.</span>
             <span className="block text-zinc-900 dark:text-white mt-1">Perfect It.</span>
           </h1>
         </AnimatedSection>
@@ -466,7 +464,7 @@ export default async function LandingPage() {
       {/* ── CTA ── */}
       <section className="relative z-10 py-28 border-t border-black/10 dark:border-white/5 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-blue-100 via-zinc-50 to-zinc-50 dark:from-blue-950/40 dark:via-[#080c10] dark:to-[#080c10]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none" />
+        {/* Glow removed */}
         <AnimatedSection direction="up" duration={0.8} amount={0.2}>
           <div className="max-w-3xl mx-auto px-6 text-center relative z-10">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold tracking-widest mb-8 uppercase">

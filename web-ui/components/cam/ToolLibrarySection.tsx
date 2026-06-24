@@ -97,38 +97,74 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 	return (
 		<div className="flex flex-col gap-4">
 			{/* Selected Tools List */}
-			<div className="flex flex-col gap-2">
+			<div className="flex flex-col gap-3">
 				{selectedTools.map((tool, index) => (
-					<div key={tool.id} className="flex items-center justify-between bg-accent dark:bg-black/40 border border-border dark:border-white/10 p-3 rounded-xl">
-						<div className="flex items-center gap-3">
-							<div className="bg-blue-500/20 text-blue-500 p-2 rounded-lg">
-								<Wrench className="size-4" />
+					<div key={tool.id} className="flex flex-col gap-2 bg-accent dark:bg-black/40 border border-border dark:border-white/10 p-3 rounded-xl">
+						<div className="flex items-center justify-between">
+							<div className="flex items-center gap-3">
+								<div className="bg-blue-500/20 text-blue-500 p-2 rounded-lg">
+									<Wrench className="size-4" />
+								</div>
+								<div className="flex flex-col">
+									<span className="text-xs font-bold text-foreground">
+										{tool.name || `${tool.type.replace('_', ' ')} Ø${tool.diameter}mm`}
+									</span>
+									<span className="text-[10px] text-muted-foreground uppercase">
+										{tool.number} • {tool.flutes} Flutes • {tool.material} {tool.coating ? `• ${tool.coating}` : ''}
+									</span>
+								</div>
 							</div>
-							<div className="flex flex-col">
-								<span className="text-xs font-bold text-foreground">
-									{tool.name || `${tool.type.replace('_', ' ')} Ø${tool.diameter}mm`}
-								</span>
-								<span className="text-[10px] text-muted-foreground uppercase">
-									{tool.number} • {tool.flutes} Flutes • {tool.material} {tool.coating ? `• ${tool.coating}` : ''}
-								</span>
+							<div className="flex items-center gap-2">
+								<button 
+									onClick={() => openModal(index)}
+									className="text-[10px] uppercase font-bold tracking-wider bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg transition-colors border border-white/10"
+								>
+									Change
+								</button>
+								{selectedTools.length > 1 && (
+									<button 
+										onClick={() => removeTool(index)}
+										className="text-xs text-red-500 hover:bg-red-500/10 p-1.5 rounded-lg font-medium transition-colors border border-transparent hover:border-red-500/20"
+										title="Remove Tool"
+									>
+										<Trash2 className="size-4" />
+									</button>
+								)}
 							</div>
 						</div>
-						<div className="flex items-center gap-2">
-							<button 
-								onClick={() => openModal(index)}
-								className="text-xs bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg font-medium transition-colors border border-white/10"
-							>
-								Change
-							</button>
-							{selectedTools.length > 1 && (
-								<button 
-									onClick={() => removeTool(index)}
-									className="text-xs text-red-500 hover:bg-red-500/10 p-1.5 rounded-lg font-medium transition-colors border border-transparent hover:border-red-500/20"
-									title="Remove Tool"
-								>
-									<Trash2 className="size-4" />
-								</button>
-							)}
+						<div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-border/50">
+							<div className="flex flex-col gap-1">
+								<label className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Tool Num</label>
+								<input type="text" value={tool.number} onChange={(e) => {
+									const newTools = [...selectedTools];
+									newTools[index].number = e.target.value;
+									onChange(newTools);
+								}} className="w-full bg-background border border-border rounded px-2 py-1 text-xs" />
+							</div>
+							<div className="flex flex-col gap-1">
+								<label className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Length (H)</label>
+								<input type="text" value={tool.lengthOffsetH || ''} onChange={(e) => {
+									const newTools = [...selectedTools];
+									newTools[index].lengthOffsetH = e.target.value;
+									onChange(newTools);
+								}} placeholder="H01" className="w-full bg-background border border-border rounded px-2 py-1 text-xs" />
+							</div>
+							<div className="flex flex-col gap-1">
+								<label className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Diam (D)</label>
+								<input type="text" value={tool.diameterOffsetD || ''} onChange={(e) => {
+									const newTools = [...selectedTools];
+									newTools[index].diameterOffsetD = e.target.value;
+									onChange(newTools);
+								}} placeholder="D01" className="w-full bg-background border border-border rounded px-2 py-1 text-xs" />
+							</div>
+							<div className="flex flex-col gap-1">
+								<label className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Holder</label>
+								<input type="text" value={tool.holder || ''} onChange={(e) => {
+									const newTools = [...selectedTools];
+									newTools[index].holder = e.target.value;
+									onChange(newTools);
+								}} placeholder="ER32" className="w-full bg-background border border-border rounded px-2 py-1 text-xs" />
+							</div>
 						</div>
 					</div>
 				))}

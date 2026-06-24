@@ -22,6 +22,9 @@ model CadSession {
   user         User?    @relation(fields: [userId], references: [id])
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  camSetups    CamSetup[]
+  simulations  SimulationRun[]
 }
 
 
@@ -115,4 +118,129 @@ model CuttingData {
   updatedAt             DateTime @updatedAt
 
   @@unique([tool_material_id, coating_id, workpiece_material])
+}
+
+model CamSetup {
+  id               String   @id @default(cuid())
+  job_id           String
+  session          CadSession @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  machine_id       String?
+  material_id      String?
+  stock_length     Float?
+  stock_width      Float?
+  stock_height     Float?
+  wcs              String?
+  origin           String?
+  clearance_height Float?
+  retract_height   Float?
+  feed_height      Float?
+  
+  tools            CamTool[]
+  operations       CamOperation[]
+  simulations      SimulationRun[]
+}
+
+model CamTool {
+  id              String   @id @default(cuid())
+  setup_id        String
+  setup           CamSetup @relation(fields: [setup_id], references: [id], onDelete: Cascade)
+  tool_number     Int?
+  tool_name       String?
+  tool_type       String
+  diameter_mm     Float
+  length_mm       Float
+  flute_count     Int
+  tool_material   String?
+  coating         String?
+  holder_type     String?
+  h_offset        Float?
+  d_offset        Float?
+  
+  operations      CamOperation[]
+  segments        ToolpathSegment[]
+}
+
+model CamOperation {
+  id               String   @id @default(cuid())
+  setup_id         String
+  setup            CamSetup @relation(fields: [setup_id], references: [id], onDelete: Cascade)
+  feature_id       String?
+  tool_id          String
+  tool             CamTool  @relation(fields: [tool_id], references: [id])
+  operation_type   String
+  operation_order  Int
+  rpm              Int?
+  feed_rate        Float?
+  plunge_rate      Float?
+  stepdown         Float?
+  stepover         Float?
+  coolant_mode     String?
+  status           String?
+  
+  segments         ToolpathSegment[]
+}
+
+model ToolpathSegment {
+  id                 String   @id @default(cuid())
+  simulation_run_id  String
+  simulation_run     SimulationRun @relation(fields: [simulation_run_id], references: [id], onDelete: Cascade)
+  operation_id       String?
+  operation          CamOperation? @relation(fields: [operation_id], references: [id])
+  tool_id            String?
+  tool               CamTool?      @relation(fields: [tool_id], references: [id])
+  segment_index      Int
+  move_type          String
+  units              String   @default("mm")
+  feed_mode          String?
+  start_x            Float
+  start_y            Float
+  start_z            Float
+  start_i            Float    @default(0)
+  start_j            Float    @default(0)
+  start_k            Float    @default(-1)
+  end_x              Float
+  end_y              Float
+  end_z              Float
+  end_i              Float    @default(0)
+  end_j              Float    @default(0)
+  end_k              Float    @default(-1)
+  center_x           Float?
+  center_y           Float?
+  center_z           Float?
+  radius             Float?
+  feed_rate          Float?
+  rpm                Int?
+  length_mm          Float
+  estimated_time_sec Float
+}
+
+model SimulationRun {
+  id                   String   @id @default(cuid())
+  job_id               String
+  session              CadSession @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  setup_id             String
+  setup                CamSetup   @relation(fields: [setup_id], references: [id], onDelete: Cascade)
+  total_runtime_sec    Float
+  total_distance_mm    Float
+  cutting_distance_mm  Float
+  rapid_distance_mm    Float
+  status               String
+  validation_status    String?
+  validation_errors    Json?
+  validation_warnings  Json?
+  created_at           DateTime @default(now())
+
+  segments             ToolpathSegment[]
+  events               SimulationEvent[]
+}
+
+model SimulationEvent {
+  id                 String   @id @default(cuid())
+  simulation_run_id  String
+  simulation_run     SimulationRun @relation(fields: [simulation_run_id], references: [id], onDelete: Cascade)
+  event_type         String
+  time_sec           Float
+  operation_id       String?
+  tool_id            String?
+  message            String?
 }

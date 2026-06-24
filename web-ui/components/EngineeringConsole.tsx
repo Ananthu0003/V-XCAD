@@ -1,19 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { Settings, Cpu, PenTool, Sliders, PlaySquare, Code2 } from 'lucide-react';
+import { Settings, Cpu, PenTool, Sliders, PlaySquare, Code2, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SetupSection } from './cam/SetupSection';
 import { ToolLibrarySection } from './cam/ToolLibrarySection';
 import { FeatureOverviewSection } from './cam/FeatureOverviewSection';
 import { OperationTreeSection } from './cam/OperationTreeSection';
 import { CuttingParametersSection } from './cam/CuttingParametersSection';
+import { OperationPropertyPanel } from './cam/OperationPropertyPanel';
 import { SimulationControls } from './cam/SimulationControls';
 import { GCodeViewer } from './cam/GCodeViewer';
 import type { SetupSettings, Tool, CamOperation, SimulationState, CamFeature, PostProcessor, OperationType } from '@/types/cam';
 
 interface EngineeringConsoleProps {
   workflowStage: string;
+  setWorkflowStage?: (v: string) => void;
   // CAM Setup
   camSetup: SetupSettings;
   setCamSetup: (v: SetupSettings) => void;
@@ -22,8 +24,9 @@ interface EngineeringConsoleProps {
   // Tools
   camTools: Tool[];
   setCamTools: (v: Tool[]) => void;
-  // G-Code generation
+  // Actions
   onGenerateGCode: () => void;
+  onGenerateToolpaths: () => void;
   isGeneratingGcode: boolean;
   gcodeContent: string | null;
   // Features
@@ -32,6 +35,7 @@ interface EngineeringConsoleProps {
   activeFeatureId: string | null;
   setActiveFeatureId: (v: string | null) => void;
   onAutoGenerateOperations: () => void;
+  onRunFeatureRecognition: () => void;
   // Operations
   camOperations: CamOperation[];
   setCamOperations: (v: CamOperation[]) => void;
@@ -40,6 +44,9 @@ interface EngineeringConsoleProps {
   // Simulation
   camSimulation: SimulationState;
   setCamSimulation: (v: SimulationState) => void;
+  // Validation
+  toolpathValid?: boolean;
+  toolpathsStale?: boolean;
 }
 
 type TabType = 'setup' | 'features' | 'tools' | 'params' | 'simulation' | 'gcode';
@@ -56,10 +63,51 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
     { id: 'gcode', label: 'G-CODE', icon: <Code2 /> },
   ];
 
+  // Calculate CAM Readiness
+  const calcReadiness = () => {
+    let score = 100;
+    const warnings: string[] = [];
+    const errors: string[] = [];
+
+    if (!props.camFeatures || props.camFeatures.length === 0) {
+      score -= 50;
+      warnings.push("No machining features detected.");
+    }
+
+    if (!props.camOperations || props.camOperations.length === 0) {
+      score -= 50;
+      errors.push("No CAM operations defined.");
+    }
+
+    const hasUnmachinable = props.camFeatures && props.camFeatures.some(f => f.status === 'not_machinable');
+    if (hasUnmachinable) {
+      score -= 20;
+      errors.push("Some features are marked as not machinable.");
+    }
+
+    const hasMissingTools = props.camOperations && props.camOperations.some(op => !props.camTools.find(t => t.id === op.toolId));
+    if (hasMissingTools) {
+      score -= 30;
+      errors.push("One or more operations have missing tools.");
+    }
+
+    if (props.toolpathsStale) {
+      score -= 40;
+      errors.push("Toolpaths are stale. Please regenerate.");
+    } else if (props.toolpathValid === false) {
+      score -= 60;
+      errors.push("Toolpath validation failed.");
+    }
+
+    return { score: Math.max(0, score), warnings, errors };
+  };
+
+  const readiness = calcReadiness();
+
   return (
-    <div className="flex h-full w-full flex-col bg-[#0a0f1c] font-sans relative">
+    <div className="flex h-full w-full flex-col bg-transparent font-sans relative">
       {/* Tabs Header */}
-      <div className="flex h-14 shrink-0 items-center px-4 bg-[#050814] overflow-x-auto custom-scrollbar gap-2">
+      <div className="flex h-14 shrink-0 items-center px-4 bg-transparent border-b border-white/5 overflow-x-auto custom-scrollbar gap-2">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -67,7 +115,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
             className={cn(
               "flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 group whitespace-nowrap",
               activeTab === tab.id
-                ? "bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]"
+                ? "bg-gradient-primary text-white shadow-[0_0_15px_rgba(59,130,246,0.4)]"
                 : "text-muted-foreground/60 hover:text-white hover:bg-white/5"
             )}
           >
@@ -85,7 +133,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto bg-[#0a0f1c] custom-scrollbar p-6">
+      <div className="flex-1 overflow-y-auto bg-transparent custom-scrollbar p-6">
         <div className="max-w-7xl mx-auto grid gap-6 animate-in fade-in duration-300">
           {activeTab === 'setup' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -99,7 +147,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                   <select
                     value={props.controller}
                     onChange={(e) => props.setController(e.target.value)}
-                    className="w-full bg-[#050814] border border-[#1e293b] rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner"
+                    className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner"
                   >
                     <option value="iso">Standard ISO (RS-274)</option>
                     <option value="fanuc">Fanuc</option>
@@ -112,7 +160,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                 
                 <div className="flex flex-col gap-2">
                   <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/80">Machining Strategy</label>
-                  <select className="w-full bg-[#050814] border border-[#1e293b] rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+                  <select className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
                     <option value="2d_profile">2D Profile Outline (Contouring)</option>
                     <option value="adaptive_clearing">Adaptive Clearing (Roughing)</option>
                     <option value="3d_parallel">3D Parallel (Finishing)</option>
@@ -127,16 +175,15 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
               <div className="flex flex-col gap-4">
                 <div className="flex justify-between items-center">
                   <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Features</h3>
-                  {props.camFeatures.length > 0 && (
-                    <button onClick={props.onAutoGenerateOperations} className="text-blue-500 hover:text-blue-400 capitalize bg-blue-500/10 px-2 py-0.5 rounded text-[10px]">
-                      Auto Generate Operations
-                    </button>
-                  )}
                 </div>
                 <FeatureOverviewSection
                   features={props.camFeatures}
                   activeFeatureId={props.activeFeatureId}
                   onFeatureSelect={props.setActiveFeatureId}
+                  onAutoGenerate={props.onAutoGenerateOperations}
+                  workflowStage={props.workflowStage}
+                  setWorkflowStage={props.setWorkflowStage}
+                  onRunFeatureRecognition={props.onRunFeatureRecognition}
                 />
               </div>
               <div className="flex flex-col gap-4">
@@ -152,6 +199,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                       name: `New ${type}`,
                       type,
                       toolId: props.camTools[0]?.id || 't1',
+                      feature_id: props.activeFeatureId || '',
                       parameters: { feedRate: 800, plungeRate: 200, maxStepdown: 1.0, totalDepth: 5.0, spindleSpeed: 12000, stepoverPercentage: 40, tolerance: 0.01, coolant: 'off' }
                     }]);
                     props.setActiveOperationId(id);
@@ -197,10 +245,10 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                       ))}
                     </select>
                   </div>
-                  <CuttingParametersSection
-                    parameters={props.camOperations.find(op => op.id === props.activeOperationId)!.parameters}
-                    onChange={(p) => {
-                      props.setCamOperations(props.camOperations.map(op => op.id === props.activeOperationId ? { ...op, parameters: p } : op));
+                  <OperationPropertyPanel
+                    operation={props.camOperations.find(op => op.id === props.activeOperationId)!}
+                    onChange={(op) => {
+                      props.setCamOperations(props.camOperations.map(o => o.id === op.id ? op : o));
                     }}
                   />
                 </div>
@@ -211,21 +259,67 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
           )}
 
           {activeTab === 'simulation' && (
-            <SimulationControls
-              state={props.camSimulation}
-              onChange={(changes) => props.setCamSimulation({ ...props.camSimulation, ...changes })}
-              onGenerateToolpath={props.onGenerateGCode}
-              isGenerating={props.isGeneratingGcode}
-            />
+            <div className="flex flex-col gap-4">
+              {props.toolpathsStale && (
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500">
+                  <Activity className="size-5" />
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold">STALE TOOLPATHS DETECTED</span>
+                    <span className="text-xs text-amber-500/80">The 3D model has changed. You must regenerate toolpaths before simulating.</span>
+                  </div>
+                </div>
+              )}
+              <SimulationControls
+                state={props.camSimulation}
+                onChange={(changes) => props.setCamSimulation({ ...props.camSimulation, ...changes })}
+                onGenerateToolpath={props.onGenerateToolpaths}
+                isGenerating={props.isGeneratingGcode}
+                toolpathValid={props.toolpathValid}
+                toolpathsStale={props.toolpathsStale}
+              />
+            </div>
           )}
 
           {activeTab === 'gcode' && (
             <div className="flex flex-col gap-4">
+              {/* Readiness Score Banner */}
+              <div className="flex flex-col gap-4">
+                <div className={cn("p-4 rounded-xl border flex items-center justify-between", readiness.score >= 80 ? "bg-emerald-500/10 border-emerald-500/20" : readiness.score >= 50 ? "bg-amber-500/10 border-amber-500/20" : "bg-rose-500/10 border-rose-500/20")}>
+                  <div className="flex items-center gap-4">
+                    <div className={cn("size-10 rounded-full flex items-center justify-center font-bold text-lg", readiness.score >= 80 ? "bg-emerald-500/20 text-emerald-500" : readiness.score >= 50 ? "bg-amber-500/20 text-amber-500" : "bg-rose-500/20 text-rose-500")}>
+                      {readiness.score}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-foreground">CAM Readiness Score</h4>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest">{readiness.score >= 80 ? "Ready for Post-Processing" : readiness.score >= 50 ? "Review Warnings" : "Action Required"}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {readiness.errors.length > 0 && (
+                  <div className="flex flex-col gap-2 p-4 rounded-lg bg-rose-500/5 border border-rose-500/20">
+                    <h5 className="text-[10px] font-bold uppercase tracking-widest text-rose-500">Critical Errors</h5>
+                    <ul className="list-disc list-inside text-xs text-rose-400/80">
+                      {readiness.errors.map((err, i) => <li key={i}>{err}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {readiness.warnings.length > 0 && (
+                  <div className="flex flex-col gap-2 p-4 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                    <h5 className="text-[10px] font-bold uppercase tracking-widest text-amber-500">Warnings</h5>
+                    <ul className="list-disc list-inside text-xs text-amber-400/80">
+                      {readiness.warnings.map((warn, i) => <li key={i}>{warn}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
               {/* Generate G-Code Button — always visible */}
               <button
                 onClick={props.onGenerateGCode}
-                disabled={props.isGeneratingGcode}
-                className="flex w-full items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 py-4 text-[11px] font-black uppercase tracking-widest text-white shadow-lg shadow-blue-500/20 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={props.isGeneratingGcode || readiness.score < 50 || props.toolpathValid === false || props.toolpathsStale}
+                className="flex w-full items-center justify-center gap-3 rounded-2xl bg-gradient-primary py-4 text-[11px] font-black uppercase tracking-widest text-white shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)] transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:saturate-0"
               >
                 {props.isGeneratingGcode ? (
                   <>
@@ -242,38 +336,6 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                   </>
                 )}
               </button>
-
-              {/* Summary of what will be generated */}
-              {!props.gcodeContent && !props.isGeneratingGcode && (
-                <div className="flex flex-col items-center justify-center py-12 gap-6 text-center">
-                  <div className="size-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
-                    <Code2 className="size-7 text-muted-foreground/40" />
-                  </div>
-                  <div className="flex flex-col gap-2 max-w-md">
-                    <h3 className="text-sm font-bold text-white">Configure CAM Settings First</h3>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Set up your machine, tools, operations, and cutting parameters in the tabs above.
-                      Then click <strong className="text-blue-400">Generate G-Code</strong> to produce
-                      machine-ready G-Code with proper tool changes, coolant control, spindle speeds,
-                      and feed rates for your <strong className="text-white">{props.controller.toUpperCase()}</strong> controller.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-3 gap-4 mt-2">
-                    <div className="flex flex-col items-center gap-1 px-4 py-3 rounded-xl bg-white/5 border border-white/5">
-                      <span className="text-lg font-bold text-blue-400">{props.camTools.length}</span>
-                      <span className="text-[9px] uppercase tracking-widest text-muted-foreground font-bold">Tools</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-1 px-4 py-3 rounded-xl bg-white/5 border border-white/5">
-                      <span className="text-lg font-bold text-purple-400">{props.camOperations.length}</span>
-                      <span className="text-[9px] uppercase tracking-widest text-muted-foreground font-bold">Operations</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-1 px-4 py-3 rounded-xl bg-white/5 border border-white/5">
-                      <span className="text-lg font-bold text-emerald-400">{props.camSetup.material.replace('_', ' ').toUpperCase()}</span>
-                      <span className="text-[9px] uppercase tracking-widest text-muted-foreground font-bold">Material</span>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {/* G-Code Viewer — only shown after explicit generation */}
               {props.gcodeContent && (

@@ -27,7 +27,7 @@ export function WorkflowNav({ workflowStage, setWorkflowStage }: WorkflowNavProp
   const activeIndex = STAGES.findIndex(s => s.id === activeDisplayStage);
 
   return (
-    <div className="flex h-full w-full flex-col bg-[#050814] font-sans text-sm relative">
+    <div className="flex h-full w-full flex-col bg-transparent font-sans text-sm relative">
       {/* Header / Logo */}
       <div className="flex h-[72px] shrink-0 items-center px-6 border-b border-white/5">
         <Link href="/" className="flex items-center gap-3 group hover:opacity-80 transition-opacity">
@@ -59,7 +59,7 @@ export function WorkflowNav({ workflowStage, setWorkflowStage }: WorkflowNavProp
           
           {/* Vertical connecting line active fill */}
           <div 
-            className="absolute left-[35px] top-[30px] w-[2px] bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)] z-0 transition-all duration-700 ease-in-out" 
+            className="absolute left-[35px] top-[30px] w-[2px] bg-gradient-primary shadow-[0_0_15px_rgba(59,130,246,0.6)] z-0 transition-all duration-700 ease-in-out" 
             style={{ 
               height: `${(Math.max(0, activeIndex) / (STAGES.length - 1)) * 100}%` 
             }}
@@ -75,18 +75,18 @@ export function WorkflowNav({ workflowStage, setWorkflowStage }: WorkflowNavProp
                 onClick={() => setWorkflowStage(stage.id as WorkflowStage)}
                 className={cn(
                   "relative flex w-full items-center gap-5 px-6 py-4 transition-all text-left group z-10",
-                  isActive ? "bg-[#0f172a]/80" : "hover:bg-white/5 bg-transparent"
+                  isActive ? "bg-blue-500/5 backdrop-blur-sm" : "hover:bg-white/5 bg-transparent"
                 )}
               >
                 {/* Active Indicator Line on the left */}
                 {isActive && (
-                  <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
+                  <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-gradient-primary shadow-[0_0_15px_rgba(59,130,246,0.6)]" />
                 )}
 
                 {/* Icon */}
-                <div className="relative flex size-6 shrink-0 items-center justify-center z-10 bg-[#050814]">
+                <div className="relative flex size-6 shrink-0 items-center justify-center z-10 bg-[#121c2e]">
                   {isPast ? (
-                    <CheckCircle2 className="size-5 text-blue-500 bg-[#050814] rounded-full" />
+                    <CheckCircle2 className="size-5 text-blue-500 bg-transparent rounded-full shadow-[0_0_10px_rgba(59,130,246,0.3)]" />
                   ) : isActive ? (
                     <div className="relative flex items-center justify-center size-5">
                       <div className="absolute inset-0 rounded-full border-[2px] border-blue-500/30" />
@@ -94,7 +94,7 @@ export function WorkflowNav({ workflowStage, setWorkflowStage }: WorkflowNavProp
                       <div className="size-1.5 rounded-full bg-blue-500" />
                     </div>
                   ) : (
-                    <div className="size-5 rounded-full border-[2px] border-white/10 group-hover:border-white/20 transition-colors bg-[#050814]" />
+                    <div className="size-5 rounded-full border-[2px] border-white/10 group-hover:border-white/20 transition-colors bg-[#121c2e]" />
                   )}
                 </div>
 
