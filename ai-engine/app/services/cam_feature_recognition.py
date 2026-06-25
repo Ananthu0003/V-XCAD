@@ -71,6 +71,12 @@ class CamFeature:
         elif feature_type == "contour":
             self.recommendedToolType = "flat_end_mill"
             self.recommendedOperation = "2d_contour"
+        elif feature_type == "boss":
+            self.recommendedToolType = "flat_end_mill"
+            self.recommendedOperation = "boss_clearing"
+        elif feature_type in ("external_cylinder", "shaft", "turned_od", "side_protrusion"):
+            self.recommendedToolType = "lathe_tool"
+            self.recommendedOperation = "turning"
         else:
             self.recommendedToolType = "flat_end_mill"
             self.recommendedOperation = "2d_contour"
@@ -99,6 +105,26 @@ class CamFeature:
             "volume_estimate": self.volume_estimate,
             "recommendedToolType": self.recommendedToolType,
             "recommendedOperation": self.recommendedOperation,
+            # Topology references for setup analysis
+            "parentFaceId": getattr(self, "parent_face_id_for_boss", None),
+            "floorFaceId": self.floor_face_id,
+            # Machining region status (set by GeometryMapper)
+            "machining_region": None,
+            # Setup-aware machinability (set by CamSetupAnalyzer)
+            "machinable_in_current_setup": True,
+            "requires_reorientation": False,
+            "requires_4axis_or_secondary_setup": False,
+            "blocked_reason": None,
+            "featureGroupId": getattr(self, "featureGroupId", None),
+            "centerline": getattr(self, "centerline", None),
+            "radius": getattr(self, "radius", None),
+            "length": getattr(self, "length", None),
+            "machiningStatus": getattr(self, "machiningStatus", "valid"),
+            # Required for contour geometry mapping
+            "boundaryPoints": getattr(self, "boundaryPoints", []),
+            "wireId": getattr(self, "wireId", None),
+            "source": getattr(self, "source", None),
+            "boundaryClosed": getattr(self, "boundaryClosed", False),
         }
         return d
 
@@ -153,7 +179,12 @@ class CamFeatureRecognition:
                 print(f"Warning: Extraction took {elapsed:.2f}s (>30s).")
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"Feature recognition failed: {e}")
+
+        # Cleanup, group, and finalize feature classification
+        self._cleanup_features()
 
         return [f.to_dict() for f in self.features]
 
@@ -286,6 +317,33 @@ class CamFeatureRecognition:
             face = self.extractor.faces[fid]
             radius = face.get("radius", 0)
 
+            # Find floor face (adjacent planar face whose normal is parallel to cylinder axis)
+            floor_face_id = None
+            adj = self.extractor.adjacency.get(fid, [])
+            for a in adj:
+                adj_f = self.extractor.faces.get(a["adjacent_face"], {})
+                if adj_f.get("type") == "plane":
+                    n = adj_f.get("normal", (0, 0, 1))
+                    # Normal of floor must be parallel to cylinder axis
+                    cyl_axis = face.get("axis", (0, 0, 1))
+                    dot = abs(sum(x * y for x, y in zip(n, cyl_axis)))
+                    if dot > 0.98:
+                        floor_face_id = a["adjacent_face"]
+                        break
+                        
+            # Fallback for floor face: match bottom Z
+            if not floor_face_id:
+                try:
+                    cyl_z_bottom = face["bbox"]["min"][2]
+                    for pid, pface in self.extractor.faces.items():
+                        if pface["type"] == "plane":
+                            pz = pface.get("bbox", {}).get("max", [0,0,0])[2]
+                            if abs(pz - cyl_z_bottom) < 1e-3:
+                                floor_face_id = pid
+                                break
+                except:
+                    pass
+
             # Height estimate from bounding box
             height = 10.0
             try:
@@ -297,19 +355,41 @@ class CamFeatureRecognition:
             except Exception:
                 pass
 
-            self.features.append(
-                CamFeature(
-                    feature_type="boss",
-                    subtype="cylindrical_boss",
+            axis = list(face.get("axis", (0, 0, 1)))
+            axis_dot = abs(sum(a * b for a, b in zip(axis, self.machining_direction)))
+            is_parallel = axis_dot > 0.98
+
+            if floor_face_id is None or not is_parallel:
+                feature_type = "external_cylinder"
+                subtype = "shaft" if is_parallel else "side_protrusion"
+                feat = CamFeature(
+                    feature_type=feature_type,
+                    subtype=subtype,
                     face_ids=[fid],
                     cylinder_face_id=fid,
                     center=list(face.get("location", (0, 0, 0))),
-                    axis=list(face.get("axis", (0, 0, 1))),
+                    axis=axis,
                     area=face.get("area", 0),
                     dimensions={"diameter": round(radius * 2, 6), "height": height},
                     confidence=0.90,
                 )
-            )
+                self.features.append(feat)
+                continue
+
+            feat = CamFeature(
+                    feature_type="boss",
+                    subtype="cylindrical_boss",
+                    face_ids=[fid],
+                    cylinder_face_id=fid,
+                    floor_face_id=floor_face_id,
+                    center=list(face.get("location", (0, 0, 0))),
+                    axis=axis,
+                    area=face.get("area", 0),
+                    dimensions={"diameter": round(radius * 2, 6), "height": height},
+                    confidence=0.90,
+                )
+            feat.parent_face_id_for_boss = floor_face_id
+            self.features.append(feat)
 
     # ------------------------------------------------------------------
     # Planar feature detection (pockets, faces, steps)
@@ -318,8 +398,14 @@ class CamFeatureRecognition:
     def _find_planar_features(self) -> None:
         md = self.machining_direction
 
+        planar_features = []
+
         for fid, face in self.extractor.faces.items():
             if face["type"] != "plane":
+                continue
+            
+            # Ignore micro faces/sliver faces
+            if face.get("area", 0) < 0.1:
                 continue
 
             n = face.get("normal", (0, 0, 0))
@@ -367,7 +453,7 @@ class CamFeatureRecognition:
 
             if has_concave_wall_up and not has_convex_wall_down:
                 # Pocket
-                self.features.append(
+                planar_features.append(
                     CamFeature(
                         feature_type="pocket",
                         subtype="closed_pocket",
@@ -382,7 +468,7 @@ class CamFeatureRecognition:
                 )
             elif has_convex_wall_down and not has_concave_wall_up:
                 # Top face
-                self.features.append(
+                planar_features.append(
                     CamFeature(
                         feature_type="face",
                         subtype="top_face",
@@ -395,19 +481,33 @@ class CamFeatureRecognition:
                 )
             elif has_concave_wall_up and has_convex_wall_down:
                 # Step / terrace
-                self.features.append(
+                planar_features.append(
                     CamFeature(
                         feature_type="step",
-                        subtype="terrace",
+                        subtype="open_step",
                         face_ids=[fid] + wall_faces,
                         floor_face_id=fid,
                         wall_face_ids=wall_faces,
                         center=list(face["center"]),
                         area=face.get("area", 0),
-                        dimensions={"z_level": z_level},
+                        dimensions={"z_bottom": z_level},
                         confidence=0.8,
                     )
                 )
+
+        # Consolidate duplicate planar features sharing same Z-height and boundary (area)
+        seen = set()
+        for feat in planar_features:
+            z_top = feat.dimensions.get("z_top")
+            z_bottom = feat.dimensions.get("z_bottom")
+            z_val = z_top if z_top is not None else z_bottom
+            if z_val is None:
+                z_val = 0.0
+                
+            key = (feat.type, round(z_val, 4), round(feat.area, 2))
+            if key not in seen:
+                seen.add(key)
+                self.features.append(feat)
 
     # ------------------------------------------------------------------
     # Outer profile (intent only — geometry extracted by GeometryMapper)
@@ -416,52 +516,192 @@ class CamFeatureRecognition:
     def _find_outer_profile(self) -> None:
         """
         Record that the model has an outer profile contour.
-
-        Does NOT extract wire geometry or use Shapely.
-        Actual silhouette extraction happens in GeometryMapper using the
-        WCS machining plane.
+        Extract the outer wire from the setup-facing face with largest valid area.
         """
         try:
             bbox = self.shape_bbox()
-            center = [
-                round((bbox["min"][0] + bbox["max"][0]) / 2, 6),
-                round((bbox["min"][1] + bbox["max"][1]) / 2, 6),
-                round((bbox["min"][2] + bbox["max"][2]) / 2, 6),
-            ]
-
-            # Collect all top-facing planar face IDs as boundary references
-            boundary_face_ids = []
+            md = self.machining_direction
+            
+            # Find the largest setup-facing planar face
+            largest_face = None
+            max_area = 0.0
+            largest_face_id = None
+            
             for fid, face in self.extractor.faces.items():
                 if face["type"] == "plane":
                     n = face.get("normal", (0, 0, 0))
-                    md = self.machining_direction
-                    dot = abs(n[0] * md[0] + n[1] * md[1] + n[2] * md[2])
+                    dot = n[0] * md[0] + n[1] * md[1] + n[2] * md[2]
                     if dot > 0.999:
-                        boundary_face_ids.append(fid)
+                        area = face.get("area", 0.0)
+                        if area > max_area:
+                            max_area = area
+                            largest_face = face
+                            largest_face_id = fid
 
+            if not largest_face:
+                return
+
+            # Extract the actual outer wire
+            wire_id, boundary_points = self.extractor.extract_outer_wire(largest_face_id)
+            
+            # Since we got points back from extract_outer_wire, it means there is a wire
+            # and the first/last point check can tell us if it's closed
+            is_closed = False
+            if boundary_points and len(boundary_points) >= 3:
+                import math
+                dist = math.hypot(
+                    boundary_points[0][0] - boundary_points[-1][0], 
+                    boundary_points[0][1] - boundary_points[-1][1]
+                )
+                is_closed = dist < 1e-3
+            
+            if not is_closed or len(boundary_points) < 3:
+                return
+                
+            center = [
+                round(sum(p[0] for p in boundary_points) / len(boundary_points), 6),
+                round(sum(p[1] for p in boundary_points) / len(boundary_points), 6),
+                round(sum(p[2] for p in boundary_points) / len(boundary_points), 6),
+            ]
+            
+            z_top = largest_face.get("location", [0,0,0])[2]
+            
             self.features.append(
                 CamFeature(
                     feature_type="contour",
                     subtype="outer_profile",
-                    face_ids=boundary_face_ids,
+                    face_ids=[largest_face_id],
                     center=center,
                     dimensions={
                         "width": round(bbox["max"][0] - bbox["min"][0], 6),
                         "length": round(bbox["max"][1] - bbox["min"][1], 6),
                         "depth": round(bbox["max"][2] - bbox["min"][2], 6),
-                        "z_top": bbox["max"][2],
+                        "z_top": z_top,
                         "z_bottom": bbox["min"][2],
                     },
                     confidence=1.0,
                 )
             )
-        except Exception:
+            # Attach boundary info for geometry mapper
+            self.features[-1].boundaryPoints = boundary_points
+            self.features[-1].wireId = wire_id
+            self.features[-1].source = "outer_wire"
+            self.features[-1].boundaryClosed = is_closed
+            self.features[-1].area = max_area
+        except Exception as e:
+            print(f"Error in outer profile extraction: {e}")
             pass
 
     def shape_bbox(self) -> Dict[str, Any]:
         """Return serialisable bounding box of the shape."""
         bb = self.extractor.shape.bounding_box()
         return {
-            "min": (round(bb.min.X, 6), round(bb.min.Y, 6), round(bb.min.Z, 6)),
-            "max": (round(bb.max.X, 6), round(bb.max.Y, 6), round(bb.max.Z, 6)),
+            "min": [bb.min.X, bb.min.Y, bb.min.Z],
+            "max": [bb.max.X, bb.max.Y, bb.max.Z],
         }
+
+    # ------------------------------------------------------------------
+    # Feature Cleanup
+    # ------------------------------------------------------------------
+
+    def _cleanup_features(self) -> None:
+        """
+        Merge duplicate/split cylindrical features and classify them properly.
+        """
+        import math
+        
+        cleaned = []
+        cylindrical_features = []
+        planar_features = []
+        
+        for f in self.features:
+            if f.type in ("hole", "external_cylinder", "boss", "side_protrusion", "shaft", "turned_od"):
+                cylindrical_features.append(f)
+            else:
+                planar_features.append(f)
+                
+        # Group cylindrical features by axis and centerline
+        groups = []
+        
+        def is_same_line(p1, v1, p2, v2, tol=1e-3):
+            # Check parallel
+            dot = sum(a * b for a, b in zip(v1, v2))
+            if abs(abs(dot) - 1.0) > 1e-3:
+                return False
+                
+            # Check distance between lines
+            dp = [p2[i] - p1[i] for i in range(3)]
+            dp_dot_v1 = sum(dp[i] * v1[i] for i in range(3))
+            perp = [dp[i] - dp_dot_v1 * v1[i] for i in range(3)]
+            dist = math.sqrt(sum(x*x for x in perp))
+            return dist < tol
+
+        for f in cylindrical_features:
+            placed = False
+            for g in groups:
+                rep = g[0]
+                if is_same_line(f.center, f.axis, rep.center, rep.axis):
+                    r1 = f.dimensions.get("diameter", 0) / 2
+                    r2 = rep.dimensions.get("diameter", 0) / 2
+                    if abs(r1 - r2) < 0.1:
+                        # Check if they touch/overlap along the axis
+                        # Approximate using center distance and lengths
+                        c_dist = sum((f.center[i] - rep.center[i])**2 for i in range(3))**0.5
+                        l1 = f.dimensions.get("height", f.dimensions.get("depth", 0))
+                        l2 = rep.dimensions.get("height", rep.dimensions.get("depth", 0))
+                        if c_dist <= (l1 + l2) / 2 + 1.0: # 1mm tolerance for touching
+                            g.append(f)
+                            placed = True
+                            break
+            if not placed:
+                groups.append([f])
+                
+        for group in groups:
+            rep = group[0]
+            
+            # Skip tiny fillet cylinders
+            total_area = sum(f.area for f in group)
+            total_length = sum(f.dimensions.get("height", f.dimensions.get("depth", 0)) for f in group)
+            avg_radius = sum(f.dimensions.get("diameter", 0) / 2 for f in group) / len(group)
+            
+            if total_area < 5.0 or total_length < 0.5 or avg_radius < 0.1:
+                continue
+                
+            # Merge fields
+            merged_face_ids = []
+            for f in group:
+                merged_face_ids.extend(f.face_ids)
+                
+            rep.face_ids = list(set(merged_face_ids))
+            rep.area = total_area
+            rep.centerline = rep.center
+            rep.radius = rep.dimensions.get("diameter", 0) / 2
+            rep.length = sum(f.dimensions.get("height", f.dimensions.get("depth", 0)) for f in group)
+            rep.featureGroupId = f"group_{rep.id}"
+            
+            # Determine classification
+            is_hole = any(f.type == "hole" for f in group)
+            has_floor = any(f.floor_face_id for f in group)
+            
+            axis_dot = abs(sum(a * b for a, b in zip(rep.axis, self.machining_direction)))
+            is_z_aligned = axis_dot > 0.98
+            
+            if is_hole:
+                rep.type = "hole"
+            elif has_floor:
+                rep.type = "boss"
+            elif is_z_aligned:
+                rep.type = "external_cylinder"
+                rep.subtype = "shaft"
+                rep.machiningStatus = "recognized_but_requires_turning_or_special_strategy"
+                rep.blocked_reason = "Vertical shaft requires turning or special multi-axis strategy"
+                rep.machinable_in_current_setup = False
+            else:
+                rep.type = "side_protrusion"
+                rep.machiningStatus = "requires_secondary_setup_or_4axis"
+                rep.blocked_reason = "Side protrusion requires 4-axis or secondary setup"
+                rep.machinable_in_current_setup = False
+                
+            cleaned.append(rep)
+            
+        self.features = planar_features + cleaned

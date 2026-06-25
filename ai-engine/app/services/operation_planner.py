@@ -36,21 +36,62 @@ class OperationPlanner:
     """
     Translates extracted B-Rep features into an ordered list of concrete 
     CNC operations. Preserves full traceability.
+    
+    Strict rules:
+    - Do not create operations for blocked features.
+    - Do not create operations where featureId is None.
+    - Do not create operations where geometry mapping failed.
+    - Only map from valid feature type → operation type whitelist.
     """
+    
+    # Valid feature type → operation type mapping
+    FEATURE_TO_OPERATION = {
+        "hole": "drilling",
+        "blind_hole": "drilling",
+        "through_hole": "drilling",
+        "boss": "boss_clearing",
+        "pocket": "pocketing",
+        "contour": "2d_contour",
+        "face": "facing",
+        "step": "2d_contour",
+    }
+    
     def __init__(self):
         pass
         
     def plan_operations(self, features: List[Dict[str, Any]], machine_type: str) -> List[Dict[str, Any]]:
         operations = []
         
-        # We process each required feature and map to an operation
         for feature in features:
             if not feature.get('requiredMachining', True):
                 continue
-                
+            
             feat_id = feature.get('id')
+            
+            # Strict: Skip features with no ID
             if not feat_id:
-                feature["diagnostic"] = "Failed to plan operation: Feature ID is null"
+                feature["diagnostic"] = "Skipped: Feature ID is null"
+                feature["geometry_status"] = "error"
+                continue
+            
+            # Strict: Skip features blocked by setup analysis
+            if not feature.get('machinable_in_current_setup', True):
+                blocked_reason = feature.get('blocked_reason', 'Not machinable in current setup')
+                feature["diagnostic"] = f"Blocked: {blocked_reason}"
+                continue
+            
+            # Strict: Skip features where geometry mapping failed
+            geom = feature.get('geometry', {})
+            if geom.get('status') == 'failed' or geom.get('status') == 'error':
+                feature["diagnostic"] = f"Skipped: Geometry mapping failed — {geom.get('error', 'unknown')}"
+                feature["geometry_status"] = "error"
+                continue
+            
+            # Strict: Skip features with missing machining region (non-drilling)
+            feat_type = feature.get('type', '')
+            machining_region = feature.get('machining_region')
+            if feat_type not in ('hole', 'blind_hole', 'through_hole') and machining_region == 'error':
+                feature["diagnostic"] = "Skipped: Machining region is missing or invalid"
                 feature["geometry_status"] = "error"
                 continue
                 
@@ -62,13 +103,13 @@ class OperationPlanner:
                 else:
                     operations.append(op)
                 
-        # Optional: Apply strategic sorting 
+        # Apply strategic sorting 
         sort_order = {
             "facing": 1,
             "drilling": 2,
             "pocketing": 3,
-            "2d_contour": 4,
-            "od_turning": 1
+            "boss_clearing": 4,
+            "2d_contour": 5,
         }
         
         operations.sort(key=lambda op: sort_order.get(op.type, 99))
@@ -78,12 +119,16 @@ class OperationPlanner:
         feat_type = feature.get('type')
         feat_id = feature.get('id')
         
-        op = None
+        # Use the strict whitelist
+        op_type = self.FEATURE_TO_OPERATION.get(feat_type)
+        if not op_type:
+            # Unsupported feature type — skip entirely, do not create fallback
+            feature["diagnostic"] = f"Skipped: Unsupported feature type '{feat_type}'"
+            return None
         
-        # Logic to map based on feature and machine type
-        if feat_type in ['blind_hole', 'through_hole', 'hole']:
-            op = CamOperation("drilling", feat_id)
-            # Assign default tool id based on operation
+        op = CamOperation(op_type, feat_id)
+        
+        if op_type == "drilling":
             op.tool_id = "tool_drill_1"
             
             z_top = feature.get('dimensions', {}).get('z_top', 0.0)
@@ -96,57 +141,39 @@ class OperationPlanner:
             if 'diameter' in feature.get('dimensions', {}):
                 op.parameters['hole_diameter'] = feature['dimensions']['diameter']
                 
-            # Basic Setup Validation (assuming Z-up tool axis for standard 3-axis milling)
-            # If the hole is horizontal (axis roughly perpendicular to Z), it requires reorientation
+            # Setup validation for drilling: check hole axis alignment
             geom = feature.get('geometry', {})
             axis = geom.get('axis')
-            if axis and abs(axis[2]) < 0.1: # very little Z component
+            if axis and abs(axis[2]) < 0.1:
                 op.machinable_in_current_setup = False
                 op.requires_reorientation = True
                 op.status = "blocked_requires_reorientation"
             
-        elif feat_type == 'pocket':
-            op = CamOperation("pocketing", feat_id)
+        elif op_type == "pocketing":
             op.tool_id = "tool_flat_end_mill_1"
             op.safe_heights['top'] = feature.get('dimensions', {}).get('z_top', 0.0)
             op.safe_heights['bottom'] = feature.get('dimensions', {}).get('z_bottom', -5.0)
             op.machining_strategy = 'adaptive_clearing'
             
-        elif feat_type == 'face':
-            op = CamOperation("facing", feat_id)
+        elif op_type == "facing":
             op.tool_id = "tool_face_mill_1"
             z_level = feature.get('dimensions', {}).get('z_top', 0.0)
             op.safe_heights['top'] = z_level
             op.safe_heights['bottom'] = z_level
             op.machining_strategy = 'zigzag'
             
-        elif feat_type == 'contour':
-            op = CamOperation("2d_contour", feat_id)
+        elif op_type == "2d_contour":
             op.tool_id = "tool_flat_end_mill_1"
             op.safe_heights['top'] = feature.get('dimensions', {}).get('z_top', 0.0)
             op.safe_heights['bottom'] = feature.get('dimensions', {}).get('z_bottom', -10.0)
             op.machining_strategy = 'outside_climb'
             
-        elif feat_type in ['od_diameter', 'shoulder', 'turned_profile']:
-            op = CamOperation("od_turning", feat_id)
-            op.tool_id = "tool_lathe_turn_1"
-            
-        elif feat_type == 'boss':
-            op = CamOperation("boss_machining", feat_id)
+        elif op_type == "boss_clearing":
             op.tool_id = "tool_flat_end_mill_1"
             op.safe_heights['top'] = feature.get('dimensions', {}).get('z_top', 0.0)
             op.safe_heights['bottom'] = feature.get('dimensions', {}).get('z_bottom', -10.0)
             op.machining_strategy = 'outside_climb'
-            
-        elif feat_type == 'step':
-            op = CamOperation("2d_contour", feat_id)
-            op.tool_id = "tool_flat_end_mill_1"
-            
-        else:
-            op = CamOperation("unknown", feat_id)
-            op.status = "error"
-            op.parameters['error'] = f"Unsupported feature type: {feat_type}"
-            
+        
         if op:
             z_top = op.safe_heights.get('top', 0.0)
             op.safe_heights['clearance'] = z_top + 15.0

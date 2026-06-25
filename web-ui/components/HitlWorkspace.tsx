@@ -465,7 +465,7 @@ export default function HitlWorkspace() {
 			if (data.script) updatePythonScript(data.script);
 			
 			if (data.artifacts) {
-				const backendUrl = 'http://localhost:8000';
+				const backendUrl = 'http://localhost:8001';
 				if (data.artifacts.stl_url) setStlUrl(backendUrl + data.artifacts.stl_url);
 				if (data.artifacts.step_url) setStepUrl(backendUrl + data.artifacts.step_url);
 				if (data.artifacts.dxf_url) setDxfUrl(backendUrl + data.artifacts.dxf_url);
@@ -661,12 +661,13 @@ export default function HitlWorkspace() {
 				setCamModelHash(null);
 				setCadModelHash(payload.artifacts?.model_hash || null);
 				setToolpaths(null);
-				setCamFeatures([]);
+				setCamFeatures(payload.artifacts?.features || []);
 				setCamOperations([]);
+				setGcodeContent(null);
+				setGcodeUrl(null);
 			}
 			if (payload.artifacts?.step_url) setStepUrl(resolveModelUrl(payload.artifacts.step_url));
 			if (payload.artifacts?.dxf_url) setDxfUrl(resolveModelUrl(payload.artifacts.dxf_url));
-			if (payload.artifacts?.toolpaths) setToolpaths(payload.artifacts.toolpaths);
 			if (payload.artifacts?.annotations) {
 				setAnnotations(payload.artifacts.annotations);
 
@@ -716,19 +717,14 @@ export default function HitlWorkspace() {
 		setStatusText('Generating G-Code with CAM parameters...');
 
 		try {
-			const response = await fetch('/api/render', {
+			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+			const response = await fetch(`${backendUrl}/api/v1/cam/gcode`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					python_script: pythonScript,
-					parameters: parameters,
 					session_id: sessionId,
-					cam_parameters: {
-						controller: controller,
-						setup: camSetup,
-						tools: camTools,
-						operations: camOperations,
-					}
+					job_id: sessionId,
+					cam_run_id: latestCamRunId.current || '',
 				}),
 			});
 
@@ -737,37 +733,10 @@ export default function HitlWorkspace() {
 				throw new Error(errorMsg);
 			}
 
-			const payload = (await response.json()) as RenderPayload;
+			const payload = await response.json();
 
-			// Update model artifacts if returned
-			if (payload.artifacts?.stl_url) setStlUrl(resolveModelUrl(payload.artifacts.stl_url, Date.now().toString()));
-			if (payload.artifacts?.step_url) setStepUrl(resolveModelUrl(payload.artifacts.step_url));
-			if (payload.artifacts?.dxf_url) setDxfUrl(resolveModelUrl(payload.artifacts.dxf_url));
-			if (payload.artifacts?.toolpaths) setToolpaths(payload.artifacts.toolpaths);
-			if (payload.artifacts?.model_hash) setCadModelHash(payload.artifacts.model_hash);
-
-			// NOW store G-code since user explicitly requested it
-			if (payload.artifacts?.gcode_content) {
-				// Prefer inline G-code content from API response
-				setGcodeContent(payload.artifacts.gcode_content);
-			}
-
-			if (payload.artifacts?.gcode_url) {
-				const resolvedUrl = resolveModelUrl(payload.artifacts.gcode_url, Date.now().toString());
-				setGcodeUrl(resolvedUrl);
-
-				// Fallback: fetch content from URL if not provided inline
-				if (!payload.artifacts?.gcode_content) {
-					try {
-						const gcodeRes = await fetch(resolvedUrl);
-						if (gcodeRes.ok) {
-							const content = await gcodeRes.text();
-							setGcodeContent(content);
-						}
-					} catch (e) {
-						console.error('Failed to fetch G-Code content:', e);
-					}
-				}
+			if (payload.gcode) {
+				setGcodeContent(payload.gcode);
 			}
 
 			setWorkflowStage('gcode');
@@ -795,8 +764,8 @@ export default function HitlWorkspace() {
 		latestCamRunId.current = runId;
 
 		try {
-			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-			const res = await fetch(`${backendUrl}/api/v1/cam/generate-toolpaths`, {
+			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+			const res = await fetch(`${backendUrl}/api/v1/cam/toolpaths`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -806,6 +775,7 @@ export default function HitlWorkspace() {
 					setup: camSetup,
 					tools: camTools,
 					operations: camOperations,
+					modelHash: cadModelHash || ""
 				})
 			});
 
@@ -853,7 +823,7 @@ export default function HitlWorkspace() {
 		setStatusText('Analyzing 3D geometry for features...');
 		
 		try {
-			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 			const res = await fetch(`${backendUrl}/api/v1/cam/analyze`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -1182,18 +1152,18 @@ export default function HitlWorkspace() {
 													hasStep={Boolean(stepUrl)}
 													hasDxf={Boolean(dxfUrl)}
 													isDeveloper={false}
-													isDownloadingStl={false}
-													isDownloadingStep={false}
-													isDownloadingDxf={false}
-													onDownloadStl={() => { }}
-													onDownloadStep={() => { }}
-													onDownloadDxf={() => { }}
+													isDownloadingStl={isDownloadingStl}
+													isDownloadingStep={isDownloadingStep}
+													isDownloadingDxf={isDownloadingDxf}
+													onDownloadStl={() => handleDownloadArtifact(stlUrl, 'stl')}
+													onDownloadStep={() => handleDownloadArtifact(stepUrl, 'step')}
+													onDownloadDxf={() => handleDownloadArtifact(dxfUrl, 'dxf')}
 													annotations={annotations}
 													activeParameter={null}
 													geometryInfo={null}
 													hasGcode={Boolean(false)}
-													isDownloadingGcode={false}
-													onDownloadGcode={() => { }}
+													isDownloadingGcode={isDownloadingGcode}
+													onDownloadGcode={() => handleDownloadArtifact(null, 'gcode')}
 													isSharing={false}
 													onShare={undefined}
 													toolpaths={toolpaths as any}
@@ -1420,7 +1390,7 @@ export default function HitlWorkspace() {
 												setController={setController}
 												pythonScript={pythonScript}
 												camSummaryElement={
-													(workflowStage === 'cam' || workflowStage === 'gcode') ? (
+													(workflowStage === 'cad' || workflowStage === 'cam' || workflowStage === 'gcode') ? (
 														<CamSummaryPanel 
 															setup={camSetup as any} 
 															tools={camTools} 

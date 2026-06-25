@@ -53,7 +53,7 @@ type CadViewportProps = {
 	annotations?: Record<string, AnnotationEntry>;
 	activeParameter?: string | null;
 	geometryInfo?: StlGeometryInfo | null;
-	
+
 	// CAM/G-code
 	toolpaths?: RenderToolpathSegment[] | null;
 	showToolpaths?: boolean;
@@ -102,7 +102,7 @@ export function CadViewport({
 }: CadViewportProps) {
 	const [exportOpen, setExportOpen] = useState(false);
 	const exportRef = useRef<HTMLDivElement>(null);
-	
+
 	const [viewMode, setViewMode] = useState<'both' | 'solid' | 'wireframe'>('both');
 
 	useEffect(() => {
@@ -120,7 +120,7 @@ export function CadViewport({
 
 	const groupedToolpaths = useMemo(() => {
 		if (!toolpaths || toolpaths.length === 0) return null;
-		
+
 		const groups: Record<string, THREE.Vector3[]> = {
 			rapid: [],
 			cut: [],
@@ -129,8 +129,14 @@ export function CadViewport({
 			retract: [],
 			other: []
 		};
+
+		const allowedSources = ['drill', 'contour', 'pocket', 'boss', 'face', 'turning'];
 		
 		toolpaths.forEach((seg) => {
+			if (!seg.source || !allowedSources.includes(seg.source)) {
+				return;
+			}
+
 			const type = seg.type || 'other';
 			const targetGroup = groups[type] || groups.other;
 			targetGroup.push(new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z));
@@ -180,10 +186,10 @@ export function CadViewport({
 						{statusText}
 					</p>
 				</div>
-				
+
 				<div className="flex items-center gap-2">
 					{headerActions}
-					
+
 					{onShare && (
 						<button
 							onClick={onShare}
@@ -194,7 +200,7 @@ export function CadViewport({
 							Share
 						</button>
 					)}
-					
+
 					{(hasDxf || hasStl || hasGcode || hasStep) && (
 						<div className="relative" ref={exportRef}>
 							<button
@@ -295,7 +301,7 @@ export function CadViewport({
 
 				<Canvas shadows dpr={[1, 2]} className="relative z-10">
 					<PerspectiveCamera makeDefault position={[5, 5, 5]} fov={40} />
-					
+
 					<Suspense fallback={null}>
 						<Environment preset="city" />
 						<Grid infiniteGrid fadeDistance={50} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={1} sectionSize={10} position={[0, -0.01, 0]} />
@@ -315,7 +321,7 @@ export function CadViewport({
 											const positions = (f as any).sub_positions || [{ center: (f as any).position?.center || f.location, normal: (f as any).position?.normal, bounding_box: (f as any).position?.bounding_box }];
 											const bSizeX = geometryInfo?.bounding_box ? (geometryInfo.bounding_box.max[0] - geometryInfo.bounding_box.min[0]) : 80;
 											const markerRadius = Math.max(3.0, bSizeX * 0.04);
-											
+
 											return (
 												<group key={`feature-${f.id}`}>
 													{positions.map((posObj: any, idx: number) => {
@@ -330,14 +336,14 @@ export function CadViewport({
 														const boxCenterX = posObj.bounding_box ? ((posObj.bounding_box.min[0] + posObj.bounding_box.max[0]) / 2) + pos[0] : pos[0];
 														const boxCenterY = posObj.bounding_box ? ((posObj.bounding_box.min[1] + posObj.bounding_box.max[1]) / 2) + pos[1] : pos[1];
 														const boxCenterZ = posObj.bounding_box ? ((posObj.bounding_box.min[2] + posObj.bounding_box.max[2]) / 2) + pos[2] : pos[2];
-														
+
 														return (
 															<group key={`pos-${idx}`}>
 																<mesh position={pos}>
 																	<sphereGeometry args={[markerRadius, 32, 32]} />
 																	<meshBasicMaterial color={(f as any).type === 'pocket' || (f as any).type === 'contour' || (f as any).type === 'large_center_hole' ? '#22c55e' : '#eab308'} depthTest={false} opacity={0.6} transparent />
 																</mesh>
-																
+
 																{/* Guaranteed Bounding Box Debug or Raw Contour */}
 																{(f as any).raw_points && (f as any).raw_points.length > 0 ? (
 																	<Line
@@ -351,7 +357,7 @@ export function CadViewport({
 																		<meshBasicMaterial color="#3b82f6" wireframe opacity={0.4} transparent depthTest={false} />
 																	</mesh>
 																)}
-																
+
 																{/* Access Direction Normal */}
 																{posObj.normal && (
 																	<Line
@@ -379,7 +385,7 @@ export function CadViewport({
 											if (!activeSegment) return null;
 											const activeTool = camTools.find(t => t.id === activeSegment.tool_id);
 											if (!activeTool) return null;
-											
+
 											const stickout = activeTool.stickout || 40;
 											const radius = (activeTool.diameter || 6) / 2;
 
@@ -387,7 +393,7 @@ export function CadViewport({
 											let j = activeSegment.end_j ?? 0;
 											let k = activeSegment.end_k ?? -1;
 											if (i === 0 && j === 0 && k === 0) k = -1;
-											
+
 											const targetVec = new THREE.Vector3(-i, -j, -k).normalize();
 											const upVec = new THREE.Vector3(0, 1, 0);
 											const quaternion = new THREE.Quaternion().setFromUnitVectors(upVec, targetVec);
@@ -396,8 +402,8 @@ export function CadViewport({
 												<group position={[activeSegment.end_x, activeSegment.end_y, activeSegment.end_z]} quaternion={quaternion}>
 													{/* Cutting Tool / End Mill */}
 													<mesh position={[0, stickout / 2, 0]}>
-														<cylinderGeometry 
-															args={[radius, radius, stickout, 32]} 
+														<cylinderGeometry
+															args={[radius, radius, stickout, 32]}
 															ref={(geom) => {
 																if (geom) {
 																	geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
@@ -407,11 +413,11 @@ export function CadViewport({
 														/>
 														<meshStandardMaterial color="#cbd5e1" metalness={0.8} roughness={0.2} transparent opacity={0.9} />
 													</mesh>
-													
+
 													{/* CNC Spindle / Tool Holder */}
 													<mesh position={[0, stickout + 10, 0]}>
-														<cylinderGeometry 
-															args={[radius * 4, radius * 2.5, 20, 32]} 
+														<cylinderGeometry
+															args={[radius * 4, radius * 2.5, 20, 32]}
 															ref={(geom) => {
 																if (geom) {
 																	geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
@@ -424,8 +430,8 @@ export function CadViewport({
 
 													{/* Tool tip point */}
 													<mesh position={[0, 0, 0]}>
-														<sphereGeometry 
-															args={[Math.max(0.5, radius * 0.2), 16, 16]} 
+														<sphereGeometry
+															args={[Math.max(0.5, radius * 0.2), 16, 16]}
 															ref={(geom) => {
 																if (geom) {
 																	geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
@@ -442,7 +448,7 @@ export function CadViewport({
 								</group>
 							)}
 						</Stage>
-						
+
 						<GizmoHelper alignment="top-right" margin={[50, 50]}>
 							<GizmoViewport axisColors={['#ef4444', '#22c55e', '#3b82f6']} labelColor="black" />
 						</GizmoHelper>
@@ -468,13 +474,13 @@ export function CadViewport({
 						<div className="relative max-w-md w-full">
 							{/* Outer glow aura */}
 							<div className="absolute inset-0 rounded-3xl bg-blue-500/5 dark:bg-blue-500/10 blur-2xl dark:blur-3xl scale-105 dark:scale-110" />
-							
+
 							{/* Main card */}
 							<div className="relative rounded-3xl border border-transparent/50 dark:border-white/10 bg-background/90 dark:bg-black/60 p-12 text-center shadow-xl backdrop-blur-2xl">
-								
+
 								{/* Top accent line */}
 								<div className="absolute inset-x-0 top-0 h-px rounded-t-3xl bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
-								
+
 								{/* Rotating wireframe icon */}
 								<div className="mx-auto mb-7 relative flex size-20 items-center justify-center">
 									{/* Orbit ring */}
@@ -501,13 +507,13 @@ export function CadViewport({
 										<line x1="24" y1="24" x2="40" y2="14" stroke="rgb(59,130,246)" strokeWidth="0.5" strokeDasharray="2,3" strokeOpacity="0.3" />
 									</svg>
 								</div>
-								
+
 								{/* Status badge */}
 								<div className="mx-auto mb-6 flex w-fit items-center gap-2 rounded-full border border-blue-500/20 bg-blue-50/50 dark:bg-blue-500/5 px-4 py-1.5 shadow-sm">
 									<div className="size-1.5 rounded-full bg-blue-500 animate-pulse shadow-sm" />
 									<span className="text-[10px] font-bold uppercase tracking-[0.05em] text-blue-600 dark:text-blue-200">Geometry Engine — Idle</span>
 								</div>
-								
+
 								<h3 className="text-xl font-bold tracking-tight text-foreground">Awaiting Parameters</h3>
 							</div>
 						</div>

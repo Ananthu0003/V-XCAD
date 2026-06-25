@@ -1,11 +1,11 @@
-import { SetupSettings, Tool, CamOperation } from '@/types/cam';
+import { SetupSettings, Tool, CamOperation, CamFeature } from '@/types/cam';
 import { Target, Layers, Settings2, Scissors, Activity, FileCode } from 'lucide-react';
 
 type CamSummaryPanelProps = {
     setup: SetupSettings;
     tools: Tool[];
     operations: CamOperation[];
-    features?: any[];
+    features?: CamFeature[];
     coordValidation?: any;
     onClickSection: (sectionId: string) => void;
 };
@@ -66,6 +66,45 @@ export function CamSummaryPanel({ setup, tools, operations, features = [], coord
                     </div>
                 </div>
 
+                {/* Features Section */}
+                <div 
+                    className="p-3 rounded-lg bg-background border border-transparent transition-all flex flex-col gap-1"
+                >
+                    <div className="flex items-center gap-2 text-cyan-500 font-semibold text-xs uppercase tracking-wide">
+                        <Target className="size-3.5" /> Detected Features ({features.length})
+                    </div>
+                    <div className="flex flex-col gap-1 mt-1">
+                        {features.length === 0 ? (
+                            <span className="text-[11px] text-muted-foreground">No features detected</span>
+                        ) : (
+                            features.map(f => {
+                                const isBlocked = f.machinable_in_current_setup === false;
+                                return (
+                                    <div key={f.id} className="text-[11px] flex flex-col gap-0.5 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
+                                        <div className="flex justify-between items-start">
+                                            <span className="text-foreground font-medium capitalize">{f.name || f.type?.replace('_', ' ')}</span>
+                                            <span className="text-[10px] whitespace-nowrap">
+                                                {isBlocked ? '🛑 Blocked' : '✅ Machinable'}
+                                            </span>
+                                        </div>
+                                        <div className="flex flex-col gap-0.5 text-[9px] text-muted-foreground font-mono ml-1 border-l border-border/50 pl-2">
+                                            <div><span className="text-foreground/60">ID:</span> {f.id}</div>
+                                            <div><span className="text-foreground/60">Type:</span> {f.type} / {(f as any).subtype || '—'}</div>
+                                            {f.axis && <div><span className="text-foreground/60">Axis:</span> [{f.axis.map(v => v.toFixed(2)).join(', ')}]</div>}
+                                            {f.machining_region && <div><span className="text-foreground/60">Region:</span> {f.machining_region}</div>}
+                                            {isBlocked && f.blocked_reason && (
+                                                <div className="text-red-400 mt-1 whitespace-pre-wrap font-sans text-[10px]">
+                                                    {f.blocked_reason}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+                </div>
+
                 {/* Operations Section */}
                 <div 
                     onClick={() => onClickSection('operations')}
@@ -85,7 +124,7 @@ export function CamSummaryPanel({ setup, tools, operations, features = [], coord
                                         <div className="flex justify-between items-start">
                                             <span className="text-foreground font-medium capitalize">{op.name || op.type.replace('_', ' ')}</span>
                                             <span className="text-[10px] whitespace-nowrap">
-                                                {op.status === 'ready' ? '🟢 OK' : op.status === 'error' ? '🔴 Error' : op.status === 'blocked_requires_reorientation' ? '🛑 Needs Regen' : op.status === 'missing_tool' ? '🔴 No Tool' : op.status === 'requires_regeneration' ? '🟡 Needs Regen' : '🟢 OK'}
+                                                {op.status === 'ready' ? '🟢 OK' : op.status === 'error' ? '🔴 Error' : op.status === 'blocked_requires_reorientation' ? '🛑 Blocked' : op.status === 'missing_tool' ? '🔴 No Tool' : op.status === 'requires_regeneration' ? '🟡 Needs Regen' : '🟢 OK'}
                                             </span>
                                         </div>
                                         <div className="flex flex-col gap-0.5 text-[9px] text-muted-foreground font-mono ml-1 border-l border-border/50 pl-2">

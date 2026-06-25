@@ -67,8 +67,19 @@ class CamOperationPlanner:
     def _map_feature_to_operation(self, feature: Dict[str, Any]) -> CamOperation:
         feat_type = feature.get('type')
         feat_id = feature.get('id')
+        machining_status = feature.get('machiningStatus', 'valid')
+        blocked_reason = feature.get('blocked_reason')
         
-        if feat_type in ['blind_hole', 'through_hole']:
+        # If the feature is known to be blocked/unmachinable in current setup, 
+        # still create an operation for UI visibility but mark it as blocked.
+        if not feature.get('machinable_in_current_setup', True) or machining_status != 'valid':
+            op = CamOperation("blocked", feat_id)
+            op.parameters['error'] = blocked_reason or "Feature is not machinable in current setup."
+            op.machining_strategy = "blocked"
+            # It will fail validation and generate 0 segments
+            return op
+            
+        if feat_type in ['hole', 'blind_hole', 'through_hole']:
             op = CamOperation("drilling", feat_id)
             z_top = feature.get('z_top', 0.0)
             z_bottom = feature.get('z_bottom', -abs(feature.get('depth', 10.0)))
@@ -79,14 +90,12 @@ class CamOperationPlanner:
             op.parameters['cycle_type'] = 'G83' if depth > 10 else 'G81'
             if 'diameter' in feature:
                 op.parameters['hole_diameter'] = feature['diameter']
-            return op
-            
+                
         elif feat_type == 'pocket':
             op = CamOperation("pocketing", feat_id)
             op.safe_heights['top'] = feature.get('z_top', 0.0)
             op.safe_heights['bottom'] = feature.get('z_bottom', -abs(feature.get('depth', 5.0)))
             op.machining_strategy = 'adaptive_clearing'
-            return op
             
         elif feat_type == 'face':
             op = CamOperation("facing", feat_id)
@@ -94,7 +103,6 @@ class CamOperationPlanner:
             op.safe_heights['top'] = z_level
             op.safe_heights['bottom'] = z_level # Facing usually cuts exactly at the Z plane
             op.machining_strategy = 'zigzag'
-            return op
             
         elif feat_type == 'contour':
             op = CamOperation("2d_contour", feat_id)
@@ -102,8 +110,15 @@ class CamOperationPlanner:
             op.safe_heights['bottom'] = feature.get('z_bottom', -abs(feature.get('depth', 10.0)))
             op.machining_strategy = 'outside_climb'
             
-        elif feat_type in ['od_diameter', 'shoulder', 'turned_profile']:
-            op = CamOperation("od_turning", feat_id)
+        elif feat_type == 'boss':
+            op = CamOperation("boss_clearing", feat_id)
+            op.safe_heights['top'] = feature.get('z_top', 0.0)
+            op.safe_heights['bottom'] = feature.get('z_bottom', -abs(feature.get('height', 10.0)))
+            op.machining_strategy = 'adaptive_clearing'
+            
+        elif feat_type in ['external_cylinder', 'shaft', 'turned_od', 'od_diameter', 'shoulder', 'turned_profile']:
+            # If it got here and is valid, it implies we are in a turning setup (since milling_3axis blocks it)
+            op = CamOperation("turning", feat_id)
             
         elif feat_type == 'step':
             op = CamOperation("2d_contour", feat_id)
@@ -111,7 +126,7 @@ class CamOperationPlanner:
         else:
             op = CamOperation("unknown", feat_id)
             
-        if op:
+        if op and op.type != "blocked":
             z_top = op.safe_heights.get('top', 0.0)
             op.safe_heights['clearance'] = z_top + 15.0
             op.safe_heights['retract'] = z_top + 5.0

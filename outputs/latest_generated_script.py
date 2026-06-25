@@ -1,89 +1,66 @@
 ```python
 import build123d as bd
 
-# --- PARAMETERS ---
 PARAMETERS = {
     "eps": 0.01,
-    "main_body_dia": 36.0,
-    "main_body_height": 118.0,
-    "bottom_flange_dia": 65.0,
-    "bottom_flange_height": 6.0,
-    "top_flange_width": 40.0,
-    "top_flange_length": 78.61,
-    "top_flange_height": 6.0,
-    "side_branch_dia": 28.0,
-    "side_branch_len": 45.0,
-    "side_branch_z": 58.0,
-    "main_bore_dia": 26.0,
-    "mounting_hole_dia": 7.0,
-    "mounting_cb_dia": 13.0,
-    "mounting_cb_depth": 1.0,
-    "mounting_hole_pcd": 50.0,
+    "block_len": 32.0,
+    "block_width": 24.0,
+    "block_height": 15.0,
+    "shaft_dia": 14.0,
+    "shaft_len": 11.5,
+    "thread_dia": 10.0,
+    "thread_len": 10.0,
+    "hole_dia": 13.0,
+    "chamfer_size": 1.0
 }
 
 PARAMETER_METADATA = {
-    "eps": {"group": "Global", "confidence": 1.0, "description": "Epsilon for boolean stability"},
-    "main_body_dia": {"group": "Body", "confidence": 1.0, "description": "Main vertical cylinder diameter"},
-    "main_body_height": {"group": "Body", "confidence": 1.0, "description": "Total height of vertical body"},
-    "bottom_flange_dia": {"group": "Flange", "confidence": 1.0, "description": "Bottom flange diameter"},
-    "bottom_flange_height": {"group": "Flange", "confidence": 1.0, "description": "Bottom flange thickness"},
-    "top_flange_width": {"group": "Flange", "confidence": 1.0, "description": "Top flange width"},
-    "top_flange_length": {"group": "Flange", "confidence": 1.0, "description": "Top flange length"},
-    "top_flange_height": {"group": "Flange", "confidence": 1.0, "description": "Top flange thickness"},
-    "side_branch_dia": {"group": "Branch", "confidence": 1.0, "description": "Side branch diameter"},
-    "side_branch_len": {"group": "Branch", "confidence": 1.0, "description": "Side branch length"},
-    "side_branch_z": {"group": "Branch", "confidence": 1.0, "description": "Side branch Z-center"},
-    "main_bore_dia": {"group": "Bore", "confidence": 1.0, "description": "Main internal bore diameter"},
-    "mounting_hole_dia": {"group": "Holes", "confidence": 1.0, "description": "Mounting hole diameter"},
-    "mounting_cb_dia": {"group": "Holes", "confidence": 1.0, "description": "Counterbore diameter"},
-    "mounting_cb_depth": {"group": "Holes", "confidence": 1.0, "description": "Counterbore depth"},
-    "mounting_hole_pcd": {"group": "Holes", "confidence": 1.0, "description": "Pitch circle diameter for holes"},
+    "eps": {"group": "Tolerance", "confidence": 1.0, "description": "Epsilon for boolean stability"},
+    "block_len": {"group": "Main", "confidence": 1.0, "description": "Length of central block"},
+    "block_width": {"group": "Main", "confidence": 1.0, "description": "Width of central block"},
+    "block_height": {"group": "Main", "confidence": 1.0, "description": "Height of central block"},
+    "shaft_dia": {"group": "Shaft", "confidence": 1.0, "description": "Diameter of shaft base"},
+    "shaft_len": {"group": "Shaft", "confidence": 1.0, "description": "Length of shaft base"},
+    "thread_dia": {"group": "Thread", "confidence": 1.0, "description": "Diameter of M10 thread section"},
+    "thread_len": {"group": "Thread", "confidence": 1.0, "description": "Length of M10 thread section"},
+    "hole_dia": {"group": "Hole", "confidence": 1.0, "description": "Diameter of central through hole"},
+    "chamfer_size": {"group": "Detail", "confidence": 1.0, "description": "Chamfer size on thread ends"}
 }
 
 # --- SPATIAL PLAN ---
-# 1. Main Body: Cylinder at (0,0,0) to (0,0,118).
-# 2. Bottom Flange: Cylinder at (0,0,0) to (0,0,6).
-# 3. Top Flange: Rectangle at (0,0,112) to (0,0,118).
-# 4. Side Branch: Cylinder at (0,0,58), rotated 45 deg around Y, extruding along X.
-# 5. Main Bore: Subtractive cylinder through Z-axis.
-# 6. Mounting Holes: 4x circular pattern on bottom flange.
+# Main Block: Centered at (0,0,0), Z-range [-7.5, 7.5].
+# Shafts: Centered on Y=0, Z=0. Left shaft starts at X = -block_len/2, extends left.
+# Threaded sections: Attached to the end of shafts, extending further left/right.
+# Through Hole: Drilled along Y-axis through the center of the block.
 # --- MENTAL WALKTHROUGH ---
-# - Main body and flanges are unioned.
-# - Side branch is placed at Z=58, rotated, and extruded into the main body to ensure fusion.
-# - Main bore is cut through the entire Z-height.
-# - Mounting holes are cut into the bottom flange using counterbore logic.
+# 1. Create main block centered at origin.
+# 2. Create shafts: To ensure fusion, overlap them by 'eps' into the block.
+# 3. Create thread sections: Attached to the outer face of the shafts.
+# 4. Chamfer the thread ends.
+# 5. Cut the central hole: Use a cylinder oriented along Y-axis.
 # --------------------
 
 with bd.BuildPart() as part:
-    # Main Body
-    bd.Cylinder(radius=PARAMETERS["main_body_dia"]/2, height=PARAMETERS["main_body_height"], align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    # Main Block
+    bd.Box(length=PARAMETERS["block_len"], width=PARAMETERS["block_width"], height=PARAMETERS["block_height"])
     
-    # Bottom Flange
-    bd.Cylinder(radius=PARAMETERS["bottom_flange_dia"]/2, height=PARAMETERS["bottom_flange_height"], align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
-    
-    # Top Flange
-    with bd.Locations((0, 0, PARAMETERS["main_body_height"] - PARAMETERS["top_flange_height"])):
-        with bd.BuildSketch():
-            bd.Rectangle(width=PARAMETERS["top_flange_width"], height=PARAMETERS["top_flange_length"])
-        bd.extrude(amount=PARAMETERS["top_flange_height"])
-        
-    # Side Branch
-    with bd.Locations((0, 0, PARAMETERS["side_branch_z"])):
-        with bd.Locations(bd.Rotation(0, 45, 0)):
-            with bd.BuildSketch():
-                bd.Circle(radius=PARAMETERS["side_branch_dia"]/2)
-            bd.extrude(amount=PARAMETERS["side_branch_len"])
+    # Shafts (Left and Right)
+    for x_sign in [-1, 1]:
+        with bd.Locations((x_sign * (PARAMETERS["block_len"] / 2 - PARAMETERS["eps"]), 0, 0)):
+            with bd.Locations(bd.Rotation(0, 90, 0)):
+                # Extrude shaft from block surface
+                bd.Cylinder(radius=PARAMETERS["shaft_dia"] / 2, height=PARAMETERS["shaft_len"], align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+                
+                # Threaded section
+                with bd.Locations((0, 0, PARAMETERS["shaft_len"])):
+                    thread = bd.Cylinder(radius=PARAMETERS["thread_dia"] / 2, height=PARAMETERS["thread_len"], align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+                    
+                    # Chamfer thread end
+                    bd.chamfer(thread.edges().filter_by(bd.GeomType.CIRCLE).sort_by(bd.Axis.Z)[-1], length=PARAMETERS["chamfer_size"])
 
-    # Main Bore
-    bd.Hole(radius=PARAMETERS["main_bore_dia"]/2, depth=PARAMETERS["main_body_height"] + PARAMETERS["eps"])
-
-    # Bottom Mounting Holes
-    with bd.Locations((0, 0, 0)):
-        with bd.PolarLocations(radius=PARAMETERS["mounting_hole_pcd"]/2, count=4):
-            bd.Hole(radius=PARAMETERS["mounting_hole_dia"]/2, depth=PARAMETERS["bottom_flange_height"] + PARAMETERS["eps"])
-            # Counterbore
-            with bd.Locations((0, 0, PARAMETERS["bottom_flange_height"] - PARAMETERS["mounting_cb_depth"] + PARAMETERS["eps"])):
-                bd.Hole(radius=PARAMETERS["mounting_cb_dia"]/2, depth=PARAMETERS["mounting_cb_depth"] + PARAMETERS["eps"])
+    # Central Through Hole (along Y-axis)
+    with bd.Locations(bd.Rotation(90, 0, 0)):
+        bd.Cylinder(radius=PARAMETERS["hole_dia"] / 2, height=PARAMETERS["block_width"] + 2 * PARAMETERS["eps"], mode=bd.Mode.SUBTRACT)
 
 if __name__ == '__main__':
     try:

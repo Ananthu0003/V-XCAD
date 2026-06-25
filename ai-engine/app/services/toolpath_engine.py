@@ -37,6 +37,11 @@ def _douglas_peucker(points: List[Tuple[float, float]], epsilon: float) -> List[
         return [points[0], points[end]]
 
 
+# Only these source strings are allowed on output segments
+ALLOWED_SOURCES = {"drill", "contour", "pocket", "boss", "face"}
+BANNED_SOURCES = {"debug_wire", "edge_sample", "topology_boundary", "silhouette", "fallback", "outer_wire_sample"}
+
+
 class ToolpathEngine:
     """
     Core engine responsible for generating true physical 3D toolpaths
@@ -54,7 +59,7 @@ class ToolpathEngine:
     def generate_toolpaths(self, operations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         toolpaths = []
         for op in operations:
-            if op.get('status') == 'error':
+            if op.get('status') in ('error', 'blocked'):
                 toolpaths.append(op)
                 continue
 
@@ -68,11 +73,12 @@ class ToolpathEngine:
         geometry = op.get("geometry", {})
         
         # Constraint C6: No fallbacks. Hard failure on missing/failed geometry.
-        if not geometry or geometry.get("status") == "failed":
-            op["status"] = "error"
-            op["parameters"]["error"] = geometry.get(
-                "error", "No geometry mapping available for this operation"
-            )
+        if not geometry or geometry.get("status") in ("failed", "blocked"):
+            if geometry.get("status") != "blocked":
+                op["status"] = "error"
+                op["parameters"]["error"] = geometry.get(
+                    "error", "No geometry mapping available for this operation"
+                )
             return []
 
         op_type = op.get("type")
@@ -100,9 +106,17 @@ class ToolpathEngine:
         # Segment validation constraints
         limit = 3000
         if op_type == "drilling": limit = 50
-        elif op_type in ("2d_contour", "profile"): limit = 1000
+        elif op_type in ("2d_contour", "profile"): limit = 2000
         elif op_type == "pocketing": limit = 3000
-        elif op_type == "boss_machining": limit = 3000
+        elif op_type == "boss_clearing": limit = 3000
+
+        # Source whitelist — only these values are allowed
+        op_source = "contour"  # safe default
+        if op_type == "drilling": op_source = "drill"
+        elif op_type in ("2d_contour", "step"): op_source = "contour"
+        elif op_type == "pocketing": op_source = "pocket"
+        elif op_type == "boss_clearing": op_source = "boss"
+        elif op_type == "facing": op_source = "face"
 
         def add_seg(seg_type: ToolpathSegmentType, start_pt: Point3D, end_pt: Point3D):
             segments.append(
@@ -115,14 +129,14 @@ class ToolpathEngine:
                     featureId=op.get("featureId", op.get("feature_id", "unknown_feat")),
                     setupId=op.get("setupId", op.get("setup_id", "setup_1")),
                     coordinateMode=CoordinateMode.MILL_XYZ,
-                    source="strategy"
+                    source=op_source
                 )
             )
 
         try:
             if op_type == "drilling":
                 self._generate_drilling_path(op, geometry, clearance, feed_z, top, bottom, add_seg)
-            elif op_type in ("2d_contour", "pocketing", "step", "boss_machining"):
+            elif op_type in ("2d_contour", "pocketing", "step", "boss_clearing"):
                 self._generate_planar_milling_path(
                     op, op_type, geometry, tool_radius, clearance, feed_z, top, bottom, add_seg
                 )
@@ -146,9 +160,17 @@ class ToolpathEngine:
 
         # Mandatory CAM Source Guard
         for seg in segments:
-            if not seg.operationId or not seg.featureId or not seg.toolId or not seg.setupId or seg.source != "strategy":
+            if not seg.operationId or not seg.featureId or not seg.toolId or not seg.setupId:
                 op["status"] = "error"
-                op["parameters"]["error"] = f"Segment validation failed: missing mandatory properties or invalid source."
+                op["parameters"]["error"] = "Segment validation failed: missing mandatory properties."
+                return []
+            if seg.source in BANNED_SOURCES:
+                op["status"] = "error"
+                op["parameters"]["error"] = f"Segment uses banned source: {seg.source}"
+                return []
+            if seg.source not in ALLOWED_SOURCES:
+                op["status"] = "error"
+                op["parameters"]["error"] = f"Segment uses unknown source: {seg.source}. Allowed: {ALLOWED_SOURCES}"
                 return []
 
         return segments
@@ -230,7 +252,7 @@ class ToolpathEngine:
         except ImportError:
             raise RuntimeError("Shapely required for toolpath offset generation")
 
-        if op_type == "boss_machining":
+        if op_type == "boss_clearing":
             boss_pts = geometry.get("boss_points")
             containing_pts = geometry.get("containing_points")
             if not boss_pts or not containing_pts:
@@ -293,8 +315,8 @@ class ToolpathEngine:
         if not all_paths_2d:
             raise ValueError("Tool radius too large for feature boundary or offset produced degenerate polygon")
 
-        # Simplify
-        all_paths_2d = [_douglas_peucker(path, epsilon=0.5) for path in all_paths_2d if len(path) > 2]
+        # Simplify to merge collinear segments but preserve arcs (0.005mm tolerance)
+        all_paths_2d = [_douglas_peucker(path, epsilon=0.005) for path in all_paths_2d if len(path) > 2]
 
         toolpath_area = 0.0
         # rough area approx
@@ -313,10 +335,17 @@ class ToolpathEngine:
         }
 
         stepdown = op.get("parameters", {}).get("stepdown", 2.0)
-        if stepdown <= 0: stepdown = 2.0
+        if stepdown <= 0.1: stepdown = 2.0
+
+        # Safety constraint based on real stock depth
+        if top - bottom > 1000:
+            bottom = top - 1000
 
         curr_z = top
-        while curr_z > bottom:
+        max_loops = 5000
+        loops = 0
+        while curr_z > bottom and loops < max_loops:
+            loops += 1
             curr_z = max(bottom, curr_z - stepdown)
             
             for path_pts_2d in all_paths_2d:

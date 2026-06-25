@@ -66,6 +66,10 @@ class GeometryMapper:
                     self._map_face_geometry(feature)
                 elif feat_type == "step":
                     self._map_step_geometry(feature)
+                elif feat_type in ("external_cylinder", "shaft", "turned_od"):
+                    self._map_external_cylinder_geometry(feature, setup)
+                elif feat_type == "side_protrusion":
+                    self._map_side_protrusion_geometry(feature, setup)
                 else:
                     feature["geometry"] = {
                         "status": "failed",
@@ -102,62 +106,137 @@ class GeometryMapper:
             }
             return
 
-        # Find the top-most face in the Z direction
-        top_face_id = None
-        max_z = -1e9
-        for fid in fids:
-            f_info = self.extractor.faces.get(fid, {})
-            try:
-                z = f_info.get("bbox", {})["max"][2]
-                if z > max_z:
-                    max_z = z
-                    top_face_id = fid
-            except (KeyError, TypeError):
-                pass
-                
-        if not top_face_id:
-            top_face_id = fids[0]
-
-        wire_id, profile_points = self.extractor.extract_outer_wire(top_face_id)
-
-        if not profile_points or len(profile_points) < 3:
+        source = feature.get("source", "unknown")
+        
+        if source not in ("outer_wire", "face_boundary"):
             feature["geometry"] = {
-                "status": "failed",
-                "error": "Wire extraction produced fewer than 3 points",
+                "status": "error",
+                "error": f"Invalid contour source: {source}. Expected outer_wire or face_boundary.",
+                "regionType": None
             }
             return
             
-        # Optional area validation (Phase 6):
-        # We can implement a quick bounding box area check to ensure the contour
-        # isn't massively larger than the face, but since we are extracting the 
-        # actual wire, it's inherently accurate.
+        profile_points = feature.get("boundaryPoints", [])
+        if not profile_points or len(profile_points) < 3:
+            feature["geometry"] = {
+                "status": "error",
+                "error": "Contour missing valid boundary points",
+                "regionType": None
+            }
+            return
+            
+        is_closed = feature.get("boundaryClosed", False)
+        if not is_closed:
+            feature["geometry"] = {
+                "status": "error",
+                "error": "Contour outer wire is not closed",
+                "regionType": None
+            }
+            return
 
-        # Get Z extents from model bounding box
-        bb = self.extractor.shape.bounding_box()
-        z_top = round(bb.max.Z, 6)
-        z_bottom = round(bb.min.Z, 6)
-
-        # Calculate rough area
-        try:
-            from shapely.geometry import Polygon
-            area = Polygon([(p[0], p[1]) for p in profile_points]).area
-        except:
-            area = 0.0
-
+        area = feature.get("area", 0.0)
+        
         feature["geometry"] = {
             "status": "ok",
+            "regionType": "contour_region",
+            "closedBoundary": True,
             "profile_points": profile_points,
-            "z_top": z_top,
-            "z_bottom": z_bottom,
+            "z_top": feature.get("dimensions", {}).get("z_top", 0.0),
+            "z_bottom": feature.get("dimensions", {}).get("z_bottom", 0.0),
             "plane_normal": list(plane_normal),
             "plane_origin": list(plane_origin),
-            "point_count": len(profile_points),
+            "source": source,
             "diagnostics": {
                 "feature_type": feature.get("type"),
                 "face_count": len(fids),
                 "wire_count": 1,
                 "boundary_count": len(profile_points),
                 "mapped_area": area
+            }
+        }
+
+    # ------------------------------------------------------------------
+    # External Cylinder / Shaft
+    # ------------------------------------------------------------------
+
+    def _map_external_cylinder_geometry(self, feature: Dict[str, Any], setup: Dict[str, Any]) -> None:
+        """
+        Extract axis, radius, length, start/end points, bbox.
+        """
+        cyl_face_id = feature.get("cylinder_face_id")
+        if not cyl_face_id:
+            feature["geometry"] = {"status": "failed", "error": "No cylinder_face_id"}
+            return
+            
+        face_info = self.extractor.faces.get(cyl_face_id, {})
+        face_obj = self.extractor.get_face_object(cyl_face_id)
+        
+        if not face_obj:
+            feature["geometry"] = {"status": "failed", "error": "No OCC object for cylinder"}
+            return
+            
+        try:
+            from OCP.BRepAdaptor import BRepAdaptor_Surface
+            surf = BRepAdaptor_Surface(face_obj.wrapped)
+            cyl = surf.Cylinder()
+            radius = cyl.Radius()
+            ax = cyl.Axis().Direction()
+            loc = cyl.Location()
+
+            center = [round(loc.X(), 6), round(loc.Y(), 6), round(loc.Z(), 6)]
+            axis = [round(ax.X(), 6), round(ax.Y(), 6), round(ax.Z(), 6)]
+        except Exception as e:
+            feature["geometry"] = {"status": "failed", "error": f"Cylinder extraction failed: {e}"}
+            return
+
+        bb = face_info.get("bbox", {"min": center, "max": center})
+        length = abs(feature.get("dimensions", {}).get("height", 10.0))
+        
+        setup_type = setup.get("type", "milling_3axis")
+        tool_axis = setup.get("toolAxis", [0, 0, 1])
+        
+        dot_axis = abs(sum(a * b for a, b in zip(axis, tool_axis)))
+        is_aligned = dot_axis > 0.98
+        
+        status = "ok"
+        region_type = "turning_profile"
+        if setup_type == "milling_3axis":
+            status = "blocked"
+            feature["machinable_in_current_setup"] = False
+            feature["blocked_reason"] = "Vertical shaft requires turning or special multi-axis strategy"
+        
+        feature["geometry"] = {
+            "status": status,
+            "regionType": region_type,
+            "center": center,
+            "axis": axis,
+            "radius": round(radius, 6),
+            "length": length,
+            "bbox": bb,
+            "source": "cylinder_extraction",
+            "diagnostics": {
+                "feature_type": feature.get("type"),
+                "is_aligned": is_aligned
+            }
+        }
+
+    # ------------------------------------------------------------------
+    # Side Protrusion
+    # ------------------------------------------------------------------
+
+    def _map_side_protrusion_geometry(self, feature: Dict[str, Any], setup: Dict[str, Any]) -> None:
+        """
+        Block side protrusions for 3-axis milling.
+        """
+        feature["machinable_in_current_setup"] = False
+        feature["blocked_reason"] = "Side protrusion requires 4-axis or secondary setup"
+        
+        feature["geometry"] = {
+            "status": "blocked",
+            "regionType": "none",
+            "error": "Side protrusion requires 4-axis or secondary setup",
+            "diagnostics": {
+                "feature_type": feature.get("type")
             }
         }
 
@@ -183,8 +262,8 @@ class GeometryMapper:
             return
 
         # Look for containing face (floor). This usually comes from adjacency or feature dict.
-        # For a boss, we expect 'floor_face_id' or we search adjacent faces.
-        containing_face_id = feature.get("floor_face_id") or feature.get("base_face_id")
+        # For a boss, we expect 'floorFaceId' or we search adjacent faces.
+        containing_face_id = feature.get("floorFaceId") or feature.get("floor_face_id") or feature.get("parentFaceId") or feature.get("base_face_id")
         
         # If no explicit floor, try to find an adjacent face with a lower Z
         if not containing_face_id:
@@ -214,8 +293,10 @@ class GeometryMapper:
             feature["geometry"] = {
                 "status": "failed", 
                 "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary.",
+                "machining_region": "error",
                 "diagnostics": { "failure_reason": "No containing face found." }
             }
+            feature["machining_region"] = "error"
             return
 
         wire_id, containing_face_points = self.extractor.extract_outer_wire(containing_face_id)
@@ -249,8 +330,11 @@ class GeometryMapper:
         except:
             area = 0.0
 
+        feature["machining_region"] = "valid"
         feature["geometry"] = {
             "status": "ok",
+            "regionType": "boss_clearing_region",
+            "machining_region": "valid",
             "containing_points": containing_face_points,
             "boss_points": boss_profile_points,
             "top_z": top_z,
@@ -339,6 +423,7 @@ class GeometryMapper:
 
         feature["geometry"] = {
             "status": "ok",
+            "regionType": "cylinder",
             "center": list(center),
             "axis": list(axis),
             "radius": round(radius, 6),
@@ -365,7 +450,7 @@ class GeometryMapper:
         Constraint C2: Shapely will be used downstream (in ToolpathEngine)
         for 2D offset of these real wire points — not here.
         """
-        floor_face_id = feature.get("floor_face_id")
+        floor_face_id = feature.get("floorFaceId") or feature.get("floor_face_id")
         if not floor_face_id:
             fids = feature.get("face_ids", [])
             floor_face_id = fids[0] if fids else None
@@ -423,6 +508,7 @@ class GeometryMapper:
 
         feature["geometry"] = {
             "status": "ok",
+            "regionType": "pocket_region",
             "boundary_points": boundary_points,
             "floor_z": floor_z,
             "top_z": top_z,
@@ -481,6 +567,7 @@ class GeometryMapper:
 
         feature["geometry"] = {
             "status": "ok",
+            "regionType": "face_boundary",
             "face_boundary": face_boundary,
             "face_z": face_z,
             "normal": list(normal),
@@ -544,6 +631,7 @@ class GeometryMapper:
 
         feature["geometry"] = {
             "status": "ok",
+            "regionType": "step_region",
             "boundary_points": boundary_points,
             "step_z": step_z,
             "top_z": top_z,

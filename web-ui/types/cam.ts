@@ -40,6 +40,8 @@ export type CamFeature = {
     name?: string;
     dimensions: Record<string, number>; // e.g., { diameter: 10, depth: 5 }
     location: [number, number, number]; // Center coordinate
+    axis?: [number, number, number];
+    center?: [number, number, number];
     position?: {
         center: [number, number, number];
         normal: [number, number, number];
@@ -64,6 +66,17 @@ export type CamFeature = {
     statusReason?: string;
     recommendedToolType: ToolType | string;
     recommendedOperation: OperationType | string;
+    
+    // Topology references
+    parentFaceId?: string;
+    floorFaceId?: string;
+    
+    // Setup-aware machinability
+    machining_region?: string;
+    machinable_in_current_setup?: boolean;
+    requires_reorientation?: boolean;
+    requires_4axis_or_secondary_setup?: boolean;
+    blocked_reason?: string;
 };
 
 export type Tool = {

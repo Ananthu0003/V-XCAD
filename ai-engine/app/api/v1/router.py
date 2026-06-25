@@ -566,17 +566,47 @@ async def render(
         fname = Path(path_str).name
         return f"/outputs/{fname}"
 
+    try:
+        from app.services.cam_pipeline_manager import CamPipelineManager
+        cam_mgr = CamPipelineManager()
+        analysis_result = await asyncio.to_thread(
+            cam_mgr.analyze_features, 
+            result.get("step_path"), 
+            session_id, 
+            "",
+            request.cam_parameters.get("setup", {}) if request.cam_parameters else {}
+        )
+        
+        features = analysis_result.get("features")
+        validation_status = analysis_result.get("validation_status")
+        mapping_summary = analysis_result.get("geometry_mapping_summary")
+        
+        # Clear CAM artifacts
+        job_dir = Path(__file__).resolve().parents[3] / "storage" / "jobs" / session_id / "cam"
+        for fname in ["cam_toolpaths.json", "cam_validation.json", "cam_operation_summary.json", "generated_gcode.nc", "cam_hashes.json", "cam_features_debug.json", "cam_geometry_mapping.json"]:
+            fpath = job_dir / fname
+            if fpath.exists():
+                try: fpath.unlink()
+                except Exception: pass
+                
+    except Exception as e:
+        features = None
+        validation_status = "error"
+        mapping_summary = {"error": str(e)}
+
     artifacts = RenderArtifacts(
-        model_hash=result.get("modelHash"),
+        model_hash=analysis_result.get("camModelHash") if 'analysis_result' in locals() and analysis_result else result.get("modelHash"),
         stl_url=_url(result.get("stl_path")),
         step_url=_url(result.get("step_path")),
         dxf_url=_url(result.get("dxf_path")),
-        gcode_url=_url(result.get("gcode_path")),
-        gcode_content=result.get("gcode_content"),
-        toolpaths=result.get("toolpaths"),
+        gcode_url=None,
+        gcode_content=None,
+        toolpaths=None,
         annotations=result.get("annotations"),
-        features=result.get("features"),
-        operations=result.get("operations"),
+        features=features,
+        feature_validation_status=validation_status,
+        geometry_mapping_summary=mapping_summary,
+        operations=None,
     )
 
     return RenderResponse(
@@ -896,14 +926,6 @@ class CamAnalyzeRequest(BaseModel):
     job_id: str = "default_job"
     cam_run_id: str = ""
 
-class CamGenerateToolpathsRequest(BaseModel):
-    session_id: str
-    job_id: str = "default_job"
-    cam_run_id: str = ""
-    setup: Dict[str, Any]
-    tools: List[Dict[str, Any]]
-    operations: List[Dict[str, Any]]
-
 @router.post("/cam/analyze")
 async def cam_analyze(request: CamAnalyzeRequest):
     outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
@@ -919,13 +941,29 @@ async def cam_analyze(request: CamAnalyzeRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail={"error": {"message": f"CAM analysis failed: {exc}"}})
 
-@router.post("/cam/generate-toolpaths")
+class CamGenerateToolpathsRequest(BaseModel):
+    session_id: str
+    job_id: str = "default_job"
+    cam_run_id: str = ""
+    setup: Dict[str, Any]
+    tools: List[Dict[str, Any]]
+    operations: List[Dict[str, Any]]
+    modelHash: Optional[str] = ""
+
+@router.post("/cam/toolpaths")
 async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
     outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
     step_path = outputs_dir / f"cad_{request.session_id}.step"
     if not step_path.exists():
         raise HTTPException(status_code=404, detail="STEP file not found for session")
-    print(f"DEBUG_REQUEST_OPS: {request.operations}")
+        
+    import hashlib
+    with open(step_path, "rb") as f:
+        current_hash = hashlib.sha256(f.read()).hexdigest()
+        
+    if request.modelHash and request.modelHash != current_hash:
+        raise HTTPException(status_code=400, detail={"error": {"message": "Model hash mismatch - generate CAD again."}})
+        
     try:
         from app.services.cam_pipeline_manager import CamPipelineManager
         cam_mgr = CamPipelineManager()
@@ -944,9 +982,53 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
             flat_paths.extend(op.get("toolpaths", []))
             
         result["toolpaths"] = flat_paths
+        result["camRunId"] = request.cam_run_id
         return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": {"message": str(exc)}})
     except Exception as exc:
         raise HTTPException(status_code=500, detail={"error": {"message": str(exc)}})
+
+class CamGCodeRequest(BaseModel):
+    session_id: str
+    job_id: str = "default_job"
+    cam_run_id: str = ""
+
+@router.post("/cam/gcode")
+async def cam_generate_gcode(request: CamGCodeRequest):
+    job_dir = Path(__file__).resolve().parents[3] / "storage" / "jobs" / request.job_id / "cam"
+    toolpaths_file = job_dir / "cam_toolpaths.json"
+    validation_file = job_dir / "cam_validation.json"
+    operation_summary_file = job_dir / "cam_operation_summary.json"
+    
+    if not toolpaths_file.exists() or not validation_file.exists() or not operation_summary_file.exists():
+        raise HTTPException(status_code=400, detail={"error": {"message": "Valid toolpaths not found. Generate toolpaths first."}})
+        
+    with open(validation_file, "r") as f:
+        validation_data = json.load(f)
+        if validation_data.get("status") != "success":
+            raise HTTPException(status_code=400, detail={"error": {"message": "Cannot generate G-Code from invalid toolpaths."}})
+            
+    with open(operation_summary_file, "r") as f:
+        summary_data = json.load(f)
+        
+    try:
+        from app.services.gcode_generator import PostProcessorFactory
+        # Setup can be extracted from the first operation if present, or fallback
+        controller = "fanuc"
+        post_processor = PostProcessorFactory.create(controller)
+        
+        gcode = post_processor.generate(summary_data)
+        
+        # Save generated gcode
+        gcode_path = job_dir / "generated_gcode.nc"
+        with open(gcode_path, "w") as f:
+            f.write(gcode)
+            
+        return {"gcode": gcode, "status": "success"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"message": f"G-Code generation failed: {str(exc)}"}})
+
 
 class SimulatePrepareRequest(BaseModel):
     setup: Dict[str, Any]

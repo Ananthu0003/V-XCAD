@@ -53,6 +53,24 @@ class CamFeatureSchema(BaseModel):
     requiredMachining: bool = True
     recommendedToolType: str = ""
     recommendedOperation: str = ""
+    # Topology references
+    parentFaceId: Optional[str] = None
+    floorFaceId: Optional[str] = None
+    # Machining region status: "valid", "missing", "error"
+    machining_region: Optional[str] = None
+    # Setup-aware machinability
+    machinable_in_current_setup: bool = True
+    requires_reorientation: bool = False
+    requires_4axis_or_secondary_setup: bool = False
+    blocked_reason: Optional[str] = None
+    
+    # New metadata fields
+    featureGroupId: Optional[str] = None
+    centerline: Optional[list[float]] = None
+    radius: Optional[float] = None
+    length: Optional[float] = None
+    machiningStatus: str = "valid"
+
 
 class CamOperationSchema(BaseModel):
     id: str
@@ -144,6 +162,8 @@ class RenderArtifacts(BaseModel):
     toolpaths: Optional[list[ToolpathSegment]] = None
     annotations: Optional[dict[str, Any]] = None
     features: Optional[list[CamFeatureSchema]] = None
+    feature_validation_status: Optional[str] = None
+    geometry_mapping_summary: Optional[dict[str, Any]] = None
     operations: Optional[list[CamOperationSchema]] = None
 
 

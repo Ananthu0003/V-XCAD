@@ -12,3 +12,4 @@ web-ui/node_modules/
 # Local environment secrets
 ai-engine/.env
 web-ui/.env
+storage/
