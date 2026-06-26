@@ -1,66 +1,72 @@
 ```python
 import build123d as bd
 
+# --- PARAMETERS ---
 PARAMETERS = {
     "eps": 0.01,
-    "block_len": 32.0,
-    "block_width": 24.0,
-    "block_height": 15.0,
-    "shaft_dia": 14.0,
-    "shaft_len": 11.5,
-    "thread_dia": 10.0,
-    "thread_len": 10.0,
-    "hole_dia": 13.0,
-    "chamfer_size": 1.0
+    "base_dia": 8.0,
+    "base_height": 2.2,
+    "shaft_dia": 6.0,
+    "shaft_height": 20.5,
+    "tip_dia": 4.74,
+    "tip_height": 2.2,
+    "tip_radius_top": 1.0,
+    "tip_radius_shoulder": 0.5
 }
 
 PARAMETER_METADATA = {
     "eps": {"group": "Tolerance", "confidence": 1.0, "description": "Epsilon for boolean stability"},
-    "block_len": {"group": "Main", "confidence": 1.0, "description": "Length of central block"},
-    "block_width": {"group": "Main", "confidence": 1.0, "description": "Width of central block"},
-    "block_height": {"group": "Main", "confidence": 1.0, "description": "Height of central block"},
-    "shaft_dia": {"group": "Shaft", "confidence": 1.0, "description": "Diameter of shaft base"},
-    "shaft_len": {"group": "Shaft", "confidence": 1.0, "description": "Length of shaft base"},
-    "thread_dia": {"group": "Thread", "confidence": 1.0, "description": "Diameter of M10 thread section"},
-    "thread_len": {"group": "Thread", "confidence": 1.0, "description": "Length of M10 thread section"},
-    "hole_dia": {"group": "Hole", "confidence": 1.0, "description": "Diameter of central through hole"},
-    "chamfer_size": {"group": "Detail", "confidence": 1.0, "description": "Chamfer size on thread ends"}
+    "base_dia": {"group": "Base", "confidence": 1.0, "description": "Diameter of the bottom mounting base"},
+    "base_height": {"group": "Base", "confidence": 1.0, "description": "Height of the bottom mounting base"},
+    "shaft_dia": {"group": "Shaft", "confidence": 1.0, "description": "Diameter of the central shaft"},
+    "shaft_height": {"group": "Shaft", "confidence": 1.0, "description": "Height of the central shaft"},
+    "tip_dia": {"group": "Tip", "confidence": 1.0, "description": "Diameter of the top punch tip"},
+    "tip_height": {"group": "Tip", "confidence": 1.0, "description": "Height of the top punch tip"},
+    "tip_radius_top": {"group": "Fillet", "confidence": 1.0, "description": "Radius of the top dome"},
+    "tip_radius_shoulder": {"group": "Fillet", "confidence": 1.0, "description": "Radius of the shoulder transition"}
 }
 
 # --- SPATIAL PLAN ---
-# Main Block: Centered at (0,0,0), Z-range [-7.5, 7.5].
-# Shafts: Centered on Y=0, Z=0. Left shaft starts at X = -block_len/2, extends left.
-# Threaded sections: Attached to the end of shafts, extending further left/right.
-# Through Hole: Drilled along Y-axis through the center of the block.
+# Base Cylinder: Centered at (0,0,0), Z-range [0, 2.2]
+# Main Shaft: Centered at (0,0,2.2), Z-range [2.2, 22.7]
+# Top Tip: Centered at (0,0,20.5), Z-range [20.5, 22.7]
+# Note: Total height is 22.7. The tip height is 2.2, starting at 20.5.
+# Fillets: Applied to the top circular edge and the shoulder edge at Z=20.5.
 # --- MENTAL WALKTHROUGH ---
-# 1. Create main block centered at origin.
-# 2. Create shafts: To ensure fusion, overlap them by 'eps' into the block.
-# 3. Create thread sections: Attached to the outer face of the shafts.
-# 4. Chamfer the thread ends.
-# 5. Cut the central hole: Use a cylinder oriented along Y-axis.
+# 1. Create base cylinder at origin.
+# 2. Create main shaft on top of base.
+# 3. Create top tip on top of main shaft.
+# 4. Use fillet on the top edge (radius 1.0).
+# 5. Use fillet on the shoulder edge (radius 0.5).
 # --------------------
 
 with bd.BuildPart() as part:
-    # Main Block
-    bd.Box(length=PARAMETERS["block_len"], width=PARAMETERS["block_width"], height=PARAMETERS["block_height"])
-    
-    # Shafts (Left and Right)
-    for x_sign in [-1, 1]:
-        with bd.Locations((x_sign * (PARAMETERS["block_len"] / 2 - PARAMETERS["eps"]), 0, 0)):
-            with bd.Locations(bd.Rotation(0, 90, 0)):
-                # Extrude shaft from block surface
-                bd.Cylinder(radius=PARAMETERS["shaft_dia"] / 2, height=PARAMETERS["shaft_len"], align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
-                
-                # Threaded section
-                with bd.Locations((0, 0, PARAMETERS["shaft_len"])):
-                    thread = bd.Cylinder(radius=PARAMETERS["thread_dia"] / 2, height=PARAMETERS["thread_len"], align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
-                    
-                    # Chamfer thread end
-                    bd.chamfer(thread.edges().filter_by(bd.GeomType.CIRCLE).sort_by(bd.Axis.Z)[-1], length=PARAMETERS["chamfer_size"])
+    # Base
+    with bd.BuildSketch():
+        bd.Circle(radius=PARAMETERS["base_dia"] / 2)
+    bd.extrude(amount=PARAMETERS["base_height"])
 
-    # Central Through Hole (along Y-axis)
-    with bd.Locations(bd.Rotation(90, 0, 0)):
-        bd.Cylinder(radius=PARAMETERS["hole_dia"] / 2, height=PARAMETERS["block_width"] + 2 * PARAMETERS["eps"], mode=bd.Mode.SUBTRACT)
+    # Shaft
+    with bd.Locations((0, 0, PARAMETERS["base_height"])):
+        with bd.BuildSketch():
+            bd.Circle(radius=PARAMETERS["shaft_dia"] / 2)
+        bd.extrude(amount=PARAMETERS["shaft_height"])
+
+    # Tip
+    with bd.Locations((0, 0, PARAMETERS["base_height"] + PARAMETERS["shaft_height"])):
+        with bd.BuildSketch():
+            bd.Circle(radius=PARAMETERS["tip_dia"] / 2)
+        bd.extrude(amount=PARAMETERS["tip_height"])
+
+    # Fillets
+    # Top edge is at the very top of the part
+    top_edge = part.edges().filter_by(bd.GeomType.CIRCLE).sort_by(bd.Axis.Z)[-1]
+    bd.fillet(top_edge, radius=PARAMETERS["tip_radius_top"])
+
+    # Shoulder edge is at the transition between shaft and tip (Z = 22.7 - 2.2 = 20.5)
+    # We look for the circular edge at that specific Z height
+    shoulder_edge = part.edges().filter_by(bd.GeomType.CIRCLE).sort_by(bd.Axis.Z)[-2]
+    bd.fillet(shoulder_edge, radius=PARAMETERS["tip_radius_shoulder"])
 
 if __name__ == '__main__':
     try:

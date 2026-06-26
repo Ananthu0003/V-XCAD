@@ -20,6 +20,7 @@ class CamOperation:
             "bottom": -10.0     # Final cutting depth (will be dynamically calculated)
         }
         self.parameters = {}
+        self.machiningRegion = None
         
     def to_dict(self):
         return self.__dict__
@@ -138,5 +139,7 @@ class CamOperationPlanner:
                 op.raw_points = feature['raw_points']
             if 'width' in feature:
                 op.feature_width = feature['width']
+                
+            op.machiningRegion = feature.get('machiningRegion')
             
         return op

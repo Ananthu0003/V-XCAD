@@ -28,6 +28,36 @@ export type SetupSettings = {
     postProcessorSettings?: PostProcessorSettings;
 };
 
+export type FeatureMachiningInfo = {
+    featureId: string;
+    featureType: string;
+    featureAxis?: [number, number, number];
+    preferredToolAxis?: [number, number, number];
+    machinableInCurrentSetup: boolean;
+    requiredSetupAxis?: [number, number, number];
+    requiresSecondarySetup: boolean;
+    requires4Axis: boolean;
+    requiresTurning: boolean;
+    status: 'machinable_in_current_setup' | 'deferred_to_secondary_setup' | 'unsupported_features';
+    reason?: string;
+};
+
+export type CamSetupPlan = {
+    setupId: string;
+    setupName: string;
+    setupType: string;
+    toolAxis: [number, number, number];
+    workCoordinateSystem: string;
+    modelToSetupTransform?: number[];
+    assignedFeatureIds: string[];
+    requiredRotation?: [number, number, number];
+    requiresManualReclamp: boolean;
+    requires4AxisIndexing: boolean;
+    machinableFeatures: string[];
+    deferredFeatures: string[];
+    unsupportedFeatures: string[];
+};
+
 export type ToolType = 'flat_end_mill' | 'ball_nose' | 'face_mill' | 'drill' | 'chamfer_mill';
 export type ToolMaterial = 'hss' | 'carbide' | 'hss_co' | 'carbide_insert' | 'ceramic' | 'cbn' | 'pcd';
 
@@ -73,6 +103,9 @@ export type CamFeature = {
     
     // Setup-aware machinability
     machining_region?: string;
+    machining_info?: FeatureMachiningInfo;
+    
+    // Legacy fields
     machinable_in_current_setup?: boolean;
     requires_reorientation?: boolean;
     requires_4axis_or_secondary_setup?: boolean;
@@ -98,9 +131,9 @@ export type Tool = {
     toolWear?: number;
 };
 
-export type OperationType = 'facing' | 'pocket' | '2d_contour' | 'drilling' | 'chamfer';
+export type OperationType = 'facing' | 'pocket' | '2d_contour' | 'drilling' | 'chamfer' | 'boss_clearing' | 'od_turning' | 'rotary_milling' | 'external_cylinder_unsupported' | 'side_feature' | string;
 export type CoolantType = 'off' | 'flood' | 'mist' | 'through_tool' | 'air_blast';
-export type OperationStatus = 'ready' | 'requires_regeneration' | 'missing_tool' | 'missing_geometry';
+export type OperationStatus = 'ready' | 'requires_regeneration' | 'missing_tool' | 'missing_geometry' | 'blocked' | 'error' | 'planned';
 
 export type HeightsSettings = {
     clearanceHeight: number;
@@ -175,12 +208,14 @@ export type CamOperation = {
     type: OperationType;
     toolId: string;
     feature_id?: string;
+    setup_id?: string;
     parameters: CuttingParameters;
     heights?: HeightsSettings;
     status?: OperationStatus;
     statistics?: ToolpathStatistics;
     collisionStatus?: CollisionStatus;
     enabled?: boolean;
+    toolpaths?: any[];
 };
 
 export type ViewportSettings = {

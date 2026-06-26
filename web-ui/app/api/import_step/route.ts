@@ -57,6 +57,7 @@ export async function POST(request: Request): Promise<Response> {
 	// Create session with the artifacts from the backend
 	const session = await prisma.cadSession.create({
 		data: {
+			id: data.session_id,
 			prompt: 'Direct STEP Import',
 			fileName: upload.name,
 			userId: validUserId,

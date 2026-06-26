@@ -139,7 +139,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               {/* Left side: Stock & Material (using existing SetupSection) */}
               <SetupSection setup={props.camSetup} onChange={props.setCamSetup} />
-              
+
               {/* Right side: Post Processor & Machining Strategy */}
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
@@ -157,7 +157,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                     <option value="grbl">GRBL</option>
                   </select>
                 </div>
-                
+
                 <div className="flex flex-col gap-2">
                   <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/80">Machining Strategy</label>
                   <select className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
@@ -169,7 +169,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
               </div>
             </div>
           )}
-          
+
           {activeTab === 'features' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               <div className="flex flex-col gap-4">
@@ -199,7 +199,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                       name: `New ${type}`,
                       type,
                       toolId: props.camTools[0]?.id || 't1',
-                      feature_id: props.activeFeatureId || '',
+                      featureId: props.activeFeatureId || (props.camFeatures[0]?.id) || '',
                       parameters: { feedRate: 800, plungeRate: 200, maxStepdown: 1.0, totalDepth: 5.0, spindleSpeed: 12000, stepoverPercentage: 40, tolerance: 0.01, coolant: 'off' }
                     }]);
                     props.setActiveOperationId(id);
@@ -232,7 +232,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                     <select
                       value={props.camOperations.find(op => op.id === props.activeOperationId)!.toolId}
                       onChange={(e) => {
-                        props.setCamOperations(props.camOperations.map(op => 
+                        props.setCamOperations(props.camOperations.map(op =>
                           op.id === props.activeOperationId ? { ...op, toolId: e.target.value } : op
                         ));
                       }}

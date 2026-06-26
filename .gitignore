@@ -13,3 +13,4 @@ web-ui/node_modules/
 ai-engine/.env
 web-ui/.env
 storage/
+outputs/

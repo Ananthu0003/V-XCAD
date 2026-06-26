@@ -14,7 +14,9 @@ type AnnotationEntry = {
 };
 
 type RenderToolpathSegment = {
-	type: 'rapid' | 'cut' | 'arc' | 'plunge' | 'retract' | 'lead_in' | 'lead_out';
+	segmentId?: string;
+	moveType?: 'rapid' | 'feed' | 'arc' | 'plunge' | 'retract' | 'helix' | 'cut' | 'lead_in' | 'lead_out';
+	type?: 'rapid' | 'cut' | 'arc' | 'plunge' | 'retract' | 'lead_in' | 'lead_out';
 	start: { x: number; y: number; z: number };
 	end: { x: number; y: number; z: number };
 	feedrate?: number;
@@ -59,10 +61,12 @@ type CadViewportProps = {
 	showToolpaths?: boolean;
 	workflowStage?: 'blueprint' | 'extraction' | 'cad' | 'cam' | 'gcode';
 	camFeatures?: { id: string; location: [number, number, number] }[];
+	hasBlockedOperations?: boolean;
 	activeFeatureId?: string | null;
 
 	simulationState?: any;
 	camTools?: any[];
+	debugMode?: boolean;
 
 	children?: React.ReactNode; // For StlMesh
 	headerActions?: React.ReactNode;
@@ -94,9 +98,11 @@ export function CadViewport({
 	showToolpaths = true,
 	workflowStage = 'blueprint',
 	camFeatures = [],
+	hasBlockedOperations = false,
 	activeFeatureId = null,
 	simulationState,
 	camTools,
+	debugMode = false,
 	children,
 	headerActions,
 }: CadViewportProps) {
@@ -118,57 +124,97 @@ export function CadViewport({
 	const isSolidVisible = viewMode === 'both' || viewMode === 'solid';
 	const isWireframeVisible = (viewMode === 'both' || viewMode === 'wireframe') && showToolpaths;
 
-	const groupedToolpaths = useMemo(() => {
-		if (!toolpaths || toolpaths.length === 0) return null;
+	const { groupedToolpaths, hasValidToolpaths, allRejected } = useMemo(() => {
+		if (!toolpaths || toolpaths.length === 0) return { groupedToolpaths: null, hasValidToolpaths: false, allRejected: false };
 
 		const groups: Record<string, THREE.Vector3[]> = {
 			rapid: [],
-			cut: [],
+			feed: [],
 			arc: [],
 			plunge: [],
 			retract: [],
+			helix: [],
 			other: []
 		};
 
 		const allowedSources = ['drill', 'contour', 'pocket', 'boss', 'face', 'turning'];
+		const allowedMoveTypes = ['rapid', 'feed', 'arc', 'plunge', 'retract', 'helix'];
+		let validCount = 0;
+		let droppedCount = 0;
+		let droppedReasons: Record<string, number> = {};
 		
-		toolpaths.forEach((seg) => {
-			if (!seg.source || !allowedSources.includes(seg.source)) {
-				return;
-			}
+		toolpaths.forEach((seg: any) => {
+			let isInvalid = false;
+			let reason = '';
+			const type = seg.moveType || seg.type || 'other';
 
-			const type = seg.type || 'other';
-			const targetGroup = groups[type] || groups.other;
-			targetGroup.push(new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z));
-			targetGroup.push(new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z));
+			// In debug mode, render everything without filtering
+			if (!debugMode) {
+				if (!seg.source || !allowedSources.includes(seg.source)) {
+					isInvalid = true;
+					reason = `Invalid source: ${seg.source}`;
+				} else if (seg.boundary || seg.wire || seg.bbox || seg.axis || seg.centerline || seg.regionType || seg.debug || seg.islands) {
+					isInvalid = true;
+					reason = 'Contains debug/region properties';
+				} else if (!allowedMoveTypes.includes(type) && type !== 'cut') {
+					isInvalid = true;
+					reason = `Invalid moveType: ${type}`;
+				}
+			}
+			
+			if (isInvalid) {
+			    droppedCount++;
+			    droppedReasons[reason] = (droppedReasons[reason] || 0) + 1;
+			    return;
+			}
+			
+			validCount++;
+
+			const targetGroup = groups[type === 'cut' ? 'feed' : type] || groups.other;
+			if (seg.start && seg.end) {
+			    targetGroup.push(new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z));
+			    targetGroup.push(new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z));
+			}
 		});
 
 		const colors: Record<string, number> = {
 			rapid: 0xf43f5e,    // rose-500
-			cut: 0x3b82f6,      // blue-500
+			feed: 0x3b82f6,      // blue-500
 			arc: 0x0ea5e9,      // sky-500
 			plunge: 0x10b981,   // emerald-500
 			retract: 0xf59e0b,  // amber-500
 			other: 0x64748b     // slate-500
 		};
 
-		return (
-			<group>
-				{Object.entries(groups).map(([type, points]) => {
-					if (points.length === 0) return null;
-					const geometry = new THREE.BufferGeometry().setFromPoints(points);
-					const material = new THREE.LineBasicMaterial({
-						color: colors[type] || colors.other,
-						linewidth: type === 'cut' || type === 'arc' ? 2 : 1.5,
-						opacity: type === 'rapid' ? 0.4 : 0.8,
-						transparent: true,
-						depthTest: true,
-					});
-					return <primitive key={type} object={new THREE.LineSegments(geometry, material)} />;
-				})}
-			</group>
-		);
-	}, [toolpaths]);
+		if (droppedCount > 0) {
+			console.warn(`[CadViewport] Dropped ${droppedCount} invalid/debug toolpath segments:`, droppedReasons);
+		}
+
+		if (validCount === 0) {
+			return { groupedToolpaths: null, hasValidToolpaths: false, allRejected: true };
+		}
+
+		return {
+			groupedToolpaths: (
+				<group>
+					{Object.entries(groups).map(([type, points]) => {
+						if (points.length === 0) return null;
+						const geometry = new THREE.BufferGeometry().setFromPoints(points);
+						const material = new THREE.LineBasicMaterial({
+							color: colors[type] || colors.other,
+							linewidth: type === 'feed' || type === 'arc' ? 2 : 1.5,
+							opacity: type === 'rapid' ? 0.4 : 0.8,
+							transparent: true,
+							depthTest: true,
+						});
+						return <primitive key={type} object={new THREE.LineSegments(geometry, material)} />;
+					})}
+				</group>
+			),
+			hasValidToolpaths: true,
+			allRejected: false
+		};
+	}, [toolpaths, debugMode]);
 
 	return (
 		<section className="relative flex h-full w-full flex-col overflow-hidden bg-background font-sans">
@@ -299,6 +345,16 @@ export function CadViewport({
 					<div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))] opacity-10" />
 				</div>
 
+				{allRejected && isWireframeVisible && (
+					<div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+						<div className="bg-black/60 backdrop-blur-md px-6 py-4 rounded-2xl border border-rose-500/30 flex flex-col items-center gap-2">
+							<Activity className="size-6 text-rose-500 mb-1" />
+							<p className="text-sm font-semibold text-rose-100">No valid machining toolpaths to display</p>
+							<p className="text-xs text-rose-300">Toolpaths may have been rejected by the engine.</p>
+						</div>
+					</div>
+				)}
+
 				<Canvas shadows dpr={[1, 2]} className="relative z-10">
 					<PerspectiveCamera makeDefault position={[5, 5, 5]} fov={40} />
 
@@ -315,68 +371,7 @@ export function CadViewport({
 									{/* Render CAM Toolpaths using optimized buffer geometry */}
 									{groupedToolpaths}
 
-									{/* Render Active Feature Indicator */}
-									{activeFeatureId && camFeatures && (
-										camFeatures.filter(f => f.id === activeFeatureId).map(f => {
-											const positions = (f as any).sub_positions || [{ center: (f as any).position?.center || f.location, normal: (f as any).position?.normal, bounding_box: (f as any).position?.bounding_box }];
-											const bSizeX = geometryInfo?.bounding_box ? (geometryInfo.bounding_box.max[0] - geometryInfo.bounding_box.min[0]) : 80;
-											const markerRadius = Math.max(3.0, bSizeX * 0.04);
-
-											return (
-												<group key={`feature-${f.id}`}>
-													{positions.map((posObj: any, idx: number) => {
-														const pos = posObj.center || f.location;
-														if (!pos) return null;
-
-														// Fallback bounding box dimensions if the backend didn't provide strict min/max
-														const boxW = posObj.bounding_box ? (posObj.bounding_box.max[0] - posObj.bounding_box.min[0]) : ((f as any).dimensions?.diameter || (f as any).dimensions?.width || markerRadius * 4);
-														const boxH = posObj.bounding_box ? (posObj.bounding_box.max[1] - posObj.bounding_box.min[1]) : ((f as any).dimensions?.diameter || (f as any).dimensions?.height || markerRadius * 4);
-														const boxD = posObj.bounding_box ? (posObj.bounding_box.max[2] - posObj.bounding_box.min[2]) : ((f as any).dimensions?.depth || markerRadius * 4);
-
-														const boxCenterX = posObj.bounding_box ? ((posObj.bounding_box.min[0] + posObj.bounding_box.max[0]) / 2) + pos[0] : pos[0];
-														const boxCenterY = posObj.bounding_box ? ((posObj.bounding_box.min[1] + posObj.bounding_box.max[1]) / 2) + pos[1] : pos[1];
-														const boxCenterZ = posObj.bounding_box ? ((posObj.bounding_box.min[2] + posObj.bounding_box.max[2]) / 2) + pos[2] : pos[2];
-
-														return (
-															<group key={`pos-${idx}`}>
-																<mesh position={pos}>
-																	<sphereGeometry args={[markerRadius, 32, 32]} />
-																	<meshBasicMaterial color={(f as any).type === 'pocket' || (f as any).type === 'contour' || (f as any).type === 'large_center_hole' ? '#22c55e' : '#eab308'} depthTest={false} opacity={0.6} transparent />
-																</mesh>
-
-																{/* Guaranteed Bounding Box Debug or Raw Contour */}
-																{(f as any).raw_points && (f as any).raw_points.length > 0 ? (
-																	<Line
-																		points={(f as any).raw_points.map((pt: any) => [pt[0], pt[1], ((f as any).z_top || pos[2])])}
-																		color="#3b82f6"
-																		lineWidth={2}
-																	/>
-																) : (
-																	<mesh position={[boxCenterX, boxCenterY, boxCenterZ]}>
-																		<boxGeometry args={[Math.max(0.1, boxW), Math.max(0.1, boxH), Math.max(0.1, boxD)]} />
-																		<meshBasicMaterial color="#3b82f6" wireframe opacity={0.4} transparent depthTest={false} />
-																	</mesh>
-																)}
-
-																{/* Access Direction Normal */}
-																{posObj.normal && (
-																	<Line
-																		points={[
-																			pos,
-																			[pos[0] + posObj.normal[0] * markerRadius * 4, pos[1] + posObj.normal[1] * markerRadius * 4, pos[2] + posObj.normal[2] * markerRadius * 4]
-																		]}
-																		color="#ef4444"
-																		lineWidth={4}
-																		depthTest={false}
-																	/>
-																)}
-															</group>
-														);
-													})}
-												</group>
-											);
-										})
-									)}
+									{/* Active feature indicators have been removed in favor of cam_debug_overlay.json */}
 
 									{/* Render Active Tool for Simulation INSIDE the scaled/translated group */}
 									{showToolpaths && simulationState?.showTool !== false && simulationState?.segments && simulationState.activeSegmentIndex !== undefined && camTools && (
@@ -565,13 +560,35 @@ export function CadViewport({
 				)}
 
 				{/* Global Safety Note */}
-				<div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 rounded-full border border-transparent bg-background/80 px-5 py-2.5 backdrop-blur-xl transition-all hover:border-blue-500/30 whitespace-nowrap">
-					<svg className="size-3 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-						<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-					</svg>
-					<p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
-						AI can make mistakes. Verify critical dimensions against original blueprints.
-					</p>
+				<div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2">
+					{toolpaths && toolpaths.length > 0 && !hasValidToolpaths && (
+						<div className="flex items-center gap-2 rounded-full border border-orange-500/30 bg-[#050814]/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
+							<svg className="size-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+							</svg>
+							<span className="text-[11px] font-bold uppercase tracking-wider text-orange-400">
+								No valid machining toolpaths to display
+							</span>
+						</div>
+					)}
+					{hasBlockedOperations && (
+						<div className="flex items-center gap-2 rounded-full border border-red-500/30 bg-[#050814]/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
+							<svg className="size-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+							</svg>
+							<span className="text-[11px] font-bold uppercase tracking-wider text-red-400">
+								Some features require turning, mill-turn, or secondary setup
+							</span>
+						</div>
+					)}
+					<div className="flex items-center gap-3 rounded-full border border-transparent bg-background/80 px-5 py-2.5 backdrop-blur-xl transition-all hover:border-blue-500/30 whitespace-nowrap">
+						<svg className="size-3 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+						</svg>
+						<p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+							AI can make mistakes. Verify critical dimensions against original blueprints.
+						</p>
+					</div>
 				</div>
 			</div>
 		</section>

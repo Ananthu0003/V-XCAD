@@ -71,14 +71,14 @@ class GeometryMapper:
                 elif feat_type == "side_protrusion":
                     self._map_side_protrusion_geometry(feature, setup)
                 else:
-                    feature["geometry"] = {
-                        "status": "failed",
-                        "error": f"Unsupported feature type for geometry mapping: {feat_type}",
+                    feature["machiningRegion"] = {
+                        "valid": False,
+                        "errorReason": f"Unsupported feature type for geometry mapping: {feat_type}",
                     }
             except Exception as exc:
-                feature["geometry"] = {
-                    "status": "failed",
-                    "error": f"Geometry extraction exception for {feat_type} "
+                feature["machiningRegion"] = {
+                    "valid": False,
+                    "errorReason": f"Geometry extraction exception for {feat_type} "
                              f"feature {feature.get('id', '?')}: {exc}",
                 }
 
@@ -100,52 +100,55 @@ class GeometryMapper:
         
         fids = feature.get("face_ids", [])
         if not fids:
-            feature["geometry"] = {
-                "status": "failed",
-                "error": "Contour feature has no face_ids",
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": "Contour feature has no face_ids",
             }
             return
 
         source = feature.get("source", "unknown")
         
         if source not in ("outer_wire", "face_boundary"):
-            feature["geometry"] = {
-                "status": "error",
-                "error": f"Invalid contour source: {source}. Expected outer_wire or face_boundary.",
-                "regionType": None
+            feature["machinable_in_current_setup"] = False
+            feature["blocked_reason"] = f"Invalid contour source: {source}. BBox, silhouette, or fallback geometries are rejected."
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": f"Invalid contour source: {source}. Expected outer_wire or face_boundary.",
+                "regionType": "none",
+                "source": "none"
             }
             return
             
         profile_points = feature.get("boundaryPoints", [])
         if not profile_points or len(profile_points) < 3:
-            feature["geometry"] = {
-                "status": "error",
-                "error": "Contour missing valid boundary points",
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": "Contour missing valid boundary points",
                 "regionType": None
             }
             return
             
         is_closed = feature.get("boundaryClosed", False)
         if not is_closed:
-            feature["geometry"] = {
-                "status": "error",
-                "error": "Contour outer wire is not closed",
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": "Contour outer wire is not closed",
                 "regionType": None
             }
             return
 
         area = feature.get("area", 0.0)
         
-        feature["geometry"] = {
-            "status": "ok",
+        feature["machiningRegion"] = {
+            "valid": True,
+            "regionId": feature.get("id", "unknown"),
             "regionType": "contour_region",
             "closedBoundary": True,
-            "profile_points": profile_points,
-            "z_top": feature.get("dimensions", {}).get("z_top", 0.0),
-            "z_bottom": feature.get("dimensions", {}).get("z_bottom", 0.0),
-            "plane_normal": list(plane_normal),
-            "plane_origin": list(plane_origin),
+            "boundary": profile_points,
+            "topZ": feature.get("dimensions", {}).get("z_top", 0.0),
+            "bottomZ": feature.get("dimensions", {}).get("z_bottom", 0.0),
             "source": source,
+            "area": area,
             "diagnostics": {
                 "feature_type": feature.get("type"),
                 "face_count": len(fids),
@@ -165,14 +168,14 @@ class GeometryMapper:
         """
         cyl_face_id = feature.get("cylinder_face_id")
         if not cyl_face_id:
-            feature["geometry"] = {"status": "failed", "error": "No cylinder_face_id"}
+            feature["machiningRegion"] = {"valid": False, "errorReason": "No cylinder_face_id"}
             return
             
         face_info = self.extractor.faces.get(cyl_face_id, {})
         face_obj = self.extractor.get_face_object(cyl_face_id)
         
         if not face_obj:
-            feature["geometry"] = {"status": "failed", "error": "No OCC object for cylinder"}
+            feature["machiningRegion"] = {"valid": False, "errorReason": "No OCC object for cylinder"}
             return
             
         try:
@@ -186,7 +189,7 @@ class GeometryMapper:
             center = [round(loc.X(), 6), round(loc.Y(), 6), round(loc.Z(), 6)]
             axis = [round(ax.X(), 6), round(ax.Y(), 6), round(ax.Z(), 6)]
         except Exception as e:
-            feature["geometry"] = {"status": "failed", "error": f"Cylinder extraction failed: {e}"}
+            feature["machiningRegion"] = {"valid": False, "errorReason": f"Cylinder extraction failed: {e}"}
             return
 
         bb = face_info.get("bbox", {"min": center, "max": center})
@@ -203,17 +206,17 @@ class GeometryMapper:
         if setup_type == "milling_3axis":
             status = "blocked"
             feature["machinable_in_current_setup"] = False
-            feature["blocked_reason"] = "Vertical shaft requires turning or special multi-axis strategy"
+            feature["blocked_reason"] = "Vertical shaft or external cylinder requires turning or special multi-axis strategy in a 3-axis milling setup"
         
-        feature["geometry"] = {
-            "status": status,
-            "regionType": region_type,
+        feature["machiningRegion"] = {
+            "valid": status == "ok",
+            "regionId": feature.get("id", "unknown"),
+            "regionType": "none",
+                "source": "none" if status == "blocked" else region_type,
             "center": center,
             "axis": axis,
-            "radius": round(radius, 6),
-            "length": length,
             "bbox": bb,
-            "source": "cylinder_extraction",
+            "source": "turning_profile",
             "diagnostics": {
                 "feature_type": feature.get("type"),
                 "is_aligned": is_aligned
@@ -231,10 +234,11 @@ class GeometryMapper:
         feature["machinable_in_current_setup"] = False
         feature["blocked_reason"] = "Side protrusion requires 4-axis or secondary setup"
         
-        feature["geometry"] = {
-            "status": "blocked",
+        feature["machiningRegion"] = {
+            "valid": False,
             "regionType": "none",
-            "error": "Side protrusion requires 4-axis or secondary setup",
+                "source": "none",
+            "errorReason": "Side protrusion requires 4-axis or secondary setup",
             "diagnostics": {
                 "feature_type": feature.get("type")
             }
@@ -248,68 +252,59 @@ class GeometryMapper:
     def _map_boss_geometry(self, feature: Dict[str, Any]) -> None:
         """
         Extract the boss machining region: Containing Face MINUS Boss Profile.
-        Constraint C6: If no containing face can be found, mark operation invalid.
+        Constraint: If no containing face can be found or validation fails, mark operation invalid.
         """
         top_face_ids = feature.get("face_ids", [])
         if not top_face_ids:
-            feature["geometry"] = {"status": "failed", "error": "Boss feature has no face_ids"}
+            feature["machiningRegion"] = {"valid": False, "errorReason": "Boss feature has no face_ids"}
             return
 
         # Find boss top profile
         boss_wire_id, boss_profile_points = self.extractor.extract_outer_wire(top_face_ids[0])
-        if not boss_profile_points:
-            feature["geometry"] = {"status": "failed", "error": "Failed to extract boss profile"}
+        if not boss_profile_points or len(boss_profile_points) < 3:
+            feature["machiningRegion"] = {"valid": False, "errorReason": "Boss island boundary invalid"}
             return
 
-        # Look for containing face (floor). This usually comes from adjacency or feature dict.
-        # For a boss, we expect 'floorFaceId' or we search adjacent faces.
-        containing_face_id = feature.get("floorFaceId") or feature.get("floor_face_id") or feature.get("parentFaceId") or feature.get("base_face_id")
+        containing_face_id = feature.get("floorFaceId") or feature.get("parentFaceId")
         
-        # If no explicit floor, try to find an adjacent face with a lower Z
         if not containing_face_id:
-            top_z = boss_profile_points[0][2]
-            best_floor_z = -1e9
-            best_floor_id = None
-            for fid in top_face_ids:
-                for adj in self.extractor.adjacency.get(fid, []):
-                    adj_fid = adj.get("adjacent_face")
-                    if adj_fid:
-                        # Follow walls to floor? No, top face adjacent is wall. Wall adjacent is floor.
-                        # This can be complex. Let's just check the wall's adjacent faces.
-                        for wall_adj in self.extractor.adjacency.get(adj_fid, []):
-                            floor_cand = wall_adj.get("adjacent_face")
-                            if floor_cand and floor_cand not in top_face_ids and floor_cand != adj_fid:
-                                face_info = self.extractor.faces.get(floor_cand, {})
-                                try:
-                                    fz = face_info["bbox"]["max"][2]
-                                    if fz < top_z and fz > best_floor_z:
-                                        best_floor_z = fz
-                                        best_floor_id = floor_cand
-                                except:
-                                    pass
-            containing_face_id = best_floor_id
-
-        if not containing_face_id:
-            feature["geometry"] = {
-                "status": "failed", 
-                "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary.",
-                "machining_region": "error",
-                "diagnostics": { "failure_reason": "No containing face found." }
-            }
-            feature["machining_region"] = "error"
+            feature["machiningRegion"] = {"valid": False, "errorReason": "Boss floorFaceId missing"}
             return
 
         wire_id, containing_face_points = self.extractor.extract_outer_wire(containing_face_id)
-        if not containing_face_points:
-            feature["geometry"] = {
-                "status": "failed", 
-                "error": "Failed to extract containing face boundary.",
-                "diagnostics": { "failure_reason": "Failed to extract containing face boundary." }
-            }
+        if not containing_face_points or len(containing_face_points) < 3:
+            feature["machiningRegion"] = {"valid": False, "errorReason": "Boss floor boundary invalid"}
             return
             
         feature["parentFaceId"] = containing_face_id
         feature["machiningRegionId"] = f"region_{containing_face_id}"
+
+        # Area validation (Polygon Area)
+        def poly_area(pts):
+            area = 0.0
+            for i in range(len(pts)):
+                j = (i + 1) % len(pts)
+                area += pts[i][0] * pts[j][1] - pts[j][0] * pts[i][1]
+            return abs(area) / 2.0
+
+        # Simple containment check via bounding box
+        boss_xs = [p[0] for p in boss_profile_points]
+        boss_ys = [p[1] for p in boss_profile_points]
+        floor_xs = [p[0] for p in containing_face_points]
+        floor_ys = [p[1] for p in containing_face_points]
+
+        if min(boss_xs) < min(floor_xs) - 1e-3 or max(boss_xs) > max(floor_xs) + 1e-3 or \
+           min(boss_ys) < min(floor_ys) - 1e-3 or max(boss_ys) > max(floor_ys) + 1e-3:
+            feature["machiningRegion"] = {"valid": False, "errorReason": "Boss island not inside floor boundary"}
+            return
+
+        floor_area = poly_area(containing_face_points)
+        boss_area = poly_area(boss_profile_points)
+        clearing_area = floor_area - boss_area
+
+        if clearing_area <= 0:
+            feature["machiningRegion"] = {"valid": False, "errorReason": "Invalid boss clearing area"}
+            return
 
         face_info = self.extractor.faces.get(containing_face_id, {})
         try:
@@ -323,30 +318,17 @@ class GeometryMapper:
         except:
             top_z = round(boss_profile_points[0][2], 6)
 
-        # Calculate rough area
-        try:
-            from shapely.geometry import Polygon
-            area = abs(Polygon([(p[0], p[1]) for p in containing_face_points]).area - Polygon([(p[0], p[1]) for p in boss_profile_points]).area)
-        except:
-            area = 0.0
-
         feature["machining_region"] = "valid"
-        feature["geometry"] = {
-            "status": "ok",
+        feature["machiningRegion"] = {
+            "valid": True,
+            "regionId": feature.get("id", "unknown"),
             "regionType": "boss_clearing_region",
-            "machining_region": "valid",
-            "containing_points": containing_face_points,
-            "boss_points": boss_profile_points,
-            "top_z": top_z,
-            "bottom_z": floor_z,
-            "floor_z": floor_z,
-            "diagnostics": {
-                "feature_type": feature.get("type"),
-                "face_count": len(feature.get("face_ids", [])),
-                "wire_count": 2,
-                "boundary_count": len(containing_face_points) + len(boss_profile_points),
-                "mapped_area": area
-            }
+            "boundary": containing_face_points,
+            "islands": [boss_profile_points],
+            "topZ": top_z,
+            "bottomZ": floor_z,
+            "area": clearing_area,
+            "source": "boss_floor_minus_island"
         }
 
 
@@ -367,17 +349,17 @@ class GeometryMapper:
             cyl_face_id = fids[0] if fids else None
 
         if not cyl_face_id:
-            feature["geometry"] = {
-                "status": "failed",
-                "error": "Hole feature has no cylinder_face_id",
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": "Hole feature has no cylinder_face_id",
             }
             return
 
         face_obj = self.extractor.get_face_object(cyl_face_id)
         if face_obj is None:
-            feature["geometry"] = {
-                "status": "failed",
-                "error": f"Face object not found for {cyl_face_id}",
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": f"Face object not found for {cyl_face_id}",
             }
             return
 
@@ -385,9 +367,9 @@ class GeometryMapper:
         try:
             surf = BRepAdaptor_Surface(face_obj.wrapped)
             if surf.GetType() != GeomAbs_Cylinder:
-                feature["geometry"] = {
-                    "status": "failed",
-                    "error": f"Face {cyl_face_id} is not a cylinder (type={surf.GetType()})",
+                feature["machiningRegion"] = {
+                    "valid": False,
+                    "errorReason": f"Face {cyl_face_id} is not a cylinder (type={surf.GetType()})",
                 }
                 return
 
@@ -400,9 +382,9 @@ class GeometryMapper:
             axis = [round(ax.X(), 6), round(ax.Y(), 6), round(ax.Z(), 6)]
 
         except Exception as exc:
-            feature["geometry"] = {
-                "status": "failed",
-                "error": f"Cylinder parameter extraction failed: {exc}",
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": f"Cylinder parameter extraction failed: {exc}",
             }
             return
 
@@ -421,15 +403,16 @@ class GeometryMapper:
             top_z = center[2]
             bottom_z = center[2] - depth
 
-        feature["geometry"] = {
-            "status": "ok",
-            "regionType": "cylinder",
+        feature["machiningRegion"] = {
+            "valid": True,
+            "regionId": feature.get("id", "unknown"),
+            "regionType": "drill_region",
             "center": list(center),
             "axis": list(axis),
-            "radius": round(radius, 6),
             "depth": depth,
-            "top_z": top_z,
-            "bottom_z": bottom_z,
+            "topZ": top_z,
+            "bottomZ": bottom_z,
+            "source": "hole_center",
             "diagnostics": {
                 "feature_type": feature.get("type"),
                 "face_count": len(feature.get("face_ids", [])),
@@ -456,18 +439,18 @@ class GeometryMapper:
             floor_face_id = fids[0] if fids else None
 
         if not floor_face_id:
-            feature["geometry"] = {
-                "status": "failed",
-                "error": "Pocket feature has no floor_face_id",
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": "Pocket feature has no floor_face_id",
             }
             return
 
         wire_id, boundary_points = self.extractor.extract_outer_wire(floor_face_id)
 
         if not boundary_points or len(boundary_points) < 3:
-            feature["geometry"] = {
-                "status": "failed",
-                "error": f"Outer wire extraction for floor face {floor_face_id} "
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": f"Outer wire extraction for floor face {floor_face_id} "
                          f"produced fewer than 3 points",
             }
             return
@@ -506,14 +489,15 @@ class GeometryMapper:
         except:
             area = 0.0
 
-        feature["geometry"] = {
-            "status": "ok",
+        feature["machiningRegion"] = {
+            "valid": True,
+            "regionId": feature.get("id", "unknown"),
             "regionType": "pocket_region",
-            "boundary_points": boundary_points,
-            "floor_z": floor_z,
-            "top_z": top_z,
-            "wire_id": wire_id,
-            "point_count": len(boundary_points),
+            "boundary": boundary_points,
+            "bottomZ": floor_z,
+            "topZ": top_z,
+            "source": "pocket_boundary",
+            "area": area,
             "diagnostics": {
                 "feature_type": feature.get("type"),
                 "face_count": len(feature.get("face_ids", [])),
@@ -533,18 +517,18 @@ class GeometryMapper:
         face_id = fids[0] if fids else None
 
         if not face_id:
-            feature["geometry"] = {
-                "status": "failed",
-                "error": "Face feature has no face_ids",
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": "Face feature has no face_ids",
             }
             return
 
         wire_id, face_boundary = self.extractor.extract_outer_wire(face_id)
 
         if not face_boundary or len(face_boundary) < 3:
-            feature["geometry"] = {
-                "status": "failed",
-                "error": f"Outer wire extraction for face {face_id} "
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": f"Outer wire extraction for face {face_id} "
                          f"produced fewer than 3 points",
             }
             return
@@ -565,14 +549,15 @@ class GeometryMapper:
         except:
             area = 0.0
 
-        feature["geometry"] = {
-            "status": "ok",
-            "regionType": "face_boundary",
-            "face_boundary": face_boundary,
-            "face_z": face_z,
-            "normal": list(normal),
-            "wire_id": wire_id,
-            "point_count": len(face_boundary),
+        feature["machiningRegion"] = {
+            "valid": True,
+            "regionId": feature.get("id", "unknown"),
+            "regionType": "face_region",
+            "boundary": face_boundary,
+            "topZ": face_z,
+            "bottomZ": face_z,
+            "source": "face_boundary",
+            "area": area,
             "diagnostics": {
                 "feature_type": feature.get("type"),
                 "face_count": len(fids),
@@ -594,18 +579,18 @@ class GeometryMapper:
             floor_face_id = fids[0] if fids else None
 
         if not floor_face_id:
-            feature["geometry"] = {
-                "status": "failed",
-                "error": "Step feature has no floor_face_id",
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": "Step feature has no floor_face_id",
             }
             return
 
         wire_id, boundary_points = self.extractor.extract_outer_wire(floor_face_id)
 
         if not boundary_points or len(boundary_points) < 3:
-            feature["geometry"] = {
-                "status": "failed",
-                "error": f"Wire extraction for step face {floor_face_id} failed",
+            feature["machiningRegion"] = {
+                "valid": False,
+                "errorReason": f"Wire extraction for step face {floor_face_id} failed",
             }
             return
 
@@ -629,12 +614,12 @@ class GeometryMapper:
             except (KeyError, TypeError):
                 pass
 
-        feature["geometry"] = {
-            "status": "ok",
-            "regionType": "step_region",
-            "boundary_points": boundary_points,
-            "step_z": step_z,
-            "top_z": top_z,
-            "wire_id": wire_id,
-            "point_count": len(boundary_points),
+        feature["machiningRegion"] = {
+            "valid": True,
+            "regionId": feature.get("id", "unknown"),
+            "regionType": "contour_region",
+            "boundary": boundary_points,
+            "bottomZ": step_z,
+            "topZ": top_z,
+            "source": "outer_wire",
         }

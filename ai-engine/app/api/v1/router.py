@@ -813,7 +813,7 @@ def _process_import_step(file_bytes: bytes) -> tuple[bytes, Any]:
 
 @router.post("/import_step")
 @router.post("/import/step")
-async def import_step_endpoint(file: UploadFile = File(...)) -> StreamingResponse:
+async def import_step_endpoint(file: UploadFile = File(...)):
     if not file.filename.lower().endswith((".step", ".stp")):
         raise HTTPException(
             status_code=400,
@@ -822,17 +822,67 @@ async def import_step_endpoint(file: UploadFile = File(...)) -> StreamingRespons
 
     try:
         file_bytes = await file.read()
-        stl_bytes, shape = await asyncio.to_thread(_process_import_step, file_bytes)
-        asset_id = str(uuid.uuid4())
-        ShapeCache.set(asset_id, shape)
-        return StreamingResponse(
-            io.BytesIO(stl_bytes),
-            media_type="application/octet-stream",
-            headers={
-                "Content-Disposition": f"attachment; filename=imported_{file.filename}.stl",
-                "x-asset-id": asset_id
-            }
+        
+        session_id = uuid.uuid4().hex
+        outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
+        outputs_dir.mkdir(parents=True, exist_ok=True)
+        
+        step_filename = f"cad_{session_id}.step"
+        stl_filename = f"cad_{session_id}.stl"
+        
+        step_path = outputs_dir / step_filename
+        stl_path = outputs_dir / stl_filename
+        
+        with open(step_path, "wb") as f:
+            f.write(file_bytes)
+            
+        from build123d import import_step, export_stl
+        imported_shape = await asyncio.to_thread(import_step, str(step_path))
+        
+        bb = imported_shape.bounding_box()
+        max_dim = max(
+            bb.max.X - bb.min.X,
+            bb.max.Y - bb.min.Y,
+            bb.max.Z - bb.min.Z
         )
+        tolerance = max(0.001, min(0.5, max_dim * 0.002))
+        
+        await asyncio.to_thread(export_stl, imported_shape, str(stl_path), tolerance, 0.15)
+        
+        asset_id = str(uuid.uuid4())
+        ShapeCache.set(asset_id, imported_shape)
+        
+        features = None
+        validation_status = None
+        mapping_summary = None
+        
+        try:
+            from app.services.cam_pipeline_manager import CamPipelineManager
+            cam_mgr = CamPipelineManager()
+            analysis_result = await asyncio.to_thread(
+                cam_mgr.analyze_features, 
+                str(step_path), 
+                session_id, 
+                "",
+                {}
+            )
+            features = analysis_result.get("features")
+            validation_status = analysis_result.get("validation_status")
+            mapping_summary = analysis_result.get("geometry_mapping_summary")
+        except Exception as e:
+            print(f"Error analyzing features on import: {e}")
+        
+        return {
+            "script": f"# Direct STEP Import: {file.filename}\n",
+            "session_id": session_id,
+            "artifacts": {
+                "stl_url": f"/outputs/{stl_filename}",
+                "step_url": f"/outputs/{step_filename}",
+                "features": features,
+                "feature_validation_status": validation_status,
+                "geometry_mapping_summary": mapping_summary,
+            }
+        }
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -940,6 +990,27 @@ async def cam_analyze(request: CamAnalyzeRequest):
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail={"error": {"message": f"CAM analysis failed: {exc}"}})
+
+class CamAutoPlanRequest(BaseModel):
+    session_id: str
+    job_id: str = "default_job"
+    cam_run_id: str = ""
+    machine_config: Dict[str, Any] = {}
+
+@router.post("/cam/auto_plan")
+async def cam_auto_plan(request: CamAutoPlanRequest):
+    outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
+    step_path = outputs_dir / f"cad_{request.session_id}.step"
+    if not step_path.exists():
+        raise HTTPException(status_code=404, detail="STEP file not found for session")
+        
+    try:
+        from app.services.cam_pipeline_manager import CamPipelineManager
+        cam_mgr = CamPipelineManager()
+        result = await asyncio.to_thread(cam_mgr.auto_plan_cam, str(step_path), request.machine_config, request.job_id)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"message": f"CAM auto-plan failed: {exc}"}})
 
 class CamGenerateToolpathsRequest(BaseModel):
     session_id: str

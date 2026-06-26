@@ -125,6 +125,8 @@ class CamFeature:
             "wireId": getattr(self, "wireId", None),
             "source": getattr(self, "source", None),
             "boundaryClosed": getattr(self, "boundaryClosed", False),
+            # Entry face data for setup assignment (holes)
+            "possibleEntryFaces": getattr(self, "possibleEntryFaces", []),
         }
         return d
 
@@ -239,13 +241,39 @@ class CamFeatureRecognition:
 
             has_planar_bottom = False
             has_conical_bottom = False
+            possible_entry_faces = []
+
+            hole_axis = list(face.get("axis", (0, 0, 1)))
+            hole_axis_len = math.sqrt(sum(v*v for v in hole_axis))
+            if hole_axis_len > 1e-6:
+                hole_axis = [v / hole_axis_len for v in hole_axis]
 
             for a in adj:
-                adj_f = self.extractor.faces.get(a["adjacent_face"], {})
+                adj_fid = a["adjacent_face"]
+                adj_f = self.extractor.faces.get(adj_fid, {})
                 if adj_f.get("type") == "plane" and a["transition"] == "concave":
                     has_planar_bottom = True
                 elif adj_f.get("type") == "cone" and a["transition"] == "tangent":
                     has_conical_bottom = True
+
+                # Detect entry/exit faces: planar faces adjacent to the hole
+                # whose normals are parallel to the hole axis, and the transition is convex
+                if adj_f.get("type") == "plane" and a.get("transition") == "convex":
+                    adj_normal = adj_f.get("normal", (0, 0, 0))
+                    dot_parallel = abs(sum(ha * an for ha, an in zip(hole_axis, adj_normal)))
+                    if dot_parallel > 0.98:
+                        # This face is an entry or exit face
+                        adj_bb = adj_f.get("bbox", {})
+                        z_level = None
+                        try:
+                            z_level = round((adj_bb["min"][2] + adj_bb["max"][2]) / 2, 6)
+                        except Exception:
+                            pass
+                        possible_entry_faces.append({
+                            "faceId": adj_fid,
+                            "normal": list(adj_normal),
+                            "zLevel": z_level,
+                        })
 
             subtype = "through_hole"
             if has_planar_bottom or has_conical_bottom:
@@ -259,19 +287,19 @@ class CamFeatureRecognition:
             except Exception:
                 pass
 
-            self.features.append(
-                CamFeature(
-                    feature_type="hole",
-                    subtype=subtype,
-                    face_ids=[fid],
-                    cylinder_face_id=fid,
-                    center=list(face.get("location", (0, 0, 0))),
-                    axis=list(face.get("axis", (0, 0, 1))),
-                    area=face.get("area", 0),
-                    dimensions={"diameter": round(radius * 2, 6), "depth": depth},
-                    confidence=0.95,
-                )
+            feat = CamFeature(
+                feature_type="hole",
+                subtype=subtype,
+                face_ids=[fid],
+                cylinder_face_id=fid,
+                center=list(face.get("location", (0, 0, 0))),
+                axis=hole_axis,
+                area=face.get("area", 0),
+                dimensions={"diameter": round(radius * 2, 6), "depth": depth},
+                confidence=0.95,
             )
+            feat.possibleEntryFaces = possible_entry_faces
+            self.features.append(feat)
 
     # ------------------------------------------------------------------
     # Boss / Shaft detection
@@ -317,33 +345,6 @@ class CamFeatureRecognition:
             face = self.extractor.faces[fid]
             radius = face.get("radius", 0)
 
-            # Find floor face (adjacent planar face whose normal is parallel to cylinder axis)
-            floor_face_id = None
-            adj = self.extractor.adjacency.get(fid, [])
-            for a in adj:
-                adj_f = self.extractor.faces.get(a["adjacent_face"], {})
-                if adj_f.get("type") == "plane":
-                    n = adj_f.get("normal", (0, 0, 1))
-                    # Normal of floor must be parallel to cylinder axis
-                    cyl_axis = face.get("axis", (0, 0, 1))
-                    dot = abs(sum(x * y for x, y in zip(n, cyl_axis)))
-                    if dot > 0.98:
-                        floor_face_id = a["adjacent_face"]
-                        break
-                        
-            # Fallback for floor face: match bottom Z
-            if not floor_face_id:
-                try:
-                    cyl_z_bottom = face["bbox"]["min"][2]
-                    for pid, pface in self.extractor.faces.items():
-                        if pface["type"] == "plane":
-                            pz = pface.get("bbox", {}).get("max", [0,0,0])[2]
-                            if abs(pz - cyl_z_bottom) < 1e-3:
-                                floor_face_id = pid
-                                break
-                except:
-                    pass
-
             # Height estimate from bounding box
             height = 10.0
             try:
@@ -356,39 +357,18 @@ class CamFeatureRecognition:
                 pass
 
             axis = list(face.get("axis", (0, 0, 1)))
-            axis_dot = abs(sum(a * b for a, b in zip(axis, self.machining_direction)))
-            is_parallel = axis_dot > 0.98
-
-            if floor_face_id is None or not is_parallel:
-                feature_type = "external_cylinder"
-                subtype = "shaft" if is_parallel else "side_protrusion"
-                feat = CamFeature(
-                    feature_type=feature_type,
-                    subtype=subtype,
-                    face_ids=[fid],
-                    cylinder_face_id=fid,
-                    center=list(face.get("location", (0, 0, 0))),
-                    axis=axis,
-                    area=face.get("area", 0),
-                    dimensions={"diameter": round(radius * 2, 6), "height": height},
-                    confidence=0.90,
-                )
-                self.features.append(feat)
-                continue
 
             feat = CamFeature(
-                    feature_type="boss",
-                    subtype="cylindrical_boss",
-                    face_ids=[fid],
-                    cylinder_face_id=fid,
-                    floor_face_id=floor_face_id,
-                    center=list(face.get("location", (0, 0, 0))),
-                    axis=axis,
-                    area=face.get("area", 0),
-                    dimensions={"diameter": round(radius * 2, 6), "height": height},
-                    confidence=0.90,
-                )
-            feat.parent_face_id_for_boss = floor_face_id
+                feature_type="external_cylinder",
+                subtype="shaft",  # Default subtype, will be refined in cleanup
+                face_ids=[fid],
+                cylinder_face_id=fid,
+                center=list(face.get("location", (0, 0, 0))),
+                axis=axis,
+                area=face.get("area", 0),
+                dimensions={"diameter": round(radius * 2, 6), "height": height},
+                confidence=0.90,
+            )
             self.features.append(feat)
 
     # ------------------------------------------------------------------
@@ -644,12 +624,20 @@ class CamFeatureRecognition:
                     r1 = f.dimensions.get("diameter", 0) / 2
                     r2 = rep.dimensions.get("diameter", 0) / 2
                     if abs(r1 - r2) < 0.1:
-                        # Check if they touch/overlap along the axis
-                        # Approximate using center distance and lengths
-                        c_dist = sum((f.center[i] - rep.center[i])**2 for i in range(3))**0.5
+                        # Check for shared edges (adjacency)
+                        shared_edges = set(f.edge_ids).intersection(set(rep.edge_ids))
+                        
+                        # Calculate axial overlap
+                        v_axis = rep.axis
+                        d_axial = abs(sum((f.center[i] - rep.center[i]) * v_axis[i] for i in range(3)))
+                        
                         l1 = f.dimensions.get("height", f.dimensions.get("depth", 0))
                         l2 = rep.dimensions.get("height", rep.dimensions.get("depth", 0))
-                        if c_dist <= (l1 + l2) / 2 + 1.0: # 1mm tolerance for touching
+                        
+                        # 1mm tolerance for axial touching
+                        is_overlapping = d_axial <= (l1 + l2) / 2 + 1.0
+                        
+                        if shared_edges or is_overlapping:
                             g.append(f)
                             placed = True
                             break
@@ -669,10 +657,16 @@ class CamFeatureRecognition:
                 
             # Merge fields
             merged_face_ids = []
+            merged_edge_ids = []
+            valid_floor = None
             for f in group:
                 merged_face_ids.extend(f.face_ids)
+                merged_edge_ids.extend(f.edge_ids)
+                if f.floor_face_id:
+                    valid_floor = f.floor_face_id
                 
             rep.face_ids = list(set(merged_face_ids))
+            rep.edge_ids = list(set(merged_edge_ids))
             rep.area = total_area
             rep.centerline = rep.center
             rep.radius = rep.dimensions.get("diameter", 0) / 2
@@ -681,18 +675,62 @@ class CamFeatureRecognition:
             
             # Determine classification
             is_hole = any(f.type == "hole" for f in group)
-            has_floor = any(f.floor_face_id for f in group)
             
             axis_dot = abs(sum(a * b for a, b in zip(rep.axis, self.machining_direction)))
             is_z_aligned = axis_dot > 0.98
             
             if is_hole:
                 rep.type = "hole"
-            elif has_floor:
-                rep.type = "boss"
-            elif is_z_aligned:
-                rep.type = "external_cylinder"
-                rep.subtype = "shaft"
+            elif not is_hole:
+                # Floor detection for external cylinders
+                floor_face_id = None
+                
+                if is_z_aligned:
+                    # Find maximum Z of the cylinder to ensure floor is below it
+                    # We compute Z levels along the machining direction
+                    cyl_z_levels = []
+                    for fid in rep.face_ids:
+                        f_info = self.extractor.faces.get(fid, {})
+                        if "bbox" in f_info:
+                            bb = f_info["bbox"]
+                            # Convert bounding box to machining direction (dot product roughly matches Z if 0,0,1)
+                            # Actually, dot product with machining_direction gives the height.
+                            cyl_z_levels.append(bb["min"][2])
+                            cyl_z_levels.append(bb["max"][2])
+                    
+                    cyl_top_z = max(cyl_z_levels) if cyl_z_levels else 0.0
+                    
+                    for fid in rep.face_ids:
+                        adj = self.extractor.adjacency.get(fid, [])
+                        for a in adj:
+                            adj_f = self.extractor.faces.get(a["adjacent_face"], {})
+                            if adj_f.get("type") == "plane":
+                                n = adj_f.get("normal", (0, 0, 1))
+                                # Convert candidate floor face normal into setup coordinates (dot product)
+                                n_dot = sum(x * y for x, y in zip(n, self.machining_direction))
+                                if abs(n_dot) > 0.98:
+                                    # Convert candidate floor face Z-level into setup coordinates
+                                    # For a simple plane, Z is essentially the bounding box Z
+                                    pz_min = adj_f.get("bbox", {}).get("min", [0,0,0])[2]
+                                    pz_max = adj_f.get("bbox", {}).get("max", [0,0,0])[2]
+                                    pz = (pz_min + pz_max) / 2.0
+                                    
+                                    # Use dot product to see if it's below top
+                                    # Since we usually assume machining_direction is +Z, pz < cyl_top_z
+                                    if pz < cyl_top_z - 1e-3:
+                                        floor_face_id = a["adjacent_face"]
+                                        break
+                        if floor_face_id:
+                            break
+                            
+                if floor_face_id:
+                    rep.type = "boss"
+                    rep.subtype = "cylindrical_boss"
+                    rep.floor_face_id = floor_face_id
+                    rep.parent_face_id_for_boss = floor_face_id
+                else:
+                    rep.type = "external_cylinder"
+                    rep.subtype = "shaft" if is_z_aligned else "side_protrusion"
                 rep.machiningStatus = "recognized_but_requires_turning_or_special_strategy"
                 rep.blocked_reason = "Vertical shaft requires turning or special multi-axis strategy"
                 rep.machinable_in_current_setup = False

@@ -6,6 +6,7 @@ class CamOperation:
     def __init__(self, operation_type: str, feature_id: str, setup_id: str = "setup_1"):
         self.id = f"op_{uuid.uuid4().hex[:8]}"
         self.type = operation_type
+        self.name = f"{operation_type} Operation"
         self.feature_id = feature_id
         self.setup_id = setup_id
         self.tool_id = None
@@ -54,6 +55,10 @@ class OperationPlanner:
         "contour": "2d_contour",
         "face": "facing",
         "step": "2d_contour",
+        "external_cylinder": "od_turning",
+        "shaft": "od_turning",
+        "side_protrusion": "rotary_milling",
+        "turned_od": "od_turning",
     }
     
     def __init__(self):

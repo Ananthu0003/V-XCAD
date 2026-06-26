@@ -1,17 +1,64 @@
 """Pydantic schemas for the CAD Copilot API."""
 from __future__ import annotations
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 
 class ToolpathSegmentType(str, Enum):
     RAPID = "rapid"
-    CUT = "cut"
-    ARC = "arc"
+    FEED = "feed"
     PLUNGE = "plunge"
     RETRACT = "retract"
-    LEAD_IN = "lead_in"
-    LEAD_OUT = "lead_out"
+    ARC = "arc"
+    HELIX = "helix"
+
+class MachineCapability(BaseModel):
+    milling_3axis: bool = True
+    indexed_4axis: bool = False
+    continuous_4axis: bool = False
+    milling_5axis: bool = False
+    turning: bool = False
+    mill_turn: bool = False
+    drilling: bool = True
+    pocketing: bool = True
+    contouring: bool = True
+    thread_milling: bool = False
+    tapping: bool = False
+
+class FeatureMachiningInfo(BaseModel):
+    featureId: str
+    featureType: str
+    featureAxis: Optional[list[float]] = None
+    preferredToolAxis: Optional[list[float]] = None
+    machinableInCurrentSetup: bool = True
+    requiredSetupAxis: Optional[list[float]] = None
+    requiresSecondarySetup: bool = False
+    requires4Axis: bool = False
+    requiresTurning: bool = False
+    status: Literal[
+        "machinable_in_active_setup",
+        "machinable_in_secondary_setup",
+        "requires_turning",
+        "requires_4axis_indexing",
+        "unsupported"
+    ] = "machinable_in_active_setup"
+    reason: Optional[str] = None
+    setupId: Optional[str] = None
+
+class CamSetupPlan(BaseModel):
+    setupId: str
+    setupName: str
+    setupType: str = "milling_3axis"
+    toolAxis: list[float] = [0.0, 0.0, 1.0]
+    workCoordinateSystem: str = "G54"
+    modelToSetupTransform: Optional[list[float]] = None
+    assignedFeatureIds: list[str] = Field(default_factory=list)
+    requiredRotation: Optional[list[float]] = None
+    requiresManualReclamp: bool = False
+    requires4AxisIndexing: bool = False
+    machinableFeatures: list[str] = Field(default_factory=list)
+    deferredFeatures: list[str] = Field(default_factory=list)
+    unsupportedFeatures: list[str] = Field(default_factory=list)
 
 class CoordinateMode(str, Enum):
     MILL_XYZ = "mill_xyz"
@@ -23,7 +70,8 @@ class Point3D(BaseModel):
     z: float
 
 class ToolpathSegment(BaseModel):
-    type: ToolpathSegmentType
+    segmentId: str = ""
+    moveType: ToolpathSegmentType = ToolpathSegmentType.RAPID
     start: Point3D
     end: Point3D
     coordinateMode: CoordinateMode = CoordinateMode.MILL_XYZ
@@ -40,6 +88,58 @@ class ToolpathSegment(BaseModel):
     source: str = "strategy"
     gcodeLineStart: Optional[int] = None
     gcodeLineEnd: Optional[int] = None
+
+class MotionCommand(BaseModel):
+    commandId: str = ""
+    commandType: ToolpathSegmentType = ToolpathSegmentType.RAPID
+    start: Point3D
+    end: Point3D
+    feedrate: Optional[float] = None
+    spindle: Optional[float] = None
+    toolId: str
+    operationId: str
+    featureId: str
+    setupId: str
+    source: str = "strategy"
+    center: Optional[Point3D] = None
+    radius: Optional[float] = None
+    clockwise: Optional[bool] = None
+    plane: Optional[str] = None
+
+class RegionType(str, Enum):
+    DRILL = "drill_region"
+    CONTOUR = "contour_region"
+    POCKET = "pocket_region"
+    BOSS_CLEARING = "boss_clearing_region"
+    FACE = "face_region"
+    TURNING = "turning_region"
+    NONE = "none"
+
+class RegionSource(str, Enum):
+    HOLE_CENTER = "hole_center"
+    OUTER_WIRE = "outer_wire"
+    FACE_BOUNDARY = "face_boundary"
+    POCKET_BOUNDARY = "pocket_boundary"
+    BOSS_FLOOR_MINUS_ISLAND = "boss_floor_minus_island"
+    TURNING_PROFILE = "turning_profile"
+    NONE = "none"
+
+class MachiningRegion(BaseModel):
+    regionId: str
+    regionType: RegionType
+    source: RegionSource
+    boundary: Optional[list[list[float]]] = None
+    islands: Optional[list[list[list[float]]]] = None
+    center: Optional[list[float]] = None
+    axis: Optional[list[float]] = None
+    topZ: Optional[float] = None
+    bottomZ: Optional[float] = None
+    depth: Optional[float] = None
+    area: Optional[float] = None
+    bbox: Optional[dict[str, list[float]]] = None
+    closedBoundary: Optional[bool] = None
+    valid: bool
+    errorReason: Optional[str] = None
 
 class CamFeatureSchema(BaseModel):
     id: str
@@ -58,7 +158,11 @@ class CamFeatureSchema(BaseModel):
     floorFaceId: Optional[str] = None
     # Machining region status: "valid", "missing", "error"
     machining_region: Optional[str] = None
+    
     # Setup-aware machinability
+    machining_info: Optional[FeatureMachiningInfo] = None
+    
+    # Legacy fields (to be deprecated in favor of machining_info)
     machinable_in_current_setup: bool = True
     requires_reorientation: bool = False
     requires_4axis_or_secondary_setup: bool = False

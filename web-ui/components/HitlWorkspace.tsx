@@ -16,7 +16,7 @@ import { ChatPanel } from './ChatPanel';
 import { SessionBrowserModal } from './SessionBrowserModal';
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { History } from 'lucide-react';
-import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, CamFeature, PostProcessor, OperationType, ToolType, ToolMaterial, CoolantType } from '@/types/cam';
+import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, CamFeature, PostProcessor, OperationType, ToolType, ToolMaterial, CoolantType, CamSetupPlan } from '@/types/cam';
 
 type ChatRole = 'user' | 'assistant' | 'system';
 
@@ -287,7 +287,7 @@ export default function HitlWorkspace() {
 	const [stepUrl, setStepUrl] = useState<string | null>(null);
 	const [dxfUrl, setDxfUrl] = useState<string | null>(null);
 	const [gcodeUrl, setGcodeUrl] = useState<string | null>(null);
-	const [toolpaths, setToolpaths] = useState<number[][][] | null>(null);
+	const [toolpaths, setToolpaths] = useState<any[] | null>(null);
 	const [camModelHash, setCamModelHash] = useState<string | null>(null);
 	const [cadModelHash, setCadModelHash] = useState<string | null>(null);
 	const latestCamRunId = useRef<string | null>(null);
@@ -308,19 +308,13 @@ export default function HitlWorkspace() {
 		tolerance: 0.01,
 		stockOffset: 2,
 	});
+	const [camSetups, setCamSetups] = useState<CamSetupPlan[]>([]);
+	const [activeSetupId, setActiveSetupId] = useState<string | null>(null);
 	const [camTools, setCamTools] = useState<Tool[]>([
 		{ id: 't1', number: 'T1', type: 'flat_end_mill', diameter: 3.175, flutes: 2, stickout: 15, material: 'carbide' }
 	]);
-	const [camOperations, setCamOperations] = useState<CamOperation[]>([
-		{
-			id: 'op1',
-			name: 'Profile',
-			type: '2d_contour',
-			toolId: 't1',
-			parameters: { feedRate: 800, plungeRate: 200, maxStepdown: 1.0, totalDepth: 5.0, spindleSpeed: 12000, stepoverPercentage: 40, tolerance: 0.01, coolant: 'off' }
-		}
-	]);
-	const [activeOperationId, setActiveOperationId] = useState<string>('op1');
+	const [camOperations, setCamOperations] = useState<CamOperation[]>([]);
+	const [activeOperationId, setActiveOperationId] = useState<string | null>(null);
 	const [camFeatures, setCamFeatures] = useState<CamFeature[]>([]);
 	const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
 	const [coordValidation, setCoordValidation] = useState<any>(null);
@@ -337,6 +331,7 @@ export default function HitlWorkspace() {
 	const [developerUsername, setDeveloperUsername] = useState('');
 	const [developerPassword, setDeveloperPassword] = useState('');
 	const [developerAuthError, setDeveloperAuthError] = useState<string | null>(null);
+	const [debugMode, setDebugMode] = useState(false);
 
 	const handleDeveloperLogin = () => {
 		if (developerUsername === 'admin' && developerPassword === 'admin') {
@@ -489,22 +484,29 @@ export default function HitlWorkspace() {
 							setCamFeatures([]);
 						}
 					} else {
-						setCamFeatures([]);
+						setCamFeatures(data.artifacts.features || []);
 					}
 				} else {
-					setCamFeatures([]);
+					setCamFeatures(data.artifacts.features || []);
 				}
 				
-				setCamOperations([
-					{
-						id: 'op1',
-						name: 'Profile',
-						type: '2d_contour',
-						toolId: 't1',
-						parameters: { feedRate: 800, plungeRate: 200, maxStepdown: 1.0, totalDepth: 5.0, spindleSpeed: 12000, stepoverPercentage: 40, tolerance: 0.01, coolant: 'off' }
-					}
-				]);
-				setActiveOperationId('op1');
+				const features = data.artifacts.features || [];
+				if (features.length > 0) {
+					setCamOperations([
+						{
+							id: 'op1',
+							name: 'Profile',
+							type: '2d_contour',
+							toolId: 't1',
+							featureId: features[0].id,
+							parameters: { feedRate: 800, plungeRate: 200, maxStepdown: 1.0, totalDepth: 5.0, spindleSpeed: 12000, stepoverPercentage: 40, tolerance: 0.01, coolant: 'off' }
+						}
+					]);
+					setActiveOperationId('op1');
+				} else {
+					setCamOperations([]);
+					setActiveOperationId(null);
+				}
 				setGcodeContent(null);
 			}
 			
@@ -628,8 +630,6 @@ export default function HitlWorkspace() {
 		setStatusText('Syncing to backend engine...');
 
 		try {
-			const activeOp = camOperations.find(o => o.id === activeOperationId) || camOperations[0];
-			const activeTool = camTools.find(t => t.id === activeOp.toolId) || camTools[0];
 
 			const response = await fetch('/api/render', {
 				method: 'POST',
@@ -850,94 +850,104 @@ export default function HitlWorkspace() {
 	}
 
 	async function handleAutoGenerateOperations() {
-		const newOperations: CamOperation[] = [];
-		let addedTools: Tool[] = [];
+		if (!sessionId) {
+			toast.error('No session active. Please import a STEP file first.');
+			return;
+		}
 
-		for (let index = 0; index < camFeatures.length; index++) {
-			const feat = camFeatures[index];
-			let defaultDepth = feat.dimensions.depth || 5.0;
-			if (defaultDepth <= 0) defaultDepth = 5.0;
+		setIsGenerating(true);
+		setStatusText('Auto Planning CAM...');
 
-			// Fetch recommendation
-			let toolParams = {
-				feedRate: 1000,
-				plungeRate: 300,
-				maxStepdown: 2.0,
-				totalDepth: defaultDepth,
-				spindleSpeed: 10000,
-				stepoverPercentage: 40,
-				tolerance: 0.01,
-				coolant: 'flood' as CoolantType
-			};
-			let recommendedToolId = 't1';
-
-			try {
-				const res = await fetch('/api/cam/recommendations', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						featureType: feat.type,
-						workpieceMaterial: camSetup.material,
-						diameterHint: feat.dimensions.diameter
-					})
-				});
-
-				if (res.ok) {
-					const data = await res.json();
-					if (data.tool) {
-						// Add tool to workspace tools if not present
-						const existingTool = camTools.find(t => t.dbId === data.tool.id) || addedTools.find(t => t.dbId === data.tool.id);
-						if (existingTool) {
-							recommendedToolId = existingTool.id;
-						} else {
-							const newToolId = `tool_${Date.now()}_${index}`;
-							const newTool: Tool = {
-								id: newToolId,
-								dbId: data.tool.id,
-								name: data.tool.name,
-								number: `T${camTools.length + addedTools.length + 1}`,
-								type: data.tool.type as ToolType,
-								diameter: data.tool.diameter,
-								flutes: data.tool.flutes,
-								stickout: data.tool.stickout,
-								material: data.tool.material?.material_code as ToolMaterial,
-								coating: data.tool.coating?.coating_name,
-							};
-							addedTools.push(newTool);
-							recommendedToolId = newToolId;
+		try {
+			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+			const res = await fetch(`${backendUrl}/api/v1/cam/auto_plan`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					session_id: sessionId,
+					job_id: sessionId,
+					machine_config: {
+						machine_capability: {
+							turning: false,
+							milling_3axis: true,
+							drilling: true,
+							pocketing: true,
+							indexed_4axis: false,
+							continuous_4axis: false,
+							milling_5axis: false,
+							mill_turn: false
 						}
 					}
-					if (data.feedsAndSpeeds) {
-						toolParams.feedRate = data.feedsAndSpeeds.feedRate;
-						toolParams.plungeRate = data.feedsAndSpeeds.plungeRate;
-						toolParams.spindleSpeed = data.feedsAndSpeeds.spindleSpeed;
-						toolParams.coolant = data.feedsAndSpeeds.coolant;
-					}
-				}
-			} catch (e) {
-				console.error('Failed to fetch recommendation for feature', feat.id, e);
+				})
+			});
+
+			if (!res.ok) {
+				throw new Error(await readErrorFromResponse(res, 'Auto plan failed'));
 			}
 
-			newOperations.push({
-				id: `op_auto_${Date.now()}_${index}`,
-				name: `${feat.type.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())} Operation`,
-				type: feat.recommendedOperation as OperationType,
-				toolId: recommendedToolId,
-				feature_id: feat.id,
-				parameters: toolParams
-			});
-		}
+			const data = await res.json();
+			
+			if (data.features) setCamFeatures(data.features);
+			if (data.setups && data.setups.length > 0) {
+				setCamSetups(data.setups);
+				setActiveSetupId(data.setups[0].setupId);
+			}
+			
+			if (data.tools) {
+				// Map backend tools to frontend Tools
+				const newTools = data.tools.map((t: any, i: number) => ({
+					id: t.id,
+					dbId: t.id,
+					name: t.name || `Auto Tool ${i+1}`,
+					number: `T${camTools.length + i + 1}`,
+					type: t.type as ToolType,
+					diameter: t.diameter || 3.175,
+					flutes: t.flutes || 2,
+					stickout: t.stickout || 20,
+					material: (t.material?.material_code || 'carbide') as ToolMaterial,
+					coating: t.coating?.coating_name
+				}));
+				setCamTools(prev => {
+					// Add only tools that don't exist yet
+					const existingIds = new Set(prev.map(p => p.dbId));
+					const toAdd = newTools.filter((nt: any) => !existingIds.has(nt.dbId));
+					return [...prev, ...toAdd];
+				});
+			}
 
-		if (addedTools.length > 0) {
-			setCamTools(prev => [...prev, ...addedTools]);
-		}
-
-		if (newOperations.length > 0) {
-			setCamOperations((prev) => [...prev, ...newOperations]);
-			setActiveOperationId(newOperations[0].id);
-			toast.success(`Auto-generated ${newOperations.length} operations`);
-		} else {
-			toast.error('No features available to generate operations from');
+			if (data.operations && data.operations.length > 0) {
+				// Map operations
+				const newOps: CamOperation[] = data.operations.map((op: any, i: number) => ({
+					id: op.id || `op_auto_${Date.now()}_${i}`,
+					name: op.name || `${op.type || op.operation_type} Operation`,
+					type: (op.type || op.operation_type) as OperationType,
+					toolId: op.tool_id || 't1', // fallback
+					feature_id: op.feature_id,
+					setup_id: op.setup_id,
+					status: op.status,
+					parameters: op.parameters || {
+						feedRate: 1000,
+						plungeRate: 300,
+						maxStepdown: 2.0,
+						spindleSpeed: 10000,
+						stepoverPercentage: 40,
+						tolerance: 0.01,
+						coolant: 'flood'
+					}
+				}));
+				setCamOperations(newOps);
+				setActiveOperationId(newOps[0].id);
+				toast.success(`Generated ${newOps.length} operations across ${data.setups?.length || 0} setups`);
+			} else {
+				toast.warning('No operations could be planned for these features.');
+			}
+		} catch (error) {
+			const errorText = error instanceof Error ? error.message : String(error);
+			setStatusText(`Auto Plan failed: ${errorText}`);
+			toast.error('Auto Plan failed', { description: errorText });
+		} finally {
+			setIsGenerating(false);
+			setStatusText('Ready');
 		}
 	}
 
@@ -1164,16 +1174,48 @@ export default function HitlWorkspace() {
 													hasGcode={Boolean(false)}
 													isDownloadingGcode={isDownloadingGcode}
 													onDownloadGcode={() => handleDownloadArtifact(null, 'gcode')}
-													isSharing={false}
-													onShare={undefined}
-													toolpaths={toolpaths as any}
+													isSharing={isSharing}
+													onShare={handleShare}
+													toolpaths={toolpaths?.filter(t => t.setupId === (activeSetupId || camSetups[0]?.setupId)) as any}
 													showToolpaths={camViewport.showToolpath}
 													camFeatures={camFeatures}
+													hasBlockedOperations={camOperations.some(op => op.status === 'blocked' || op.status === 'error')}
 													activeFeatureId={activeFeatureId}
 													simulationState={camSimulation}
 													camTools={camTools}
+													debugMode={debugMode}
 													headerActions={
 														<div className="flex items-center gap-2">
+															{/* Debug Mode Toggle */}
+															<button
+																onClick={() => setDebugMode(!debugMode)}
+																className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all pointer-events-auto text-[10px] font-bold uppercase tracking-widest ${
+																	debugMode
+																		? 'bg-orange-500/20 border-orange-500/40 text-orange-400 hover:bg-orange-500/30'
+																		: 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10 hover:text-white'
+																}`}
+																title={debugMode ? 'Debug mode ON — showing all geometry' : 'Debug mode OFF — showing clean toolpaths only'}
+															>
+																<svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																	<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+																</svg>
+																Debug
+															</button>
+															{/* Setup Selector */}
+															{camSetups.length > 1 && (
+																<select
+																	value={activeSetupId || ''}
+																	onChange={(e) => setActiveSetupId(e.target.value)}
+																	className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-white/10 transition-all pointer-events-auto appearance-none cursor-pointer"
+																	title="Switch active setup to view its toolpaths"
+																>
+																	{camSetups.map((s, idx) => (
+																		<option key={s.setupId} value={s.setupId} className="bg-[#0a0f1c] text-white">
+																			{s.setupName || `Setup ${idx + 1}`}
+																		</option>
+																	))}
+																</select>
+															)}
 															<div className="relative">
 																<button
 																	onClick={() => setIsWorkspaceMenuOpen(!isWorkspaceMenuOpen)}
@@ -1393,6 +1435,7 @@ export default function HitlWorkspace() {
 													(workflowStage === 'cad' || workflowStage === 'cam' || workflowStage === 'gcode') ? (
 														<CamSummaryPanel 
 															setup={camSetup as any} 
+															setups={camSetups}
 															tools={camTools} 
 															operations={camOperations}
 															features={camFeatures}
