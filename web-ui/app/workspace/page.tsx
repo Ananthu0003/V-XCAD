@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 
-const HitlWorkspace = dynamic(() => import('@/components/HitlWorkspace'), {
+const HitlWorkspace = dynamic(() => import('@/components/workspace/HitlWorkspace'), {
   ssr: false,
 });
 

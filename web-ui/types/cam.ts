@@ -38,7 +38,7 @@ export type FeatureMachiningInfo = {
     requiresSecondarySetup: boolean;
     requires4Axis: boolean;
     requiresTurning: boolean;
-    status: 'machinable_in_current_setup' | 'deferred_to_secondary_setup' | 'unsupported_features';
+    status: 'machinable_in_current_setup' | 'machinable_in_active_setup' | 'machinable_in_secondary_setup' | 'deferred_to_secondary_setup' | 'requires_turning' | 'requires_4axis_indexing' | 'unsupported_features' | 'unsupported' | string;
     reason?: string;
 };
 
@@ -50,6 +50,8 @@ export type CamSetupPlan = {
     workCoordinateSystem: string;
     modelToSetupTransform?: number[];
     assignedFeatureIds: string[];
+    unassignedFeatureIds?: string[];
+    allFeatureIds?: string[];
     requiredRotation?: [number, number, number];
     requiresManualReclamp: boolean;
     requires4AxisIndexing: boolean;
@@ -133,7 +135,7 @@ export type Tool = {
 
 export type OperationType = 'facing' | 'pocket' | '2d_contour' | 'drilling' | 'chamfer' | 'boss_clearing' | 'od_turning' | 'rotary_milling' | 'external_cylinder_unsupported' | 'side_feature' | string;
 export type CoolantType = 'off' | 'flood' | 'mist' | 'through_tool' | 'air_blast';
-export type OperationStatus = 'ready' | 'requires_regeneration' | 'missing_tool' | 'missing_geometry' | 'blocked' | 'error' | 'planned';
+export type OperationStatus = 'ready' | 'warning' | 'requires_regeneration' | 'missing_tool' | 'missing_geometry' | 'blocked' | 'blocked_requires_reorientation' | 'unsupported' | 'error' | 'planned' | string;
 
 export type HeightsSettings = {
     clearanceHeight: number;
@@ -209,9 +211,19 @@ export type CamOperation = {
     toolId: string;
     feature_id?: string;
     setup_id?: string;
-    parameters: CuttingParameters;
+    parameters: CuttingParameters & {
+        error?: string;
+        errorReason?: string;
+        recommended_machine?: string;
+        tool_selection_reason?: string;
+        feeds_and_speeds?: Record<string, number>;
+        depends_on_operation?: string;
+        depends_on_setup?: string;
+        diagnostics?: Record<string, any>;
+    };
     heights?: HeightsSettings;
     status?: OperationStatus;
+    blocked_reason?: string;
     statistics?: ToolpathStatistics;
     collisionStatus?: CollisionStatus;
     enabled?: boolean;

@@ -48,12 +48,13 @@ export function OperationTreeSection({
         setDraggedIndex(null);
     };
 
-    const renderStatus = (status?: string) => {
+    const renderStatus = (status?: string, reason?: string) => {
         switch (status) {
             case 'ready': return <span title="Ready"><CheckCircle2 className="size-3 text-emerald-500" /></span>;
             case 'requires_regeneration': return <span title="Requires Regeneration"><RefreshCw className="size-3 text-amber-500" /></span>;
             case 'missing_tool': return <span title="Missing Tool"><XCircle className="size-3 text-rose-500" /></span>;
             case 'missing_geometry': return <span title="Geometry Missing"><AlertTriangle className="size-3 text-rose-500" /></span>;
+            case 'blocked': return <span title={reason || "Blocked by capability constraints"}><XCircle className="size-3 text-red-600" /></span>;
             default: return null;
         }
     };
@@ -107,7 +108,7 @@ export function OperationTreeSection({
                                         <span className="text-xs font-semibold">{index + 1}. {op.name}</span>
                                     </div>
                                     <div className="flex items-center gap-1.5">
-                                        {renderStatus(op.status)}
+                                        {renderStatus(op.status, op.blocked_reason)}
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();

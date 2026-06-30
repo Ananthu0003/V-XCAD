@@ -17,7 +17,8 @@ export function SimulationControls({ state, onChange, onGenerateToolpath, isGene
 		
 		if (state.isPlaying) {
 			intervalId = setInterval(() => {
-				const nextProgress = state.progress >= 100 ? 100 : Math.min(100, state.progress + (state.speed * 0.5));
+				// Reduced from 0.5 to 0.2 to make 1x speed significantly slower and easier to watch
+				const nextProgress = state.progress >= 100 ? 100 : Math.min(100, state.progress + (state.speed * 0.2));
 				
 				let nextSegmentIndex = state.activeSegmentIndex || 0;
 				if (state.segments && state.segments.length > 0) {
@@ -87,11 +88,11 @@ export function SimulationControls({ state, onChange, onGenerateToolpath, isGene
 					<div className="grid grid-cols-2 gap-2 mt-1">
 						<div className="flex flex-col bg-background/50 rounded-lg p-2">
 							<span className="text-[9px] font-bold text-muted-foreground">FEED (mm/min)</span>
-							<span className="font-mono text-xs text-foreground">{(activeSegment as any)?.feedrate || 0}</span>
+							<span className="font-mono text-xs text-foreground">{(activeSegment as any)?.feedrate || (activeSegment as any)?.feed_rate || 0}</span>
 						</div>
 						<div className="flex flex-col bg-background/50 rounded-lg p-2">
 							<span className="text-[9px] font-bold text-muted-foreground">SPINDLE (RPM)</span>
-							<span className="font-mono text-xs text-foreground">{(activeSegment as any)?.spindle || 0}</span>
+							<span className="font-mono text-xs text-foreground">{(activeSegment as any)?.spindle || (activeSegment as any)?.rpm || 0}</span>
 						</div>
 					</div>
 				</div>

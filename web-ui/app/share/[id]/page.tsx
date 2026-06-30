@@ -5,8 +5,8 @@ import type { ReactNode } from 'react';
 import { Loader2, Layers, AlertCircle, Cuboid } from 'lucide-react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stage, PerspectiveCamera } from '@react-three/drei';
-import { StlMesh, type StlGeometryInfo } from '@/components/StlMesh';
-import { ThemeToggle } from '@/components/theme-toggle';
+import { StlMesh, type StlGeometryInfo } from '@/components/viewport/StlMesh';
+import { ThemeToggle } from '@/components/shared/theme-toggle';
 
 // --- Error Boundary for 3D canvas failures ---
 class CanvasErrorBoundary extends Component<

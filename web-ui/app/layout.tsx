@@ -2,8 +2,8 @@ import { Toaster } from '@/components/ui/sonner';
 import type { Metadata } from 'next';
 import { IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
-import { ThemeProvider } from '@/components/theme-provider';
-import { ThemeToggle } from '@/components/theme-toggle';
+import { ThemeProvider } from '@/components/shared/theme-provider';
+import { ThemeToggle } from '@/components/shared/theme-toggle';
 
 const ibmPlexMono = IBM_Plex_Mono({
 	weight: ['400', '500', '600', '700'],

@@ -4,12 +4,12 @@ import {
   Code2, Box, History, Zap, FileImage, ChevronRight,
 } from 'lucide-react';
 import { getSession } from '@/lib/auth';
-import { Hero3D } from '@/components/Hero3D';
-import { AnimatedSection } from '@/components/AnimatedSection';
-import { AnimatedCode } from '@/components/AnimatedCode';
-import { WorkflowStep } from '@/components/WorkflowStep';
-import { LandingClient } from '@/components/LandingClient';
-import { BackToTop } from '@/components/BackToTop';
+import { Hero3D } from '@/components/landing/Hero3D';
+import { AnimatedSection } from '@/components/landing/AnimatedSection';
+import { AnimatedCode } from '@/components/landing/AnimatedCode';
+import { WorkflowStep } from '@/components/workspace/WorkflowStep';
+import { LandingClient } from '@/components/landing/LandingClient';
+import { BackToTop } from '@/components/landing/BackToTop';
 
 export default async function LandingPage() {
   const session = await getSession();

@@ -1,72 +1,81 @@
 ```python
 import build123d as bd
 
-# --- PARAMETERS ---
 PARAMETERS = {
     "eps": 0.01,
-    "base_dia": 8.0,
-    "base_height": 2.2,
-    "shaft_dia": 6.0,
-    "shaft_height": 20.5,
-    "tip_dia": 4.74,
-    "tip_height": 2.2,
-    "tip_radius_top": 1.0,
-    "tip_radius_shoulder": 0.5
+    "cyl_dia": 75.0,
+    "cyl_height": 75.0,
+    "bore_dia": 38.0,
+    "plate_len": 75.5,
+    "plate_width": 56.0,
+    "plate_height": 28.0,
+    "slot_width": 19.0,
+    "slot_depth": 25.0,
+    "slot_rad": 9.5,
+    "fillet_rad": 10.0
 }
 
 PARAMETER_METADATA = {
     "eps": {"group": "Tolerance", "confidence": 1.0, "description": "Epsilon for boolean stability"},
-    "base_dia": {"group": "Base", "confidence": 1.0, "description": "Diameter of the bottom mounting base"},
-    "base_height": {"group": "Base", "confidence": 1.0, "description": "Height of the bottom mounting base"},
-    "shaft_dia": {"group": "Shaft", "confidence": 1.0, "description": "Diameter of the central shaft"},
-    "shaft_height": {"group": "Shaft", "confidence": 1.0, "description": "Height of the central shaft"},
-    "tip_dia": {"group": "Tip", "confidence": 1.0, "description": "Diameter of the top punch tip"},
-    "tip_height": {"group": "Tip", "confidence": 1.0, "description": "Height of the top punch tip"},
-    "tip_radius_top": {"group": "Fillet", "confidence": 1.0, "description": "Radius of the top dome"},
-    "tip_radius_shoulder": {"group": "Fillet", "confidence": 1.0, "description": "Radius of the shoulder transition"}
+    "cyl_dia": {"group": "Cylinder", "confidence": 1.0, "description": "Diameter of main boss"},
+    "cyl_height": {"group": "Cylinder", "confidence": 1.0, "description": "Height of main boss"},
+    "bore_dia": {"group": "Cylinder", "confidence": 1.0, "description": "Diameter of central bore"},
+    "plate_len": {"group": "Plate", "confidence": 1.0, "description": "Length of rectangular extension"},
+    "plate_width": {"group": "Plate", "confidence": 1.0, "description": "Width of rectangular extension"},
+    "plate_height": {"group": "Plate", "confidence": 1.0, "description": "Height of rectangular extension"},
+    "slot_width": {"group": "Slot", "confidence": 1.0, "description": "Width of U-slot"},
+    "slot_depth": {"group": "Slot", "confidence": 1.0, "description": "Depth of U-slot"},
+    "slot_rad": {"group": "Slot", "confidence": 1.0, "description": "Radius of U-slot base"},
+    "fillet_rad": {"group": "Fillet", "confidence": 1.0, "description": "Transition fillet radius"}
 }
 
 # --- SPATIAL PLAN ---
-# Base Cylinder: Centered at (0,0,0), Z-range [0, 2.2]
-# Main Shaft: Centered at (0,0,2.2), Z-range [2.2, 22.7]
-# Top Tip: Centered at (0,0,20.5), Z-range [20.5, 22.7]
-# Note: Total height is 22.7. The tip height is 2.2, starting at 20.5.
-# Fillets: Applied to the top circular edge and the shoulder edge at Z=20.5.
+# Main Cylinder: Centered at (0,0,0), height 75.
+# Base Plate: Attached to cylinder, centered Y, extending from X=0 to X=75.5.
+#             To ensure fusion, plate starts at X = cyl_dia/2 - eps.
+# U-Slot: Cut into the plate at X=94.0 (relative to origin), Z=28.0.
 # --- MENTAL WALKTHROUGH ---
-# 1. Create base cylinder at origin.
-# 2. Create main shaft on top of base.
-# 3. Create top tip on top of main shaft.
-# 4. Use fillet on the top edge (radius 1.0).
-# 5. Use fillet on the shoulder edge (radius 0.5).
+# 1. Create Main Cylinder.
+# 2. Create Base Plate as a Box. Position it so it overlaps the cylinder by 'eps'.
+# 3. Union Cylinder and Plate.
+# 4. Cut the central bore through the cylinder.
+# 5. Cut the U-slot into the plate. The slot is a rectangle + circle, 
+#    subtracted from the top face of the plate.
+# 6. Apply fillets to the transition between cylinder and plate.
 # --------------------
 
 with bd.BuildPart() as part:
-    # Base
-    with bd.BuildSketch():
-        bd.Circle(radius=PARAMETERS["base_dia"] / 2)
-    bd.extrude(amount=PARAMETERS["base_height"])
+    # Main Cylinder
+    bd.Cylinder(radius=PARAMETERS["cyl_dia"]/2, height=PARAMETERS["cyl_height"], align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    
+    # Base Plate
+    # Plate starts at X = cyl_dia/2 - eps to ensure overlap
+    plate_x_start = PARAMETERS["cyl_dia"]/2 - PARAMETERS["eps"]
+    plate_len = PARAMETERS["plate_len"]
+    with bd.Locations((plate_x_start + plate_len/2, 0, 0)):
+        bd.Box(length=plate_len, width=PARAMETERS["plate_width"], height=PARAMETERS["plate_height"], align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    
+    # Central Bore
+    bd.Hole(radius=PARAMETERS["bore_dia"]/2, depth=PARAMETERS["cyl_height"])
+    
+    # U-Slot
+    # Located at X=94.0, Z=28.0. 
+    # Slot is 19 wide, 25 deep.
+    slot_x_pos = 94.0
+    with bd.Locations((slot_x_pos, 0, PARAMETERS["plate_height"])):
+        with bd.BuildSketch(bd.Plane.XY):
+            # Rectangle for the vertical part of the slot
+            bd.Rectangle(width=PARAMETERS["slot_width"], height=PARAMETERS["slot_depth"] - PARAMETERS["slot_rad"], align=(bd.Align.CENTER, bd.Align.MIN))
+            # Circle for the bottom radius
+            with bd.Locations((0, PARAMETERS["slot_depth"] - PARAMETERS["slot_rad"])):
+                bd.Circle(radius=PARAMETERS["slot_rad"])
+        bd.extrude(amount=-PARAMETERS["slot_depth"], mode=bd.Mode.SUBTRACT)
 
-    # Shaft
-    with bd.Locations((0, 0, PARAMETERS["base_height"])):
-        with bd.BuildSketch():
-            bd.Circle(radius=PARAMETERS["shaft_dia"] / 2)
-        bd.extrude(amount=PARAMETERS["shaft_height"])
-
-    # Tip
-    with bd.Locations((0, 0, PARAMETERS["base_height"] + PARAMETERS["shaft_height"])):
-        with bd.BuildSketch():
-            bd.Circle(radius=PARAMETERS["tip_dia"] / 2)
-        bd.extrude(amount=PARAMETERS["tip_height"])
-
-    # Fillets
-    # Top edge is at the very top of the part
-    top_edge = part.edges().filter_by(bd.GeomType.CIRCLE).sort_by(bd.Axis.Z)[-1]
-    bd.fillet(top_edge, radius=PARAMETERS["tip_radius_top"])
-
-    # Shoulder edge is at the transition between shaft and tip (Z = 22.7 - 2.2 = 20.5)
-    # We look for the circular edge at that specific Z height
-    shoulder_edge = part.edges().filter_by(bd.GeomType.CIRCLE).sort_by(bd.Axis.Z)[-2]
-    bd.fillet(shoulder_edge, radius=PARAMETERS["tip_radius_shoulder"])
+    # Fillet transition
+    # Select edges where plate meets cylinder
+    edges_to_fillet = part.edges().filter_by(bd.GeomType.CIRCLE).sort_by(bd.Axis.Z)
+    # We target the vertical edges at the junction
+    bd.fillet(part.edges().filter_by_position(bd.Axis.X, 37.5, 38.0), radius=PARAMETERS["fillet_rad"])
 
 if __name__ == '__main__':
     try:

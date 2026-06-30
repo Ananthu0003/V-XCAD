@@ -5,10 +5,10 @@ export const runtime = 'nodejs';
 
 export async function GET(
 	request: Request,
-	{ params }: { params: { jobId: string; simulationRunId: string } }
+	{ params }: { params: Promise<{ jobId: string; simulationRunId: string }> }
 ) {
 	try {
-		const runId = params.simulationRunId;
+		const { simulationRunId: runId } = await params;
 		if (!runId) {
 			return NextResponse.json({ error: { message: 'Missing simulationRunId' } }, { status: 400 });
 		}
@@ -17,6 +17,7 @@ export async function GET(
 			where: { id: runId },
 			include: {
 				setup: true,
+				segments: true,
 			}
 		});
 

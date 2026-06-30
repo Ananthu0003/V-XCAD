@@ -155,6 +155,10 @@ model CamTool {
   holder_type     String?
   h_offset        Float?
   d_offset        Float?
+  length_offset_number Int?
+  diameter_offset_number Int?
+  stickout_mm     Float?
+  material_compatibility String?
   
   operations      CamOperation[]
   segments        ToolpathSegment[]
@@ -176,6 +180,7 @@ model CamOperation {
   stepover         Float?
   coolant_mode     String?
   status           String?
+  blocked_reason   String?
   
   segments         ToolpathSegment[]
 }

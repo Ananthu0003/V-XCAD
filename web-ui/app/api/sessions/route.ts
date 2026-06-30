@@ -8,13 +8,14 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
     try {
         const authSession = await getSession();
-        if (!authSession?.userId) {
-            return NextResponse.json([], { status: 200 });
-        }
+        const userId = authSession?.userId || null;
 
         const sessions = await prisma.cadSession.findMany({
             where: {
-                userId: authSession.userId,
+                OR: [
+                    { userId: userId },
+                    { userId: null }
+                ]
             },
             orderBy: {
                 createdAt: 'desc'

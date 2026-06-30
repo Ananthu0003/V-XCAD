@@ -5,12 +5,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 
 class ToolpathSegmentType(str, Enum):
-    RAPID = "rapid"
-    FEED = "feed"
+    RAPID_CLEARANCE = "rapid_clearance"
+    RAPID_XY = "rapid_xy"
+    APPROACH_RETRACT = "approach_retract"
     PLUNGE = "plunge"
-    RETRACT = "retract"
-    ARC = "arc"
-    HELIX = "helix"
+    CUT = "cut"
+    ARC_CW = "arc_cw"
+    ARC_CCW = "arc_ccw"
+    RETRACT_CLEARANCE = "retract_clearance"
+    DRILL_CYCLE = "drill_cycle"
 
 class MachineCapability(BaseModel):
     milling_3axis: bool = True
@@ -28,6 +31,7 @@ class MachineCapability(BaseModel):
 class FeatureMachiningInfo(BaseModel):
     featureId: str
     featureType: str
+    manufacturing_class: Optional[Literal["2.5D Milling", "3D Milling", "Drilling", "Turning", "Mill-Turn", "Inspection"]] = None
     featureAxis: Optional[list[float]] = None
     preferredToolAxis: Optional[list[float]] = None
     machinableInCurrentSetup: bool = True
@@ -53,6 +57,8 @@ class CamSetupPlan(BaseModel):
     workCoordinateSystem: str = "G54"
     modelToSetupTransform: Optional[list[float]] = None
     assignedFeatureIds: list[str] = Field(default_factory=list)
+    unassignedFeatureIds: list[str] = Field(default_factory=list)
+    allFeatureIds: list[str] = Field(default_factory=list)
     requiredRotation: Optional[list[float]] = None
     requiresManualReclamp: bool = False
     requires4AxisIndexing: bool = False
@@ -71,7 +77,7 @@ class Point3D(BaseModel):
 
 class ToolpathSegment(BaseModel):
     segmentId: str = ""
-    moveType: ToolpathSegmentType = ToolpathSegmentType.RAPID
+    moveType: ToolpathSegmentType = ToolpathSegmentType.RAPID_CLEARANCE
     start: Point3D
     end: Point3D
     coordinateMode: CoordinateMode = CoordinateMode.MILL_XYZ
@@ -91,7 +97,7 @@ class ToolpathSegment(BaseModel):
 
 class MotionCommand(BaseModel):
     commandId: str = ""
-    commandType: ToolpathSegmentType = ToolpathSegmentType.RAPID
+    commandType: ToolpathSegmentType = ToolpathSegmentType.RAPID_CLEARANCE
     start: Point3D
     end: Point3D
     feedrate: Optional[float] = None
@@ -182,6 +188,13 @@ class CamOperationSchema(BaseModel):
     feature_id: Optional[str] = Field(default=None, alias="featureId")
     setup_id: str = "setup_1"
     tool_id: Optional[str] = None
+    material_id: Optional[str] = None
+    status: Literal["planned", "ready", "warning", "blocked", "unsupported", "pending_secondary_setup", "error"] = "planned"
+    reason: Optional[str] = None
+    recommended_machine: Optional[str] = None
+    tool_selection_reason: Optional[str] = None
+    depends_on_setup: Optional[str] = None
+    depends_on_operation: Optional[str] = None
     machining_strategy: str = "default"
     safe_heights: dict[str, float] = Field(default_factory=dict)
     parameters: dict[str, Any] = Field(default_factory=dict)

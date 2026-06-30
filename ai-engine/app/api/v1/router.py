@@ -16,9 +16,9 @@ from app.services.cam_pipeline_manager import CamPipelineManager
 from app.services.cam_input_router import CamInputRouter
 from fastapi.responses import FileResponse, StreamingResponse
 from app.models.schemas import GenerateResponse, EditRequest, StepRequest, RenderRequest, RenderResponse, RenderArtifacts, GCodeResponse, CAMJobRequest
-from app.services.csg_parser import CSGParser, export_to_step
-from app.services.llm_codegen import LLMCodegenService
-from app.services.parameter_render import ParameterRenderService
+from app.services.geometry.csg_parser import CSGParser, export_to_step
+from app.services.llm.llm_codegen import LLMCodegenService
+from app.services.llm.parameter_render import ParameterRenderService
 
 router = APIRouter(tags=["cad"])
 
@@ -442,7 +442,7 @@ async def export_step_stream(request: StepRequest) -> StreamingResponse:
     """
     Convert flat CSG tree into a parametric STEP model and stream in-memory.
     """
-    from app.services.export_utils import build123d_to_step_bytes
+    from app.services.io.export_utils import build123d_to_step_bytes
     
     try:
         is_ref, asset_id = is_step_reference(request.csg_tree)
@@ -582,7 +582,7 @@ async def render(
         mapping_summary = analysis_result.get("geometry_mapping_summary")
         
         # Clear CAM artifacts
-        job_dir = Path(__file__).resolve().parents[3] / "storage" / "jobs" / session_id / "cam"
+        job_dir = Path(__file__).resolve().parents[4] / "storage" / "jobs" / session_id / "cam"
         for fname in ["cam_toolpaths.json", "cam_validation.json", "cam_operation_summary.json", "generated_gcode.nc", "cam_hashes.json", "cam_features_debug.json", "cam_geometry_mapping.json"]:
             fpath = job_dir / fname
             if fpath.exists():
@@ -618,8 +618,8 @@ async def render(
 
 def _process_gcode(cam_request_dict: dict, step_file_path: str | None, temp_path_str: str | None) -> dict:
     from app.models.schemas import CAMJobRequest
-    from app.services.gcode_generator import GCodeGenerator
-    from app.services.csg_parser import CSGParser, export_to_step
+    from app.services.gcode.gcode_generator import GCodeGenerator
+    from app.services.geometry.csg_parser import CSGParser, export_to_step
 
     cam_request = CAMJobRequest(**cam_request_dict)
 
@@ -1017,6 +1017,7 @@ class CamGenerateToolpathsRequest(BaseModel):
     job_id: str = "default_job"
     cam_run_id: str = ""
     setup: Dict[str, Any]
+    setups: Optional[List[Dict[str, Any]]] = None
     tools: List[Dict[str, Any]]
     operations: List[Dict[str, Any]]
     modelHash: Optional[str] = ""
@@ -1044,6 +1045,7 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
             request.job_id,
             request.cam_run_id,
             request.setup,
+            request.setups,
             request.tools,
             request.operations
         )
@@ -1058,7 +1060,10 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": {"message": str(exc)}})
     except Exception as exc:
-        raise HTTPException(status_code=500, detail={"error": {"message": str(exc)}})
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[CAM TOOLPATH ERROR]\n{tb}")
+        raise HTTPException(status_code=500, detail={"error": {"message": f"{str(exc)}\n{tb}"}})
 
 class CamGCodeRequest(BaseModel):
     session_id: str
@@ -1067,7 +1072,7 @@ class CamGCodeRequest(BaseModel):
 
 @router.post("/cam/gcode")
 async def cam_generate_gcode(request: CamGCodeRequest):
-    job_dir = Path(__file__).resolve().parents[3] / "storage" / "jobs" / request.job_id / "cam"
+    job_dir = Path(__file__).resolve().parents[4] / "storage" / "jobs" / request.job_id / "cam"
     toolpaths_file = job_dir / "cam_toolpaths.json"
     validation_file = job_dir / "cam_validation.json"
     operation_summary_file = job_dir / "cam_operation_summary.json"
@@ -1077,28 +1082,109 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         
     with open(validation_file, "r") as f:
         validation_data = json.load(f)
-        if validation_data.get("status") != "success":
-            raise HTTPException(status_code=400, detail={"error": {"message": "Cannot generate G-Code from invalid toolpaths."}})
+        # Allow generation even if there are some errors, as long as some toolpaths exist.
+        if validation_data.get("status") != "success" and validation_data.get("readyOperations", 1) == 0:
+            raise HTTPException(status_code=400, detail={"error": {"message": "Cannot generate G-Code. No valid operations exist."}})
+
+    # Check for legacy toolpath schema
+    hashes_file = job_dir / "cam_hashes.json"
+    if hashes_file.exists():
+        with open(hashes_file, "r") as f:
+            try:
+                hashes = json.load(f)
+                if hashes.get("toolpath_schema_version") != "semantic_v1":
+                    raise HTTPException(status_code=400, detail={"error": {"message": "Stale CAM data detected. Please regenerate toolpaths."}})
+            except json.JSONDecodeError:
+                pass
             
-    with open(operation_summary_file, "r") as f:
-        summary_data = json.load(f)
+    # Load original operations which have the tool and parameter data
+    input_file = job_dir / "cam_toolpath_engine_input.json"
+    if input_file.exists():
+        with open(input_file, "r") as f:
+            engine_input = json.load(f)
+            operations = engine_input.get("operations", [])
+    else:
+        operations = []
+        
+    # Read toolpaths and attach them to operations
+    with open(toolpaths_file, "r") as f:
+        tp_data = json.load(f)
+        all_tp = tp_data.get("toolpaths", [])
+        
+    # Group toolpaths by operationId
+    tp_by_op = {}
+    for tp in all_tp:
+        op_id = tp.get("operationId")
+        if op_id:
+            tp_by_op.setdefault(op_id, []).append(tp)
+            
+    # Mock setups/machines for MVP (should be loaded from project)
+    setup = {"id": "setup_1", "material": "aluminum"}
+    machine = {"id": "machine_1", "axes": 3, "max_spindle_rpm": 10000}
+    
+    # Load tools
+    # Assuming tools are in engine_input, or we mock them if not present.
+    tools_list = engine_input.get("tools", [])
+    tools_by_id = {t.get("id"): t for t in tools_list}
+    
+    errors = []
+    from app.services.validation.manufacturing_capability_validator import ManufacturingCapabilityValidator
+    from app.services.validation.gcode_safety_validator import GCodeSafetyValidator
+    from app.services.validation.post_output_validator import PostOutputValidator
+    from app.services.gcode.gcode_generator import PostProcessorFactory
+    
+    # Validate each operation
+    valid_operations = []
+    for op in operations:
+        op_id = op.get("id")
+        op["toolpaths"] = tp_by_op.get(op_id, [])
+        tool_id = op.get("tool_id") or op.get("toolId")
+        tool = tools_by_id.get(tool_id, {})
+        op["tool"] = tool
+        
+        # 1. Capability Validation
+        cap_val = ManufacturingCapabilityValidator.validate_operation(op, setup, machine, tool)
+        if not cap_val["valid"]:
+            errors.append({"level": "error", "operation_id": op_id, "feature_id": op.get("feature_id"), "code": "CAPABILITY_ERROR", "message": cap_val["reason"]})
+            continue
+            
+        # 2. Safety Validation
+        safe_val = GCodeSafetyValidator.validate_toolpath_safety(op, op["toolpaths"], setup)
+        if not safe_val["valid"]:
+            errors.append({"level": "error", "operation_id": op_id, "feature_id": op.get("feature_id"), "code": "SAFETY_ERROR", "message": safe_val["reason"]})
+            continue
+            
+        valid_operations.append(op)
+        
+    if errors:
+        operation_statuses = {e.get("operation_id"): "blocked" for e in errors if "operation_id" in e}
+        return {"can_generate_gcode": False, "gcode": None, "errors": errors, "operation_statuses": operation_statuses}
+        
+    if not valid_operations:
+        return {"can_generate_gcode": False, "gcode": None, "errors": [{"level": "error", "message": "No valid operations to generate G-code for."}]}
         
     try:
-        from app.services.gcode_generator import PostProcessorFactory
-        # Setup can be extracted from the first operation if present, or fallback
         controller = "fanuc"
         post_processor = PostProcessorFactory.create(controller)
+        gcode = post_processor.generate(valid_operations)
         
-        gcode = post_processor.generate(summary_data)
+        # 3. Post Output Validation
+        out_val = PostOutputValidator.validate_gcode(gcode, valid_operations)
+        if not out_val["valid"]:
+            operation_statuses = {op.get("id"): "blocked" for op in valid_operations}
+            return {"can_generate_gcode": False, "gcode": None, "errors": [{"level": "error", "code": "POST_OUTPUT_ERROR", "message": out_val["reason"]}], "operation_statuses": operation_statuses}
         
         # Save generated gcode
         gcode_path = job_dir / "generated_gcode.nc"
         with open(gcode_path, "w") as f:
             f.write(gcode)
             
-        return {"gcode": gcode, "status": "success"}
+        return {"can_generate_gcode": True, "gcode": gcode, "errors": [], "status": "success"}
     except Exception as exc:
-        raise HTTPException(status_code=500, detail={"error": {"message": f"G-Code generation failed: {str(exc)}"}})
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[GCODE ERROR]\n{tb}")
+        return {"can_generate_gcode": False, "gcode": None, "errors": [{"level": "error", "message": f"G-Code generation failed: {str(exc)}"}]}
 
 
 class SimulatePrepareRequest(BaseModel):
@@ -1109,8 +1195,8 @@ class SimulatePrepareRequest(BaseModel):
 @router.post("/cam/simulate/prepare")
 async def simulate_prepare(request: SimulatePrepareRequest):
     try:
-        from app.services.cam_simulation_service import CamSimulationService
-        from app.services.toolpath_engine import ToolpathEngine
+        from app.services.simulation.cam_simulation_service import CamSimulationService
+        from app.services.toolpath.toolpath_engine import ToolpathEngine
         
         # Generate neutral toolpaths if missing
         engine = ToolpathEngine()

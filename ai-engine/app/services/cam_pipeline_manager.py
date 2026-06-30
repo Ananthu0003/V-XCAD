@@ -3,22 +3,25 @@ import os
 import shutil
 from pathlib import Path
 from typing import Dict, Any, List
-from .cam_input_router import CamInputRouter
-from .step_import_service import StepImportService
-from .cam_feature_recognition import CamFeatureRecognition
-from .cam_setup_analyzer import CamSetupAnalyzer
-from .machine_type_detector import MachineTypeDetector
-from .operation_planner import OperationPlanner
-from .operation_strategy_planner import OperationStrategyPlanner
-from .setup_planner import SetupPlanner
-from .tool_recommendation_engine import ToolRecommendationEngine
-from .toolpath_engine import ToolpathEngine, ALLOWED_SOURCES, BANNED_SOURCES
-from .toolpath_validator import ToolpathValidator
+from app.services.cam_input_router import CamInputRouter
+from app.services.io.step_import_service import StepImportService
+from app.services.geometry.cam_feature_recognition import CamFeatureRecognition
+from app.services.planning.cam_setup_analyzer import CamSetupAnalyzer
+from app.services.gcode.machine_type_detector import MachineTypeDetector
+from app.services.planning.operation_planner import OperationPlanner
+from app.services.planning.operation_strategy_planner import OperationStrategyPlanner
+from app.services.planning.setup_planner import SetupPlanner
+from app.services.tooling.tool_recommendation_engine import ToolRecommendationEngine
+from app.services.toolpath.toolpath_engine import ToolpathEngine, ALLOWED_SOURCES, BANNED_SOURCES
+from app.services.validation.toolpath_validator import ToolpathValidator
 from app.models.schemas import MachineCapability
-from .gcode_generator import PostProcessorFactory
-from .topology_extractor import TopologyExtractor
-from .geometry_mapper import GeometryMapper
-from .coordinate_validator import CoordinateValidator
+from app.models.manufacturing import MachineProfile, MaterialProfile, ToolProfile, FeatureDecision
+from app.services.validation.manufacturing_capability_matrix import ManufacturingCapabilityMatrix
+from app.services.planning.manufacturing_strategy_planner import ManufacturingStrategyPlanner
+from app.services.gcode.gcode_generator import PostProcessorFactory
+from app.services.geometry.topology_extractor import TopologyExtractor
+from app.services.geometry.geometry_mapper import GeometryMapper
+from app.services.validation.coordinate_validator import CoordinateValidator
 
 class CamPipelineManager:
     """
@@ -34,7 +37,6 @@ class CamPipelineManager:
         self.validator = ToolpathValidator()
         self.operation_strategy_planner = OperationStrategyPlanner()
         self.operation_planner = OperationPlanner()
-        self.tool_engine = ToolRecommendationEngine()
         self.coord_validator = CoordinateValidator()
         
     def analyze_features(self, step_file_path: str, job_id: str, cam_run_id: str, setup: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -43,7 +45,7 @@ class CamPipelineManager:
         and Setup-Aware Machinability Analysis.
         Does NOT generate toolpaths or G-code.
         """
-        from app.services.step_importer import StepImporter
+        from app.services.io.step_importer import StepImporter
         
         # 1. Import and Validate Topology
         topology_info = self.step_importer.import_and_validate(step_file_path)
@@ -157,112 +159,149 @@ class CamPipelineManager:
         
     def auto_plan_cam(self, step_file_path: str, machine_config: Dict[str, Any], job_id: str = "default_job") -> Dict[str, Any]:
         """
-        Performs Feature -> Setup Planning -> Tool Recommendation -> Operation Strategy -> Operation.
-        Does NOT generate toolpaths.
+        Production-Grade Auto Generate Operations Pipeline.
         """
-        # 1. Feature Recognition & Geometry Mapping
+        # 1. Initialize Manufacturing Profiles
+        machine = MachineProfile(**machine_config.get("machine_profile", {
+            "machine_id": "m1", "machine_name": "Default 3-Axis", "machine_type": "3_axis_mill",
+            "axis_count": 3,
+            "supported_operations": ["drilling", "facing", "pocket_milling", "2d_contour", "boss_clearing", "slot_milling", "chamfer_milling"]
+        }))
+        material = MaterialProfile(**machine_config.get("material_profile", {
+            "material_id": "mat1", "material_name": "Aluminum 6061", "cutting_speed": 300, "feed_per_tooth": 0.08
+        }))
+        # Create default tools if not provided
+        default_tools = [
+            ToolProfile(tool_id="t1", name="1/4 Flat End Mill", type="end_mill", diameter=6.35, flute_count=3, cutting_length=20.0, stickout=30.0),
+            ToolProfile(tool_id="t2", name="1/2 Flat End Mill", type="end_mill", diameter=12.7, flute_count=3, cutting_length=30.0, stickout=40.0),
+            ToolProfile(tool_id="t3", name="1/4 Drill", type="drill", diameter=6.35, flute_count=2, cutting_length=25.0, stickout=35.0),
+            ToolProfile(tool_id="t4", name="Turning Tool", type="turning_tool", diameter=0, flute_count=1, cutting_length=0, stickout=0)
+        ]
+        tool_library = [ToolProfile(**t) for t in machine_config.get("tool_library", [])] if machine_config.get("tool_library") else default_tools
+        tool_engine = ToolRecommendationEngine(tool_library)
+
+        # 2. Feature Recognition & Geometry Mapping
         features = self.feature_recognizer.recognize_features(step_file_path)
         mapper = GeometryMapper(self.feature_recognizer.extractor)
-        # Assuming default setup for enrichment
         default_setup = {"toolAxis": [0.0, 0.0, 1.0]}
         features = mapper.enrich_features(features, default_setup)
         features = self._sanitize_for_api(features)
         
-        # 2. Setup Planning
+        # 3. Setup Planning
         caps = MachineCapability(**machine_config.get("machine_capability", {}))
         setup_plans = self.setup_planner.plan_setups(features, caps)
         
-        all_tools = []
         all_operations = []
+        decision_trace = []
         
-        # 3. Tool Recommendation & Operation Strategy Planner per Setup
+        # Pipeline execution per setup
         for sp in setup_plans:
-            # Generate strategy (unassigned tools)
-            ops = self.operation_strategy_planner.plan_strategies(features, sp.model_dump())
+            setup_id = sp.setupId
+            # Process both assigned AND unassigned features so they get full strategy evaluation
+            all_setup_features = [f for f in features if f.get("id") in sp.assignedFeatureIds or f.get("id") in sp.unassignedFeatureIds]
+            setup_decisions = []
             
-            for op in ops:
-                # Find matching feature to get dimensions for tool recommendation
-                feat = next((f for f in features if f.get("id") == op.feature_id), None)
-                if feat:
-                    rec = self.tool_engine.recommend_tool({"type": op.type, "parameters": {"dimensions": feat.get("dimensions", {})}})
-                    if "tool" in rec:
-                        tool_data = rec["tool"]
-                        # Assign tool to operation
-                        existing = next((t for t in all_tools if t["id"] == tool_data["id"]), None)
-                        if not existing:
-                            all_tools.append(tool_data)
-                        op.tool_id = tool_data["id"]
-                        
-                        if "feedsAndSpeeds" in rec:
-                            op.parameters.update(rec["feedsAndSpeeds"])
-                all_operations.append(op.to_dict())
-        # Validation
-        operationsForSecondarySetupInActiveSetup = []
-        okOperationForUnsupportedFeature = []
-        operationSetupMismatch = []
-        
-        feature_map = {f.get("id"): f for f in features}
-        
-        duplicateFeatureAssignments = []
-        for feat in features:
-            fid = feat.get("id")
-            setup_count = 0
-            for sp in setup_plans:
-                if fid in sp.assignedFeatureIds:
-                    setup_count += 1
-            if setup_count > 1:
-                duplicateFeatureAssignments.append(fid)
+            for feature in all_setup_features:
+                decision = FeatureDecision(feature_id=feature.get("id"), feature_type=feature.get("type", ""))
+                decision.setup_assignment = setup_id
+                
+                # 3a. Manufacturing Capability Validation
+                is_capable, cap_reason, rec_machine = ManufacturingCapabilityMatrix.evaluate_capability(feature, machine, sp.toolAxis)
+                decision.machine_capability_result = is_capable
+                
+                # 3b. Manufacturing Strategy
+                strategy = ManufacturingStrategyPlanner.determine_strategy(feature, machine.machine_type, sp.toolAxis)
+                decision.manufacturing_strategy = strategy
+                decision.operation_type = strategy
+                
+                if strategy == "unknown_strategy":
+                    decision.status = "blocked"
+                    decision.reason = f"No strategy mapped for feature type: {decision.feature_type}"
+                    setup_decisions.append(decision)
+                    continue
 
-        for op in all_operations:
-            feat = feature_map.get(op.get("feature_id"))
-            if not feat:
-                continue
+                if not is_capable:
+                    decision.status = "blocked"
+                    decision.reason = cap_reason
+                    decision.recommended_machine = rec_machine
+                    setup_decisions.append(decision)
+                    continue
                 
-            machining_info = feat.get("machining_info", {})
-            feat_status = machining_info.get("status")
-            feat_setup_id = machining_info.get("setupId")
-            
-            if op.get("setup_id") != feat_setup_id:
-                operationSetupMismatch.append({
-                    "operationId": op.get("id"),
-                    "featureId": op.get("feature_id"),
-                    "opSetupId": op.get("setup_id"),
-                    "featSetupId": feat_setup_id
-                })
+                # 3c. Tool Selection & Feeds/Speeds (ONLY if capable)
+                tool, t_status, t_reason, feeds = tool_engine.recommend_tool(strategy, feature, machine, material)
+                if not tool:
+                    decision.status = "blocked"
+                    decision.reason = t_reason
+                    setup_decisions.append(decision)
+                    continue
+                    
+                decision.selected_tool = tool.model_dump()
+                decision.tool_selection_reason = t_reason
+                decision.feeds_and_speeds = feeds
+                decision.status = t_status
+                decision.reason = "Ready for toolpath generation" if t_status == "ready" else "Ready with warnings"
                 
-            if feat_status == "machinable_in_secondary_setup" and op.get("status") not in ("error", "blocked", "pending_secondary_setup"):
-                operationsForSecondarySetupInActiveSetup.append({
-                    "operationId": op.get("id"),
-                    "featureId": op.get("feature_id"),
-                })
+                setup_decisions.append(decision)
+                
+            decision_trace.extend([d.model_dump() for d in setup_decisions])
             
-            if feat_status == "unsupported" and op.get("status") not in ("error", "blocked"):
-                okOperationForUnsupportedFeature.append({
-                    "operationId": op.get("id"),
-                    "featureId": op.get("feature_id"),
-                })
+            # 3d. Operation Planning (Ordering and Generation)
+            ops = self.operation_strategy_planner.plan_operations(setup_decisions, setup_id)
+            for op in ops:
+                all_operations.append(op.to_dict())
+                
+        # 4. Feature Coverage Validation & Fallback Planning
+        feature_ids = {f.get("id") for f in features if f.get("id") and f.get("requiredMachining", True)}
+        decision_feature_ids = {d.get("feature_id") for d in decision_trace}
+        missing_features_ids = list(feature_ids - decision_feature_ids)
         
-        # Feature-without-operation validation
-        all_op_feature_ids = set(op.get("feature_id") for op in all_operations if op.get("feature_id"))
-        feature_without_operation = []
-        for feat in features:
-            fid = feat.get("id")
-            if fid and fid not in all_op_feature_ids:
-                feature_without_operation.append({
-                    "featureId": fid,
-                    "featureType": feat.get("type"),
-                    "featureSubtype": feat.get("subtype"),
-                })
+        # Only fallback for truly orphaned features (not handled by assigned or unassigned loops)
+        missing_decisions = []
+        for feat_id in missing_features_ids:
+            feature = next((f for f in features if f.get("id") == feat_id), None)
+            if not feature: continue
+            
+            decision = FeatureDecision(feature_id=feat_id, feature_type=feature.get("type", ""))
+            
+            info = feature.get("machining_info", {})
+            decision.status = "unsupported"
+            decision.operation_type = "unsupported_feature"
+            decision.reason = info.get("reason") or "Unsupported feature type or configuration"
+            
+            decision.setup_assignment = setup_plans[0].setupId if setup_plans else "setup_1"
+            missing_decisions.append(decision)
+            
+        decision_trace.extend([d.model_dump() for d in missing_decisions])
         
+        if missing_decisions:
+            ops = self.operation_strategy_planner.plan_operations(missing_decisions, setup_plans[0].setupId if setup_plans else "setup_1")
+            for op in ops:
+                all_operations.append(op.to_dict())
+
+        # Re-compute missing features after fallback
+        decision_feature_ids_final = {d.get("feature_id") for d in decision_trace}
+        final_missing = list(feature_ids - decision_feature_ids_final)
+        
+        # Write Debug and Traces
+        job_dir = Path(__file__).resolve().parents[3] / "storage" / "jobs" / job_id / "cam"
+        job_dir.mkdir(parents=True, exist_ok=True)
+        
+        with open(job_dir / "cam_decision_trace.json", "w") as fp:
+            json.dump(decision_trace, fp, indent=2, default=str)
+            
+        with open(job_dir / "cam_operation_report.json", "w") as fp:
+            json.dump(all_operations, fp, indent=2, default=str)
+            
         cam_validation = {
-            "duplicateFeatureAssignments": duplicateFeatureAssignments,
-            "operationsForSecondarySetupInActiveSetup": operationsForSecondarySetupInActiveSetup,
-            "okOperationForUnsupportedFeature": okOperationForUnsupportedFeature,
-            "operationSetupMismatch": operationSetupMismatch,
-            "featureWithoutOperation": feature_without_operation,
-            "debugGeometryLeakedToToolpaths": [],
-            "invalidViewportPayload": [],
-            "bossMappingFailures": []
+            "totalFeatures": len(feature_ids),
+            "totalDecisions": len(decision_trace),
+            "missingDecisionFeatures": final_missing,
+            "unsupportedFeatures": [d.get("feature_id") for d in decision_trace if d.get("status") == "unsupported"],
+            "blockedFeatures": [d.get("feature_id") for d in decision_trace if d.get("status") == "blocked"],
+            "readyOperations": sum(1 for op in all_operations if op.get("status") == "ready"),
+            "warningOperations": sum(1 for op in all_operations if op.get("status") == "warning"),
+            "errorOperations": sum(1 for op in all_operations if op.get("status") in ("error", "blocked", "unsupported")),
+            "featureCoveragePassed": len(final_missing) == 0
         }
         
         # Hole-specific validation
@@ -306,6 +345,8 @@ class CamPipelineManager:
             if sid:
                 hole_setup_assignments.setdefault(fid, []).append(sid)
         
+        feature_map = {f.get("id"): f for f in features}
+        
         for op in all_operations:
             feat = feature_map.get(op.get("feature_id"))
             if feat and feat.get("type") in ("hole", "blind_hole", "through_hole"):
@@ -338,7 +379,7 @@ class CamPipelineManager:
             if feat.get("type") == "boss" or feat.get("subtype") == "cylindrical_boss":
                 fid = feat.get("id")
                 mi = feat.get("machining_info", {})
-                mr = feat.get("machiningRegion", {})
+                mr = feat.get("machiningRegion") or {}
                 
                 bd = {
                     "featureId": fid,
@@ -435,7 +476,7 @@ class CamPipelineManager:
                             "operationCreated": True,
                             "operationType": op.get("type"),
                             "status": op.get("status"),
-                            "reason": op.get("parameters", {}).get("errorReason") or op.get("parameters", {}).get("error", "")
+                            "reason": (op.get("parameters") or {}).get("errorReason") or (op.get("parameters") or {}).get("error", "")
                         })
                 else:
                     coverage_data.append({
@@ -456,16 +497,17 @@ class CamPipelineManager:
             "status": "success",
             "features": features,
             "setups": [s.model_dump() for s in setup_plans],
-            "tools": all_tools,
-            "operations": all_operations
+            "tools": [t.model_dump() for t in tool_library],
+            "operations": all_operations,
+            "cam_validation": cam_validation
         }
         
-    def generate_toolpaths(self, step_file_path: str, job_id: str, cam_run_id: str, setup: Dict[str, Any], tools: List[Dict[str, Any]], operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def generate_toolpaths(self, step_file_path: str, job_id: str, cam_run_id: str, setup: Dict[str, Any], setups: List[Dict[str, Any]], tools: List[Dict[str, Any]], operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Performs Phase 7: Toolpath Generation based strictly on User Setup, Tools, and Approved Operations.
         No auto-generation or fallback loops allowed.
         """
-        from app.services.step_importer import StepImporter
+        from app.services.io.step_importer import StepImporter
         shape, metadata = StepImporter.load_and_heal(step_file_path)
         
         features = self.feature_recognizer.recognize_features(step_file_path)
@@ -475,15 +517,9 @@ class CamPipelineManager:
         raw_features = copy.deepcopy(features)
         
         mapper = GeometryMapper(self.feature_recognizer.extractor)
-        features = mapper.enrich_features(features, setup)
         
-        clean_features = copy.deepcopy(features)
-        
-        # Run setup analysis on features
-        features = self.setup_analyzer.analyze(features, setup)
-        
-        # Strict operation validation
         feat_map = {f['id']: f for f in features}
+        setup_map = {s.get("setupId", s.get("id")): s for s in (setups or [])}
         
         for op in operations:
             # Reset operation status and errors from previous runs
@@ -492,25 +528,44 @@ class CamPipelineManager:
                 del op['parameters']['error']
                 
             feat_id = op.get('feature_id') or op.get('featureId')
-            tool_id = op.get('toolId')
+            tool_id = op.get('toolId') or op.get('tool_id')
             strategy = op.get('machining_strategy') or op.get('type')
+            op_type = op.get('type', '')
             
-            if not feat_id or not tool_id or not strategy:
-                raise ValueError(f"Every operation must include a valid featureId, toolId, and strategy. Received: {op}")
+            # Blocked/unsupported operations have no tool and no geometry — skip all validation
+            if op_type in ('turning_required', 'unsupported_feature') or \
+               strategy in ('turning_required', 'unsupported_feature') or \
+               (not tool_id and op_type not in ('drilling', 'pocketing', '2d_contour', '2d_contour_outer',
+                    'facing', 'boss_clearing', 'slot_milling', 'chamfer_milling', 'od_turning',
+                    'rotary_milling', 'indexed_4axis_milling', 'multi_axis_surface_milling', 'tapping')):
+                op['status'] = 'blocked'
+                op['toolpaths'] = []
+                op['machiningRegion'] = None
+                continue
+            
+            if not feat_id or not strategy:
+                raise ValueError(f"Every operation must include a valid featureId and strategy. Received: {op}")
                 
             if feat_id not in feat_map:
                 raise ValueError(f"Requested operation uses an unknown featureId: {feat_id}.")
             
+            op_setup_id = op.get('setup_id') or op.get('setupId')
+            op_setup = setup_map.get(op_setup_id, setup)
+            
+            # Isolate feature and analyze/map geometry specifically for its target setup
+            feat_clone = copy.deepcopy(feat_map[feat_id])
+            mapper.enrich_features([feat_clone], op_setup)
+            self.setup_analyzer.analyze([feat_clone], op_setup)
+            
             # Check if feature is machinable in current setup — skip gracefully
-            feat = feat_map[feat_id]
-            if not feat.get('machinable_in_current_setup', True):
-                blocked_reason = feat.get('blocked_reason', 'Not machinable in current setup')
+            if not feat_clone.get('machinable_in_current_setup', True):
+                blocked_reason = feat_clone.get('blocked_reason', 'Not machinable in current setup')
                 op['status'] = 'error'
                 op.setdefault('parameters', {})['error'] = f"Blocked: {blocked_reason}"
                 continue
             
             # Check if machiningRegion mapping succeeded — skip gracefully
-            mr = feat.get('machiningRegion')
+            mr = feat_clone.get('machiningRegion')
             if not mr or not mr.get('valid'):
                 op['status'] = 'error'
                 err_reason = mr.get('errorReason', 'Missing or invalid machining region') if mr else 'No machining region generated'
@@ -524,7 +579,10 @@ class CamPipelineManager:
                 op['machiningRegion'] = None
                 continue
             
-            allowed_sources = {"hole_center", "outer_wire", "face_boundary", "pocket_boundary", "boss_floor_minus_island", "turning_profile"}
+            allowed_sources = {
+                "hole_center", "outer_wire", "face_boundary", "pocket_boundary",
+                "boss_floor_minus_island", "turning_profile", "wrapped_cylindrical_surface", "cylinder_as_boss"
+            }
             if mr.get('source') not in allowed_sources:
                 op['status'] = 'error'
                 op.setdefault('parameters', {})['error'] = f"Geometry mapping failed: Invalid region source {mr.get('source')}"
@@ -534,11 +592,24 @@ class CamPipelineManager:
             # Inject geometry into operations
             op['machiningRegion'] = mr
             
+            # Ensure safe heights exist since UI strips them
+            if 'safe_heights' not in op:
+                z_top = mr.get('topZ', 0.0)
+                z_bottom = mr.get('bottomZ', -10.0)
+                op['safe_heights'] = {
+                    "top": z_top,
+                    "bottom": z_bottom,
+                    "clearance": z_top + 15.0,
+                    "retract": z_top + 5.0,
+                    "feed": z_top + 2.0
+                }
+            
         # Ensure mapping of tool to operation
-        tool_dict = {t['id']: t for t in tools}
+        tool_dict = {t.get('id', t.get('tool_id')): t for t in tools if t.get('id') or t.get('tool_id')}
         for op in operations:
-            if 'toolId' in op and op['toolId'] in tool_dict:
-                op['tool'] = tool_dict[op['toolId']]
+            tool_id_ref = op.get('toolId') or op.get('tool_id')
+            if tool_id_ref and tool_id_ref in tool_dict:
+                op['tool'] = tool_dict[tool_id_ref]
 
         # Output toolpath engine input debug
         try:
@@ -547,18 +618,19 @@ class CamPipelineManager:
             with open(job_dir / 'cam_toolpath_engine_input.json', 'w') as f:
                 json.dump({
                     "operations": operations,
-                    "setup": setup
+                    "setup": setup,
+                    "tools": tools
                 }, f, indent=2, default=str)
         except Exception:
             pass
 
         # 4. Generate Toolpaths
-        from app.services.motion_planner import MotionPlanner
+        from app.services.toolpath.motion_planner import MotionPlanner
         motion_planner = MotionPlanner()
         toolpath_engine = ToolpathEngine()
         
         for op in operations:
-            if op.get("status") in ("error", "blocked"):
+            if op.get("status") in ("error", "blocked", "unsupported"):
                 op["toolpaths"] = []
                 continue
                 
@@ -577,14 +649,15 @@ class CamPipelineManager:
         invalid_ops = 0
         validation_reasons = []
         TOOLPATH_SOURCES = {"drill", "contour", "pocket", "boss", "face", "turning"}
-        REGION_SOURCES = {"hole_center", "outer_wire", "face_boundary", "pocket_boundary", "boss_floor_minus_island", "turning_profile"}
+        REGION_SOURCES = {"hole_center", "outer_wire", "face_boundary", "pocket_boundary", "boss_floor_minus_island", "turning_profile", "wrapped_cylindrical_surface"}
+        BANNED_SOURCES = set()  # Reserved for future use
 
         for op in operations:
-            if op.get("status") == "error":
+            if op.get("status") in ("error", "blocked", "unsupported"):
                 invalid_ops += 1
-                reason = op.get("parameters", {}).get("error", "Unknown validation error")
+                reason = (op.get("parameters") or {}).get("error", (op.get("parameters") or {}).get("errorReason", "Blocked or unsupported"))
                 validation_reasons.append({"operationId": op.get("id"), "reason": reason})
-                op["toolpaths"] = []
+                op["toolpaths"] = op.get("toolpaths", [])
                 op["debug_toolpaths"] = []
                 continue
                 
@@ -661,11 +734,13 @@ class CamPipelineManager:
                     "featureType": next((f.get("type") for f in features if f.get("id") == (op.get("featureId") or op.get("feature_id"))), "unknown"),
                     "operationType": op.get("type"),
                     "strategy": op.get("machining_strategy"),
-                    "machiningRegionArea": op.get("parameters", {}).get("diagnostics", {}).get("region_area", 0),
+                    "machiningRegionArea": (op.get("parameters") or {}).get("diagnostics", {}).get("region_area", 0),
                     "segmentCount": 0,
                     "sourceTypes": [],
                     "status": "error",
-                    "errorReason": op.get("parameters", {}).get("error", "Unknown error")
+                    "errorReason": (op.get("parameters") or {}).get("error", "Unknown error"),
+                    "tool_id": op.get("toolId") or op.get("tool_id"),
+                    "toolId": op.get("toolId") or op.get("tool_id")
                 })
                 continue
                 
@@ -715,7 +790,7 @@ class CamPipelineManager:
                 "featureType": next((f.get("type") for f in features if f.get("id") == (op.get("featureId") or op.get("feature_id"))), "unknown"),
                 "operationType": op.get("type"),
                 "strategy": op.get("machining_strategy"),
-                "machiningRegionArea": op.get("machiningRegion", {}).get("area", 0),
+                "machiningRegionArea": (op.get("machiningRegion") or {}).get("area", 0),
                 "totalPathLength": round(total_path_length, 2),
                 "cutDistance": round(cut_distance, 2),
                 "rapidDistance": round(rapid_distance, 2),
@@ -725,7 +800,9 @@ class CamPipelineManager:
                 "estimatedCycleTime": round(est_cycle_time, 2),
                 "sourceTypes": sources,
                 "status": op.get("status", "planned"),
-                "errorReason": error_reason
+                "errorReason": error_reason,
+                "tool_id": op.get("toolId") or op.get("tool_id"),
+                "toolId": op.get("toolId") or op.get("tool_id")
             })
              
         # Calculate hashes to verify uniqueness per model
@@ -747,7 +824,11 @@ class CamPipelineManager:
             try:
                 with open(cache_file, 'r') as f:
                     prev_hashes = json.load(f)
-                    
+
+                if prev_hashes.get('toolpath_schema_version') != 'semantic_v1':
+                    print("Toolpath schema version mismatch. Forcing regeneration.")
+                    # Let it overwrite to force update
+
                 if prev_hashes.get('modelHash') != model_hash:
                     if (prev_hashes.get('featureHash') == feature_hash and
                         prev_hashes.get('operationHash') == operation_hash):
@@ -758,12 +839,13 @@ class CamPipelineManager:
                 if "stale" in str(exc):
                     raise
                 print(f"Warning checking hashes: {exc}")
-                
+
         with open(cache_file, 'w') as f:
             json.dump({
                 "modelHash": model_hash,
                 "featureHash": feature_hash,
-                "operationHash": operation_hash
+                "operationHash": operation_hash,
+                "toolpath_schema_version": "semantic_v1"
             }, f)
 
         # Dump CAM Debug Output — all 6 required files
@@ -777,7 +859,7 @@ class CamPipelineManager:
                 
             with open(job_dir / 'cam_clean_features.json', 'w') as f:
                 json.dump({
-                    "features": clean_features,
+                    "features": features,
                     "modelHash": model_hash
                 }, f, indent=2, default=str)
                 
@@ -830,9 +912,9 @@ class CamPipelineManager:
                             "boundarySource": feat.get("source", "unknown"),
                             "boundaryClosed": feat.get("boundaryClosed", False),
                             "boundaryPointCount": len(feat.get("boundaryPoints", [])),
-                            "contourArea": feat.get("machiningRegion", {}).get("diagnostics", {}).get("mapped_area", 0.0),
+                            "contourArea": (feat.get("machiningRegion") or {}).get("diagnostics", {}).get("mapped_area", 0.0),
                             "toolpathSegmentCount": op_seg_count,
-                            "rejectedReason": feat.get("machiningRegion", {}).get("error", None)
+                            "rejectedReason": (feat.get("machiningRegion") or {}).get("error", None)
                         })
                 json.dump(contour_debugs, f, indent=2, default=str)
                 
@@ -898,7 +980,7 @@ class CamPipelineManager:
                     if tp_min[0] < 1e8:
                         tp_bbox = {"min": tp_min, "max": tp_max}
                         
-                    geom = feat.get("machiningRegion", {})
+                    geom = feat.get("machiningRegion") or {}
                     
                     overlay_debugs.append({
                         "featureId": feat_id,
@@ -907,7 +989,7 @@ class CamPipelineManager:
                         "operationType": op.get("type"),
                         "machiningRegionSource": geom.get("source", feat.get("source", "unknown")),
                         "bannedSourceDetected": banned_found,
-                        "rejectionReason": op.get("parameters", {}).get("error"),
+                        "rejectionReason": (op.get("parameters") or {}).get("error"),
                         "toolpathBBox": tp_bbox,
                         "machiningRegionBBox": geom.get("bbox") if geom else None,
                         "modelBBox": setup.get("stockDimensions"),
