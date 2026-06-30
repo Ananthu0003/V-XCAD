@@ -69,3 +69,5 @@ outputs/
 
 # Temporary / Scratch
 scratch/
+test/
+tests/

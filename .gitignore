@@ -13,6 +13,8 @@ ai-engine/logs/
 ai-engine/outputs/
 scratch/
 ai-engine/scratch/
+test/
+tests/
 
 # Node / Next.js
 **/node_modules/
