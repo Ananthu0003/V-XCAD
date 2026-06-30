@@ -108,7 +108,7 @@ export function OperationTreeSection({
                                         <span className="text-xs font-semibold">{index + 1}. {op.name}</span>
                                     </div>
                                     <div className="flex items-center gap-1.5">
-                                        {renderStatus(op.status, op.blocked_reason)}
+                                        {renderStatus(op.status, (op as any).blocked_reason || (op as any).errorReason || op.parameters?.error || op.reason)}
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();

@@ -502,6 +502,44 @@ class CamPipelineManager:
             "cam_validation": cam_validation
         }
         
+
+    def clear_downstream_cache(self, job_dir: Path):
+        """
+        Deletes old generated toolpath outputs and operation status caches,
+        but preserves current CamOperation definitions unless the operation
+        planning stage is explicitly rerun.
+        """
+        import shutil
+        files_to_remove = [
+            "cam_gcode.nc",
+            "cam_simulation.json",
+            "cam_validation.json",
+            "cam_operation_summary.json",
+            "cam_toolpaths.json",
+            "cam_decision_trace.json",
+            "cam_setup_plan.json",
+            "cam_regions.json",
+            "cam_feature_machining_info.json",
+            "cam_operation_plan.json"
+        ]
+        # Do NOT delete cam_toolpath_engine_input.json or cam_features.json
+        for fname in files_to_remove:
+            p = job_dir / fname
+            if p.exists():
+                try:
+                    p.unlink()
+                except Exception as e:
+                    print(f"Warning: failed to delete {fname}: {e}")
+                    
+        # If there are simulation or preview subdirectories, clear them too
+        for dname in ["preview_cache"]:
+            d = job_dir / dname
+            if d.exists() and d.is_dir():
+                try:
+                    shutil.rmtree(d)
+                except Exception as e:
+                    print(f"Warning: failed to delete {dname}: {e}")
+                    
     def generate_toolpaths(self, step_file_path: str, job_id: str, cam_run_id: str, setup: Dict[str, Any], setups: List[Dict[str, Any]], tools: List[Dict[str, Any]], operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Performs Phase 7: Toolpath Generation based strictly on User Setup, Tools, and Approved Operations.
@@ -612,9 +650,10 @@ class CamPipelineManager:
                 op['tool'] = tool_dict[tool_id_ref]
 
         # Output toolpath engine input debug
+        job_dir = Path(__file__).resolve().parents[3] / "storage" / "jobs" / job_id / "cam"
+        job_dir.mkdir(parents=True, exist_ok=True)
+        self.clear_downstream_cache(job_dir)
         try:
-            job_dir = Path(__file__).resolve().parents[3] / "storage" / "jobs" / job_id / "cam"
-            job_dir.mkdir(parents=True, exist_ok=True)
             with open(job_dir / 'cam_toolpath_engine_input.json', 'w') as f:
                 json.dump({
                     "operations": operations,
@@ -818,6 +857,15 @@ class CamPipelineManager:
         job_dir = Path(__file__).resolve().parents[3] / "storage" / "jobs" / job_id / "cam"
         job_dir.mkdir(parents=True, exist_ok=True)
         
+        # Clear downstream artifacts to prevent stale cache usage
+        try:
+            for file_to_remove in ["cam_gcode.nc", "cam_simulation.json", "cam_validation.json", "cam_operation_summary.json"]:
+                p = job_dir / file_to_remove
+                if p.exists():
+                    p.unlink()
+        except Exception as e:
+            print(f"Warning: failed to remove downstream artifact: {e}")
+        
         # Read previous hashes to detect stale identical output
         cache_file = job_dir / "cam_hashes.json"
         if cache_file.exists():
@@ -921,15 +969,34 @@ class CamPipelineManager:
             with open(job_dir / 'cam_operation_summary.json', 'w') as f:
                 json.dump(operation_summaries, f, indent=2, default=str)
                 
+
+            import datetime
+            import datetime
+            generated_at = datetime.datetime.now().isoformat()
             with open(job_dir / 'cam_toolpaths.json', 'w') as f:
                 all_tp = []
                 for op in operations:
-                    all_tp.extend(op.get("toolpaths", []))
+                    op["toolpath_schema_version"] = "semantic_v1"
+                    for tp in op.get("toolpaths", []):
+                        tp["toolpath_schema_version"] = "semantic_v1"
+                        tp["generated_at"] = generated_at
+                        all_tp.append(tp)
                 json.dump({
                     "toolpath_count": len(all_tp),
                     "toolpaths": all_tp,
                     "camRunId": cam_run_id,
-                    "modelHash": model_hash
+                    "modelHash": model_hash,
+                    "toolpath_schema_version": "semantic_v1",
+                    "generated_at": generated_at
+                }, f, indent=2, default=str)
+                
+            with open(job_dir / 'cam_operations.json', 'w') as f:
+                json.dump({
+                    "operations": operations,
+                    "camRunId": cam_run_id,
+                    "modelHash": model_hash,
+                    "toolpath_schema_version": "semantic_v1",
+                    "generated_at": generated_at
                 }, f, indent=2, default=str)
             with open(job_dir / 'cam_debug_overlay.json', 'w') as f:
                 all_debug_tp = []

@@ -51,6 +51,9 @@ interface EngineeringConsoleProps {
   toolpathsStale?: boolean;
   coordValidation?: any;
   camValidation?: any;
+  camReadinessScore?: number | null;
+  camStatus?: string | null;
+  canGenerateGcode?: boolean;
 }
 
 type TabType = 'setup' | 'features' | 'tools' | 'params' | 'simulation' | 'gcode';
@@ -69,49 +72,61 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
 
   // Calculate CAM Readiness
   const calcReadiness = () => {
-    let score = 100;
+    let score = props.camReadinessScore !== undefined && props.camReadinessScore !== null ? props.camReadinessScore : 100;
     const warnings: string[] = [];
     const errors: string[] = [];
 
-    if (!props.camFeatures || props.camFeatures.length === 0) {
-      score -= 50;
-      warnings.push("No machining features detected.");
+    // Always check specific operation errors to show detailed reasons instead of generic ones
+    if (props.camOperations) {
+      props.camOperations.forEach(op => {
+        if (op.status === 'error' || op.status === 'blocked' || op.status === 'unsupported' || op.status === 'missing_tool') {
+          const reason = (op.parameters && op.parameters.error) || op.errorReason || op.reason || "Unsupported feature or mapping failed";
+          errors.push(`Operation ${op.id} blocked: ${reason}`);
+        }
+      });
     }
 
-    if (!props.camOperations || props.camOperations.length === 0) {
-      score -= 50;
-      errors.push("No CAM operations defined.");
-    }
+    if (props.camReadinessScore === undefined || props.camReadinessScore === null) {
+      // Fallback local heuristic when backend hasn't generated toolpaths yet
+      if (!props.camFeatures || props.camFeatures.length === 0) {
+        score -= 50;
+        warnings.push("No machining features detected.");
+      }
 
-    const hasUnmachinable = props.camFeatures && props.camFeatures.some(f => f.status === 'not_machinable');
-    if (hasUnmachinable) {
-      score -= 20;
-      errors.push("Some features are marked as not machinable.");
-    }
+      if (!props.camOperations || props.camOperations.length === 0) {
+        score -= 50;
+        errors.push("No CAM operations defined.");
+      }
 
-    const hasMissingTools = props.camOperations && props.camOperations.some(op => !props.camTools.find(t => t.id === op.toolId));
-    if (hasMissingTools) {
-      score -= 30;
-      errors.push("One or more operations have missing tools.");
-    }
+      const hasUnmachinable = props.camFeatures && props.camFeatures.some(f => f.status === 'not_machinable');
+      if (hasUnmachinable) {
+        score -= 20;
+        errors.push("Some features are marked as not machinable.");
+      }
 
-    if (props.toolpathsStale) {
-      score -= 40;
-      errors.push("Toolpaths are stale. Please regenerate.");
-    } else if (props.toolpathValid === false) {
-      score -= 60;
-      errors.push("Toolpaths validation failed. Check parameters and re-generate.");
-    }
+      const hasMissingTools = props.camOperations && props.camOperations.some(op => !props.camTools.find(t => t.id === op.toolId));
+      if (hasMissingTools) {
+        score -= 30;
+        if (errors.length === 0) errors.push("One or more operations have missing tools.");
+      }
 
-    if (props.camValidation && !props.camValidation.featureCoveragePassed) {
-      score -= 60;
-      errors.push(`Feature coverage failed: ${props.camValidation.missingDecisionFeatures?.length || 0} features have no manufacturing decision.`);
-    }
-    
-    const hasBlockedOps = props.camOperations && props.camOperations.some(op => op.status === 'blocked' || op.status === 'unsupported' || op.status === 'error');
-    if (hasBlockedOps) {
-      score -= 60;
-      errors.push("Operations plan contains blocked or unsupported features. Check the Operations Plan.");
+      if (props.toolpathsStale) {
+        score -= 40;
+        errors.push("Toolpaths are stale. Please regenerate.");
+      } else if (props.toolpathValid === false) {
+        score -= 60;
+        errors.push("Toolpaths validation failed. Check parameters and re-generate.");
+      }
+
+      if (props.camValidation && !props.camValidation.featureCoveragePassed) {
+        score -= 60;
+        errors.push(`Feature coverage failed: ${props.camValidation.missingDecisionFeatures?.length || 0} features have no manufacturing decision.`);
+      }
+    } else {
+      // Using backend readiness state
+      if (props.camStatus === 'toolpaths_outdated') {
+        errors.push("Toolpaths are outdated. Please regenerate.");
+      }
     }
 
     return { score: Math.max(0, score), warnings, errors };
@@ -316,14 +331,14 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                   className="flex w-full items-center justify-center gap-3 rounded-2xl bg-amber-500/20 py-4 text-[11px] font-black uppercase tracking-widest text-amber-500 border border-amber-500/50 hover:bg-amber-500/30 transition-all active:scale-[0.98] disabled:opacity-50"
                 >
                   <Activity className="size-4" />
-                  <span>Generate Toolpaths First</span>
+                  <span>{props.toolpathsStale ? 'Regenerate Toolpaths' : 'Generate Toolpaths First'}</span>
                 </button>
               )}
 
               {/* Generate G-Code Button — always visible */}
               <button
                 onClick={props.onGenerateGCode}
-                disabled={props.isGeneratingGcode || readiness.score < 50 || props.toolpathValid === false || props.toolpathsStale || (props.camValidation && !props.camValidation.featureCoveragePassed)}
+                disabled={props.isGeneratingGcode || (props.canGenerateGcode === false && props.camReadinessScore !== null) || (props.camReadinessScore === null && (readiness.score < 50 || props.toolpathValid === false || props.toolpathsStale || (props.camValidation && !props.camValidation.featureCoveragePassed)))}
                 className="flex w-full items-center justify-center gap-3 rounded-2xl bg-gradient-primary py-4 text-[11px] font-black uppercase tracking-widest text-white shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)] transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:saturate-0"
               >
                 {props.isGeneratingGcode ? (

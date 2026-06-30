@@ -213,12 +213,15 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                 ) : (
                                     operations.map(op => {
                                         const numSegments = op.toolpaths ? op.toolpaths.length : 0;
+                                        const isOutdated = op.toolpaths && op.toolpaths.length > 0 && op.toolpath_schema_version !== 'semantic_v1';
+                                        const displayStatus = isOutdated ? 'outdated' : op.status;
+                                        
                                         return (
                                             <div key={op.id} className="text-[11px] flex flex-col gap-1 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
                                                 <div className="flex justify-between items-start">
                                                     <span className="text-foreground font-medium capitalize">{op.name || op.type.replace('_', ' ')}</span>
                                                     <span className="text-[10px] whitespace-nowrap">
-                                                        {op.status === 'ready' || op.status === 'planned' ? '🟢 OK' : op.status === 'error' ? '🔴 Error' : op.status === 'blocked' || op.status === 'blocked_requires_reorientation' ? '🚧 Blocked' : op.status === 'missing_tool' ? '⚠️ No Tool' : op.status === 'requires_regeneration' ? '⚠️ Needs Regen' : op.status || '🟢 OK'}
+                                                        {displayStatus === 'ready' || displayStatus === 'planned' ? '🟢 OK' : displayStatus === 'error' ? '🔴 Error' : displayStatus === 'blocked' || displayStatus === 'blocked_requires_reorientation' ? '🚧 Blocked' : displayStatus === 'missing_tool' ? '⚠️ No Tool' : displayStatus === 'requires_regeneration' || displayStatus === 'outdated' ? '⚠️ Needs Regen' : displayStatus || '🟢 OK'}
                                                     </span>
                                                 </div>
                                                 <div className="flex flex-col gap-0.5 text-[9px] text-muted-foreground font-mono ml-1 border-l border-border/50 pl-2">
@@ -231,8 +234,11 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                                             <div><span className="text-foreground/60">Toolpath Area:</span> {op.parameters.diagnostics.toolpath_area} mm²</div>
                                                         </>
                                                     )}
-                                                    {(op.status === 'error' || op.status === 'blocked') && op.parameters?.error && (
+                                                    {(displayStatus === 'error' || displayStatus === 'blocked') && op.parameters?.error && (
                                                         <div className="text-red-400 mt-1 whitespace-pre-wrap font-sans text-[10px]">{op.parameters.error}</div>
+                                                    )}
+                                                    {isOutdated && (
+                                                        <div className="text-amber-400 mt-1 whitespace-pre-wrap font-sans text-[10px]">Operation toolpath uses outdated or missing schema. Regenerate toolpaths.</div>
                                                     )}
                                                 </div>
                                             </div>

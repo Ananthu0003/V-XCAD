@@ -323,6 +323,9 @@ export default function HitlWorkspace() {
 	const [gcodeContent, setGcodeContent] = useState<string | null>(null);
 	const [isGeneratingGcode, setIsGeneratingGcode] = useState(false);
 	const [gcodeErrors, setGcodeErrors] = useState<any[]>([]);
+	const [camReadinessScore, setCamReadinessScore] = useState<number | null>(null);
+	const [camStatus, setCamStatus] = useState<string | null>(null);
+	const [canGenerateGcode, setCanGenerateGcode] = useState<boolean>(false);
 
 	const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 	const [isSharing, setIsSharing] = useState(false);
@@ -747,11 +750,16 @@ export default function HitlWorkspace() {
 				toast.error('G-Code generation failed');
 			}
 
-			if (payload.operation_statuses) {
+			if (payload.operation_statuses && Array.isArray(payload.operation_statuses)) {
 			    setCamOperations((prevOps: any[]) => prevOps.map(op => {
-			        const override = payload.operation_statuses[op.id];
+			        const override = payload.operation_statuses.find((s: any) => s.operation_id === op.id);
 			        if (override) {
-			            return { ...op, status: override };
+			            return { 
+							...op, 
+							status: override.status, 
+							errorReason: override.blocked_reason,
+							parameters: { ...(op.parameters || {}), error: override.blocked_reason }
+						};
 			        }
 			        return op;
 			    }));
@@ -802,9 +810,30 @@ export default function HitlWorkspace() {
 
 			const data = await res.json();
 			if (latestCamRunId.current === runId) {
+				// Clear old G-code state
+				setGcodeErrors([]);
+				setGcodeContent(null);
+				// (Assuming validationErrors is cleared if applicable, we clear gcode errors here)
+				
 				setToolpaths(data.toolpaths || []);
 				if (data.operations) {
-					setCamOperations(data.operations);
+					// We also want to merge in data.operation_statuses if it exists
+					let mergedOps = data.operations;
+					if (data.operation_statuses && Array.isArray(data.operation_statuses)) {
+					    mergedOps = mergedOps.map((op: any) => {
+					        const override = data.operation_statuses.find((s: any) => s.operation_id === op.id);
+					        if (override) {
+					            return { 
+									...op, 
+									status: override.status, 
+									errorReason: override.blocked_reason,
+									parameters: { ...(op.parameters || {}), error: override.blocked_reason }
+								};
+					        }
+					        return op;
+					    });
+					}
+					setCamOperations(mergedOps);
 				}
 				if (data.coordinate_validation) {
 					setCoordValidation(data.coordinate_validation);
@@ -812,8 +841,18 @@ export default function HitlWorkspace() {
 				if (data.camModelHash) {
 					setCamModelHash(data.camModelHash);
 				}
-				setStatusText('Toolpaths generated successfully.');
-				toast.success('Toolpaths generated');
+				
+				if (data.cam_readiness_score !== undefined) setCamReadinessScore(data.cam_readiness_score);
+				if (data.cam_status !== undefined) setCamStatus(data.cam_status);
+				if (data.can_generate_gcode !== undefined) setCanGenerateGcode(data.can_generate_gcode);
+				
+				if (data.status === 'operations_blocked' || data.status === 'toolpaths_generated_with_blocks') {
+					setStatusText('Toolpaths generated, but some operations need attention.');
+					toast.warning('Toolpaths generated, but some operations need attention.');
+				} else {
+					setStatusText('Toolpaths generated successfully.');
+					toast.success('Toolpaths generated');
+				}
 			}
 		} catch (error) {
 			if (latestCamRunId.current === runId) {
@@ -1514,11 +1553,14 @@ export default function HitlWorkspace() {
 								setCamOperations={setCamOperations}
 								activeOperationId={activeOperationId}
 								setActiveOperationId={setActiveOperationId}
-								toolpathValid={camOperations.length > 0 && camOperations.some(op => op.toolpaths && op.toolpaths.length > 0)}
-								toolpathsStale={false}
 								camSimulation={camSimulation}
 								setCamSimulation={setCamSimulation}
-								coordValidation={coordValidation}
+								toolpathValid={coordValidation?.status !== 'error'}
+								toolpathsStale={false}
+								camReadinessScore={camReadinessScore}
+								camStatus={camStatus}
+								canGenerateGcode={canGenerateGcode}
+								camValidation={undefined}
 							/>
 						</div>
 					</Panel>

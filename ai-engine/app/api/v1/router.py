@@ -12,6 +12,8 @@ import uuid
 import io
 import gc
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, BackgroundTasks
+from app.services.validation.toolpath_schema_validator import ToolpathSchemaValidator
+from app.services.validation.cam_readiness_evaluator import CamReadinessEvaluator
 from app.services.cam_pipeline_manager import CamPipelineManager
 from app.services.cam_input_router import CamInputRouter
 from fastapi.responses import FileResponse, StreamingResponse
@@ -1056,6 +1058,35 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
             
         result["toolpaths"] = flat_paths
         result["camRunId"] = request.cam_run_id
+        
+        # Evaluate readiness based on generated output
+        from app.services.validation.toolpath_schema_validator import ToolpathSchemaValidator
+        from app.services.validation.cam_readiness_evaluator import CamReadinessEvaluator
+        
+        operations = result.get("operations", [])
+        toolpaths_data = {"toolpath_schema_version": "semantic_v1", "toolpaths": flat_paths}
+        schema_validation = ToolpathSchemaValidator.validate(operations, toolpaths_data)
+        readiness = CamReadinessEvaluator.evaluate(operations, schema_validation, True, "semantic_v1")
+        
+        has_errors = result.get("gcode_blocked", False)
+        
+        if has_errors:
+            result["status"] = "toolpaths_generated_with_blocks"
+        else:
+            result["status"] = "toolpaths_generated"
+            
+        result["cam_readiness_score"] = readiness["cam_readiness_score"]
+        result["cam_status"] = readiness["status"]
+        result["can_generate_gcode"] = readiness["can_generate_gcode"]
+        result["operation_statuses"] = readiness["operation_statuses"]
+        result["toolpath_schema_version"] = "semantic_v1"
+        
+        # Merge readiness errors into result errors if any
+        if readiness.get("errors"):
+            if "errors" not in result:
+                result["errors"] = []
+            result["errors"].extend(readiness["errors"])
+            
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": {"message": str(exc)}})
@@ -1074,50 +1105,55 @@ class CamGCodeRequest(BaseModel):
 async def cam_generate_gcode(request: CamGCodeRequest):
     job_dir = Path(__file__).resolve().parents[4] / "storage" / "jobs" / request.job_id / "cam"
     toolpaths_file = job_dir / "cam_toolpaths.json"
-    validation_file = job_dir / "cam_validation.json"
-    operation_summary_file = job_dir / "cam_operation_summary.json"
-    
-    if not toolpaths_file.exists() or not validation_file.exists() or not operation_summary_file.exists():
-        raise HTTPException(status_code=400, detail={"error": {"message": "Valid toolpaths not found. Generate toolpaths first."}})
-        
-    with open(validation_file, "r") as f:
-        validation_data = json.load(f)
-        # Allow generation even if there are some errors, as long as some toolpaths exist.
-        if validation_data.get("status") != "success" and validation_data.get("readyOperations", 1) == 0:
-            raise HTTPException(status_code=400, detail={"error": {"message": "Cannot generate G-Code. No valid operations exist."}})
-
-    # Check for legacy toolpath schema
     hashes_file = job_dir / "cam_hashes.json"
-    if hashes_file.exists():
-        with open(hashes_file, "r") as f:
-            try:
-                hashes = json.load(f)
-                if hashes.get("toolpath_schema_version") != "semantic_v1":
-                    raise HTTPException(status_code=400, detail={"error": {"message": "Stale CAM data detected. Please regenerate toolpaths."}})
-            except json.JSONDecodeError:
-                pass
-            
-    # Load original operations which have the tool and parameter data
     input_file = job_dir / "cam_toolpath_engine_input.json"
+    ops_file = job_dir / "cam_operations.json"
+
+    # Load data
+    toolpaths_data = {}
+    if toolpaths_file.exists():
+        with open(toolpaths_file, "r") as f:
+            toolpaths_data = json.load(f)
+
+    engine_input = {}
     if input_file.exists():
         with open(input_file, "r") as f:
             engine_input = json.load(f)
-            operations = engine_input.get("operations", [])
-    else:
-        operations = []
-        
-    # Read toolpaths and attach them to operations
-    with open(toolpaths_file, "r") as f:
-        tp_data = json.load(f)
-        all_tp = tp_data.get("toolpaths", [])
-        
-    # Group toolpaths by operationId
-    tp_by_op = {}
-    for tp in all_tp:
-        op_id = tp.get("operationId")
-        if op_id:
-            tp_by_op.setdefault(op_id, []).append(tp)
             
+    operations = []
+    if ops_file.exists():
+        with open(ops_file, "r") as f:
+            ops_data = json.load(f)
+            operations = ops_data.get("operations", [])
+    else:
+        operations = engine_input.get("operations", [])
+
+    hashes_data = {}
+    if hashes_file.exists():
+        with open(hashes_file, "r") as f:
+            try:
+                hashes_data = json.load(f)
+            except json.JSONDecodeError:
+                pass
+
+    # Hash matching mock for MVP (assuming matching if exists for now, in a real system we'd compare)
+    hashes_match = bool(hashes_data)
+    cam_hashes_schema = hashes_data.get("toolpath_schema_version", "")
+
+    schema_validation = ToolpathSchemaValidator.validate(operations, toolpaths_data)
+    readiness = CamReadinessEvaluator.evaluate(operations, schema_validation, hashes_match, cam_hashes_schema)
+
+    if not readiness["can_generate_gcode"]:
+        return {
+            "can_generate_gcode": False,
+            "gcode": None,
+            "cam_readiness_score": readiness["cam_readiness_score"],
+            "status": readiness["status"],
+            "message": readiness["message"],
+            "errors": readiness["errors"],
+            "operation_statuses": readiness["operation_statuses"]
+        }
+
     # Mock setups/machines for MVP (should be loaded from project)
     setup = {"id": "setup_1", "material": "aluminum"}
     machine = {"id": "machine_1", "axes": 3, "max_spindle_rpm": 10000}
@@ -1133,6 +1169,14 @@ async def cam_generate_gcode(request: CamGCodeRequest):
     from app.services.validation.post_output_validator import PostOutputValidator
     from app.services.gcode.gcode_generator import PostProcessorFactory
     
+    # Build toolpaths by operation ID
+    tp_by_op = {}
+    all_tp = toolpaths_data.get("toolpaths", [])
+    for tp in all_tp:
+        op_id = tp.get("operationId") or tp.get("operation_id")
+        if op_id:
+            tp_by_op.setdefault(op_id, []).append(tp)
+            
     # Validate each operation
     valid_operations = []
     for op in operations:
