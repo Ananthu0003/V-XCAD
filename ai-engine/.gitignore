@@ -66,3 +66,6 @@ static/uploads/
 
 # Outputs
 outputs/
+
+# Temporary / Scratch
+scratch/
