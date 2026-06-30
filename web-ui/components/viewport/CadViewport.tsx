@@ -138,7 +138,11 @@ export function CadViewport({
 		};
 
 		const allowedSources = ['drill', 'contour', 'pocket', 'boss', 'face', 'turning'];
-		const allowedMoveTypes = ['rapid', 'feed', 'arc', 'plunge', 'retract', 'helix'];
+		const allowedMoveTypes = [
+            'rapid_clearance', 'rapid_xy', 'approach_retract', 'retract_clearance',
+            'plunge', 'cut', 'arc_cw', 'arc_ccw', 'drill_cycle',
+            'rapid', 'feed', 'arc', 'retract', 'helix'
+        ];
 		let validCount = 0;
 		let droppedCount = 0;
 		let droppedReasons: Record<string, number> = {};
@@ -156,9 +160,8 @@ export function CadViewport({
 				} else if (seg.boundary || seg.wire || seg.bbox || seg.axis || seg.centerline || seg.regionType || seg.debug || seg.islands) {
 					isInvalid = true;
 					reason = 'Contains debug/region properties';
-				} else if (!allowedMoveTypes.includes(type) && type !== 'cut') {
-					isInvalid = true;
-					reason = `Invalid moveType: ${type}`;
+				} else if (!allowedMoveTypes.includes(type)) {
+					console.warn(`Unknown toolpath segment type: "${type}". Regenerate toolpaths using semantic_v1.`);
 				}
 			}
 			
@@ -170,7 +173,16 @@ export function CadViewport({
 			
 			validCount++;
 
-			const targetGroup = groups[type === 'cut' ? 'feed' : type] || groups.other;
+            // Map semantic types to rendering groups
+            let targetGroupName = 'other';
+            if (['rapid', 'rapid_clearance', 'rapid_xy', 'retract_clearance'].includes(type)) targetGroupName = 'rapid';
+            else if (['feed', 'cut'].includes(type)) targetGroupName = 'feed';
+            else if (['arc', 'arc_cw', 'arc_ccw'].includes(type)) targetGroupName = 'arc';
+            else if (['plunge', 'approach_retract', 'drill_cycle'].includes(type)) targetGroupName = 'plunge';
+            else if (type === 'retract') targetGroupName = 'retract';
+            else if (type === 'helix') targetGroupName = 'helix';
+
+			const targetGroup = groups[targetGroupName] || groups.other;
 			if (seg.start && seg.end) {
 			    targetGroup.push(new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z));
 			    targetGroup.push(new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z));

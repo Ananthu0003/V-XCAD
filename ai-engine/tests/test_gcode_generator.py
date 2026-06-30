@@ -27,6 +27,7 @@ def test_missing_tool_blocked():
 def test_safe_z_logic():
     op = {
         "type": "drilling", 
+        "toolpath_schema_version": "semantic_v1",
         "safe_heights": {"clearance": 50, "retract": 5, "top": 0, "bottom": -10}
     }
     segments = [{"moveType": "rapid", "end": {"z": 2}}] # Z=2 is below retract=5
@@ -36,7 +37,7 @@ def test_safe_z_logic():
 
 def test_post_processor_output_validation():
     # Provide bad G-code missing M06
-    bad_gcode = "G0 X0 Y0\nG1 Z-1 F100\nM30"
+    bad_gcode = "G0 Z50\nG0 X0 Y0\nG1 Z-1 F100\nM30"
     res = PostOutputValidator.validate_gcode(bad_gcode, [])
     assert not res["valid"]
     assert "M06" in res["reason"]

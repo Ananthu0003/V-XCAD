@@ -10,21 +10,21 @@ def test_legacy_path_rejection():
     assert not res["valid"]
 
 def test_missing_z_clearance():
-    op = {"type": "drilling", "safe_heights": {"retract": 5}} # missing clearance
+    op = {"type": "drilling", "toolpath_schema_version": "semantic_v1", "safe_heights": {"retract": 5}} # missing clearance
     segments = [{"moveType": "rapid_clearance", "end": {"z": 50}}]
     res = GCodeSafetyValidator.validate_toolpath_safety(op, segments, {})
     assert not res["valid"]
     assert "Missing safe Z heights" in res["reason"]
 
 def test_first_move_below_retract():
-    op = {"type": "drilling", "safe_heights": {"clearance": 50, "retract": 5}}
+    op = {"type": "drilling", "toolpath_schema_version": "semantic_v1", "safe_heights": {"clearance": 50, "retract": 5}}
     segments = [{"moveType": "rapid_xy", "end": {"x": 0, "y": 0, "z": 0}}] # End Z is 0 < retract (5)
     res = GCodeSafetyValidator.validate_toolpath_safety(op, segments, {})
     assert not res["valid"]
     assert "below retract_z" in res["reason"] or "First motion must be at or above" in res["reason"]
 
 def test_rapid_clearance_below_clearance():
-    op = {"type": "drilling", "safe_heights": {"clearance": 50, "retract": 5}}
+    op = {"type": "drilling", "toolpath_schema_version": "semantic_v1", "safe_heights": {"clearance": 50, "retract": 5}}
     # First move is safe
     # Second move rapid_clearance below clearance
     segments = [
@@ -36,7 +36,7 @@ def test_rapid_clearance_below_clearance():
     assert "below clearance_z" in res["reason"]
 
 def test_rapid_xy_with_z_change():
-    op = {"type": "drilling", "safe_heights": {"clearance": 50, "retract": 5}}
+    op = {"type": "drilling", "toolpath_schema_version": "semantic_v1", "safe_heights": {"clearance": 50, "retract": 5}}
     segments = [
         {"moveType": "approach_retract", "end": {"x": 0, "y": 0, "z": 10}}, 
         {"moveType": "rapid_xy", "start": {"z": 10}, "end": {"x": 10, "y": 10, "z": 5}} # Z changed
@@ -74,3 +74,24 @@ def test_post_validator_empty_code():
     res = PostOutputValidator.validate_gcode("", [])
     assert not res["valid"]
     assert "empty" in res["reason"].lower()
+
+def test_post_validator_safe_g53_home():
+    operations = [{"safe_heights": {"clearance": 50, "retract": 5}}]
+    gcode = "M06\nM03\nG43\nG0 X0 Y0 Z10.0\nG1 Z-2.0 F100\nG53 G0 Z0.\nM05\nM30"
+    res = PostOutputValidator.validate_gcode(gcode, operations)
+    assert res["valid"]
+
+def test_post_validator_unsafe_g53_home():
+    operations = [{"safe_heights": {"clearance": 50, "retract": 5}}]
+    gcode = "M06\nM03\nG43\nG0 X0 Y0 Z10.0\nG1 Z-2.0 F100\nG53 G0 Z-999.\nM05\nM30"
+    res = PostOutputValidator.validate_gcode(gcode, operations)
+    assert not res["valid"]
+    assert "machine limit" in res["reason"].lower()
+
+def test_post_validator_normal_g0_z0_fails():
+    operations = [{"safe_heights": {"clearance": 50, "retract": 5}}]
+    # G0 Z0. without G53 should be evaluated against retract_z=5 and fail
+    gcode = "M06\nM03\nG43\nG0 X0 Y0 Z10.0\nG1 Z-2.0 F100\nG0 Z0.\nM05\nM30"
+    res = PostOutputValidator.validate_gcode(gcode, operations)
+    assert not res["valid"]
+    assert "below retract_z" in res["reason"].lower()

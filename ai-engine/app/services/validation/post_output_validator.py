@@ -19,6 +19,7 @@ class PostOutputValidator:
             return {"valid": False, "reason": "Generated G-Code is empty."}
             
         lines = gcode.split('\n')
+        current_z = None
         
         has_tool_change = False
         has_spindle_start = False
@@ -49,6 +50,10 @@ class PostOutputValidator:
                 has_spindle_start = True
             if 'G43' in line:
                 has_tool_offset = True
+                z_match = re.search(r'Z([-\d\.]+)', line)
+                if z_match:
+                    current_z = float(z_match.group(1))
+
             if 'M08' in line or 'M8' in line:
                 coolant_started = True
             if 'M09' in line or 'M9' in line:
@@ -67,24 +72,40 @@ class PostOutputValidator:
                 if not has_tool_offset:
                     return {"valid": False, "reason": "Cutting motion found before tool length offset (G43)."}
                     
+                z_match = re.search(r'Z([-\d\.]+)', line)
+                if z_match:
+                    current_z = float(z_match.group(1))
+
+            # Find global min_retract
+            min_retract = 5.0 # fallback
+            if operations:
+                retracts = [op.get('safe_heights', {}).get('retract', 5.0) for op in operations if op.get('safe_heights')]
+                if retracts:
+                    min_retract = min(retracts)
+
             # Safe Z check for G0 moves
             if 'G00' in line or 'G0 ' in line or line.endswith('G0'):
                 # Find Z coordinate if any
                 z_match = re.search(r'Z([-\d\.]+)', line)
                 if z_match:
                     z_val = float(z_match.group(1))
+                    current_z = z_val
                     
-                    # We must enforce that NO G0 move goes below the global retract_z.
-                    # We can find the min retract_z across operations, or pass it in.
-                    # Since we have `operations` in arguments, let's calculate min retract_z.
-                    min_retract = 5.0 # fallback
-                    if operations:
-                        retracts = [op.get('safe_heights', {}).get('retract', 5.0) for op in operations if op.get('safe_heights')]
-                        if retracts:
-                            min_retract = min(retracts)
-                    
-                    if z_val < min_retract:
-                        return {"valid": False, "reason": f"Unsafe G0 rapid move below retract_z ({z_val} < {min_retract}) at line: {line}"}
+                    if 'G53' in line:
+                        if z_val < -500.0:
+                            return {"valid": False, "reason": f"Unsafe machine-coordinate rapid move: Z below machine limit on line: {line}"}
+                    else:
+                        if z_val < min_retract:
+                            return {"valid": False, "reason": f"Unsafe G0 rapid move below retract_z ({z_val} < {min_retract}) at line: {line}"}
+
+                # XY Check
+                x_match = re.search(r'X([-\d\.]+)', line)
+                y_match = re.search(r'Y([-\d\.]+)', line)
+                if (x_match or y_match) and 'G53' not in line:
+                    if current_z is None:
+                        return {"valid": False, "reason": f"Unsafe rapid XY move before a known safe Z height is established: {line}"}
+                    if current_z < min_retract:
+                        return {"valid": False, "reason": f"Unsafe rapid XY move while Z ({current_z}) is below retract_z ({min_retract}): {line}"}
                     
         # Check trailers
         if not spindle_stopped:

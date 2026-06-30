@@ -113,11 +113,25 @@ class MotionPlanner:
 
         cx, cy, cz = center
         
-        # Output a single semantic segment for the hole
+        # Output safe approach segments for the hole
+        add_cmd(ToolpathSegmentType.RAPID_CLEARANCE,
+                Point3D(x=cx, y=cy, z=clearance),
+                Point3D(x=cx, y=cy, z=clearance))
+        add_cmd(ToolpathSegmentType.RAPID_XY,
+                Point3D(x=cx, y=cy, z=clearance),
+                Point3D(x=cx, y=cy, z=clearance))
+        add_cmd(ToolpathSegmentType.APPROACH_RETRACT,
+                Point3D(x=cx, y=cy, z=clearance),
+                Point3D(x=cx, y=cy, z=feed_z))
+        
         # The post-processor will handle G81/G83 logic safely.
         add_cmd(ToolpathSegmentType.DRILL_CYCLE, 
-                Point3D(x=cx, y=cy, z=clearance), 
+                Point3D(x=cx, y=cy, z=feed_z), 
                 Point3D(x=cx, y=cy, z=bottom))
+
+        add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE,
+                Point3D(x=cx, y=cy, z=bottom),
+                Point3D(x=cx, y=cy, z=clearance))
 
     def _generate_contour_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
         try:

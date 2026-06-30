@@ -1151,13 +1151,28 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         # 2. Safety Validation
         safe_val = GCodeSafetyValidator.validate_toolpath_safety(op, op["toolpaths"], setup)
         if not safe_val["valid"]:
-            errors.append({"level": "error", "operation_id": op_id, "feature_id": op.get("feature_id"), "code": "SAFETY_ERROR", "message": safe_val["reason"]})
+            errors.append({
+                "level": "error", 
+                "operation_id": op_id, 
+                "feature_id": op.get("feature_id"), 
+                "code": safe_val.get("code", "SAFETY_ERROR"), 
+                "message": safe_val["reason"]
+            })
             continue
             
         valid_operations.append(op)
         
     if errors:
-        operation_statuses = {e.get("operation_id"): "blocked" for e in errors if "operation_id" in e}
+        operation_statuses = [
+            {
+                "operation_id": e.get("operation_id"),
+                "feature_id": e.get("feature_id"),
+                "status": "blocked",
+                "code": e.get("code"),
+                "blocked_reason": e.get("message")
+            }
+            for e in errors if "operation_id" in e
+        ]
         return {"can_generate_gcode": False, "gcode": None, "errors": errors, "operation_statuses": operation_statuses}
         
     if not valid_operations:
@@ -1171,7 +1186,16 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         # 3. Post Output Validation
         out_val = PostOutputValidator.validate_gcode(gcode, valid_operations)
         if not out_val["valid"]:
-            operation_statuses = {op.get("id"): "blocked" for op in valid_operations}
+            operation_statuses = [
+                {
+                    "operation_id": op.get("id"),
+                    "feature_id": op.get("feature_id"),
+                    "status": "blocked",
+                    "code": "POST_OUTPUT_ERROR",
+                    "blocked_reason": out_val["reason"]
+                }
+                for op in valid_operations
+            ]
             return {"can_generate_gcode": False, "gcode": None, "errors": [{"level": "error", "code": "POST_OUTPUT_ERROR", "message": out_val["reason"]}], "operation_statuses": operation_statuses}
         
         # Save generated gcode

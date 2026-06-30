@@ -25,6 +25,7 @@ class ToolpathEngine:
         pass
 
     def generate_toolpaths_from_commands(self, op: Dict[str, Any], commands: List[MotionCommand], limit: int = 15000) -> List[ToolpathSegment]:
+        op['toolpath_schema_version'] = 'semantic_v1'
         op_type = op.get('type', 'unknown')
         if op_type in ['legacy_path', 'mock_path', 'fallback_path', 'silhouette_path', 'generic_path', 'unknown', 'blocked']:
             op["status"] = "blocked"

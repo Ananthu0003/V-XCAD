@@ -4,9 +4,15 @@ class BasePostProcessor:
     """Base class for all CNC dialect post-processors."""
     def __init__(self):
         self.output = []
+        self.current_x = None
+        self.current_y = None
+        self.current_z = None
         
     def generate(self, operations: List[Dict[str, Any]]) -> str:
         self.output = []
+        self.current_x = None
+        self.current_y = None
+        self.current_z = None
         self.program_start()
         
         for op in operations:
@@ -59,13 +65,22 @@ class BasePostProcessor:
     def cancel_cycle(self):
         pass
 
+    def ensure_safe_z(self, clearance_z: float):
+        if self.current_z is None or self.current_z < clearance_z:
+            self.rapid(z=clearance_z)
+
+    def ensure_xy(self, x: float, y: float):
+        if self.current_x != x or self.current_y != y:
+            self.rapid(x=x, y=y)
+
     def emit_safe_approach(self, x: float, y: float, clearance_z: float, retract_z: float):
-        self.rapid(z=clearance_z)
-        self.rapid(x=x, y=y)
-        self.rapid(z=retract_z)
+        self.ensure_safe_z(clearance_z)
+        self.ensure_xy(x, y)
+        if self.current_z is None or self.current_z > retract_z:
+            self.rapid(z=retract_z)
 
     def emit_safe_retract(self, clearance_z: float):
-        self.rapid(z=clearance_z)
+        self.ensure_safe_z(clearance_z)
 
     def _write_operation(self, op: Dict[str, Any]):
         tool = op.get('tool', {})
@@ -84,8 +99,10 @@ class BasePostProcessor:
         clearance_z = safe_heights.get('clearance', 50.0)
         retract_z = safe_heights.get('retract', 5.0)
 
-        # Move to safe Z first
-        self.rapid(z=clearance_z)
+        # Auto-emit safe approach scaffold if needed before starting segments
+        # But we do not emit it blindly here to avoid duplicate moves.
+        # It will be handled per-segment if safety is missing, or we can just ensure safe Z.
+        self.ensure_safe_z(clearance_z)
 
         # Apply offset and coolant
         self.apply_tool_length_offset(offset_num, clearance_z)
@@ -102,41 +119,47 @@ class BasePostProcessor:
         feed_plunge = op.get('parameters', {}).get('plunge_rate', 300)
 
         is_first = True
-        current_z = clearance_z
 
         for seg in segments:
             move_type = seg.get('moveType', 'unknown')
             pt = seg.get('end', {})
             x, y, z = pt.get('x'), pt.get('y'), pt.get('z')
 
+            # Ensure safe Z before any XY motion if it's the first move and state is unknown
+            if is_first and move_type in ['rapid_xy', 'cut', 'arc_cw', 'arc_ccw', 'plunge', 'drill_cycle']:
+                self.ensure_safe_z(clearance_z)
+            is_first = False
+
             if move_type == 'drill_cycle':
                 bottom_z = pt.get('z', 0.0)
                 cycle_type = op.get('parameters', {}).get('cycle_type', 'G81')
-                self.rapid(x=x, y=y)
+                # Drill cycle should already have safe XY approaches emitted by motion planner.
+                # If not, we ensure it safely here:
+                if x is not None and y is not None:
+                    self.ensure_xy(x, y)
+                
                 if cycle_type == 'G83':
                     peck = op.get('parameters', {}).get('peck_depth', 2.0)
                     self.peck_drilling_cycle(x, y, bottom_z, retract_z, peck, feed_plunge)
                 else:
                     self.drilling_cycle(x, y, bottom_z, retract_z, feed_plunge)
                 self.cancel_cycle()
-                self.rapid(z=clearance_z)
-                current_z = clearance_z
 
             elif move_type == 'rapid_clearance':
-                self.rapid(z=max(z if z is not None else clearance_z, clearance_z))
-                current_z = clearance_z
+                safe_z = max(z if z is not None else clearance_z, clearance_z)
+                self.ensure_safe_z(safe_z)
                 
             elif move_type == 'rapid_xy':
-                self.rapid(x=x, y=y)
+                self.ensure_xy(x, y)
                 
             elif move_type == 'approach_retract':
                 safe_z = max(z if z is not None else retract_z, retract_z)
-                self.rapid(z=safe_z)
-                current_z = safe_z
+                if self.current_z is None or self.current_z > safe_z:
+                    self.rapid(z=safe_z)
                 
             elif move_type == 'retract_clearance':
-                self.rapid(z=max(z if z is not None else clearance_z, clearance_z))
-                current_z = clearance_z
+                safe_z = max(z if z is not None else clearance_z, clearance_z)
+                self.ensure_safe_z(safe_z)
 
             elif move_type == 'plunge':
                 self.linear(x=x, y=y, z=z, feed=feed_plunge)
@@ -191,20 +214,33 @@ class FanucPostProcessor(BasePostProcessor):
         
     def apply_tool_length_offset(self, offset_num: int, safe_z: float):
         self.output.append(f"G43 H{offset_num} Z{safe_z:.3f}")
+        self.current_z = safe_z
         
     def rapid(self, x: float = None, y: float = None, z: float = None):
         cmd = "G0"
-        if x is not None: cmd += f" X{x:.3f}"
-        if y is not None: cmd += f" Y{y:.3f}"
-        if z is not None: cmd += f" Z{z:.3f}"
+        if x is not None: 
+            cmd += f" X{x:.3f}"
+            self.current_x = x
+        if y is not None: 
+            cmd += f" Y{y:.3f}"
+            self.current_y = y
+        if z is not None: 
+            cmd += f" Z{z:.3f}"
+            self.current_z = z
         if cmd != "G0":
             self.output.append(cmd)
             
     def linear(self, x: float = None, y: float = None, z: float = None, feed: float = None):
         cmd = "G1"
-        if x is not None: cmd += f" X{x:.3f}"
-        if y is not None: cmd += f" Y{y:.3f}"
-        if z is not None: cmd += f" Z{z:.3f}"
+        if x is not None: 
+            cmd += f" X{x:.3f}"
+            self.current_x = x
+        if y is not None: 
+            cmd += f" Y{y:.3f}"
+            self.current_y = y
+        if z is not None: 
+            cmd += f" Z{z:.3f}"
+            self.current_z = z
         if feed is not None: cmd += f" F{feed:.0f}"
         if cmd != "G1":
             self.output.append(cmd)
