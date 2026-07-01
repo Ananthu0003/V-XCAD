@@ -228,6 +228,17 @@ def _validate_shape(obj):
     if _shape_faces_count(obj) == 0:
         raise RuntimeError("No faces found in result.")
 
+    try:
+        bbox = obj.bounding_box() if callable(getattr(obj, "bounding_box", None)) else getattr(obj, "bounding_box", None)
+        if bbox and hasattr(bbox, "size"):
+            max_dim = max(bbox.size.X, bbox.size.Y, bbox.size.Z)
+            if max_dim > 5000:
+                raise ValueError(f"Shape exceeds maximum bounding box limits (max dimension {max_dim:.1f} > 5000).")
+    except ValueError:
+        raise
+    except Exception:
+        pass
+
 def run():
     raw_json = os.getenv("CAD_PARAMETERS_JSON", "{}")
     try:

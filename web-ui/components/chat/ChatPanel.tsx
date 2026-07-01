@@ -71,6 +71,8 @@ type ChatPanelProps = {
 	setIsOpen: (v: boolean) => void;
 	onOpenAuthModal?: () => void;
 	fileInputRef?: React.RefObject<HTMLInputElement | null>;
+	selectionContext?: [number, number, number] | null;
+	onClearSelectionContext?: () => void;
 };
 
 export function ChatPanel({
@@ -89,7 +91,9 @@ export function ChatPanel({
 	isOpen,
 	setIsOpen,
 	onOpenAuthModal,
-	fileInputRef
+	fileInputRef,
+	selectionContext,
+	onClearSelectionContext
 }: ChatPanelProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const router = useRouter();
@@ -260,6 +264,33 @@ export function ChatPanel({
 											<button
 												type="button"
 												onClick={() => handleFileChange(null)}
+												className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+											>
+												<svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+													<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+												</svg>
+											</button>
+										</div>
+									</div>
+								)}
+								{selectionContext && (
+									<div className="animate-message">
+										<div className="flex items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-2 pl-3 pr-2 backdrop-blur-xl">
+											<div className="flex size-7 items-center justify-center rounded-lg bg-red-500 text-black shadow-sm">
+												<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+													<circle cx="12" cy="12" r="10" />
+													<line x1="12" y1="8" x2="12" y2="16" />
+													<line x1="8" y1="12" x2="16" y2="12" />
+												</svg>
+											</div>
+											<div className="flex-1 min-w-0">
+												<p className="truncate text-[10px] font-sans font-bold text-red-400 uppercase tracking-wider">
+													Targeting [{selectionContext[0].toFixed(2)}, {selectionContext[1].toFixed(2)}, {selectionContext[2].toFixed(2)}]
+												</p>
+											</div>
+											<button
+												type="button"
+												onClick={onClearSelectionContext}
 												className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
 											>
 												<svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -35,6 +35,7 @@ type RenderPayload = {
 
 	status?: string;
 	job_id?: string;
+    repaired_script?: string;
 	error?: {
 		message?: string;
 		hint?: string;
@@ -362,6 +363,7 @@ export default function HitlWorkspace() {
 	const [activeParameter, setActiveParameter] = useState<string | null>(null);
 	const [geometryInfo, setGeometryInfo] = useState<StlGeometryInfo | null>(null);
 	const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+	const [selectionContext, setSelectionContext] = useState<[number, number, number] | null>(null);
 
 	const parameterEntries = Object.entries(parameters).filter(([_, v]) => typeof v === 'number' || typeof v === 'string');
 
@@ -541,11 +543,15 @@ export default function HitlWorkspace() {
 		if (selectedFile) {
 			formData.append('image', selectedFile);
 		}
+		if (selectionContext) {
+			formData.append('selection_context', JSON.stringify(selectionContext));
+		}
 		formData.append('model_name', selectedModel);
 
 		// Clear input fields after securing the payload
 		setPrompt('');
 		setSelectedFile(null);
+		setSelectionContext(null);
 
 		try {
 			const response = await fetch('/api/generate', { method: 'POST', body: formData });
@@ -656,6 +662,12 @@ export default function HitlWorkspace() {
 			}
 
 			const payload = (await response.json()) as RenderPayload;
+            
+            if (payload.repaired_script) {
+                updatePythonScript(payload.repaired_script);
+                toast.info('Script was auto-healed during rendering');
+            }
+            
 			if (payload.artifacts?.stl_url) {
 				setStlUrl(resolveModelUrl(payload.artifacts.stl_url, Date.now().toString()));
 				setWorkflowStage(prev => (prev === 'blueprint' || prev === 'extraction' ? 'cad' : prev));
@@ -797,6 +809,7 @@ export default function HitlWorkspace() {
 					job_id: sessionId,
 					cam_run_id: runId,
 					setup: camSetup,
+					setups: camSetups,
 					tools: camTools,
 					operations: camOperations,
 					modelHash: cadModelHash || ""
@@ -914,6 +927,22 @@ export default function HitlWorkspace() {
 		setStatusText('Auto Planning CAM...');
 
 		try {
+			const is5Axis = camSetup.machine.toLowerCase().includes('5-axis');
+			const is4Axis = camSetup.machine.toLowerCase().includes('4-axis') || is5Axis;
+			const isLathe = camSetup.machine.toLowerCase().includes('lathe');
+			const isMillTurn = camSetup.machine.toLowerCase().includes('mill-turn') || camSetup.machine.toLowerCase().includes('millturn');
+
+			const machine_capability = {
+				turning: isLathe || isMillTurn,
+				milling_3axis: !isLathe || isMillTurn,
+				drilling: true,
+				pocketing: !isLathe || isMillTurn,
+				indexed_4axis: is4Axis || isMillTurn,
+				continuous_4axis: is4Axis || isMillTurn,
+				milling_5axis: is5Axis,
+				mill_turn: isMillTurn
+			};
+
 			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 			const res = await fetch(`${backendUrl}/api/v1/cam/auto_plan`, {
 				method: 'POST',
@@ -922,16 +951,7 @@ export default function HitlWorkspace() {
 					session_id: sessionId,
 					job_id: sessionId,
 					machine_config: {
-						machine_capability: {
-							turning: false,
-							milling_3axis: true,
-							drilling: true,
-							pocketing: true,
-							indexed_4axis: false,
-							continuous_4axis: false,
-							milling_5axis: false,
-							mill_turn: false
-						},
+						machine_capability: machine_capability,
 						tool_library: camTools.map(t => {
 							let backendType = t.type as string;
 							if (backendType === 'flat_end_mill') backendType = 'end_mill';
@@ -1255,6 +1275,7 @@ export default function HitlWorkspace() {
 													simulationState={camSimulation}
 													camTools={camTools}
 													debugMode={debugMode}
+													setupToolAxis={camSetups.find(s => s.setupId === (activeSetupId || camSetups[0]?.setupId))?.toolAxis}
 													headerActions={
 														<div className="flex items-center gap-2">
 															{/* Debug Mode Toggle */}
@@ -1355,7 +1376,13 @@ export default function HitlWorkspace() {
 														</div>
 													}
 												>
-													{stlUrl ? <StlMesh url={stlUrl} onGeometryReady={() => { }} /> : null}
+													{stlUrl ? <StlMesh url={stlUrl} onGeometryReady={() => { }} onMeshClick={(p) => setSelectionContext(p)} /> : null}
+													{selectionContext && (
+														<mesh position={selectionContext}>
+															<sphereGeometry args={[1.5, 16, 16]} />
+															<meshBasicMaterial color="#ef4444" depthTest={false} transparent opacity={0.8} />
+														</mesh>
+													)}
 												</CadViewport>
 											)}
 											{/* Bottom Overlay with CAM Metrics */}
@@ -1475,6 +1502,8 @@ export default function HitlWorkspace() {
 												setIsOpen={setIsChatOpen}
 												fileInputRef={fileUploadRef}
 												onOpenAuthModal={() => setIsAuthModalOpen(true)}
+												selectionContext={selectionContext}
+												onClearSelectionContext={() => setSelectionContext(null)}
 											/>
 										</div>
 									</Panel>
@@ -1533,6 +1562,7 @@ export default function HitlWorkspace() {
 							<EngineeringConsole
 								workflowStage={workflowStage}
 								camSetup={camSetup}
+								camSetups={camSetups}
 								setCamSetup={setCamSetup}
 								controller={controller}
 								setController={setController}

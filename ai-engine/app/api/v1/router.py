@@ -556,10 +556,29 @@ async def render(
             detail={"error": {"message": str(exc)}},
         )
     except RuntimeError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={"error": {"message": str(exc)}},
-        )
+        # ── Auto-healing Loop ──────────────────────────────────────────────────
+        try:
+            llm_svc = LLMCodegenService()
+            repaired_script = await asyncio.to_thread(
+                llm_svc.repair_script,
+                current_code=request.python_script,
+                error_log=str(exc)
+            )
+            
+            # Re-run render with the repaired script
+            result = await svc.render_to_outputs(
+                parameters=request.parameters,
+                script=repaired_script,
+                output_basename=output_basename,
+                cam_parameters=request.cam_parameters,
+            )
+            
+        except Exception as retry_exc:
+            # If auto-heal fails, raise the original error plus the new one
+            raise HTTPException(
+                status_code=500,
+                detail={"error": {"message": f"Render failed and auto-heal failed.\nOriginal: {exc}\nHeal: {retry_exc}"}},
+            )
 
     # Build artifact URLs — the outputs directory is mounted as /outputs
     def _url(path_str: str | None) -> str | None:
@@ -615,6 +634,7 @@ async def render(
         status="ok",
         session_id=session_id,
         artifacts=artifacts,
+        repaired_script=repaired_script if 'repaired_script' in locals() else None,
     )
 
 
@@ -1186,6 +1206,10 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         tool = tools_by_id.get(tool_id, {})
         op["tool"] = tool
         
+        # Skip operations that are not supported in this setup
+        if op.get("status") == "unsupported":
+            continue
+            
         # 1. Capability Validation
         cap_val = ManufacturingCapabilityValidator.validate_operation(op, setup, machine, tool)
         if not cap_val["valid"]:

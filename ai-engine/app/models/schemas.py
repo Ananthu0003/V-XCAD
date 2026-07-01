@@ -289,6 +289,7 @@ class RenderResponse(BaseModel):
     status: str = "ok"
     session_id: str
     artifacts: RenderArtifacts
+    repaired_script: Optional[str] = None
 
 class MachineConfig(BaseModel):
     controller: str = "fanuc"

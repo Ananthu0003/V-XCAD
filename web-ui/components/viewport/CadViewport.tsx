@@ -70,6 +70,7 @@ type CadViewportProps = {
 
 	children?: React.ReactNode; // For StlMesh
 	headerActions?: React.ReactNode;
+	setupToolAxis?: [number, number, number];
 };
 
 export function CadViewport({
@@ -103,6 +104,7 @@ export function CadViewport({
 	simulationState,
 	camTools,
 	debugMode = false,
+	setupToolAxis,
 	children,
 	headerActions,
 }: CadViewportProps) {
@@ -382,14 +384,24 @@ export function CadViewport({
 						<Environment files="/potsdamer_platz_1k.hdr" />
 						<Grid infiniteGrid fadeDistance={50} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={1} sectionSize={10} position={[0, -0.01, 0]} />
 						<Stage intensity={0.8} adjustCamera={!hasSimulated} shadows="contact">
-							{isSolidVisible && children}
-							{isWireframeVisible && (
-								<group
-									scale={1}
-									position={[0, 0, 0]}
-								>
-									{/* Render CAM Toolpaths using optimized buffer geometry */}
-									{groupedToolpaths}
+							<group
+								quaternion={
+									setupToolAxis 
+										? new THREE.Quaternion().setFromUnitVectors(
+												new THREE.Vector3(...setupToolAxis).normalize(),
+												new THREE.Vector3(0, 1, 0)
+										  )
+										: new THREE.Quaternion()
+								}
+							>
+								{isSolidVisible && children}
+								{isWireframeVisible && (
+									<group
+										scale={1}
+										position={[0, 0, 0]}
+									>
+										{/* Render CAM Toolpaths using optimized buffer geometry */}
+										{groupedToolpaths}
 
 									{/* Active feature indicators have been removed in favor of cam_debug_overlay.json */}
 
@@ -468,6 +480,7 @@ export function CadViewport({
 									)}
 								</group>
 							)}
+							</group>
 						</Stage>
 
 						<GizmoHelper alignment="top-right" margin={[50, 50]}>

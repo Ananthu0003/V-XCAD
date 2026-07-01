@@ -76,7 +76,7 @@ class CamReadinessEvaluator:
                 
                 op_code = None
                 op_blocked_reason = None
-                if op_status in ["error", "blocked", "blocked_requires_reorientation", "missing_tool", "unsupported"]:
+                if op_status in ["error", "blocked", "blocked_requires_reorientation", "missing_tool"]:
                     can_generate_gcode = False
                     if status != "toolpaths_outdated":
                         status = "operations_blocked"
@@ -85,7 +85,7 @@ class CamReadinessEvaluator:
                     # Extract reason from op parameters
                     params = op.get("parameters", {})
                     op_blocked_reason = params.get("error") or params.get("errorReason") or op.get("reason")
-                    op_code = "UNSUPPORTED_OPERATION" if op_status == "unsupported" else "OPERATION_ERROR"
+                    op_code = "OPERATION_ERROR"
                     
                     if op_blocked_reason:
                         errors.append({
@@ -95,6 +95,20 @@ class CamReadinessEvaluator:
                             "code": op_code,
                             "message": op_blocked_reason
                         })
+                elif op_status == "unsupported":
+                    # Unsupported features (like turning on a mill) shouldn't block the rest of the G-Code
+                    score = min(score, 80)
+                    params = op.get("parameters", {})
+                    op_blocked_reason = params.get("error") or params.get("errorReason") or op.get("reason") or "Requires different machine"
+                    op_code = "UNSUPPORTED_OPERATION"
+                    
+                    errors.append({
+                        "level": "warning",
+                        "operation_id": op_id,
+                        "feature_id": feat_id,
+                        "code": op_code,
+                        "message": f"Feature is unsupported in current setup and will be skipped in G-Code: {op_blocked_reason}"
+                    })
                         
                 operation_statuses.append({
                     "operation_id": op_id,

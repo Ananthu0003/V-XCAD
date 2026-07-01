@@ -158,7 +158,7 @@ class SetupPlanner:
                 info.machinableInCurrentSetup = True
                 info.requiredSetupAxis = info.preferredToolAxis or base_tool_axis
                 return info
-            elif caps.indexed_4axis or caps.continuous_4axis:
+            elif caps.indexed_4axis or caps.continuous_4axis or caps.milling_5axis:
                 # Machine has rotary axis: rotary milling strategy
                 info.status = "requires_4axis_indexing"
                 info.machinableInCurrentSetup = True

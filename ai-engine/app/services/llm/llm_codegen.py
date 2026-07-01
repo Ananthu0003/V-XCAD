@@ -238,7 +238,15 @@ Output the ENTIRE updated build123d Python script. Do not output partial snippet
 Your script must follow the exact syntax, manifold stability rules, and proper Build123d contexts.
 """.strip()
 
-
+REPAIR_SYSTEM_PROMPT = """
+# ROLE: Expert CAD Engineer & build123d Refinement Specialist
+You are an expert CAD engineer fixing a broken build123d Python script.
+The script failed to render due to an exception or topological failure.
+You will be provided with the CURRENT_CODE and the ERROR_LOG.
+Your job is to analyze the error and output the ENTIRE repaired script.
+Do not output partial snippets. Do not explain your changes outside of code comments.
+Output only the fixed Python script.
+""".strip()
 
 # -- Regex ---------------------------------------------------------------------
 
@@ -499,4 +507,29 @@ class LLMCodegenService:
             )
 
         raw = self._call_with_retry(_call, "edit")
+        return self._normalize_script(raw)
+
+    def repair_script(
+        self,
+        current_code: str,
+        error_log: str,
+    ) -> str:
+        """
+        Stage 3 - Auto-heal a broken OpenSCAD/build123d script.
+        """
+        user_text = f"CURRENT_CODE:\n{current_code}\n\nERROR_LOG:\n{error_log}"
+
+        contents = [
+            types.Part.from_text(text=REPAIR_SYSTEM_PROMPT),
+            types.Part.from_text(text=user_text),
+        ]
+
+        def _call() -> Any:
+            return self.client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=types.GenerateContentConfig(temperature=0.0),
+            )
+
+        raw = self._call_with_retry(_call, "repair")
         return self._normalize_script(raw)

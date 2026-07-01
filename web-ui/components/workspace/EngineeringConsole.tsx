@@ -20,6 +20,7 @@ interface EngineeringConsoleProps {
   // CAM Setup
   camSetup: SetupSettings;
   setCamSetup: (v: SetupSettings) => void;
+  camSetups?: any[];
   controller: string;
   setController: (v: string) => void;
   // Tools
@@ -79,9 +80,12 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
     // Always check specific operation errors to show detailed reasons instead of generic ones
     if (props.camOperations) {
       props.camOperations.forEach(op => {
-        if (op.status === 'error' || op.status === 'blocked' || op.status === 'unsupported' || op.status === 'missing_tool') {
-          const reason = (op.parameters && op.parameters.error) || op.errorReason || op.reason || "Unsupported feature or mapping failed";
+        if (op.status === 'error' || op.status === 'blocked' || op.status === 'missing_tool') {
+          const reason = (op.parameters && op.parameters.error) || op.errorReason || op.reason || "Operation blocked or mapping failed";
           errors.push(`Operation ${op.id} blocked: ${reason}`);
+        } else if (op.status === 'unsupported') {
+          const reason = (op.parameters && op.parameters.error) || op.errorReason || op.reason || "Unsupported feature or mapping failed";
+          warnings.push(`Operation ${op.id} unsupported: ${reason}`);
         }
       });
     }
@@ -218,7 +222,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
               </div>
               <div className="flex flex-col gap-4">
                 <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Operations Plan</h3>
-                <OperationPlanningTable operations={props.camOperations} camValidation={props.camValidation} />
+                <OperationPlanningTable operations={props.camOperations} camValidation={props.camValidation} camSetups={props.camSetups} />
               </div>
             </div>
           )}

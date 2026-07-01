@@ -4,9 +4,29 @@ import { CamOperation } from '../../types/cam';
 interface OperationPlanningTableProps {
     operations: CamOperation[];
     camValidation?: any;
+    camSetups?: any[];
 }
 
-export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({ operations, camValidation }) => {
+export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({ operations, camValidation, camSetups }) => {
+    // Group operations by setup_id
+    const groupedOps: Record<string, CamOperation[]> = {};
+    operations.forEach(op => {
+        const setupId = op.setup_id || 'unassigned';
+        if (!groupedOps[setupId]) {
+            groupedOps[setupId] = [];
+        }
+        groupedOps[setupId].push(op);
+    });
+
+    const setupIds = Object.keys(groupedOps);
+    
+    // Sort so 'unassigned' is at the bottom, and other setups are in order
+    setupIds.sort((a, b) => {
+        if (a === 'unassigned') return 1;
+        if (b === 'unassigned') return -1;
+        return a.localeCompare(b);
+    });
+
     return (
         <div className="overflow-x-auto w-full flex flex-col gap-4">
             {camValidation && !camValidation.featureCoveragePassed && (
@@ -30,49 +50,65 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({ 
                     </tr>
                 </thead>
                 <tbody className="text-gray-300 divide-y divide-gray-800">
-                    {operations.map(op => {
-                        const statusColor = 
-                            op.status === 'ready' ? 'text-green-400 bg-green-400/10' :
-                            op.status === 'warning' ? 'text-yellow-400 bg-yellow-400/10' :
-                            (op.status === 'blocked' || op.status === 'unsupported' || op.status === 'error') ? 'text-red-400 bg-red-400/10' :
-                            'text-gray-400 bg-gray-400/10';
-
-                        const displayStatus = op.status === 'unsupported' && op.type === 'turning_required' ? 'REQUIRES TURNING' : op.status;
-
-                        return (
-                            <tr key={op.id} className="hover:bg-gray-800/50 transition-colors">
-                                <td className="py-2 px-4 align-top">
-                                    {op.feature_id || 'Unknown Feature'}
-                                </td>
-                                <td className="py-2 px-4 align-top font-mono">
-                                    {op.name || op.type}
-                                </td>
-                                <td className="py-2 px-4 align-top text-xs">
-                                    {op.toolId}
-                                    {op.parameters.tool_selection_reason && (
-                                        <div className="text-gray-500 mt-1">{op.parameters.tool_selection_reason}</div>
-                                    )}
-                                </td>
-                                <td className="py-2 px-4 align-top">
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wider ${statusColor}`}>
-                                        {displayStatus}
-                                    </span>
-                                </td>
-                                <td className="py-2 px-4 align-top text-xs max-w-xs text-gray-400">
-                                    {op.parameters.errorReason || op.parameters.error || '-'}
-                                </td>
-                                <td className="py-2 px-4 align-top text-xs text-blue-400">
-                                    {op.parameters.recommended_machine || '-'}
-                                </td>
-                            </tr>
-                        );
-                    })}
-                    {operations.length === 0 && (
+                    {setupIds.length === 0 && operations.length === 0 ? (
                         <tr>
                             <td colSpan={6} className="py-8 text-center text-gray-500">
                                 No operations generated. Click "Auto Generate Operations".
                             </td>
                         </tr>
+                    ) : (
+                        setupIds.map(setupId => {
+                            const setupOps = groupedOps[setupId];
+                            const setupInfo = camSetups?.find(s => s.setupId === setupId || s.id === setupId);
+                            const setupName = setupInfo ? `Setup ${setupIds.indexOf(setupId) + 1} (${setupInfo.machineType === 'milling_3axis' && setupInfo.fixtureSide ? setupInfo.fixtureSide.toUpperCase() : 'MAIN'})` : 'Unassigned Features';
+                            
+                            return (
+                                <React.Fragment key={setupId}>
+                                    <tr className="bg-gray-800/80 border-t border-b border-gray-700">
+                                        <td colSpan={6} className="py-2 px-4 text-xs font-bold text-gray-200 uppercase tracking-widest">
+                                            {setupName} <span className="text-gray-500 ml-2 font-normal lowercase">({setupOps.length} ops)</span>
+                                        </td>
+                                    </tr>
+                                    {setupOps.map(op => {
+                                        const statusColor = 
+                                            op.status === 'ready' ? 'text-green-400 bg-green-400/10' :
+                                            op.status === 'warning' ? 'text-yellow-400 bg-yellow-400/10' :
+                                            (op.status === 'blocked' || op.status === 'unsupported' || op.status === 'error') ? 'text-red-400 bg-red-400/10' :
+                                            'text-gray-400 bg-gray-400/10';
+
+                                        const displayStatus = op.status === 'unsupported' && op.type === 'turning_required' ? 'REQUIRES TURNING' : op.status;
+
+                                        return (
+                                            <tr key={op.id} className="hover:bg-gray-800/50 transition-colors">
+                                                <td className="py-2 px-4 align-top">
+                                                    {op.feature_id || 'Unknown Feature'}
+                                                </td>
+                                                <td className="py-2 px-4 align-top font-mono">
+                                                    {op.name || op.type}
+                                                </td>
+                                                <td className="py-2 px-4 align-top text-xs">
+                                                    {op.toolId}
+                                                    {op.parameters?.tool_selection_reason && (
+                                                        <div className="text-gray-500 mt-1">{op.parameters.tool_selection_reason}</div>
+                                                    )}
+                                                </td>
+                                                <td className="py-2 px-4 align-top">
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wider ${statusColor}`}>
+                                                        {displayStatus}
+                                                    </span>
+                                                </td>
+                                                <td className="py-2 px-4 align-top text-xs max-w-xs text-gray-400">
+                                                    {op.parameters?.errorReason || op.parameters?.error || '-'}
+                                                </td>
+                                                <td className="py-2 px-4 align-top text-xs text-blue-400">
+                                                    {op.parameters?.recommended_machine || '-'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </React.Fragment>
+                            );
+                        })
                     )}
                 </tbody>
             </table>

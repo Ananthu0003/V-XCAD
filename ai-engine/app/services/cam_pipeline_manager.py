@@ -197,8 +197,8 @@ class CamPipelineManager:
         # Pipeline execution per setup
         for sp in setup_plans:
             setup_id = sp.setupId
-            # Process both assigned AND unassigned features so they get full strategy evaluation
-            all_setup_features = [f for f in features if f.get("id") in sp.assignedFeatureIds or f.get("id") in sp.unassignedFeatureIds]
+            # Process ONLY assigned features for this setup to prevent duplicate blocked operations
+            all_setup_features = [f for f in features if f.get("id") in sp.assignedFeatureIds]
             setup_decisions = []
             
             for feature in all_setup_features:
@@ -576,7 +576,7 @@ class CamPipelineManager:
                (not tool_id and op_type not in ('drilling', 'pocketing', '2d_contour', '2d_contour_outer',
                     'facing', 'boss_clearing', 'slot_milling', 'chamfer_milling', 'od_turning',
                     'rotary_milling', 'indexed_4axis_milling', 'multi_axis_surface_milling', 'tapping')):
-                op['status'] = 'blocked'
+                op['status'] = 'unsupported'
                 op['toolpaths'] = []
                 op['machiningRegion'] = None
                 continue
@@ -815,7 +815,7 @@ class CamPipelineManager:
             error_reason = None
             if not op.get("featureId") and not op.get("feature_id"):
                 error_reason = "Missing featureId"
-            elif seg_count == 0:
+            elif seg_count == 0 and op.get("status") not in ("unsupported", "blocked", "error"):
                 error_reason = "Segment count is 0"
             
             if error_reason:

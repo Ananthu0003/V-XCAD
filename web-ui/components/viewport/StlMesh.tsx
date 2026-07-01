@@ -17,9 +17,10 @@ export type StlGeometryInfo = {
 type StlMeshProps = {
 	url: string;
 	onGeometryReady?: (info: StlGeometryInfo) => void;
+	onMeshClick?: (point: [number, number, number]) => void;
 };
 
-export function StlMesh({ url, onGeometryReady }: StlMeshProps) {
+export function StlMesh({ url, onGeometryReady, onMeshClick }: StlMeshProps) {
 	const geometry = useLoader(STLLoader, url);
 
 	const { centeredGeometry, scale, center } = useMemo(() => {
@@ -61,5 +62,5 @@ export function StlMesh({ url, onGeometryReady }: StlMeshProps) {
 		[]
 	);
 
-	return <mesh geometry={centeredGeometry} material={material} scale={scale} castShadow receiveShadow />;
+	return <mesh geometry={centeredGeometry} material={material} scale={scale} castShadow receiveShadow onClick={(e) => { e.stopPropagation(); onMeshClick?.([e.point.x, e.point.y, e.point.z]); }} />;
 }
