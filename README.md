@@ -30,7 +30,7 @@ Data flow:
 ## Repository Structure
 
 ```text
-cad_copilot/
+vexcad/
 ├── docker-compose.yml
 ├── README.md
 ├── docs/
@@ -42,8 +42,12 @@ cad_copilot/
 │   │   ├── api/v1/router.py
 │   │   ├── models/schemas.py
 │   │   └── services/
-│   │       ├── llm_codegen.py
-│   │       └── parameter_render.py
+│   │       ├── llm/
+│   │       ├── planning/
+│   │       ├── simulation/
+│   │       ├── tooling/
+│   │       ├── toolpath/
+│   │       └── validation/
 │   ├── outputs/
 │   ├── requirements.txt
 │   └── .env
@@ -52,8 +56,10 @@ cad_copilot/
     │   ├── page.tsx
     │   ├── layout.tsx
     │   └── api/
-    │       ├── generate/route.ts
-    │       └── render/route.ts
+    │       ├── cam/
+    │       ├── generate/
+    │       ├── render/
+    │       └── sessions/
     ├── components/
     │   ├── HitlWorkspace.tsx
     │   └── ui/sonner.tsx
@@ -177,29 +183,27 @@ Open:
 
 ### ai-engine
 
-- POST /api/v1/generate
-    - multipart/form-data
-    - fields: prompt, image, model_name
-    - response: text/event-stream
-    - events: status, token, done, error
-
-- POST /api/v1/render
-    - JSON body:
-        - python_script: string
-        - parameters: object
-        - session_id: string (optional)
-    - response: JSON RenderResponse with artifacts
-
-- GET /outputs/{file}
-    - static artifact serving for STL/STEP
+- POST /api/v1/cam/auto-plan
+    - Analyzes STEP files to extract machinable features and proposes machine setups.
+- POST /api/v1/cam/toolpaths
+    - Generates full 3D simulation-ready toolpath sequences for chosen setups.
+- POST /api/v1/cam/gcode
+    - Post-processes planned toolpaths into specific machine-ready G-Code.
+- POST /api/v1/cam/simulate
+    - Generates timeline simulations for material removal verification.
+- POST /api/v1/generate (Legacy CAD)
+    - Generates base CAD geometry from images/prompts.
+- POST /api/v1/render (Legacy CAD)
+    - Renders parameterized code to STEP/STL artifacts.
 
 ### web-ui BFF routes
 
+- POST /api/cam/*
+    - Proxies all advanced CAM operations to the ai-engine.
 - POST /api/generate
-    - validates input, creates CadSession, proxies SSE upstream
-
+    - Validates AI CAD input, creates session, proxies SSE upstream.
 - POST /api/render
-    - normalizes legacy payloads, proxies render request, stores artifact URLs in CadSession
+    - Proxies render request, stores artifacts URLs in CadSession.
 
 ## Typical User Workflow
 
@@ -224,16 +228,16 @@ Open:
 - Verify selected model has quota
 - Check ai-engine logs for upstream model errors
 
+### Toolpaths / G-Code Generation is Blocked
+
+- Ensure that the active Machine Profile supports the required operation (e.g., trying to generate a turning profile on a 3-axis mill).
+- Verify tool lengths in the Tool Library are sufficient for the feature depth.
+- The CAM Readiness Evaluator explicitly blocks G-Code generation if any safety limits are exceeded.
+
 ### Render succeeds but geometry looks old
 
-- The frontend appends cache-busting query params per sync to force fresh fetch
-- If still stale, verify session_id and output files in ai-engine/outputs
-
-### /api/render returns 500
-
-- Validate generated script defines top-level PARAMETERS
-- Validate script has build_model(params) and returns an exportable shape
-- Check stderr in ai-engine logs for kernel/runtime errors
+- The frontend appends cache-busting query params per sync to force fresh fetch.
+- If still stale, verify session_id and output files in ai-engine/outputs.
 
 ## Security and Operational Notes
 
