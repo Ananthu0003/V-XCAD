@@ -1,6 +1,6 @@
-# ⚙️ CAD Copilot AI Engine (FastAPI Backend)
+# ⚙️ VexCAD AI CAM Engine (FastAPI Backend)
 
-The Python FastAPI backend service that orchestrates the machine-intelligence layer of CAD Copilot. It converts natural language prompts, hand-drawn sketches, and blueprint drawings (PDF/images) into clean, parameterized OpenSCAD CAD scripts utilizing the **Google Gemini API**.
+The Python FastAPI backend service that orchestrates the machine-intelligence and manufacturing layer of VexCAD. It analyzes 3D STEP files, extracts machinable features, generates intelligent multi-axis setup plans, creates simulation-ready toolpaths, and outputs production G-Code.
 
 ---
 
@@ -37,21 +37,33 @@ The service acts as a stateless, high-performance API endpoint that isolates hea
                              └─────────────────┘
 ```
 
-### 1. Two-Stage Generation Pipeline (`/generate`)
-To ensure high accuracy when translating raw files (sketches/PDF blueprints) to 3D code, the engine divides generation into two logical LLM calls:
-- **Stage 1: Blueprint Audit**: The image is analyzed using Gemini Vision with `AUDIT_INSTRUCTION`. It extracts a normalized JSON feature-map detailing dimensions, coordinate systems, stack order, and references, checking confidence ratings.
-- **Stage 2: Script Synthesis**: The feature-map is combined with the user's prompt and fed into Gemini Text with `SYSTEM_INSTRUCTION`. The LLM synthesizes a clean, standard OpenSCAD script conforming to parameter blocks.
+### 1. Feature Recognition & Geometry Mapping
+The engine uses Python boundary representation (B-Rep) libraries to analyze incoming STEP files. It automatically detects and parameterizes manufacturing features such as:
+- Drilling holes (blind, through, countersunk)
+- Pocketing and facing
+- Boss and contour milling
+- Turning profiles (shafts, cylinders)
+
+### 2. Intelligent Setup Planning
+Based on the provided Machine Profile (3-Axis, 4-Axis Indexed, 5-Axis, Lathe, Mill-Turn), the backend analyzes the tool approach axis for every feature:
+- Calculates alignment against the base setup.
+- Automatically clusters features into minimal setups (e.g., rotary indexing operations vs flip/reclamp).
+- Blocks features that the active machine cannot support.
+
+### 3. Toolpath Generation & G-Code Post-Processing
+- Assigns tools from the Tool Library and generates detailed `ToolpathSegment` sequences for 3D simulation.
+- Executes G-Code compilation via post-processors to convert spatial toolpaths into physical machine controller commands.
 
 ### 2. Isolated Surgical Refinement (`/edit`)
 Editing existing code presents different context requirements than creating a model from scratch. To prevent prompt dilution, editing is decoupled:
 - **State Constraints**: Takes the current active code and prompt. The model is guided by `EDIT_SYSTEM_PROMPT` to surgically modify existing modules, keeping parameter headers (`// PARAMETERS_START/END`) intact, and returning the entire updated file.
 - **Spatial Injection**: If click-coordinates are passed, the backend automatically formats and injects them as an absolute spatial boundary override: `[System Context: The user clicked X, Y, Z. Use as origin/target]`.
 
-### 3. Manifold Stability Safety Guards
-LLM-generated code can occasionally contain syntax errors or unstable boolean geometries. Before returning code to the client, a regular-expression safety net is run:
-- **$fn Cap**: Caps any resolution setting (`$fn = N`) that exceeds `32` down to `32` to prevent browser freezes in the client's WebAssembly thread.
-- **$fn Injection**: If the model forgot to declare `$fn`, `"$fn = 32;"` is automatically prepended.
-- **Epsilon Injection**: If a subtractive operation (`difference()`) is found without an `eps` variable, `eps = 0.02;` is injected to prevent co-planar face z-fighting crashes.
+### 4. Readiness Evaluation & Safety Guards
+Before generating G-Code, the CAM Readiness Evaluator checks:
+- Stale or modified toolpaths
+- Blocked operations (e.g. missing capabilities or tool length collisions)
+- Prevents generating unsafe/incomplete code.
 
 ---
 
@@ -84,49 +96,13 @@ ai-engine/
 
 ## 🔌 API Reference & Schema Definitions
 
-### 1. `POST /api/v1/generate`
-Used to generate new models from scratch.
+### 1. CAM Pipeline API
+Endpoints for the CAM workflow including setup planning, feature extraction, toolpaths, and G-Code generation:
 
-* **Content-Type**: `multipart/form-data`
-* **Parameters**:
-  * `prompt` (Form Parameter, Required): Sizing/functional request.
-  * `model` (Form Parameter, Optional): Model override (defaults to `gemini-3.1-flash-lite`).
-  * `image` (File Upload, Optional): PDF blueprint or blueprint drawing (PNG, JPEG).
-* **Response** (`GenerateResponse`):
-  ```json
-  {
-    "openscad_script": "/* planning and code */",
-    "parameters": {
-      "base_height": 20.0,
-      "bore_diameter": 10.0
-    }
-  }
-  ```
-
-### 2. `POST /api/v1/edit`
-Surgically edits active code.
-
-* **Content-Type**: `application/json`
-* **JSON Request Body** (`EditRequest`):
-  ```json
-  {
-    "prompt": "Increase the shaft height",
-    "current_code": "$fn = 32;\nbase_height = 20;\n...",
-    "target_point": [0.0, 0.0, 20.0],
-    "model": "gemini-3.1-flash-lite"
-  }
-  ```
-* **Response** (`GenerateResponse`):
-  ```json
-  {
-    "openscad_script": "/* Updated OpenSCAD code */",
-    "parameters": {
-      "base_height": 20.0,
-      "bore_diameter": 10.0,
-      "shaft_height": 40.0
-    }
-  }
-  ```
+* `POST /api/v1/cam/auto-plan` - Analyzes a STEP file and returns initial Setup Plans and recognized features.
+* `POST /api/v1/cam/toolpaths` - Generates simulation-ready toolpath coordinate lists based on the active setups and tools.
+* `POST /api/v1/cam/gcode` - Compiles toolpaths into machine-specific G-Code.
+* `POST /api/v1/cam/simulate` - Evaluates cycle times and material removal rates.
 
 ### 3. `GET /health`
 * **Response**: `{"status": "ok", "version": "2.0.0"}`
@@ -181,7 +157,6 @@ Test the setup by curling `http://127.0.0.1:8000/health`.
 
 Future backend features currently planned:
 
-- **[ ] OpenCASCADE STEP conversion service**: A FastAPI service routing compiled CSG nodes to STEP file configurations.
-- **[ ] Local G-Code compilation**: Lightweight parser transforming OpenSCAD coordinates to sliced extrusion lines.
-- **[ ] Offline LLM / Ollama Connector**: Integration of local models (e.g. Qwen-Coder-32B) for offline blueprint auditing.
-- **[ ] Multi-Part Assembly Parser**: Engine capability to coordinate multiple separate files under a parent assembly manifest.
+- **[ ] OpenCASCADE Advanced Blending**: Enhancing feature extraction for complex fillets and chamfers.
+- **[ ] Adaptive Toolpaths (HSM)**: Implementing constant-engagement high-speed machining clearing strategies.
+- **[ ] Multi-Part Assembly Support**: Processing and nesting multiple STEP components for batch manufacturing.

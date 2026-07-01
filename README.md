@@ -1,14 +1,14 @@
-# CAD Copilot Monorepo
+# VexCAD Production CAM System
 
-CAD Copilot is a full-stack Docs/Image-to-CAD system.
+VexCAD is a full-stack, AI-powered Computer-Aided Manufacturing (CAM) system designed for production.
 
 It combines:
 
-- A Next.js workspace UI (chat, parameter editing, code editing, STL preview)
-- A FastAPI AI engine (Gemini-powered build123d code generation and render execution)
+- A Next.js workspace UI (chat, parameter editing, setup planning, 3D toolpath simulation, and g-code generation)
+- A FastAPI AI engine (Feature recognition, setup planning, and toolpath/G-Code generation)
 - PostgreSQL + Prisma for session persistence
 
-The platform generates a parameterized Python CAD script, lets users edit parameters and raw code, and re-renders STL/STEP artifacts on demand.
+The platform allows users to upload STEP files or use AI to generate base CAD geometries, automatically extracts machinable features, plans 3/4/5-axis machine setups, and outputs production-ready G-Code.
 
 ## High-Level Architecture
 
@@ -18,14 +18,14 @@ The platform generates a parameterized Python CAD script, lets users edit parame
 
 Data flow:
 
-1. User submits prompt + image/PDF in UI
-2. web-ui POST /api/generate proxies multipart request to ai-engine /api/v1/generate
-3. ai-engine streams SSE tokens while building the CAD script
-4. UI receives final script + parsed PARAMETERS
-5. User edits parameters and/or code, then clicks Sync to Engine
-6. web-ui POST /api/render proxies JSON to ai-engine /api/v1/render
-7. ai-engine writes STL/STEP into ai-engine/outputs and returns artifact URLs
-8. UI loads latest STL into Three.js viewer and exposes download buttons
+1. User submits prompt + image/PDF or uploads a STEP file in UI
+2. web-ui POST /api/generate proxies request to ai-engine /api/v1/generate or process STEP
+3. ai-engine extracts features and generates setup plans based on Machine Profile capabilities
+4. UI receives the setup plans and machinable features
+5. User edits parameters and operations in the HITL (Human-in-the-Loop) UI, then clicks Generate Toolpaths
+6. ai-engine validates setups and creates detailed Toolpath Segments for simulation
+7. UI loads 3D model, rotates dynamically per active setup, and visualizes toolpaths
+8. User clicks Generate G-Code to retrieve final production files
 
 ## Repository Structure
 
@@ -64,15 +64,13 @@ cad_copilot/
 
 ## Core Features
 
-- Prompt + image/PDF to build123d script generation
-- Real-time script streaming over SSE
-- Auto-parse of top-level PARAMETERS dictionary
-- Live parameter drawer editing
-- Monaco Editor code tab for manual Python script edits
-- Re-render pipeline using edited parameters and code
-- STL visualization with react-three-fiber + STLLoader
-- STEP/STL artifact downloads from UI
-- Toast-based status/error feedback with Sonner
+- AI-driven CAD generation from images/prompts or direct STEP file uploads
+- Automated Feature Recognition (drilling, pocketing, turning, etc.)
+- Intelligent Setup Planning for 3-axis, indexed 4/5-axis, and mill-turn machines
+- Interactive Operation Tree for editing and managing generated toolpaths
+- 3D Viewport with dynamic setup rotation and real-time toolpath simulation
+- G-Code generation with configurable post-processors
+- Comprehensive readiness evaluation blocking unsupported features
 - Session persistence in PostgreSQL via Prisma
 
 ## Prerequisites
@@ -205,13 +203,12 @@ Open:
 
 ## Typical User Workflow
 
-1. Upload image/PDF and write prompt
-2. Choose model and click Generate CAD Script
-3. Wait for streamed script completion
-4. Adjust parameters in Parameters tab and/or edit code in Code Engine tab
-5. Click Sync to Engine
-6. View updated STL in viewport
-7. Download STL/STEP artifacts
+1. Upload STEP file or prompt/image to generate base CAD
+2. Review automatically recognized features and proposed setups
+3. Select Machine Profile (e.g. 3-Axis Mill vs 5-Axis) and update capability matrix
+4. Auto Plan Operations and review the generated Operation Tree
+5. Simulate toolpaths in 3D to verify safety and intent
+6. Generate G-Code and download for production
 
 ## Troubleshooting
 
