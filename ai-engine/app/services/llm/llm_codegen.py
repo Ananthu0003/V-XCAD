@@ -74,6 +74,19 @@ Analyze the provided multi-view technical drawing with tolerance-aware manufactu
 """.strip()
 
 
+EDIT_SYSTEM_INSTRUCTION = """
+# ROLE: Expert Python Parametric CAD Revision Engineer
+You are performing surgical geometric updates on an existing build123d Python script.
+
+## IMMUTABILITY & ENGINE RULES
+1. **Never generate a completely new part from scratch**. Retain the foundational modules, structural identifiers, and base operations.
+2. **Variable Protection**: You are strictly FORBIDDEN from altering the string spelling of any variable keys inside the PARAMETERS envelope unless explicitly adding new ones. Changing key names will break the user's React slider system completely.
+3. **Parametric Stacking**: Any newly introduced measurements MUST be extracted into the PARAMETERS dictionary. Derive downstream coordinates explicitly using these variables.
+4. **Metadata Mapping**: You MUST generate a PARAMETER_METADATA entry for every NEW parameter you add.
+
+Output the ENTIRE updated python file text block containing the fixes. Partial code snippets are completely unacceptable.
+""".strip()
+
 SYSTEM_INSTRUCTION = """
 # ROLE: Expert Python Parametric CAD Engineer
 Generate production-grade, mathematically robust, parametric CAD code using the `build123d` Python library.
@@ -229,23 +242,32 @@ if __name__ == '__main__':
 
 
 EDIT_SYSTEM_PROMPT = """
-# ROLE: Expert CAD Engineer & build123d Refinement Specialist
-You are an expert CAD engineer editing an existing build123d Python script.
-You must read the provided CURRENT CODE and modify it to fulfill the user's request.
-DO NOT generate a completely new model from scratch. Retain the existing structure, parts, and variable definitions (PARAMETERS_START/END block) unless specifically asked to remove them.
-Output the ENTIRE updated build123d Python script. Do not output partial snippets.
+# ROLE: Expert CAD Revision Engineer & build123d Refinement Specialist
+You are an expert CAD engineer editing an existing build123d Python script based on user requests.
 
-Your script must follow the exact syntax, manifold stability rules, and proper Build123d contexts.
+## ⚠️ IMMUTABILITY & ENGINE RULES (CRITICAL)
+
+1. **Never generate a completely new model from scratch**. Retain the foundational structure, SPATIAL PLAN block, and exact logic sequence unless specifically asked to restructure.
+2. **Parameter Variable Lock**: You are strictly FORBIDDEN from altering the string keys inside the `PARAMETERS` dictionary or `PARAMETER_METADATA`. If you change key names, the React UI parameter sliders will break entirely!
+   * ✅ ACCEPTABLE: Appending new keys or adjusting the float values of existing keys (e.g., `20.0` -> `25.0`).
+   * ❌ UNACCEPTABLE: Renaming existing keys (e.g., `"shank_diameter"` -> `"diameter"`).
+3. **Manifold Stability (Epsilon Protocol)**: When modifying or adding subtractive holes (`bd.Hole`, `bd.extrude(mode=bd.Mode.SUBTRACT)`), always apply `eps` depth extensions and offsets to guarantee clean bounds.
+4. **Strict API Enforcement**: NO magic numbers. ALL dimensions must come from `PARAMETERS`. Use declarative `build123d` syntax (never CadQuery).
+5. **Output Format**: Return the ENTIRE valid Python file text block containing the fixes. Partial code snippets are completely unacceptable.
 """.strip()
 
 REPAIR_SYSTEM_PROMPT = """
-# ROLE: Expert CAD Engineer & build123d Refinement Specialist
-You are an expert CAD engineer fixing a broken build123d Python script.
-The script failed to render due to an exception or topological failure.
-You will be provided with the CURRENT_CODE and the ERROR_LOG.
-Your job is to analyze the error and output the ENTIRE repaired script.
-Do not output partial snippets. Do not explain your changes outside of code comments.
-Output only the fixed Python script.
+# ROLE: build123d Compiler Error Recovery Specialist
+
+You are receiving a build123d Python script that failed to render due to an exception or topological failure. Fix the EXACT error reported in the ERROR_LOG and return a corrected script.
+
+## ⚠️ IMMUTABILITY & SYNTAX CONSTRAINTS (CRITICAL)
+
+1. **Parameter Variable Lock**: You are strictly FORBIDDEN from altering the string keys inside the `PARAMETERS` or `PARAMETER_METADATA` dictionaries. 
+2. **Context Manager Enforcement**: Ensure 3D operations (`bd.extrude`, `bd.revolve`, etc) are NOT nested inside `with bd.BuildSketch():`. They must sit under `with bd.BuildPart():`.
+3. **Edge/Face Referencing**: If a C++ `NCollection_IndexedDataMap` crash occurs, you likely passed primitive edges directly to a chamfer/fillet. ALWAYS extract edges from the active part using `part.edges().filter_by(...)`.
+4. **Boolean Epsilon Rules**: If a `StdFail_NotDone` crash occurs, you likely have zero-thickness walls from overlapping subtractive boundaries. Ensure `eps=0.01` is applied to subtractive shapes so they pierce cleanly.
+5. **Output Format**: Return the ENTIRE valid Python file text block. Do not output snippets or incomplete reconstructions.
 """.strip()
 
 # -- Regex ---------------------------------------------------------------------
@@ -286,7 +308,7 @@ class LLMCodegenService:
             pass
 
     def _call_with_retry(self, fn: Callable[[], Any], label: str) -> str:
-        """Execute `fn()` up to MAX_RETRIES times with exponential back-off."""
+        """Execute `fn()` up to MAX_RETRIES times with exponential back-off and auto-fallback."""
         last_exc: Exception | None = None
         for attempt in range(self.MAX_RETRIES):
             try:
@@ -294,6 +316,9 @@ class LLMCodegenService:
                 return response.text or ""
             except Exception as exc:
                 last_exc = exc
+                if attempt == 1 and "3.5" in self.model:
+                    print(f"[{label}] Attempt {attempt} failed. Auto-falling back to gemini-1.5-flash.")
+                    self.model = "gemini-1.5-flash"
                 time.sleep(2 ** attempt)
         raise RuntimeError(
             f"[{label}] failed after {self.MAX_RETRIES} attempts: {last_exc}"
@@ -368,14 +393,12 @@ class LLMCodegenService:
         mime_type: str | None = None,
         feature_map: dict[str, Any] | str | None = None,
         base_code: str | None = None,
-        selection_context: str | None = None,
     ) -> str:
         """
         Stage 2 - Synthesise or refine an OpenSCAD script.
 
         If `base_code` is provided, Gemini will refine the existing script
-        rather than generating from scratch. `selection_context` attaches
-        spatial raycasting data so edits are geometrically targeted.
+        rather than generating from scratch.
         """
         # Build context string
         parts: list[str] = [f"REQUEST: {prompt}"]
@@ -389,22 +412,23 @@ class LLMCodegenService:
         if base_code:
             parts.append(f"EXISTING_CODE_TO_REFINE:\n{base_code}")
 
-        if selection_context:
-            parts.append(f"USER_SELECTION_CONTEXT:\n{selection_context}")
-
         user_text = "\n\n".join(parts)
 
         # Assemble multimodal contents
-        contents: list[Any] = [types.Part.from_text(text=SYSTEM_INSTRUCTION)]
+        sys_instr = EDIT_SYSTEM_INSTRUCTION if base_code else SYSTEM_INSTRUCTION
+        contents: list[Any] = [types.Part.from_text(text=sys_instr)]
         if image_bytes and mime_type:
             contents.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
         contents.append(types.Part.from_text(text=user_text))
 
         def _call() -> Any:
+            config_params = {"temperature": 0.0, "max_output_tokens": 1000000}
+            if "3.5" in self.model:
+                config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
             return self.client.models.generate_content(
                 model=self.model,
                 contents=contents,
-                config=types.GenerateContentConfig(temperature=0.0),
+                config=types.GenerateContentConfig(**config_params),
             )
 
         raw = self._call_with_retry(_call, "codegen")
@@ -417,7 +441,6 @@ class LLMCodegenService:
         mime_type: str | None = None,
         feature_map: dict[str, Any] | str | None = None,
         base_code: str | None = None,
-        selection_context: str | None = None,
     ):
         """
         Stage 2 - Synthesise or refine an OpenSCAD script, yielding chunks.
@@ -432,21 +455,23 @@ class LLMCodegenService:
                 parts.append(f"BLUEPRINT_AUDIT_REPORT:\n{feature_map}")
         if base_code:
             parts.append(f"EXISTING_CODE_TO_REFINE:\n{base_code}")
-        if selection_context:
-            parts.append(f"USER_SELECTION_CONTEXT:\n{selection_context}")
 
         user_text = "\n\n".join(parts)
 
-        contents: list[Any] = [types.Part.from_text(text=SYSTEM_INSTRUCTION)]
+        sys_instr = EDIT_SYSTEM_INSTRUCTION if base_code else SYSTEM_INSTRUCTION
+        contents: list[Any] = [types.Part.from_text(text=sys_instr)]
         if image_bytes and mime_type:
             contents.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
         contents.append(types.Part.from_text(text=user_text))
 
         def _call_stream():
+            config_params = {"temperature": 0.0, "max_output_tokens": 1000000}
+            if "3.5" in self.model:
+                config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
             return self.client.models.generate_content_stream(
                 model=self.model,
                 contents=contents,
-                config=types.GenerateContentConfig(temperature=0.0),
+                config=types.GenerateContentConfig(**config_params),
             )
 
         # Retry logic for the initial connection
@@ -458,6 +483,9 @@ class LLMCodegenService:
                 break
             except Exception as exc:
                 last_exc = exc
+                if attempt == 1 and "3.5" in self.model:
+                    print(f"[codegen stream] Attempt {attempt} failed. Auto-falling back to gemini-1.5-flash.")
+                    self.model = "gemini-1.5-flash"
                 await asyncio.sleep(2 ** attempt)
         
         if not response_stream:
@@ -500,10 +528,13 @@ class LLMCodegenService:
         ]
 
         def _call() -> Any:
+            config_params = {"temperature": 0.0, "max_output_tokens": 1000000}
+            if "3.5" in self.model:
+                config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
             return self.client.models.generate_content(
                 model=self.model,
                 contents=contents,
-                config=types.GenerateContentConfig(temperature=0.0),
+                config=types.GenerateContentConfig(**config_params),
             )
 
         raw = self._call_with_retry(_call, "edit")
@@ -525,10 +556,13 @@ class LLMCodegenService:
         ]
 
         def _call() -> Any:
+            config_params = {"temperature": 0.0, "max_output_tokens": 1000000}
+            if "3.5" in self.model:
+                config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
             return self.client.models.generate_content(
                 model=self.model,
                 contents=contents,
-                config=types.GenerateContentConfig(temperature=0.0),
+                config=types.GenerateContentConfig(**config_params),
             )
 
         raw = self._call_with_retry(_call, "repair")

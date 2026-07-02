@@ -38,7 +38,7 @@ export type FeatureMachiningInfo = {
     requiresSecondarySetup: boolean;
     requires4Axis: boolean;
     requiresTurning: boolean;
-    status: 'machinable_in_current_setup' | 'machinable_in_active_setup' | 'machinable_in_secondary_setup' | 'deferred_to_secondary_setup' | 'requires_turning' | 'requires_4axis_indexing' | 'unsupported_features' | 'unsupported' | string;
+    status: 'machinable_in_current_setup' | 'machinable_in_active_setup' | 'machinable_in_secondary_setup' | 'deferred_to_secondary_setup' | 'requires_turning' | 'requires_4axis_indexing' | 'requires_5axis_positioning' | 'unsupported_features' | 'unsupported' | string;
     reason?: string;
 };
 

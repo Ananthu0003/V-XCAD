@@ -847,7 +847,6 @@ def run():
         from build123d.exporters import ExportDXF
         _validate_shape(shape)
         
-        annotations = {}
         try:
             bbox = shape.bounding_box() if callable(getattr(shape, "bounding_box", None)) else getattr(shape, "bounding_box", None)
             vol = shape.volume if hasattr(shape, "volume") else 0.0

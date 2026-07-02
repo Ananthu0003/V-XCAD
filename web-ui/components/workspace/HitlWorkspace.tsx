@@ -317,6 +317,7 @@ export default function HitlWorkspace() {
 	const [activeOperationId, setActiveOperationId] = useState<string | null>(null);
 	const [camFeatures, setCamFeatures] = useState<CamFeature[]>([]);
 	const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
+	const [activeParameter, setActiveParameter] = useState<string | null>(null);
 	const [coordValidation, setCoordValidation] = useState<any>(null);
 	const [camSimulation, setCamSimulation] = useState<SimulationState>({ isPlaying: false, progress: 0, speed: 1 });
 	const [camViewport, setCamViewport] = useState<ViewportSettings>({ showStock: false, showTool: true, showToolpath: true, showOrigin: true, showAxes: true });
@@ -360,7 +361,6 @@ export default function HitlWorkspace() {
 	const [workflowStage, setWorkflowStage] = useState<'blueprint' | 'extraction' | 'cad' | 'cam' | 'gcode'>('blueprint');
 	const [annotations, setAnnotations] = useState<Record<string, { p1: [number, number, number]; p2: [number, number, number] }>>({});
 	const [parameterMetadata, setParameterMetadata] = useState<Record<string, any>>({});
-	const [activeParameter, setActiveParameter] = useState<string | null>(null);
 	const [geometryInfo, setGeometryInfo] = useState<StlGeometryInfo | null>(null);
 	const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 	const [selectionContext, setSelectionContext] = useState<[number, number, number] | null>(null);
@@ -1124,14 +1124,13 @@ export default function HitlWorkspace() {
 		setAnnotations({});
 		setParameterMetadata({});
 		setActiveParameter(null);
-		setActiveParameter(null);
 		setStatusText('Ready');
 		setWorkflowStage('blueprint');
 		toast.info('Session cleared');
 	};
 
 	return (
-		<div className="h-screen w-full bg-[#050814] text-foreground overflow-hidden flex flex-col p-3">
+		<div className="h-screen w-full bg-background text-foreground overflow-hidden flex flex-col p-3">
 			<main className="flex-1 flex overflow-hidden w-full gap-0 relative">
 				<PanelGroup id="workspace-layout-v5" orientation="vertical">
 					{/* Top: Navigation + Viewport + Settings */}
@@ -1139,7 +1138,7 @@ export default function HitlWorkspace() {
 						<div className="h-full w-full flex">
 
 							{/* 1. Left Navigation (Fixed Width) */}
-							<div className="w-[260px] shrink-0 h-full overflow-hidden flex flex-col z-10 border-r border-white/5 bg-[#050814]">
+							<div className="w-[260px] shrink-0 h-full overflow-hidden flex flex-col z-10 border-r border-border bg-background">
 								<WorkflowNav
 									workflowStage={workflowStage}
 									setWorkflowStage={setWorkflowStage}
@@ -1152,10 +1151,10 @@ export default function HitlWorkspace() {
 
 									{/* Center: CAD/CAM Viewport */}
 									<Panel defaultSize={70} minSize={40}>
-										<div className="h-full w-full bg-[#0a0f1c] rounded-xl border border-[#1e293b] shadow-2xl overflow-hidden relative">
+										<div className="h-full w-full bg-card rounded-xl border border-border shadow-2xl overflow-hidden relative">
 											{workflowStage === 'blueprint' ? (
 												<div
-													className="h-full flex flex-col items-center justify-center bg-[#070b14] relative overflow-hidden"
+													className="h-full flex flex-col items-center justify-center bg-background relative overflow-hidden"
 													onMouseMove={(e) => {
 														const rect = e.currentTarget.getBoundingClientRect();
 														const x = (e.clientX - rect.left) / rect.width - 0.5;
@@ -1201,41 +1200,41 @@ export default function HitlWorkspace() {
 																	setIsChatOpen(true);
 																	setTimeout(() => fileUploadRef.current?.click(), 100);
 																}}
-																className="flex items-center gap-4 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-blue-500/30 transition-all text-left group"
+																className="flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/50 hover:bg-muted hover:border-blue-500/30 transition-all text-left group"
 															>
-																<div className="size-8 rounded-lg bg-black/50 border border-white/5 flex items-center justify-center shrink-0">
+																<div className="size-8 rounded-lg bg-black/50 dark:bg-black/50 border border-border flex items-center justify-center shrink-0">
 																	<svg className="size-4 text-muted-foreground group-hover:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 																		<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
 																	</svg>
 																</div>
 																<div>
-																	<div className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors">Upload Blueprint</div>
+																	<div className="text-sm font-bold text-foreground group-hover:text-blue-400 transition-colors">Upload Blueprint</div>
 																	<div className="text-[10px] text-muted-foreground">PDF, PNG, JPG</div>
 																</div>
 															</button>
 															<button
 																onClick={() => stepUploadRef.current?.click()}
-																className="flex items-center gap-4 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-blue-500/30 transition-all text-left group"
+																className="flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/50 hover:bg-muted hover:border-blue-500/30 transition-all text-left group"
 															>
-																<div className="size-8 rounded-lg bg-black/50 border border-white/5 flex items-center justify-center shrink-0">
+																<div className="size-8 rounded-lg bg-black/50 dark:bg-black/50 border border-border flex items-center justify-center shrink-0">
 																	<svg className="size-4 text-muted-foreground group-hover:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 																		<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
 																	</svg>
 																</div>
 																<div>
-																	<div className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors">Import STEP File</div>
+																	<div className="text-sm font-bold text-foreground group-hover:text-blue-400 transition-colors">Import STEP File</div>
 																	<div className="text-[10px] text-muted-foreground">Direct 3D import</div>
 																</div>
 															</button>
 															<button
 																onClick={() => setIsSessionBrowserOpen(true)}
-																className="flex items-center gap-4 p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-blue-500/30 transition-all text-left group"
+																className="flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/50 hover:bg-muted hover:border-blue-500/30 transition-all text-left group"
 															>
-																<div className="size-8 rounded-lg bg-black/50 border border-white/5 flex items-center justify-center shrink-0">
+																<div className="size-8 rounded-lg bg-black/50 dark:bg-black/50 border border-border flex items-center justify-center shrink-0">
 																	<History className="size-4 text-muted-foreground group-hover:text-blue-400" />
 																</div>
 																<div>
-																	<div className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors">Recent Projects</div>
+																	<div className="text-sm font-bold text-foreground group-hover:text-blue-400 transition-colors">Recent Projects</div>
 																	<div className="text-[10px] text-muted-foreground">Resume work</div>
 																</div>
 															</button>
@@ -1260,8 +1259,9 @@ export default function HitlWorkspace() {
 													onDownloadStep={() => handleDownloadArtifact(stepUrl, 'step')}
 													onDownloadDxf={() => handleDownloadArtifact(dxfUrl, 'dxf')}
 													annotations={annotations}
-													activeParameter={null}
-													geometryInfo={null}
+													activeParameter={activeParameter}
+													parameters={parameters}
+													geometryInfo={geometryInfo}
 													hasGcode={Boolean(false)}
 													isDownloadingGcode={isDownloadingGcode}
 													onDownloadGcode={() => handleDownloadArtifact(null, 'gcode')}
@@ -1284,9 +1284,9 @@ export default function HitlWorkspace() {
 																className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all pointer-events-auto text-[10px] font-bold uppercase tracking-widest ${
 																	debugMode
 																		? 'bg-orange-500/20 border-orange-500/40 text-orange-400 hover:bg-orange-500/30'
-																		: 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10 hover:text-white'
+																		: 'bg-muted/50 border-border text-foreground/50 hover:bg-muted hover:text-foreground'
 																}`}
-																title={debugMode ? 'Debug mode ON — showing all geometry' : 'Debug mode OFF — showing clean toolpaths only'}
+																title={debugMode ? 'Debug mode ON ?" showing all geometry' : 'Debug mode OFF ?" showing clean toolpaths only'}
 															>
 																<svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 																	<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -1298,11 +1298,11 @@ export default function HitlWorkspace() {
 																<select
 																	value={activeSetupId || ''}
 																	onChange={(e) => setActiveSetupId(e.target.value)}
-																	className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-white/10 transition-all pointer-events-auto appearance-none cursor-pointer"
+																	className="px-3 py-1.5 rounded-lg border border-border bg-muted/50 text-foreground text-[10px] font-bold uppercase tracking-widest hover:bg-muted transition-all pointer-events-auto appearance-none cursor-pointer"
 																	title="Switch active setup to view its toolpaths"
 																>
 																	{camSetups.map((s, idx) => (
-																		<option key={s.setupId} value={s.setupId} className="bg-[#0a0f1c] text-white">
+																		<option key={s.setupId} value={s.setupId} className="bg-card text-foreground">
 																			{s.setupName || `Setup ${idx + 1}`}
 																		</option>
 																	))}
@@ -1311,7 +1311,7 @@ export default function HitlWorkspace() {
 															<div className="relative">
 																<button
 																	onClick={() => setIsWorkspaceMenuOpen(!isWorkspaceMenuOpen)}
-																	className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-white transition-all pointer-events-auto"
+																	className="flex items-center gap-2 px-4 py-2 rounded-lg bg-muted/50 border border-border hover:bg-muted text-foreground transition-all pointer-events-auto"
 																>
 																	<svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 																		<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -1319,20 +1319,20 @@ export default function HitlWorkspace() {
 																	<span className="text-[10px] font-bold uppercase tracking-widest">Project</span>
 																</button>
 																{isWorkspaceMenuOpen && (
-																	<div className="absolute right-0 mt-2 w-56 rounded-xl border border-white/10 bg-[#0a0f1c]/95 backdrop-blur-md shadow-xl overflow-hidden z-50 py-1 pointer-events-auto">
+																	<div className="absolute right-0 mt-2 w-56 rounded-xl border border-border bg-card/95 backdrop-blur-md shadow-xl overflow-hidden z-50 py-1 pointer-events-auto">
 																		<button
 																			onClick={() => {
 																				setIsWorkspaceMenuOpen(false);
 																				setIsChatOpen(true);
 																				setTimeout(() => fileUploadRef.current?.click(), 100);
 																			}}
-																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-white/10 transition-colors"
+																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted transition-colors"
 																		>
 																			<svg className="size-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 																				<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
 																			</svg>
 																			<div className="flex flex-col">
-																				<span className="text-[11px] font-bold uppercase tracking-wider text-white">Upload Blueprint</span>
+																				<span className="text-[11px] font-bold uppercase tracking-wider text-foreground">Upload Blueprint</span>
 																			</div>
 																		</button>
 																		<button
@@ -1340,13 +1340,13 @@ export default function HitlWorkspace() {
 																				setIsWorkspaceMenuOpen(false);
 																				stepUploadRef.current?.click();
 																			}}
-																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-white/10 transition-colors"
+																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted transition-colors"
 																		>
 																			<svg className="size-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 																				<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
 																			</svg>
 																			<div className="flex flex-col">
-																				<span className="text-[11px] font-bold uppercase tracking-wider text-white">Import STEP File</span>
+																				<span className="text-[11px] font-bold uppercase tracking-wider text-foreground">Import STEP File</span>
 																			</div>
 																		</button>
 																		<button
@@ -1354,11 +1354,11 @@ export default function HitlWorkspace() {
 																				setIsWorkspaceMenuOpen(false);
 																				setIsSessionBrowserOpen(true);
 																			}}
-																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-white/10 transition-colors border-t border-white/5 mt-1 pt-2"
+																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted transition-colors border-t border-border mt-1 pt-2"
 																		>
 																			<History className="size-4 text-muted-foreground" />
 																			<div className="flex flex-col">
-																				<span className="text-[11px] font-bold uppercase tracking-wider text-white">Recent Projects</span>
+																				<span className="text-[11px] font-bold uppercase tracking-wider text-foreground">Recent Projects</span>
 																			</div>
 																		</button>
 																	</div>
@@ -1376,7 +1376,7 @@ export default function HitlWorkspace() {
 														</div>
 													}
 												>
-													{stlUrl ? <StlMesh url={stlUrl} onGeometryReady={() => { }} onMeshClick={(p) => setSelectionContext(p)} /> : null}
+													{stlUrl ? <StlMesh url={stlUrl} onGeometryReady={setGeometryInfo} onMeshClick={(p) => setSelectionContext(p)} /> : null}
 													{selectionContext && (
 														<mesh position={selectionContext}>
 															<sphereGeometry args={[1.5, 16, 16]} />
@@ -1394,7 +1394,7 @@ export default function HitlWorkspace() {
 															{/* Glowing blue underline */}
 															<div className="absolute -bottom-[1px] left-8 right-8 h-[2px] bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,1)] z-10" />
 
-															<div className="flex items-center gap-8 bg-[#030408]/40 backdrop-blur-md border border-[#1e293b]/50 px-8 py-3 rounded-xl shadow-2xl relative z-0">
+															<div className="flex items-center gap-8 bg-muted/40 backdrop-blur-md border border-border/50 px-8 py-3 rounded-xl shadow-2xl relative z-0">
 
 																<div className="flex flex-col gap-1 items-start min-w-[80px]">
 																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
@@ -1403,27 +1403,27 @@ export default function HitlWorkspace() {
 																	<span className="text-[11px] font-bold text-blue-500 uppercase">{camSetup.material.replace('_', ' ')}</span>
 																</div>
 
-																<div className="w-px h-8 bg-white/5" />
+																<div className="w-px h-8 bg-muted/50" />
 
 																<div className="flex flex-col gap-1 items-start min-w-[80px]">
 																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
 																		<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
 																		Machine
 																	</span>
-																	<span className="text-[11px] font-bold text-white uppercase">{camSetup.machine}</span>
+																	<span className="text-[11px] font-bold text-foreground uppercase">{camSetup.machine}</span>
 																</div>
 
-																<div className="w-px h-8 bg-white/5" />
+																<div className="w-px h-8 bg-muted/50" />
 
 																<div className="flex flex-col gap-1 items-start min-w-[80px]">
 																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
 																		<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
 																		Controller
 																	</span>
-																	<span className="text-[11px] font-bold text-white uppercase">{controller}</span>
+																	<span className="text-[11px] font-bold text-foreground uppercase">{controller}</span>
 																</div>
 
-																<div className="w-px h-8 bg-white/5" />
+																<div className="w-px h-8 bg-muted/50" />
 
 																<div className="flex flex-col gap-1 items-center min-w-[60px]">
 																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Features</span>
@@ -1440,7 +1440,7 @@ export default function HitlWorkspace() {
 																	<span className="text-[12px] font-bold text-purple-500">{camOperations.length}</span>
 																</div>
 
-																<div className="w-px h-8 bg-white/5" />
+																<div className="w-px h-8 bg-muted/50" />
 
 																<div className="flex flex-col gap-1 items-start min-w-[80px]">
 																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
@@ -1455,7 +1455,7 @@ export default function HitlWorkspace() {
 																		<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg>
 																		Removal
 																	</span>
-																	<span className="text-[11px] font-bold text-white uppercase">82%</span>
+																	<span className="text-[11px] font-bold text-foreground uppercase">82%</span>
 																</div>
 
 																<div className="ml-4 flex items-center">
@@ -1514,10 +1514,12 @@ export default function HitlWorkspace() {
 
 									{/* Right: Workspace Settings */}
 									<Panel defaultSize={30} minSize={20}>
-										<div className="h-full w-full bg-[#0a0f1c] rounded-xl border border-white/5 overflow-hidden relative">
+										<div className="h-full w-full bg-card rounded-xl border border-border overflow-hidden relative">
 											<WorkspaceSettings
 												workflowStage={workflowStage}
 												parameters={parameters}
+												activeParameter={activeParameter}
+												onParameterSelect={setActiveParameter}
 												onParameterChange={(key, val) => {
 													const newParams = setParameterValue(parameters, key, val);
 													setParameters(newParams);
@@ -1553,12 +1555,12 @@ export default function HitlWorkspace() {
 					</Panel>
 
 					<PanelResizeHandle className="h-3 relative group flex items-center justify-center cursor-row-resize z-50">
-						<div className="h-1 w-8 rounded-full bg-white/10 group-hover:bg-blue-500/50 transition-colors" />
+						<div className="h-1 w-8 rounded-full bg-muted group-hover:bg-blue-500/50 transition-colors" />
 					</PanelResizeHandle>
 
 					{/* Bottom: Engineering Console */}
 					<Panel defaultSize={25} minSize={10}>
-						<div className="h-full w-full bg-[#0a0f1c] rounded-xl border border-[#1e293b] overflow-hidden relative">
+						<div className="h-full w-full bg-card rounded-xl border border-border overflow-hidden relative">
 							<EngineeringConsole
 								workflowStage={workflowStage}
 								camSetup={camSetup}

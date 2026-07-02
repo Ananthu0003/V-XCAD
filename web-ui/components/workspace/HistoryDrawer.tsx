@@ -50,9 +50,9 @@ export function HistoryDrawer({ isOpen, onClose, onRestore }: HistoryDrawerProps
     return (
         <div className="fixed inset-0 z-50 flex justify-end">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300" onClick={onClose} />
-            <div className="relative w-full max-w-md bg-zinc-950/95 backdrop-blur-xl border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right duration-500 ease-out">
+            <div className="relative w-full max-w-md bg-zinc-950/95 backdrop-blur-xl border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-500 ease-out">
                 {/* Header */}
-                <div className="p-6 border-b border-white/10 flex items-center justify-between bg-zinc-900/20">
+                <div className="p-6 border-b border-border flex items-center justify-between bg-zinc-900/20">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-blue-500/10 rounded-lg border border-blue-500/20">
                             <History className="w-5 h-5 text-blue-400" />
@@ -78,7 +78,7 @@ export function HistoryDrawer({ isOpen, onClose, onRestore }: HistoryDrawerProps
                         )}
                         <button
                             onClick={onClose}
-                            className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-all active:scale-95"
+                            className="p-1.5 rounded-lg text-zinc-400 hover:text-foreground hover:bg-muted transition-all active:scale-95"
                             title="Close"
                         >
                             <X className="size-5" />
@@ -98,7 +98,7 @@ export function HistoryDrawer({ isOpen, onClose, onRestore }: HistoryDrawerProps
                         </div>
                     ) : sessions.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full text-zinc-500 gap-4">
-                            <div className="p-6 bg-zinc-900/50 rounded-full border border-white/5 shadow-inner">
+                            <div className="p-6 bg-zinc-900/50 rounded-full border border-border shadow-inner">
                                 <Clock className="w-10 h-10 text-zinc-600" />
                             </div>
                             <p className="text-sm font-medium text-zinc-400">No history found yet.</p>
@@ -107,7 +107,7 @@ export function HistoryDrawer({ isOpen, onClose, onRestore }: HistoryDrawerProps
                         sessions.map((session, index) => (
                             <div 
                                 key={session.id}
-                                className="group p-5 bg-white/[0.02] border border-white/5 rounded-2xl hover:bg-white/[0.04] hover:border-blue-500/30 hover:shadow-[0_0_30px_rgba(59,130,246,0.05)] transition-all duration-300 cursor-pointer transform hover:-translate-y-1 animate-in fade-in slide-in-from-bottom-4"
+                                className="group p-5 bg-white/[0.02] border border-border rounded-2xl hover:bg-white/[0.04] hover:border-blue-500/30 hover:shadow-[0_0_30px_rgba(59,130,246,0.05)] transition-all duration-300 cursor-pointer transform hover:-translate-y-1 animate-in fade-in slide-in-from-bottom-4"
                                 style={{ animationDelay: `${Math.min(index * 50, 500)}ms`, animationFillMode: 'both' }}
                                 onClick={() => onRestore(session)}
                             >
@@ -149,7 +149,7 @@ export function HistoryDrawer({ isOpen, onClose, onRestore }: HistoryDrawerProps
                                     {session.prompt}
                                 </p>
                                 <div className="flex flex-wrap gap-2">
-                                    <span className="px-2.5 py-1 bg-white/5 border border-white/10 rounded-md text-[10px] text-zinc-300 font-medium tracking-wide flex items-center gap-1.5">
+                                    <span className="px-2.5 py-1 bg-muted/50 border border-border rounded-md text-[10px] text-zinc-300 font-medium tracking-wide flex items-center gap-1.5">
                                         <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
                                         {Object.keys(session.parameters || {}).length} Params
                                     </span>

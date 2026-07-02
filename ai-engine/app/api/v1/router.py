@@ -292,7 +292,6 @@ async def generate(
     model_name: str = Form(_DEFAULT_MODEL, alias="model"),
     image: UploadFile = File(None),
     base_code: str | None = Form(None),
-    selection_context: str | None = Form(None),
 ) -> StreamingResponse:
     """
     Two-stage CAD generation pipeline:
@@ -345,7 +344,6 @@ async def generate(
                 mime_type=mime_type,
                 feature_map=feature_map,
                 base_code=base_code,
-                selection_context=selection_context,
             ):
                 full_script += chunk_text
                 # stream token

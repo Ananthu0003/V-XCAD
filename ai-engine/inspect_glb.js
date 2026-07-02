@@ -1,0 +1,12 @@
+const fs = require('fs');
+const path = require('path');
+const data = fs.readFileSync('test_export.glb');
+const magic = data.readUInt32LE(0);
+const version = data.readUInt32LE(4);
+const length = data.readUInt32LE(8);
+const chunkLength = data.readUInt32LE(12);
+const chunkType = data.readUInt32LE(16);
+const jsonChunk = data.slice(20, 20 + chunkLength);
+const gltf = JSON.parse(jsonChunk.toString());
+console.log(JSON.stringify(gltf.meshes, null, 2));
+console.log(JSON.stringify(gltf.nodes, null, 2));

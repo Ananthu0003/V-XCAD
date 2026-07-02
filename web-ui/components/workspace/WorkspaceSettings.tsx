@@ -5,6 +5,8 @@ import type { SetupSettings } from '@/types/cam';
 interface WorkspaceSettingsProps {
   workflowStage: string;
   parameters: Record<string, unknown>;
+  activeParameter?: string | null;
+  onParameterSelect?: (key: string | null) => void;
   onParameterChange: (key: string, val: unknown) => void;
   parameterMetadata: Record<string, any>;
   camSetup: SetupSettings;
@@ -18,6 +20,8 @@ interface WorkspaceSettingsProps {
 export function WorkspaceSettings({
   workflowStage,
   parameters,
+  activeParameter,
+  onParameterSelect,
   onParameterChange,
   parameterMetadata,
   camSetup,
@@ -34,7 +38,7 @@ export function WorkspaceSettings({
       <div className="flex h-[72px] shrink-0 items-center px-6">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Settings2 className="size-4 text-blue-500" />
-          <h3 className="text-[11px] font-bold uppercase tracking-[0.15em] text-white/90">
+          <h3 className="text-[11px] font-bold uppercase tracking-[0.15em] text-foreground/90">
             WORKSPACE SETTINGS
           </h3>
         </div>
@@ -56,22 +60,24 @@ export function WorkspaceSettings({
             <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80 mb-1">
               EXTRACTED PARAMETERS
             </h4>
-            <div className="flex-1 h-px bg-white/5" />
+            <div className="flex-1 h-px bg-muted/50" />
           </div>
           {Object.keys(parameters).length === 0 ? (
-            <div className="rounded-xl border border-dashed border-white/10 bg-white/5 p-6 text-center text-xs text-muted-foreground font-mono">
+            <div className="rounded-xl border border-dashed border-border bg-muted/50 p-6 text-center text-xs text-muted-foreground font-mono">
               NO PARAMETERS EXTRACTED
             </div>
           ) : (
             <div className="space-y-4">
               {Object.keys(parameters).map((key) => (
-                <ParameterInput
-                  key={key}
-                  label={key}
-                  value={parameters[key]}
-                  description={parameterMetadata?.[key]?.description}
-                  onChange={(val) => onParameterChange(key, val)}
-                />
+                <div key={key} onClick={() => onParameterSelect?.(activeParameter === key ? null : key)} className="cursor-pointer">
+                  <ParameterInput
+                    label={key}
+                    value={parameters[key]}
+                    description={parameterMetadata?.[key]?.description}
+                    onChange={(val) => onParameterChange(key, val)}
+                    isActive={activeParameter === key}
+                  />
+                </div>
               ))}
             </div>
           )}
@@ -83,10 +89,10 @@ export function WorkspaceSettings({
             <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80 mb-1">
               CAD SCRIPT (BUILD123D)
             </h4>
-            <div className="flex-1 h-px bg-white/5" />
+            <div className="flex-1 h-px bg-muted/50" />
           </div>
           {!pythonScript ? (
-            <div className="rounded-xl border border-dashed border-white/10 bg-white/5 p-6 text-center text-xs text-muted-foreground font-mono">
+            <div className="rounded-xl border border-dashed border-border bg-muted/50 p-6 text-center text-xs text-muted-foreground font-mono">
               NO SCRIPT GENERATED
             </div>
           ) : (
@@ -106,7 +112,7 @@ export function WorkspaceSettings({
                 <h4 className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground/60">
                   MACHINE CONTEXT
                 </h4>
-                <div className="flex-1 h-px bg-white/5" />
+                <div className="flex-1 h-px bg-muted/50" />
               </div>
               
               <div className="space-y-4">
@@ -157,7 +163,7 @@ export function WorkspaceSettings({
                 <h4 className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground/60">
                   CAM DEFAULTS
                 </h4>
-                <div className="flex-1 h-px bg-white/5" />
+                <div className="flex-1 h-px bg-muted/50" />
               </div>
               
               <div className="space-y-4">

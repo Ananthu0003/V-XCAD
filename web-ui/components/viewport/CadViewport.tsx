@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewport, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { DimensionOverlay } from '@/components/viewport/DimensionOverlay';
+import { FeatureHighlight } from '@/components/viewport/FeatureHighlight';
 import type { StlGeometryInfo } from '@/components/viewport/StlMesh';
 
 type AnnotationEntry = {
@@ -60,7 +61,8 @@ type CadViewportProps = {
 	toolpaths?: RenderToolpathSegment[] | null;
 	showToolpaths?: boolean;
 	workflowStage?: 'blueprint' | 'extraction' | 'cad' | 'cam' | 'gcode';
-	camFeatures?: { id: string; location: [number, number, number] }[];
+	camFeatures?: any[];
+	parameters?: Record<string, unknown>;
 	hasBlockedOperations?: boolean;
 	activeFeatureId?: string | null;
 
@@ -71,6 +73,8 @@ type CadViewportProps = {
 	children?: React.ReactNode; // For StlMesh
 	headerActions?: React.ReactNode;
 	setupToolAxis?: [number, number, number];
+	onMeshClick?: (point: [number, number, number]) => void;
+	onClearSelection?: () => void;
 };
 
 export function CadViewport({
@@ -99,6 +103,7 @@ export function CadViewport({
 	showToolpaths = true,
 	workflowStage = 'blueprint',
 	camFeatures = [],
+	parameters = {},
 	hasBlockedOperations = false,
 	activeFeatureId = null,
 	simulationState,
@@ -107,6 +112,8 @@ export function CadViewport({
 	setupToolAxis,
 	children,
 	headerActions,
+	onMeshClick,
+	onClearSelection,
 }: CadViewportProps) {
 	const [exportOpen, setExportOpen] = useState(false);
 	const exportRef = useRef<HTMLDivElement>(null);
@@ -231,6 +238,7 @@ export function CadViewport({
 	}, [toolpaths, debugMode]);
 
 	const [hasSimulated, setHasSimulated] = useState(false);
+	const [featureDebug, setFeatureDebug] = useState<any>(null);
 
 	useEffect(() => {
 		if (simulationState?.isPlaying || (simulationState?.progress ?? 0) > 0 || simulationState?.activeSegmentIndex !== undefined) {
@@ -240,6 +248,47 @@ export function CadViewport({
 
 	return (
 		<section className="relative flex h-full w-full flex-col overflow-hidden bg-background font-sans">
+			{debugMode && featureDebug && (
+				<div className="absolute top-20 right-4 bg-black/80 text-green-400 text-[10px] font-mono p-3 rounded border border-green-500/30 whitespace-nowrap backdrop-blur-sm shadow-xl pointer-events-none select-none max-w-[350px] overflow-hidden z-[100]">
+					<div className="font-bold text-foreground mb-1 border-b border-green-500/30 pb-1">FEATURE DEBUG</div>
+					<div className="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1">
+						<span className="opacity-70">ID:</span><span className="truncate">{featureDebug.id}</span>
+						<span className="opacity-70">Type:</span><span>{featureDebug.type}</span>
+						
+						{featureDebug.center && (
+							<>
+								<span className="opacity-70">Center:</span>
+								<span>[{featureDebug.center.map((n: number) => n.toFixed(2)).join(', ')}]</span>
+							</>
+						)}
+						
+						{featureDebug.axis && (
+							<>
+								<span className="opacity-70">Axis:</span>
+								<span>[{featureDebug.axis.map((n: number) => n.toFixed(2)).join(', ')}]</span>
+							</>
+						)}
+						
+						{featureDebug.dimensions && Object.keys(featureDebug.dimensions).length > 0 && (
+							<>
+								<span className="opacity-70">Dims:</span>
+								<span className="break-all whitespace-normal">
+									{Object.entries(featureDebug.dimensions).map(([k, v]) => `${k}:${Number(v).toFixed(2)}`).join(' ')}
+								</span>
+							</>
+						)}
+						
+						{featureDebug.p1 && featureDebug.p2 && (
+							<>
+								<span className="opacity-70">Box Min:</span>
+								<span>[{featureDebug.p1.map((n: number) => n.toFixed(2)).join(', ')}]</span>
+								<span className="opacity-70">Box Max:</span>
+								<span>[{featureDebug.p2.map((n: number) => n.toFixed(2)).join(', ')}]</span>
+							</>
+						)}
+					</div>
+				</div>
+			)}
 			<header className="flex h-16 items-center justify-between border-b border-transparent bg-background/60 backdrop-blur-xl px-6 z-50">
 				<div className="flex flex-col gap-1.5">
 					<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -377,7 +426,7 @@ export function CadViewport({
 					</div>
 				)}
 
-				<Canvas shadows dpr={[1, 2]} className="relative z-10">
+				<Canvas shadows dpr={[1, 2]} className="relative z-10" onPointerMissed={onClearSelection}>
 					<PerspectiveCamera makeDefault position={[5, 5, 5]} fov={40} />
 
 					<Suspense fallback={null}>
@@ -395,6 +444,30 @@ export function CadViewport({
 								}
 							>
 								{isSolidVisible && children}
+								
+								{/* Overlays - placed next to children so they inherit the exact same Stage/rotation transforms */}
+								{geometryInfo && (activeParameter || activeFeatureId) && (
+									<>
+										{activeParameter && (
+											<DimensionOverlay
+												annotations={annotations}
+												activeParameter={activeParameter}
+												geometryScale={geometryInfo.scale}
+												geometryCenter={geometryInfo.center}
+											/>
+										)}
+										<FeatureHighlight 
+											annotations={annotations} 
+											camFeatures={camFeatures}
+											parameters={parameters}
+											activeParameter={(activeParameter || activeFeatureId) as string}
+											geometryScale={geometryInfo.scale}
+											geometryCenter={geometryInfo.center}
+											debugMode={debugMode}
+											onDebugInfo={setFeatureDebug}
+										/>
+									</>
+								)}
 								{isWireframeVisible && (
 									<group
 										scale={1}
@@ -488,17 +561,7 @@ export function CadViewport({
 						</GizmoHelper>
 					</Suspense>
 
-					<OrbitControls makeDefault />
-
-					{/* Dimension overlay */}
-					{geometryInfo && activeParameter && Object.keys(annotations).length > 0 && (
-						<DimensionOverlay
-							annotations={annotations}
-							activeParameter={activeParameter}
-							geometryScale={geometryInfo.scale}
-							geometryCenter={geometryInfo.center}
-						/>
-					)}
+					{/* Dimension overlay was moved inside Stage */}
 
 					<OrbitControls makeDefault enableDamping dampingFactor={0.05} minPolarAngle={0} maxPolarAngle={Math.PI / 1.75} />
 				</Canvas>
@@ -510,7 +573,7 @@ export function CadViewport({
 							<div className="absolute inset-0 rounded-3xl bg-blue-500/5 dark:bg-blue-500/10 blur-2xl dark:blur-3xl scale-105 dark:scale-110" />
 
 							{/* Main card */}
-							<div className="relative rounded-3xl border border-transparent/50 dark:border-white/10 bg-background/90 dark:bg-black/60 p-12 text-center shadow-xl backdrop-blur-2xl">
+							<div className="relative rounded-3xl border border-transparent/50 dark:border-border bg-background/90 dark:bg-black/60 p-12 text-center shadow-xl backdrop-blur-2xl">
 
 								{/* Top accent line */}
 								<div className="absolute inset-x-0 top-0 h-px rounded-t-3xl bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
@@ -575,33 +638,12 @@ export function CadViewport({
 					</div>
 				)}
 
-				{/* Feature Missing Face Mapping Overlay */}
-				{activeFeatureId && camFeatures && (
-					(() => {
-						const activeFeat = camFeatures.find(f => f.id === activeFeatureId);
-						const hasFaceIds = activeFeat && ((activeFeat as any).faceIds || (activeFeat as any).meshGroupIds);
-						if (activeFeat && !hasFaceIds) {
-							return (
-								<div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-									<div className="flex items-center gap-2 rounded-lg border border-orange-500/30 bg-[#050814]/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
-										<svg className="size-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-										</svg>
-										<span className="text-[11px] font-bold uppercase tracking-wider text-orange-400">
-											Exact face mapping unavailable
-										</span>
-									</div>
-								</div>
-							);
-						}
-						return null;
-					})()
-				)}
+
 
 				{/* Global Safety Note */}
 				<div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2">
 					{toolpaths && toolpaths.length > 0 && !hasValidToolpaths && (
-						<div className="flex items-center gap-2 rounded-full border border-orange-500/30 bg-[#050814]/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
+						<div className="flex items-center gap-2 rounded-full border border-orange-500/30 bg-background/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
 							<svg className="size-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
 							</svg>
@@ -611,7 +653,7 @@ export function CadViewport({
 						</div>
 					)}
 					{hasBlockedOperations && (
-						<div className="flex items-center gap-2 rounded-full border border-red-500/30 bg-[#050814]/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
+						<div className="flex items-center gap-2 rounded-full border border-red-500/30 bg-background/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
 							<svg className="size-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
 							</svg>

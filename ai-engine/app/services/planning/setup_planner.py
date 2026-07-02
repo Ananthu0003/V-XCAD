@@ -65,13 +65,16 @@ class SetupPlanner:
             required_axis_key = self._format_axis_key(required_axis)
             
             # Determine setup type based on capability
-            if info.status == "requires_turning":
+            if machine_capability.mill_turn:
+                stype = "mill_turn"
+            elif info.status == "requires_turning":
                 stype = "turning"
+            elif info.status == "requires_5axis_positioning":
+                stype = "indexed_5axis"
             elif info.status == "requires_4axis_indexing":
                 stype = "indexed_4axis"
             else:
                 stype = "milling_3axis"
-                
             fixtureSide = "top" if required_axis_key == base_axis_key else "side"
             setup_key = f"{stype}:{required_axis_key}:{fixtureSide}"
             
@@ -89,8 +92,8 @@ class SetupPlanner:
                     setupType=stype,
                     toolAxis=required_axis,
                     workCoordinateSystem=f"G{53 + min(setup_counter, 6)}",
-                    requiresManualReclamp=not machine_capability.indexed_4axis and stype == "milling_3axis",
-                    requires4AxisIndexing=machine_capability.indexed_4axis and stype == "indexed_4axis"
+                    requiresManualReclamp=stype in ("milling_3axis", "turning") and required_axis_key != base_axis_key,
+                    requires4AxisIndexing=stype == "indexed_4axis"
                 )
                 
             # Machinable statuses → assignedFeatureIds
@@ -99,7 +102,7 @@ class SetupPlanner:
                 setups[setup_key].unassignedFeatureIds.append(feat_id)
             else:
                 # Includes: machinable_in_active_setup, machinable_in_secondary_setup,
-                # requires_turning, requires_4axis_indexing — all are machinable on correct machine
+                # requires_turning, requires_4axis_indexing, requires_5axis_positioning
                 setups[setup_key].assignedFeatureIds.append(feat_id)
 
         all_features = [f.get('id') for f in features if f.get('requiredMachining', True) and f.get('id')]
@@ -226,11 +229,17 @@ class SetupPlanner:
                     info.requiredSetupAxis = base_tool_axis
                 else:
                     # Opposite direction (e.g. face pointing -Z)
-                    info.status = "machinable_in_secondary_setup"
-                    info.machinableInCurrentSetup = False
-                    info.requiresSecondarySetup = True
-                    info.requiredSetupAxis = info.preferredToolAxis
-                    info.reason = "Feature requires opposite setup orientation"
+                    if caps.milling_5axis:
+                        info.status = "requires_5axis_positioning"
+                        info.machinableInCurrentSetup = True
+                        info.requiredSetupAxis = info.preferredToolAxis
+                        info.reason = "Requires 5-axis positioning"
+                    else:
+                        info.status = "machinable_in_secondary_setup"
+                        info.machinableInCurrentSetup = False
+                        info.requiresSecondarySetup = True
+                        info.requiredSetupAxis = info.preferredToolAxis
+                        info.reason = "Feature requires opposite setup orientation"
             else:
                 info.machinableInCurrentSetup = False
                 info.requiredSetupAxis = info.preferredToolAxis
@@ -246,8 +255,10 @@ class SetupPlanner:
                         info.reason = "Requires secondary setup (reclamping)"
                 else:
                     if caps.milling_5axis:
-                        info.status = "machinable_in_secondary_setup"
+                        info.status = "requires_5axis_positioning"
+                        info.machinableInCurrentSetup = True
                         info.reason = "Requires 5-axis positioning"
+                        info.requiredSetupAxis = info.preferredToolAxis
                     else:
                         info.status = "machinable_in_secondary_setup"
                         info.requiresSecondarySetup = True

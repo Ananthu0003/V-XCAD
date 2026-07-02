@@ -22,7 +22,7 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 	// System messages render as a compact inline hint strip
 	if (role === 'system') {
 		return (
-			<div className="flex items-center gap-2.5 rounded-xl border border-transparent/50 dark:border-white/5 bg-background dark:bg-white/5 shadow-sm px-3.5 py-2.5 animate-message">
+			<div className="flex items-center gap-2.5 rounded-xl border border-transparent/50 dark:border-border bg-background dark:bg-muted/50 shadow-sm px-3.5 py-2.5 animate-message">
 				<Info className="size-3.5 shrink-0 text-blue-500/60" />
 				<p className="text-[11px] leading-snug text-muted-foreground font-sans">{content}</p>
 			</div>
@@ -30,8 +30,8 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 	}
 
 	const bubbleClass = isUser
-		? 'bg-gradient-to-br from-[#1e293b] to-[#0f172a] border border-[#334155] text-white shadow-xl'
-		: 'bg-[#030408]/80 backdrop-blur-md text-blue-50 border border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.15)]';
+		? 'bg-gradient-to-br from-[#1e293b] to-[#0f172a] border border-[#334155] text-foreground shadow-xl'
+		: 'bg-muted/80 backdrop-blur-md text-blue-50 border border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.15)]';
 
 	const handleCopy = (text: string) => {
 		navigator.clipboard.writeText(text);
@@ -52,7 +52,7 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 
 			<div className={`relative max-w-[88%] rounded-2xl px-5 py-4 text-sm leading-[1.6] ${bubbleClass} ${isUser ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
 				{fileName && isUser && (
-					<div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-black/5 dark:bg-black/20 border border-transparent dark:border-white/10 w-fit backdrop-blur-sm shadow-inner">
+					<div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-black/5 dark:bg-black/20 border border-transparent dark:border-border w-fit backdrop-blur-sm shadow-inner">
 						<FileImage className="size-3.5 text-blue-400" />
 						<span className="text-[10px] font-mono font-bold text-blue-200 uppercase tracking-wider truncate max-w-[200px]">{fileName}</span>
 					</div>
@@ -78,13 +78,13 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 									}
 
 									return (
-										<div className="my-6 overflow-hidden rounded-2xl border border-transparent dark:border-white/10 bg-accent/50 dark:bg-zinc-950/40 backdrop-blur-sm shadow-2xl">
-											<div className="flex items-center justify-between bg-background dark:bg-zinc-900/50 px-5 py-3.5 border-b border-transparent dark:border-white/5">
+										<div className="my-6 overflow-hidden rounded-2xl border border-transparent dark:border-border bg-accent/50 dark:bg-zinc-950/40 backdrop-blur-sm shadow-2xl">
+											<div className="flex items-center justify-between bg-background dark:bg-zinc-900/50 px-5 py-3.5 border-b border-transparent dark:border-border">
 												<div className="flex items-center gap-3">
 													<div className="size-2 rounded-full bg-cyan-500 animate-pulse shadow-[0_0_10px_rgba(6,182,212,0.25)]" />
 													<span className="text-[10px] font-black uppercase tracking-[0.05em] text-foreground dark:text-zinc-300">Technical Analysis Report</span>
 												</div>
-												<div className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-black/5 dark:bg-black/40 border border-transparent dark:border-white/5">
+												<div className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-black/5 dark:bg-black/40 border border-transparent dark:border-border">
 													<span className="text-[8px] font-bold text-muted-foreground uppercase tracking-wide">Model Fidelity: High</span>
 												</div>
 											</div>
@@ -109,7 +109,7 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 													))}
 												</div>
 
-												<div className="pt-4 border-t border-transparent dark:border-white/5 flex items-center justify-between">
+												<div className="pt-4 border-t border-transparent dark:border-border flex items-center justify-between">
 													<div className="flex items-center gap-4">
 														<div className="flex -space-x-1">
 															{[1,2,3].map(i => (
@@ -131,8 +131,8 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 
 								if (match) {
 									return (
-										<div className="relative my-4 overflow-hidden rounded-xl bg-black/5 dark:bg-black/40 border border-transparent dark:border-white/5 shadow-inner group/code">
-											<div className="flex items-center justify-between bg-black/5 dark:bg-white/3 px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground border-b border-transparent dark:border-white/5">
+										<div className="relative my-4 overflow-hidden rounded-xl bg-black/5 dark:bg-black/40 border border-transparent dark:border-border shadow-inner group/code">
+											<div className="flex items-center justify-between bg-black/5 dark:bg-white/3 px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground border-b border-transparent dark:border-border">
 												<span className="flex items-center gap-2">
 													<div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.25)]" />
 													{match[1]}

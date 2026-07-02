@@ -124,9 +124,11 @@
 	* {
 		@apply border-border outline-ring/50;
 	}
+
 	body {
 		@apply bg-background text-foreground;
 	}
+
 	html {
 		@apply font-sans;
 	}
@@ -136,13 +138,16 @@
 		width: 5px;
 		height: 5px;
 	}
+
 	::-webkit-scrollbar-track {
 		background: transparent;
 	}
+
 	::-webkit-scrollbar-thumb {
 		background: #27272a;
 		border-radius: 10px;
 	}
+
 	::-webkit-scrollbar-thumb:hover {
 		background: #3f3f46;
 	}
@@ -152,15 +157,19 @@
 	.bg-gradient-workspace {
 		background: radial-gradient(circle at center, #081226 0%, #050816 70%, #050816 100%);
 	}
+
 	.bg-gradient-panel {
 		background: linear-gradient(145deg, #16243A 0%, #111C2F 100%);
 	}
+
 	.bg-gradient-primary {
 		background: linear-gradient(to right, #2563EB, #3B82F6, #60A5FA);
 	}
+
 	.bg-gradient-secondary {
 		background: linear-gradient(to right, #4F46E5, #3B82F6, #22D3EE);
 	}
+
 	.text-gradient-primary {
 		background: linear-gradient(to right, #60A5FA, #3B82F6);
 		-webkit-background-clip: text;
@@ -172,6 +181,7 @@
 	.prose pre {
 		@apply m-0 bg-transparent p-0;
 	}
+
 	.prose code {
 		@apply font-mono font-medium;
 	}
@@ -182,6 +192,7 @@
 		opacity: 0;
 		transform: translateY(10px) scale(0.98);
 	}
+
 	to {
 		opacity: 1;
 		transform: translateY(0) scale(1);

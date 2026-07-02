@@ -88,19 +88,19 @@ export function SessionBrowserModal({ isOpen, onClose, onSelectSession }: Sessio
 			<div className="flex flex-col w-full max-w-2xl bg-popover border border-border rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
 				
 				{/* Header */}
-				<div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5">
+				<div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/50">
 					<div className="flex items-center gap-3">
 						<div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
 							<Clock className="w-5 h-5" />
 						</div>
 						<div>
-							<h2 className="text-sm font-bold text-white uppercase tracking-widest">Recent Projects</h2>
+							<h2 className="text-sm font-bold text-foreground uppercase tracking-widest">Recent Projects</h2>
 							<p className="text-[11px] text-muted-foreground mt-0.5">Resume your previous CAD sessions</p>
 						</div>
 					</div>
 					<button
 						onClick={onClose}
-						className="p-2 text-muted-foreground hover:bg-white/10 hover:text-white rounded-lg transition-colors"
+						className="p-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-lg transition-colors"
 					>
 						<X className="w-5 h-5" />
 					</button>
@@ -126,14 +126,14 @@ export function SessionBrowserModal({ isOpen, onClose, onSelectSession }: Sessio
 									onSelectSession(session);
 									onClose();
 								}}
-								className="w-full flex items-center gap-4 p-4 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 hover:border-blue-500/30 transition-all group text-left"
+								className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/50 hover:bg-muted hover:border-blue-500/30 transition-all group text-left"
 							>
-								<div className="flex-shrink-0 w-12 h-12 rounded-lg bg-black/50 border border-white/5 flex items-center justify-center relative overflow-hidden">
+								<div className="flex-shrink-0 w-12 h-12 rounded-lg bg-black/50 dark:bg-black/50 border border-border flex items-center justify-center relative overflow-hidden">
 									{getFileIcon(session)}
 								</div>
 								
 								<div className="flex-1 min-w-0">
-									<h3 className="text-sm font-bold text-white truncate group-hover:text-blue-400 transition-colors">
+									<h3 className="text-sm font-bold text-foreground truncate group-hover:text-blue-400 transition-colors">
 										{session.fileName || session.title || 'Untitled Project'}
 									</h3>
 									<p className="text-[11px] text-muted-foreground truncate mt-1">
@@ -164,7 +164,7 @@ export function SessionBrowserModal({ isOpen, onClose, onSelectSession }: Sessio
 
 				{/* Footer */}
 				{!isLoading && sessions.length > 0 && (
-					<div className="flex items-center justify-between px-6 py-4 border-t border-white/5 bg-black/20">
+					<div className="flex items-center justify-between px-6 py-4 border-t border-border bg-black/20">
 						<button
 							onClick={handleClearHistory}
 							disabled={isClearing}

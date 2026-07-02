@@ -37,21 +37,21 @@ function DimensionLine({
 	const transformedP1 = useMemo(
 		() =>
 			new Vector3(
-				(p1[0] - center[0]) * scale,
-				(p1[1] - center[1]) * scale,
-				(p1[2] - center[2]) * scale,
+				p1[0] * scale,
+				p1[1] * scale,
+				p1[2] * scale,
 			),
-		[p1, center, scale],
+		[p1, scale],
 	);
 
 	const transformedP2 = useMemo(
 		() =>
 			new Vector3(
-				(p2[0] - center[0]) * scale,
-				(p2[1] - center[1]) * scale,
-				(p2[2] - center[2]) * scale,
+				p2[0] * scale,
+				p2[1] * scale,
+				p2[2] * scale,
 			),
-		[p2, center, scale],
+		[p2, scale],
 	);
 
 	const midpoint = useMemo(
