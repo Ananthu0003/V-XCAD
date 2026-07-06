@@ -192,12 +192,23 @@ export type CuttingParameters = {
 
     linking?: ToolpathLinking;
 
-    // Backend error/debug info used by CamSummaryPanel
+    // Backend planning / error / debug fields
     error?: string;
     errorReason?: string;
+    recommended_machine?: string;
+    tool_selection_reason?: string;
+    feeds_and_speeds?: Record<string, number>;
+    depends_on_operation?: string;
+    depends_on_setup?: string;
     diagnostics?: Record<string, any>;
-};
+    blocked_reason?: string;
+    strategy?: string;
+    operation?: string;
+    status?: string;
 
+    // Allows backend to send extra CAM fields without breaking deployment
+    [key: string]: any;
+};
 export type ToolpathStatistics = {
     cycleTimeSeconds: number;
     rapidDistance: number;
@@ -241,7 +252,10 @@ export type CamOperation = {
   collisionStatus?: CollisionStatus;
   enabled?: boolean;
 
-  toolpath?: any;
+   toolpath?: any;
+
+  // Allows backend to send extra operation fields without breaking deployment
+  [key: string]: any;
 };
 
 export type ViewportSettings = {
