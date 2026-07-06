@@ -265,12 +265,12 @@ class HaasPostProcessor(FanucPostProcessor):
 class PostProcessorFactory:
     """Factory to instantiate the correct dialect post-processor."""
     @staticmethod
-    def create(controller: str) -> BasePostProcessor:
-        controller = controller.lower() if controller else ""
-        if controller == 'haas':
+    def create(post_id: str) -> BasePostProcessor:
+        post_id = post_id.upper() if post_id else ""
+        if "HAAS" in post_id:
             return HaasPostProcessor()
         else:
-            return FanucPostProcessor() # Default ISO/Fanuc
+            return FanucPostProcessor() # Default ISO/Fanuc for all others currently implemented
 
 # Legacy compatibility removed intentionally to enforce operation-based paths
 class GCodeGenerator:

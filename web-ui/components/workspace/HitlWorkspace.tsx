@@ -11,6 +11,8 @@ import { StlMesh, type StlGeometryInfo } from '@/components/viewport/StlMesh';
 import { HistoryDrawer } from '@/components/workspace/HistoryDrawer';
 import { WorkflowNav } from '@/components/workspace/WorkflowNav';
 import { WorkspaceSettings } from '@/components/workspace/WorkspaceSettings';
+import { migrateLegacyCamSetup, validateMachineControllerPost } from '@/lib/cam/machineValidation';
+import { MACHINE_MATRIX, ControllerId } from '@/lib/cam/machineProfiles';
 import { EngineeringConsole } from '@/components/workspace/EngineeringConsole';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { SessionBrowserModal } from '@/components/workspace/SessionBrowserModal';
@@ -299,9 +301,9 @@ export default function HitlWorkspace() {
 	const [isDownloadingGcode, setIsDownloadingGcode] = useState(false);
 
 	// CAM Parameters State
-	const [camSetup, setCamSetup] = useState<SetupSettings>({
+	const [camSetup, setCamSetup] = useState<SetupSettings>(() => migrateLegacyCamSetup({
 		units: 'mm',
-		machine: 'Haas VF-2 (3-Axis)',
+		machine: 'Haas VF-2 (3-Axis VMC)',
 		stockType: 'box',
 		material: 'aluminum_6061',
 		stockDimensions: [100, 100, 20],
@@ -309,7 +311,7 @@ export default function HitlWorkspace() {
 		originPosition: 'top_center',
 		tolerance: 0.01,
 		stockOffset: 2,
-	});
+	}));
 	const [camSetups, setCamSetups] = useState<CamSetupPlan[]>([]);
 	const [activeSetupId, setActiveSetupId] = useState<string | null>(null);
 	const [camTools, setCamTools] = useState<Tool[]>([]);
@@ -321,7 +323,6 @@ export default function HitlWorkspace() {
 	const [coordValidation, setCoordValidation] = useState<any>(null);
 	const [camSimulation, setCamSimulation] = useState<SimulationState>({ isPlaying: false, progress: 0, speed: 1 });
 	const [camViewport, setCamViewport] = useState<ViewportSettings>({ showStock: false, showTool: true, showToolpath: true, showOrigin: true, showAxes: true });
-	const [controller, setController] = useState<string>('grbl');
 	const [gcodeContent, setGcodeContent] = useState<string | null>(null);
 	const [isGeneratingGcode, setIsGeneratingGcode] = useState(false);
 	const [gcodeErrors, setGcodeErrors] = useState<any[]>([]);
@@ -648,7 +649,8 @@ export default function HitlWorkspace() {
 					parameters: params,
 					session_id: session,
 					cam_parameters: {
-						controller: controller,
+						controller: camSetup.controller || 'FANUC_0I_MF',
+						post_processor: camSetup.postProcessor || 'AUTO',
 						setup: camSetup,
 						tools: camTools,
 						operations: camOperations,
@@ -724,6 +726,12 @@ export default function HitlWorkspace() {
 		}
 		if (!stepUrl) {
 			toast.error('No STEP file available. Generate a 3D model first.');
+			return;
+		}
+
+		const validation = validateMachineControllerPost(camSetup);
+		if (!validation.valid) {
+			toast.error('Invalid CAM Setup', { description: validation.error });
 			return;
 		}
 
@@ -927,10 +935,11 @@ export default function HitlWorkspace() {
 		setStatusText('Auto Planning CAM...');
 
 		try {
-			const is5Axis = camSetup.machine.toLowerCase().includes('5-axis');
-			const is4Axis = camSetup.machine.toLowerCase().includes('4-axis') || is5Axis;
-			const isLathe = camSetup.machine.toLowerCase().includes('lathe');
-			const isMillTurn = camSetup.machine.toLowerCase().includes('mill-turn') || camSetup.machine.toLowerCase().includes('millturn');
+			const machineType = camSetup.machineType || 'MILL_3X_VMC';
+			const is5Axis = machineType === 'MILL_5X_VMC';
+			const is4Axis = machineType === 'MILL_4X_VMC' || is5Axis;
+			const isLathe = machineType === 'CNC_LATHE';
+			const isMillTurn = machineType === 'MILL_TURN';
 
 			const machine_capability = {
 				turning: isLathe || isMillTurn,
@@ -1410,7 +1419,7 @@ export default function HitlWorkspace() {
 																		<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
 																		Machine
 																	</span>
-																	<span className="text-[11px] font-bold text-foreground uppercase">{camSetup.machine}</span>
+																	<span className="text-[11px] font-bold text-foreground uppercase">{MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Generic 3-Axis VMC'}</span>
 																</div>
 
 																<div className="w-px h-8 bg-muted/50" />
@@ -1420,7 +1429,7 @@ export default function HitlWorkspace() {
 																		<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
 																		Controller
 																	</span>
-																	<span className="text-[11px] font-bold text-foreground uppercase">{controller}</span>
+																	<span className="text-[11px] font-bold text-foreground uppercase">{MACHINE_MATRIX.controllers[(camSetup.controller as ControllerId) || 'FANUC_0I_MF']?.label || camSetup.controller || 'FANUC'}</span>
 																</div>
 
 																<div className="w-px h-8 bg-muted/50" />
@@ -1530,8 +1539,6 @@ export default function HitlWorkspace() {
 												parameterMetadata={parameterMetadata}
 												camSetup={camSetup}
 												setCamSetup={setCamSetup}
-												controller={controller}
-												setController={setController}
 												pythonScript={pythonScript}
 												camSummaryElement={
 													(workflowStage === 'cad' || workflowStage === 'cam' || workflowStage === 'gcode') ? (
@@ -1566,8 +1573,6 @@ export default function HitlWorkspace() {
 								camSetup={camSetup}
 								camSetups={camSetups}
 								setCamSetup={setCamSetup}
-								controller={controller}
-								setController={setController}
 								camTools={camTools}
 								setCamTools={setCamTools}
 								onGenerateGCode={handleGenerateGCode}

@@ -1,0 +1,389 @@
+{
+  "machineTypes": [
+    { "id": "MILL_3X_VMC", "label": "3-Axis Vertical Machining Center (VMC)" },
+    { "id": "MILL_4X_VMC", "label": "4-Axis Vertical Machining Center (VMC)" },
+    { "id": "MILL_5X_VMC", "label": "5-Axis Vertical Machining Center (VMC)" },
+    { "id": "CNC_LATHE", "label": "CNC Turning Center" },
+    { "id": "MILL_TURN", "label": "Mill-Turn Center" },
+    { "id": "DRILL_TAP_CENTER", "label": "Drill/Tap Center" },
+    { "id": "ROUTER_3X", "label": "3-Axis CNC Router" }
+  ],
+  "machineProfiles": [
+    {
+      "id": "generic_3x_vmc",
+      "label": "Generic 3-Axis VMC",
+      "machineType": "MILL_3X_VMC",
+      "axisCount": 3,
+      "defaultController": "FANUC_0I_MF",
+      "compatibleControllers": [
+        "FANUC_0I_MF",
+        "HAAS_NGC",
+        "SIEMENS_828D",
+        "SIEMENS_840D_ONE",
+        "HEIDENHAIN_TNC",
+        "MITSUBISHI_M80_M800",
+        "MAZAK_SMOOTH_EIA"
+      ],
+      "recommendedPost": "FANUC_3X_MILL",
+      "camSupport": {
+        "setup": true,
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
+      }
+    },
+    {
+      "id": "haas_vf2",
+      "label": "Haas VF-2",
+      "machineType": "MILL_3X_VMC",
+      "axisCount": 3,
+      "defaultController": "HAAS_NGC",
+      "compatibleControllers": ["HAAS_NGC"],
+      "recommendedPost": "HAAS_NGC_3X_MILL",
+      "camSupport": {
+        "setup": true,
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
+      }
+    },
+    {
+      "id": "generic_4x_vmc",
+      "label": "Generic 4-Axis VMC",
+      "machineType": "MILL_4X_VMC",
+      "axisCount": 4,
+      "defaultController": "FANUC_0I_MF",
+      "compatibleControllers": [
+        "FANUC_0I_MF",
+        "HAAS_NGC",
+        "SIEMENS_840D_ONE",
+        "HEIDENHAIN_TNC"
+      ],
+      "recommendedPost": "FANUC_3X_MILL",
+      "camSupport": {
+        "setup": true,
+        "featureRecognition": false,
+        "toolpathGeneration": false,
+        "gcodeGeneration": false
+      }
+    },
+    {
+      "id": "generic_5x_vmc",
+      "label": "Generic 5-Axis VMC",
+      "machineType": "MILL_5X_VMC",
+      "axisCount": 5,
+      "defaultController": "HEIDENHAIN_TNC",
+      "compatibleControllers": [
+        "HEIDENHAIN_TNC",
+        "SIEMENS_840D_ONE",
+        "HAAS_NGC"
+      ],
+      "recommendedPost": "HEIDENHAIN_TNC_3X_MILL",
+      "camSupport": {
+        "setup": true,
+        "featureRecognition": false,
+        "toolpathGeneration": false,
+        "gcodeGeneration": false
+      }
+    },
+    {
+      "id": "generic_cnc_turning_center",
+      "label": "Generic CNC Turning Center",
+      "machineType": "CNC_LATHE",
+      "axisCount": 2,
+      "defaultController": "FANUC_0I_MF",
+      "compatibleControllers": [
+        "FANUC_0I_MF",
+        "HAAS_NGC",
+        "SIEMENS_828D",
+        "OKUMA_OSP"
+      ],
+      "recommendedPost": "FANUC_3X_MILL",
+      "camSupport": {
+        "setup": true,
+        "featureRecognition": false,
+        "toolpathGeneration": false,
+        "gcodeGeneration": false
+      }
+    },
+    {
+      "id": "generic_mill_turn",
+      "label": "Generic Mill-Turn Center",
+      "machineType": "MILL_TURN",
+      "axisCount": 5,
+      "defaultController": "MAZAK_SMOOTH_EIA",
+      "compatibleControllers": [
+        "MAZAK_SMOOTH_EIA",
+        "OKUMA_OSP",
+        "FANUC_0I_MF"
+      ],
+      "recommendedPost": "MAZAK_SMOOTH_EIA_3X_MILL",
+      "camSupport": {
+        "setup": true,
+        "featureRecognition": false,
+        "toolpathGeneration": false,
+        "gcodeGeneration": false
+      }
+    },
+    {
+      "id": "generic_drill_tap",
+      "label": "Generic Drill/Tap Center",
+      "machineType": "DRILL_TAP_CENTER",
+      "axisCount": 3,
+      "defaultController": "BROTHER_CNC_D00",
+      "compatibleControllers": [
+        "BROTHER_CNC_D00",
+        "FANUC_0I_MF"
+      ],
+      "recommendedPost": "BROTHER_DRILL_TAP_MILL",
+      "camSupport": {
+        "setup": true,
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
+      }
+    },
+    {
+      "id": "generic_3x_router",
+      "label": "Generic 3-Axis CNC Router",
+      "machineType": "ROUTER_3X",
+      "axisCount": 3,
+      "defaultController": "LINUXCNC",
+      "compatibleControllers": ["LINUXCNC", "MACH3", "GRBL"],
+      "recommendedPost": "LINUXCNC_3X_MILL",
+      "camSupport": {
+        "setup": true,
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
+      }
+    }
+  ],
+  "controllers": {
+    "FANUC_0I_MF": {
+      "label": "FANUC 0i-MF / 31i",
+      "industrial": true,
+      "compatiblePosts": ["FANUC_3X_MILL"]
+    },
+    "HAAS_NGC": {
+      "label": "Haas NGC",
+      "industrial": true,
+      "compatiblePosts": ["HAAS_NGC_3X_MILL"]
+    },
+    "SIEMENS_828D": {
+      "label": "Siemens SINUMERIK 828D",
+      "industrial": true,
+      "compatiblePosts": ["SIEMENS_828D_3X_MILL"]
+    },
+    "SIEMENS_840D_ONE": {
+      "label": "Siemens SINUMERIK 840D / ONE",
+      "industrial": true,
+      "compatiblePosts": ["SIEMENS_840D_ONE_3X_MILL"]
+    },
+    "HEIDENHAIN_TNC": {
+      "label": "Heidenhain TNC 620 / 640",
+      "industrial": true,
+      "compatiblePosts": ["HEIDENHAIN_TNC_3X_MILL"]
+    },
+    "MAZAK_SMOOTH_EIA": {
+      "label": "Mazak Smooth / MAZATROL EIA",
+      "industrial": true,
+      "compatiblePosts": ["MAZAK_SMOOTH_EIA_3X_MILL"]
+    },
+    "MITSUBISHI_M80_M800": {
+      "label": "Mitsubishi M80 / M800",
+      "industrial": true,
+      "compatiblePosts": ["MITSUBISHI_M80_M800_3X_MILL"]
+    },
+    "OKUMA_OSP": {
+      "label": "Okuma OSP",
+      "industrial": true,
+      "compatiblePosts": ["OKUMA_OSP_3X_MILL"]
+    },
+    "BROTHER_CNC_D00": {
+      "label": "Brother CNC-D00 / CNC-C00",
+      "industrial": true,
+      "compatiblePosts": ["BROTHER_DRILL_TAP_MILL"]
+    },
+    "LINUXCNC": {
+      "label": "LinuxCNC",
+      "industrial": false,
+      "compatiblePosts": ["LINUXCNC_3X_MILL"]
+    },
+    "MACH3": {
+      "label": "Mach3",
+      "industrial": false,
+      "compatiblePosts": ["MACH3_3X_ROUTER"]
+    },
+    "GRBL": {
+      "label": "GRBL",
+      "industrial": false,
+      "compatiblePosts": ["GRBL_3X_ROUTER"]
+    }
+  },
+  "postProcessors": {
+    "AUTO": {
+      "label": "Auto Recommended",
+      "description": "Automatically selects the safest compatible post processor.",
+      "controller": null,
+      "machineTypes": [],
+      "supports": {}
+    },
+    "FANUC_3X_MILL": {
+      "label": "Fanuc 3-Axis Mill",
+      "controller": "FANUC_0I_MF",
+      "machineTypes": ["MILL_3X_VMC", "DRILL_TAP_CENTER"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": true,
+        "cutterCompensation": true,
+        "cannedCycles": true,
+        "arcs": true
+      }
+    },
+    "HAAS_NGC_3X_MILL": {
+      "label": "Haas NGC 3-Axis Mill",
+      "controller": "HAAS_NGC",
+      "machineTypes": ["MILL_3X_VMC", "DRILL_TAP_CENTER"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": true,
+        "cutterCompensation": true,
+        "cannedCycles": true,
+        "arcs": true
+      }
+    },
+    "SIEMENS_828D_3X_MILL": {
+      "label": "Siemens 828D 3-Axis Mill",
+      "controller": "SIEMENS_828D",
+      "machineTypes": ["MILL_3X_VMC"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": true,
+        "cutterCompensation": true,
+        "cannedCycles": true,
+        "arcs": true
+      }
+    },
+    "SIEMENS_840D_ONE_3X_MILL": {
+      "label": "Siemens 840D / ONE 3-Axis Mill",
+      "controller": "SIEMENS_840D_ONE",
+      "machineTypes": ["MILL_3X_VMC", "MILL_4X_VMC", "MILL_5X_VMC"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": true,
+        "cutterCompensation": true,
+        "cannedCycles": true,
+        "arcs": true
+      }
+    },
+    "HEIDENHAIN_TNC_3X_MILL": {
+      "label": "Heidenhain TNC 3-Axis Mill",
+      "controller": "HEIDENHAIN_TNC",
+      "machineTypes": ["MILL_3X_VMC", "MILL_4X_VMC", "MILL_5X_VMC"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": true,
+        "cutterCompensation": false,
+        "cannedCycles": true,
+        "arcs": true
+      }
+    },
+    "MAZAK_SMOOTH_EIA_3X_MILL": {
+      "label": "Mazak Smooth EIA 3-Axis Mill",
+      "controller": "MAZAK_SMOOTH_EIA",
+      "machineTypes": ["MILL_3X_VMC", "MILL_TURN"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": true,
+        "cutterCompensation": true,
+        "cannedCycles": true,
+        "arcs": true
+      }
+    },
+    "MITSUBISHI_M80_M800_3X_MILL": {
+      "label": "Mitsubishi M80 / M800 3-Axis Mill",
+      "controller": "MITSUBISHI_M80_M800",
+      "machineTypes": ["MILL_3X_VMC"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": true,
+        "cutterCompensation": true,
+        "cannedCycles": true,
+        "arcs": true
+      }
+    },
+    "OKUMA_OSP_3X_MILL": {
+      "label": "Okuma OSP 3-Axis Mill",
+      "controller": "OKUMA_OSP",
+      "machineTypes": ["MILL_3X_VMC", "CNC_LATHE"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": true,
+        "cutterCompensation": true,
+        "cannedCycles": true,
+        "arcs": true
+      }
+    },
+    "BROTHER_DRILL_TAP_MILL": {
+      "label": "Brother SPEEDIO / Drill-Tap Mill",
+      "controller": "BROTHER_CNC_D00",
+      "machineTypes": ["DRILL_TAP_CENTER"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": true,
+        "cutterCompensation": true,
+        "cannedCycles": true,
+        "arcs": true
+      }
+    },
+    "LINUXCNC_3X_MILL": {
+      "label": "LinuxCNC 3-Axis Mill",
+      "controller": "LINUXCNC",
+      "machineTypes": ["ROUTER_3X", "MILL_3X_VMC"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": true,
+        "cutterCompensation": true,
+        "cannedCycles": true,
+        "arcs": true
+      }
+    },
+    "MACH3_3X_ROUTER": {
+      "label": "Mach3 3-Axis Router",
+      "controller": "MACH3",
+      "machineTypes": ["ROUTER_3X"],
+      "supports": {
+        "toolChange": true,
+        "workOffsets": true,
+        "lengthCompensation": false,
+        "cutterCompensation": false,
+        "cannedCycles": false,
+        "arcs": true
+      }
+    },
+    "GRBL_3X_ROUTER": {
+      "label": "GRBL 3-Axis Router",
+      "controller": "GRBL",
+      "machineTypes": ["ROUTER_3X"],
+      "supports": {
+        "toolChange": false,
+        "workOffsets": true,
+        "lengthCompensation": false,
+        "cutterCompensation": false,
+        "cannedCycles": false,
+        "arcs": true
+      }
+    }
+  }
+}

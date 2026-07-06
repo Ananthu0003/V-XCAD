@@ -21,8 +21,6 @@ interface EngineeringConsoleProps {
   camSetup: SetupSettings;
   setCamSetup: (v: SetupSettings) => void;
   camSetups?: any[];
-  controller: string;
-  setController: (v: string) => void;
   // Tools
   camTools: Tool[];
   setCamTools: (v: Tool[]) => void;
@@ -177,22 +175,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
               {/* Right side: Post Processor & Machining Strategy */}
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
-                  <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/80">Post Processor</label>
-                  <select
-                    value={props.controller}
-                    onChange={(e) => props.setController(e.target.value)}
-                    className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner"
-                  >
-                    <option value="iso">Standard ISO (RS-274)</option>
-                    <option value="fanuc">Fanuc</option>
-                    <option value="haas">Haas</option>
-                    <option value="siemens">Siemens Sinumerik</option>
-                    <option value="heidenhain">Heidenhain</option>
-                    <option value="grbl">GRBL</option>
-                  </select>
-                </div>
 
-                <div className="flex flex-col gap-2">
                   <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/80">Machining Strategy</label>
                   <select className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
                     <option value="2d_profile">2D Profile Outline (Contouring)</option>
@@ -385,7 +368,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `vexcad_${props.controller}_output.gcode`;
+                    a.download = `vexcad_${props.camSetup.postProcessor || 'iso'}_output.gcode`;
                     a.click();
                     URL.revokeObjectURL(url);
                   }}

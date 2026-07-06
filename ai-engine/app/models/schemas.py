@@ -201,9 +201,11 @@ class CamOperationSchema(BaseModel):
     toolpaths: Optional[list[ToolpathSegment]] = None
 
 class CamSetup(BaseModel):
-    machineType: str = "3-Axis"
-    machineModel: str = "Generic 3-Axis"
-    controller: str = "fanuc"
+    machineType: str = "MILL_3X_VMC"
+    machineProfile: str = "generic_3x_vmc"
+    controller: str = "FANUC_0I_MF"
+    postProcessor: str = "AUTO"
+    resolved_post_processor: Optional[str] = None
     material: str = "aluminum_6061"
     stockType: str = "box"
     stockDimensions: list[float] = [100.0, 100.0, 20.0]
@@ -292,7 +294,11 @@ class RenderResponse(BaseModel):
     repaired_script: Optional[str] = None
 
 class MachineConfig(BaseModel):
-    controller: str = "fanuc"
+    machine_type: str = "MILL_3X_VMC"
+    machine_profile: str = "generic_3x_vmc"
+    controller: str = "FANUC_0I_MF"
+    post_processor: str = "AUTO"
+    resolved_post_processor: Optional[str] = None
     safe_z: float = 10.0
     resolution: float = 0.1
 

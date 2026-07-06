@@ -11,8 +11,6 @@ interface WorkspaceSettingsProps {
   parameterMetadata: Record<string, any>;
   camSetup: SetupSettings;
   setCamSetup: React.Dispatch<React.SetStateAction<SetupSettings>>;
-  controller: string;
-  setController: React.Dispatch<React.SetStateAction<string>>;
   pythonScript: string;
   camSummaryElement?: React.ReactNode;
 }
@@ -26,8 +24,6 @@ export function WorkspaceSettings({
   parameterMetadata,
   camSetup,
   setCamSetup,
-  controller,
-  setController,
   pythonScript,
   camSummaryElement,
 }: WorkspaceSettingsProps) {
@@ -104,93 +100,7 @@ export function WorkspaceSettings({
           )}
         </div>
 
-        {/* CAM & GCode Stage Settings (Always visible now) */}
-        <div className="space-y-8 animate-in fade-in duration-300">
-            {/* Machine Context */}
-            <div className="space-y-5">
-              <div className="flex items-center gap-2">
-                <h4 className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground/60">
-                  MACHINE CONTEXT
-                </h4>
-                <div className="flex-1 h-px bg-muted/50" />
-              </div>
-              
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-bold tracking-widest text-muted-foreground/80 uppercase">Units</label>
-                  <select
-                    className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary/50 outline-none transition-all shadow-inner"
-                    value={camSetup.units}
-                    onChange={(e) => setCamSetup({ ...camSetup, units: e.target.value as 'mm' | 'in' })}
-                  >
-                    <option value="mm">Millimeters (mm)</option>
-                    <option value="in">Inches (in)</option>
-                  </select>
-                </div>
-                
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-bold tracking-widest text-muted-foreground/80 uppercase">Machine</label>
-                  <select
-                    className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary/50 outline-none transition-all shadow-inner"
-                    value={camSetup.machine}
-                    onChange={(e) => setCamSetup({ ...camSetup, machine: e.target.value })}
-                  >
-                    <option value="Haas VF-2 (3-Axis)">Haas VF-2 (3-Axis)</option>
-                    <option value="PocketNC V2-50 (5-Axis)">PocketNC V2-50 (5-Axis)</option>
-                    <option value="Tormach 1100M">Tormach 1100M</option>
-                  </select>
-                </div>
-                
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-bold tracking-widest text-muted-foreground/80 uppercase">Controller</label>
-                  <select
-                    className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary/50 outline-none transition-all shadow-inner"
-                    value={controller}
-                    onChange={(e) => setController(e.target.value)}
-                  >
-                    <option value="Fanuc">Fanuc</option>
-                    <option value="GRBL">GRBL</option>
-                    <option value="LinuxCNC">LinuxCNC</option>
-                    <option value="Mach3">Mach3</option>
-                  </select>
-                </div>
-              </div>
-            </div>
 
-            {/* CAM Defaults */}
-            <div className="space-y-5">
-              <div className="flex items-center gap-2">
-                <h4 className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground/60">
-                  CAM DEFAULTS
-                </h4>
-                <div className="flex-1 h-px bg-muted/50" />
-              </div>
-              
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-bold tracking-widest text-muted-foreground/80 uppercase">Tolerance</label>
-                  <input
-                    type="number"
-                    step="0.001"
-                    className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary/50 outline-none transition-all shadow-inner font-mono"
-                    value={camSetup.tolerance}
-                    onChange={(e) => setCamSetup({ ...camSetup, tolerance: parseFloat(e.target.value) })}
-                  />
-                </div>
-                
-                <div className="space-y-1.5">
-                  <label className="text-[9px] font-bold tracking-widest text-muted-foreground/80 uppercase">Stock Offset</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary/50 outline-none transition-all shadow-inner font-mono"
-                    value={camSetup.stockOffset}
-                    onChange={(e) => setCamSetup({ ...camSetup, stockOffset: parseFloat(e.target.value) })}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </aside>

@@ -1172,9 +1172,40 @@ async def cam_generate_gcode(request: CamGCodeRequest):
             "operation_statuses": readiness["operation_statuses"]
         }
 
-    # Mock setups/machines for MVP (should be loaded from project)
-    setup = {"id": "setup_1", "material": "aluminum"}
-    machine = {"id": "machine_1", "axes": 3, "max_spindle_rpm": 10000}
+    from app.services.cam.machine_validation import validate_full_setup, validate_post_capabilities_for_operations
+    
+    engine_setup = engine_input.get("setup", {})
+    machine_type = engine_setup.get("machineType", "MILL_3X_VMC")
+    machine_profile = engine_setup.get("machineProfile", "generic_3x_vmc")
+    controller = engine_setup.get("controller", "FANUC_0I_MF")
+    post_processor_req = engine_setup.get("postProcessor", "AUTO")
+    
+    is_valid, err_msg, resolved_post = validate_full_setup(machine_type, machine_profile, controller, post_processor_req)
+    if not is_valid:
+        return {
+            "can_generate_gcode": False,
+            "gcode": None,
+            "cam_readiness_score": readiness["cam_readiness_score"],
+            "status": "validation_error",
+            "message": err_msg,
+            "errors": [{"message": err_msg, "level": "error"}],
+            "operation_statuses": []
+        }
+
+    cap_valid, cap_err = validate_post_capabilities_for_operations(resolved_post, operations)
+    if not cap_valid:
+        return {
+            "can_generate_gcode": False,
+            "gcode": None,
+            "cam_readiness_score": readiness["cam_readiness_score"],
+            "status": "capability_error",
+            "message": cap_err,
+            "errors": [{"message": cap_err, "level": "error"}],
+            "operation_statuses": []
+        }
+
+    setup = engine_setup
+    machine = {"id": machine_profile, "type": machine_type}
     
     # Load tools
     # Assuming tools are in engine_input, or we mock them if not present.
@@ -1245,8 +1276,7 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         return {"can_generate_gcode": False, "gcode": None, "errors": [{"level": "error", "message": "No valid operations to generate G-code for."}]}
         
     try:
-        controller = "fanuc"
-        post_processor = PostProcessorFactory.create(controller)
+        post_processor = PostProcessorFactory.create(resolved_post)
         gcode = post_processor.generate(valid_operations)
         
         # 3. Post Output Validation

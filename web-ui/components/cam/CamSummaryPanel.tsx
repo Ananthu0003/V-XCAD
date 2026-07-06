@@ -1,5 +1,6 @@
 import { SetupSettings, Tool, CamOperation, CamFeature, CamSetupPlan } from '@/types/cam';
 import { Target, Layers, Settings2, Scissors, Activity, FileCode } from 'lucide-react';
+import { MACHINE_MATRIX } from '@/lib/cam/machineProfiles';
 
 type CamSummaryPanelProps = {
     setup: SetupSettings;
@@ -134,7 +135,7 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                 <Settings2 className="size-3.5" /> Setup
                             </div>
                             <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-muted-foreground mt-1">
-                                <div>Machine:</div><div className="text-foreground capitalize">{setup.machine || 'Not selected'}</div>
+                                <div>Machine:</div><div className="text-foreground capitalize">{MACHINE_MATRIX.machineProfiles.find(p => p.id === setup.machineProfile)?.label || setup.machineProfile || 'Not selected'}</div>
                                 <div>Type:</div><div className="text-foreground capitalize">{(setup as any).setupType || '3-Axis'}</div>
                                 <div>Tool Axis:</div><div className="text-foreground font-mono">[{(setup as any).toolAxis?.join(', ') || '0, 0, 1'}]</div>
                                 <div>Material:</div><div className="text-foreground capitalize">{setup.material.replace('_', ' ')}</div>
