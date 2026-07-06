@@ -215,6 +215,15 @@ export type CamOperation = {
   toolpaths?: unknown[];
   toolpath_schema_version?: string;
 
+  // Used by CamSummaryPanel
+  statistics?: ToolpathStatistics;
+  setup_id?: string;
+  feature_id?: string;
+
+  // Optional camelCase versions if frontend/backend uses mixed naming
+  setupId?: string;
+  featureId?: string;
+
   error?: string;
   errorReason?: string;
   recommended_machine?: string;
@@ -228,7 +237,8 @@ export type CamOperation = {
   blocked_reason?: string;
   collisionStatus?: CollisionStatus;
   enabled?: boolean;
-  toolpath: any;
+
+  toolpath?: any;
 };
 
 export type ViewportSettings = {
