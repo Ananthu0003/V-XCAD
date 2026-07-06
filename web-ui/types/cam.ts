@@ -191,6 +191,11 @@ export type CuttingParameters = {
     passCount?: number;
 
     linking?: ToolpathLinking;
+
+    // Backend error/debug info used by CamSummaryPanel
+    error?: string;
+    errorReason?: string;
+    diagnostics?: Record<string, any>;
 };
 
 export type ToolpathStatistics = {
@@ -215,12 +220,10 @@ export type CamOperation = {
   toolpaths?: unknown[];
   toolpath_schema_version?: string;
 
-  // Used by CamSummaryPanel
   statistics?: ToolpathStatistics;
   setup_id?: string;
   feature_id?: string;
 
-  // Optional camelCase versions if frontend/backend uses mixed naming
   setupId?: string;
   featureId?: string;
 
