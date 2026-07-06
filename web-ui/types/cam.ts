@@ -205,29 +205,30 @@ export type ToolpathStatistics = {
 export type CollisionStatus = 'safe' | 'warning' | 'critical';
 
 export type CamOperation = {
-    id: string;
-    name: string;
-    type: OperationType;
-    toolId: string;
-    feature_id?: string;
-    setup_id?: string;
-    parameters: CuttingParameters & {
-        error?: string;
-        errorReason?: string;
-        recommended_machine?: string;
-        tool_selection_reason?: string;
-        feeds_and_speeds?: Record<string, number>;
-        depends_on_operation?: string;
-        depends_on_setup?: string;
-        diagnostics?: Record<string, any>;
-    };
-    heights?: HeightsSettings;
-    status?: OperationStatus;
-    blocked_reason?: string;
-    statistics?: ToolpathStatistics;
-    collisionStatus?: CollisionStatus;
-    enabled?: boolean;
-    toolpaths?: any[];
+  id: string;
+  name: string;
+  type: OperationType;
+  toolId: string;
+  parameters: CuttingParameters;
+
+  status?: OperationStatus | string;
+  toolpaths?: unknown[];
+  toolpath_schema_version?: string;
+
+  error?: string;
+  errorReason?: string;
+  recommended_machine?: string;
+  tool_selection_reason?: string;
+  feeds_and_speeds?: Record<string, number>;
+  depends_on_operation?: string;
+  depends_on_setup?: string;
+  diagnostics?: Record<string, any>;
+
+  heights?: HeightsSettings;
+  blocked_reason?: string;
+  collisionStatus?: CollisionStatus;
+  enabled?: boolean;
+  toolpath: any;
 };
 
 export type ViewportSettings = {
