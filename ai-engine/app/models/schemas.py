@@ -55,7 +55,10 @@ class CamSetupPlan(BaseModel):
     setupType: str = "milling_3axis"
     toolAxis: list[float] = [0.0, 0.0, 1.0]
     workCoordinateSystem: str = "G54"
-    modelToSetupTransform: Optional[list[float]] = None
+    modelToSetupTransform: Optional[list[list[float]]] = None
+    stockTopZ: float = 0.0
+    stockBottomZ: float = 0.0
+    setupOrigin: str = "top_center"
     assignedFeatureIds: list[str] = Field(default_factory=list)
     unassignedFeatureIds: list[str] = Field(default_factory=list)
     allFeatureIds: list[str] = Field(default_factory=list)
@@ -65,6 +68,18 @@ class CamSetupPlan(BaseModel):
     machinableFeatures: list[str] = Field(default_factory=list)
     deferredFeatures: list[str] = Field(default_factory=list)
     unsupportedFeatures: list[str] = Field(default_factory=list)
+
+class SetupLocalFeature(BaseModel):
+    featureId: str
+    setupId: str
+    featureType: str
+    localCenter: list[float]
+    localAxis: list[float]
+    localTopZ: float
+    localBottomZ: float
+    depth: float
+    machiningRegion: Optional[dict[str, Any]] = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
 
 class CoordinateMode(str, Enum):
     MILL_XYZ = "mill_xyz"
@@ -94,6 +109,11 @@ class ToolpathSegment(BaseModel):
     source: str = "strategy"
     gcodeLineStart: Optional[int] = None
     gcodeLineEnd: Optional[int] = None
+    toolpathType: Optional[Literal["tool_centerline", "geometry_boundary"]] = None
+    toolRadiusCompensated: Optional[bool] = None
+    toolDiameterMm: Optional[float] = None
+    compensationMode: Optional[Literal["computer", "controller"]] = None
+    segmentRole: Optional[Literal["lead_in", "cut", "lead_out", "retract"]] = None
 
 class MotionCommand(BaseModel):
     commandId: str = ""
@@ -109,6 +129,7 @@ class MotionCommand(BaseModel):
     source: str = "strategy"
     center: Optional[Point3D] = None
     radius: Optional[float] = None
+    segmentRole: Optional[Literal["lead_in", "cut", "lead_out", "retract"]] = None
     clockwise: Optional[bool] = None
     plane: Optional[str] = None
 
@@ -307,7 +328,17 @@ class CAMJobRequest(BaseModel):
     step_file_path: Optional[str] = None
     machine_configuration: MachineConfig = Field(default_factory=MachineConfig)
 
+class GCodeValidationReport(BaseModel):
+    status: Literal["passed", "failed"] = "passed"
+    setupCoordinateSystem: str = "normalized_top_z_zero"
+    stockTopZ: float = 0.0
+    stockBottomZ: float = 0.0
+    safeClearanceZ: float = 0.0
+    issues: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
+
 class GCodeResponse(BaseModel):
-    gcode: str
+    gcode: Optional[str] = None
+    validation: Optional[GCodeValidationReport] = None
     toolpaths: list[ToolpathSegment] = Field(default_factory=list)
 

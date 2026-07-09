@@ -20,8 +20,15 @@ export function SettingsPanel({ isOpen, onClose, user }: SettingsPanelProps) {
 	const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
 	const [mounted, setMounted] = useState(false);
 
-	useEffect(() => { setMounted(true); }, []);
-	useEffect(() => { setDisplayName(user?.name ?? ''); }, [user]);
+	useEffect(() => {
+		const t1 = setTimeout(() => setMounted(true), 0);
+		return () => clearTimeout(t1);
+	}, []);
+	
+	useEffect(() => {
+		const t2 = setTimeout(() => setDisplayName(user?.name ?? ''), 0);
+		return () => clearTimeout(t2);
+	}, [user?.name]);
 
 	const handleLogout = async () => {
 		setIsLoggingOut(true);

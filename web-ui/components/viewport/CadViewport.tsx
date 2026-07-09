@@ -154,7 +154,7 @@ export function CadViewport({
         ];
 		let validCount = 0;
 		let droppedCount = 0;
-		let droppedReasons: Record<string, number> = {};
+		const droppedReasons: Record<string, number> = {};
 		
 		toolpaths.forEach((seg: any) => {
 			let isInvalid = false;
@@ -289,7 +289,7 @@ export function CadViewport({
 					</div>
 				</div>
 			)}
-			<header className="flex h-16 items-center justify-between border-b border-transparent bg-background/60 backdrop-blur-xl px-6 z-50">
+			<header className="flex h-16 items-center justify-between border-b border-transparent bg-background/60 backdrop-blur-xl px-6 z-30">
 				<div className="flex flex-col gap-1.5">
 					<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
 						{/* Workflow breadcrumb removed per user request */}
@@ -491,8 +491,8 @@ export function CadViewport({
 											const radius = toolDiameter / 2;
 											const stickout = activeTool.length_mm || activeTool.stickout || (radius * 5); // visually more proportional fallback
 
-											let i = activeSegment.end_i ?? 0;
-											let j = activeSegment.end_j ?? 0;
+											const i = activeSegment.end_i ?? 0;
+											const j = activeSegment.end_j ?? 0;
 											let k = activeSegment.end_k ?? -1;
 											if (i === 0 && j === 0 && k === 0) k = -1;
 

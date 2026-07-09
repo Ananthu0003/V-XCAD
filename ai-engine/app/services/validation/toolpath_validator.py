@@ -66,6 +66,9 @@ class ToolpathValidator:
                     
                 # 3. Geometry Validation
                 self._validate_geometry(op, toolpaths, f_name, f_id, result)
+                
+                # 4. Compensation Validation
+                self._validate_compensation(op, toolpaths, f_name, f_id, result)
                     
         return result
 
@@ -120,3 +123,68 @@ class ToolpathValidator:
                 result["errors"].append(f"Geometry validation failed: {f_name} toolpath segments are disconnected by {dist:.3f}mm.")
                 result["status"] = "error"
                 return
+
+    def _validate_compensation(self, op: Dict[str, Any], toolpaths: List[Dict[str, Any]], f_name: str, f_id: str, result: Dict[str, Any]) -> None:
+        op_type = op.get("type")
+        if op_type not in ["2d_contour", "2d_contour_outer"]:
+            return
+
+        for seg in toolpaths:
+            if seg.get("moveType") == "cut":
+                if seg.get("toolpathType") != "tool_centerline":
+                    result["errors"].append("Contour toolpath must be tool-centerline compensated when using R0")
+                    result["status"] = "error"
+                    return
+                    
+                if seg.get("toolRadiusCompensated") is not True:
+                    result["errors"].append("Tool radius compensation metadata missing")
+                    result["status"] = "error"
+                    return
+                    
+                if not seg.get("toolDiameterMm"):
+                    result["errors"].append("Tool diameter missing; cannot validate radius compensation")
+                    result["status"] = "error"
+                    return
+                    
+                comp_mode = seg.get("compensationMode")
+                if comp_mode != "computer":
+                    result["errors"].append("Only computer compensation with R0 is currently supported for Klartext")
+                    result["status"] = "error"
+                    return
+                    
+            # Safe space validation for lead out and BLK FORM bounds
+            if seg.get("segmentRole") in ["lead_in", "lead_out"]:
+                sx = seg.get("start", {}).get("x", 0)
+                sy = seg.get("start", {}).get("y", 0)
+                ex = seg.get("end", {}).get("x", 0)
+                ey = seg.get("end", {}).get("y", 0)
+                if max(abs(sx), abs(ex)) > 100.0 or max(abs(sy), abs(ey)) > 100.0:
+                    result["warnings"].append({
+                        "code": "LEAD_MOVE_OUTSIDE_BLK_FORM",
+                        "severity": "warning",
+                        "message": "Lead-in/lead-out move is outside declared BLK FORM. Confirm stock, fixture, and machine clearance."
+                    })
+                    
+            if seg.get("segmentRole") == "lead_out":
+                # Find the previous cut segment to check collinearity
+                idx = toolpaths.index(seg)
+                if idx > 0:
+                    prev_seg = toolpaths[idx - 1]
+                    if prev_seg.get("segmentRole") == "cut":
+                        dx = seg.get("end", {}).get("x", 0) - seg.get("start", {}).get("x", 0)
+                        dy = seg.get("end", {}).get("y", 0) - seg.get("start", {}).get("y", 0)
+                        mag = math.hypot(dx, dy)
+                        
+                        pdx = prev_seg.get("end", {}).get("x", 0) - prev_seg.get("start", {}).get("x", 0)
+                        pdy = prev_seg.get("end", {}).get("y", 0) - prev_seg.get("start", {}).get("y", 0)
+                        pmag = math.hypot(pdx, pdy)
+                        
+                        if mag > 0.001 and pmag > 0.001:
+                            nx, ny = dx/mag, dy/mag
+                            pnx, pny = pdx/pmag, pdy/pmag
+                            
+                            dot = nx * pnx + ny * pny
+                            if abs(dot) > 0.99:
+                                result["errors"].append(f"Geometry validation failed: {f_name} lead_out vector runs along the finished profile edge.")
+                                result["status"] = "error"
+                                return

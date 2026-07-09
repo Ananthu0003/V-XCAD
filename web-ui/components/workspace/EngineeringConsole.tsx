@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Settings, Cpu, PenTool, Sliders, PlaySquare, Code2, Activity } from 'lucide-react';
+import { Settings, Cpu, PenTool, Sliders, PlaySquare, Code2, Activity, Database } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SetupSection } from '../cam/SetupSection';
 import { ToolLibrarySection } from '../cam/ToolLibrarySection';
@@ -12,6 +12,7 @@ import { OperationPropertyPanel } from '../cam/OperationPropertyPanel';
 import { SimulationControls } from '../cam/SimulationControls';
 import { GCodeViewer } from '../cam/GCodeViewer';
 import { OperationPlanningTable } from '../cam/OperationPlanningTable';
+import { ManageHoldersTab } from '../cam/ManageHoldersTab';
 import type { SetupSettings, Tool, CamOperation, SimulationState, CamFeature, PostProcessor, OperationType } from '@/types/cam';
 
 interface EngineeringConsoleProps {
@@ -29,6 +30,7 @@ interface EngineeringConsoleProps {
   onGenerateToolpaths: () => void;
   isGeneratingGcode: boolean;
   gcodeContent: string | null;
+  klartextContent?: string | null;
   gcodeErrors?: any[];
   // Features
   camFeatures: CamFeature[];
@@ -55,16 +57,17 @@ interface EngineeringConsoleProps {
   canGenerateGcode?: boolean;
 }
 
-type TabType = 'setup' | 'features' | 'tools' | 'params' | 'simulation' | 'gcode';
+type TabType = 'setup' | 'features' | 'tools' | 'holders' | 'params' | 'simulation' | 'gcode';
 
 export function EngineeringConsole(props: EngineeringConsoleProps) {
   const [activeTab, setActiveTab] = useState<TabType>('setup');
+  const [gcodeViewMode, setGcodeViewMode] = useState<'iso' | 'klartext'>('klartext');
 
   const tabs = [
     { id: 'setup', label: 'SETUP', icon: <Settings /> },
     { id: 'features', label: 'FEATURES & AI', icon: <Cpu /> },
-    { id: 'tools', label: 'TOOL LIBRARY', icon: <PenTool /> },
-    { id: 'params', label: 'CUTTING PARAMS', icon: <Sliders /> },
+    { id: 'tools', label: 'JOB TOOLS', icon: <PenTool /> },
+    { id: 'holders', label: 'JOB HOLDERS', icon: <Database /> },
     { id: 'simulation', label: 'SIMULATION', icon: <PlaySquare /> },
     { id: 'gcode', label: 'G-CODE', icon: <Code2 /> },
   ];
@@ -218,39 +221,8 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
             />
           )}
 
-          {activeTab === 'params' && (
-            <div>
-              {props.camOperations.find(op => op.id === props.activeOperationId) ? (
-                <div className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Assigned Tool</label>
-                    <select
-                      value={props.camOperations.find(op => op.id === props.activeOperationId)!.toolId}
-                      onChange={(e) => {
-                        props.setCamOperations(props.camOperations.map(op =>
-                          op.id === props.activeOperationId ? { ...op, toolId: e.target.value } : op
-                        ));
-                      }}
-                      className="w-full rounded-2xl border border-border dark:border-white/10 bg-accent dark:bg-black/60 px-4 py-3 text-sm text-foreground focus:border-blue-500 focus:outline-none"
-                    >
-                      {props.camTools.map(t => (
-                        <option key={t.id} value={t.id}>
-                          {t.number} - {t.name || t.type.replace('_', ' ')}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <OperationPropertyPanel
-                    operation={props.camOperations.find(op => op.id === props.activeOperationId)!}
-                    onChange={(op) => {
-                      props.setCamOperations(props.camOperations.map(o => o.id === op.id ? op : o));
-                    }}
-                  />
-                </div>
-              ) : (
-                <div className="text-center text-muted-foreground/50 py-12 font-mono text-sm">No operation selected</div>
-              )}
-            </div>
+          {activeTab === 'holders' && (
+            <ManageHoldersTab />
           )}
 
           {activeTab === 'simulation' && (
@@ -360,19 +332,53 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
               )}
 
               {/* G-Code Viewer — only shown after explicit generation */}
-              {props.gcodeContent && (
-                <GCodeViewer
-                  content={props.gcodeContent}
-                  onDownload={() => {
-                    const blob = new Blob([props.gcodeContent!], { type: 'text/plain' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `vexcad_${props.camSetup.postProcessor || 'iso'}_output.gcode`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                />
+              {(props.gcodeContent || props.klartextContent) && (
+                <div className="flex flex-col gap-4 mt-2">
+                  {props.klartextContent && props.gcodeContent && (
+                    <div className="flex items-center gap-2 border-b border-white/10 pb-2">
+                      <button
+                        onClick={() => setGcodeViewMode('klartext')}
+                        className={cn("px-4 py-1.5 rounded-md text-xs font-bold uppercase tracking-widest transition-colors", gcodeViewMode === 'klartext' ? "bg-blue-600 text-white" : "text-muted-foreground hover:bg-white/5")}
+                      >
+                        Heidenhain Klartext
+                      </button>
+                      <button
+                        onClick={() => setGcodeViewMode('iso')}
+                        className={cn("px-4 py-1.5 rounded-md text-xs font-bold uppercase tracking-widest transition-colors", gcodeViewMode === 'iso' ? "bg-blue-600 text-white" : "text-muted-foreground hover:bg-white/5")}
+                      >
+                        ISO G-Code
+                      </button>
+                    </div>
+                  )}
+                  {(!props.klartextContent || gcodeViewMode === 'iso') && props.gcodeContent && (
+                    <GCodeViewer
+                      content={props.gcodeContent}
+                      onDownload={() => {
+                        const blob = new Blob([props.gcodeContent!], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `vexcad_${props.camSetup.postProcessor || 'iso'}_output.nc`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                    />
+                  )}
+                  {props.klartextContent && gcodeViewMode === 'klartext' && (
+                    <GCodeViewer
+                      content={props.klartextContent}
+                      onDownload={() => {
+                        const blob = new Blob([props.klartextContent!], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `vexcad_heidenhain_klartext.h`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                    />
+                  )}
+                </div>
               )}
             </div>
           )}

@@ -57,3 +57,4 @@ class FeatureDecision(BaseModel):
     tool_selection_reason: Optional[str] = None
     feeds_and_speeds: Optional[Dict[str, float]] = None
     operation_type: Optional[str] = None
+    parameters: Dict[str, Any] = Field(default_factory=dict)

@@ -217,16 +217,22 @@ def _validate_shape(obj):
         if hasattr(obj, "is_valid") and callable(getattr(obj, "is_valid")):
             if not obj.is_valid():
                 raise RuntimeError("Invalid shape geometry (is_valid=False).")
+    except RuntimeError:
+        raise
     except Exception:
         pass
+
     try:
         if hasattr(obj, "solids") and callable(getattr(obj, "solids")):
             if len(obj.solids()) == 0:
-                raise RuntimeError("No solid bodies found in result.")
+                raise RuntimeError("No solid bodies found in result. You returned a 2D sketch/face instead of a 3D solid. Ensure you have extruded or revolved your geometry.")
+    except RuntimeError:
+        raise
     except Exception:
         pass
+
     if _shape_faces_count(obj) == 0:
-        raise RuntimeError("No faces found in result.")
+        raise RuntimeError("No faces found in result. Ensure you have generated solid geometry.")
 
     try:
         bbox = obj.bounding_box() if callable(getattr(obj, "bounding_box", None)) else getattr(obj, "bounding_box", None)
@@ -485,6 +491,13 @@ def run():
         ns["Line"] = safe_line
 
     build123d.Vector.position = property(lambda self: self)
+    build123d.Vector.x = property(lambda self: self.X)
+    build123d.Vector.y = property(lambda self: self.Y)
+    build123d.Vector.z = property(lambda self: self.Z)
+    if hasattr(build123d, "Vertex"):
+        build123d.Vertex.x = property(lambda self: self.X)
+        build123d.Vertex.y = property(lambda self: self.Y)
+        build123d.Vertex.z = property(lambda self: self.Z)
 
     if hasattr(build123d, "BuildLine"):
         build123d.BuildLine.__matmul__ = lambda self, val: self.wire() @ val
@@ -1201,6 +1214,13 @@ class ParameterRenderService:
                 return "Export error: " + log.split("EXPORT_ERROR:")[1].strip().splitlines()[0]
             except Exception:
                 pass
+                
+        if "VALIDATION_GEOMETRY_ERROR:" in log:
+            try:
+                return "Geometry error: " + log.split("VALIDATION_GEOMETRY_ERROR:")[1].strip().splitlines()[0]
+            except Exception:
+                pass
+
 
         return f"Geometry engine failed. Review script logic and parameter values. \n\nRAW LOG:\n{log}"
 

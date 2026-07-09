@@ -63,7 +63,7 @@ export async function POST(
 		// Persist using Prisma transaction
 		await prisma.$transaction(async (tx) => {
 			// 1. Setup
-			let setupId = setup.id || `setup_${jobId}`;
+			const setupId = setup.id || `setup_${jobId}`;
 			const existingSetup = await tx.camSetup.findUnique({ where: { id: setupId } });
 			if (!existingSetup) {
 				await tx.camSetup.create({

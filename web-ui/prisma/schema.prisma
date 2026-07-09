@@ -249,3 +249,113 @@ model SimulationEvent {
   tool_id            String?
   message            String?
 }
+
+model Tool {
+  id            String             @id @default(uuid())
+  name          String             @unique
+  category      String
+  type          String
+  description   String?
+  manufacturer  String?
+  partNumber    String?
+  unit          String             @default("mm")
+  isActive      Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  
+  geometry      ToolGeometry?
+  offsets       ToolOffset?
+  assembly      ToolAssembly?
+  cuttingData   ToolCuttingData?
+  compatibility ToolCompatibility?
+}
+
+model ToolGeometry {
+  id              String  @id @default(uuid())
+  toolId          String  @unique
+  tool            Tool    @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  diameter        Float
+  cuttingDiameter Float?
+  cornerRadius    Float?
+  ballRadius      Float?
+  fluteLength     Float
+  cuttingLength   Float?
+  overallLength   Float
+  shankDiameter   Float?
+  neckDiameter    Float?
+  neckLength      Float?
+  fluteCount      Int?
+  helixAngle      Float?
+  taperAngle      Float?
+  pointAngle      Float?
+  includedAngle   Float?
+  cuttingWidth    Float?
+  insertCount     Int?
+  leadAngle       Float?
+  arborDiameter   Float?
+  profilePointsJson String? // Stored as JSON string
+}
+
+model ToolOffset {
+  id             String  @id @default(uuid())
+  toolId         String  @unique
+  tool           Tool    @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  lengthOffset   Int
+  diameterOffset Int
+  headNumber     Int?
+  compensationType String?
+}
+
+model Holder {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  type         String
+  gaugeLength  Float
+  diameter     Float
+  shankSize    Float?
+  taperType    String?
+  manufacturer String?
+  description  String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assemblies   ToolAssembly[]
+}
+
+model ToolAssembly {
+  id                  String  @id @default(uuid())
+  toolId              String  @unique
+  tool                Tool    @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  holderId            String?
+  holder              Holder? @relation(fields: [holderId], references: [id], onDelete: SetNull)
+  stickoutLength      Float
+  totalLength         Float?
+  safeClearanceLength Float?
+}
+
+model ToolCuttingData {
+  id           String  @id @default(uuid())
+  toolId       String  @unique
+  tool         Tool    @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  spindleRpm   Int
+  feedRate     Float
+  plungeRate   Float
+  retractRate  Float
+  coolant      String
+  stepdown     Float?
+  stepover     Float?
+  chipLoad     Float?
+  surfaceSpeed Float?
+  feedPerTooth Float?
+}
+
+model ToolCompatibility {
+  id                       String  @id @default(uuid())
+  toolId                   String  @unique
+  tool                     Tool    @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  compatibleOperationsJson String? // Stored as JSON array string
+  compatibleMachinesJson   String? // Stored as JSON array string
+  compatibleMaterialsJson  String? // Stored as JSON array string
+  unsupportedReason        String?
+}

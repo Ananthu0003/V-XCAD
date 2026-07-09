@@ -57,8 +57,8 @@ export function GCodeViewer({ content, onDownload }: GCodeViewerProps) {
 
 	const stats = useMemo(() => {
 		let toolChanges = 0;
-		let gCodes = new Set<string>();
-		let mCodes = new Set<string>();
+		const gCodes = new Set<string>();
+		const mCodes = new Set<string>();
 		let hasCoolant = false;
 		let estimatedMins = 0;
 

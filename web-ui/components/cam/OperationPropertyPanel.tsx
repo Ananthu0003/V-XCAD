@@ -112,6 +112,10 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Stock to Leave</label>
                             <input type="number" step="0.1" value={params.stockToLeave || 0} onChange={(e) => updateParams('stockToLeave', parseFloat(e.target.value) || 0)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" />
                         </div>
+                        <div className="flex flex-col gap-2">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Max Stepdown</label>
+                            <input type="number" step="0.1" value={params.maxStepdown || 0} onChange={(e) => updateParams('maxStepdown', parseFloat(e.target.value) || 0)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" />
+                        </div>
                     </div>
                 )}
 
@@ -127,6 +131,10 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Stock to Leave</label>
                             <input type="number" step="0.1" value={params.stockToLeave || 0} onChange={(e) => updateParams('stockToLeave', parseFloat(e.target.value) || 0)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Max Stepdown</label>
+                            <input type="number" step="0.1" value={params.maxStepdown || 0} onChange={(e) => updateParams('maxStepdown', parseFloat(e.target.value) || 0)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" />
                         </div>
                         <div className="flex flex-col gap-2 col-span-2">
                             <label className="text-[10px] font-bold flex items-center gap-2"><input type="checkbox" checked={params.restMachining || false} onChange={e => updateParams('restMachining', e.target.checked)} className="rounded" /> Rest Machining</label>

@@ -324,6 +324,7 @@ export default function HitlWorkspace() {
 	const [camSimulation, setCamSimulation] = useState<SimulationState>({ isPlaying: false, progress: 0, speed: 1 });
 	const [camViewport, setCamViewport] = useState<ViewportSettings>({ showStock: false, showTool: true, showToolpath: true, showOrigin: true, showAxes: true });
 	const [gcodeContent, setGcodeContent] = useState<string | null>(null);
+	const [klartextContent, setKlartextContent] = useState<string | null>(null);
 	const [isGeneratingGcode, setIsGeneratingGcode] = useState(false);
 	const [gcodeErrors, setGcodeErrors] = useState<any[]>([]);
 	const [camReadinessScore, setCamReadinessScore] = useState<number | null>(null);
@@ -748,6 +749,7 @@ export default function HitlWorkspace() {
 					session_id: sessionId,
 					job_id: sessionId,
 					cam_run_id: latestCamRunId.current || '',
+					setup_id: activeSetupId || '',
 				}),
 			});
 
@@ -760,11 +762,13 @@ export default function HitlWorkspace() {
 
 			if (payload.can_generate_gcode) {
 				setGcodeContent(payload.gcode);
+				setKlartextContent(payload.klartext || null);
 				setGcodeErrors([]);
 				setStatusText('G-Code generated successfully.');
 				toast.success('G-Code generated with full CAM configuration');
 			} else {
 				setGcodeContent(null);
+				setKlartextContent(null);
 				setGcodeErrors(payload.errors || []);
 				setStatusText('G-Code generation failed due to safety/validation errors.');
 				toast.error('G-Code generation failed');
@@ -952,6 +956,22 @@ export default function HitlWorkspace() {
 				mill_turn: isMillTurn
 			};
 
+			// Fetch the full global tool library so the AI picks from existing tools instead of inventing them.
+			let globalTools = [...camTools];
+			try {
+				const toolsRes = await fetch('/api/cam/tools');
+				if (toolsRes.ok) {
+					const data = await toolsRes.json();
+					if (data.tools && data.tools.length > 0) {
+						// Merge global tools with any currently active job tools (prioritizing global)
+						// Actually, just pass the global tools to let the AI pick from the library.
+						globalTools = data.tools;
+					}
+				}
+			} catch (e) {
+				console.warn('Could not fetch global tool library for AI planning', e);
+			}
+
 			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 			const res = await fetch(`${backendUrl}/api/v1/cam/auto_plan`, {
 				method: 'POST',
@@ -961,7 +981,7 @@ export default function HitlWorkspace() {
 					job_id: sessionId,
 					machine_config: {
 						machine_capability: machine_capability,
-						tool_library: camTools.map(t => {
+						tool_library: globalTools.map((t: any) => {
 							let backendType = t.type as string;
 							if (backendType === 'flat_end_mill') backendType = 'end_mill';
 							if (backendType === 'ball_nose') backendType = 'ball_mill';
@@ -969,10 +989,10 @@ export default function HitlWorkspace() {
 								tool_id: t.id,
 								name: t.name || t.number || `Tool ${t.id}`,
 								type: backendType,
-								diameter: t.diameter,
-								flute_count: t.flutes,
-								cutting_length: t.stickout,
-								stickout: t.stickout,
+								diameter: t.geometry?.diameter || t.diameter || 6.35,
+								flute_count: t.geometry?.fluteCount || t.flutes || 2,
+								cutting_length: t.geometry?.fluteLength || t.stickout || 20,
+								stickout: t.assembly?.stickoutLength || t.stickout || 20,
 								compatible_materials: ["all"]
 							};
 						})
@@ -993,23 +1013,60 @@ export default function HitlWorkspace() {
 			}
 			
 			if (data.tools) {
+				// 1. Identify which tool IDs were actually assigned to an operation
+				const assignedToolIds = new Set(
+					(data.operations || [])
+						.map((o: any) => o.tool_id)
+						.filter(Boolean)
+				);
+
+				// 2. Only process tools that were actually assigned
+				const assignedTools = data.tools.filter((t: any) => assignedToolIds.has(t.tool_id || t.id));
+
 				// Map backend tools to frontend Tools
-				const newTools = data.tools.map((t: any, i: number) => ({
+				const newTools = assignedTools.map((t: any, i: number) => ({
 					id: t.tool_id || t.id,
 					dbId: t.tool_id || t.id,
 					name: t.name || `Auto Tool ${i+1}`,
-					number: `T${camTools.length + i + 1}`,
+					number: `T`, // Will be assigned sequentially below
 					type: t.type as ToolType,
 					diameter: t.diameter || 3.175,
 					flutes: t.flutes || 2,
 					stickout: t.stickout || 20,
 					material: (t.material?.material_code || 'carbide') as ToolMaterial,
-					coating: t.coating?.coating_name
+					coating: t.coating?.coating_name,
+					cuttingData: t.cuttingData || (() => {
+						// Fallback: try to find an operation using this tool and extract its speeds & feeds
+						const ops = data.operations || [];
+						const op = ops.find((o: any) => o.tool_id === t.tool_id || o.tool_id === t.id);
+						if (op) {
+							return {
+								spindleRpm: op.parameters?.feeds_and_speeds?.spindleSpeed || op.parameters?.spindleSpeed || 10000,
+								feedRate: op.parameters?.feeds_and_speeds?.feedRate || op.parameters?.feedRate || 1000,
+								plungeRate: op.parameters?.feeds_and_speeds?.plungeRate || op.parameters?.plungeRate || 300,
+								coolant: op.parameters?.coolant || 'flood'
+							};
+						}
+						// Absolute fallback if no operation is found
+						return {
+							spindleRpm: 10000,
+							feedRate: 1000,
+							plungeRate: 300,
+							coolant: 'flood'
+						};
+					})()
 				}));
+				
 				setCamTools(prev => {
 					// Add only tools that don't exist yet
 					const existingIds = new Set(prev.map(p => p.id));
 					const toAdd = newTools.filter((nt: any) => !existingIds.has(nt.id));
+					
+					// Assign sequential T-numbers to the newly added tools
+					toAdd.forEach((nt: any, idx: number) => {
+						nt.number = `T${prev.length + idx + 1}`;
+					});
+					
 					return [...prev, ...toAdd];
 				});
 			}
@@ -1020,7 +1077,7 @@ export default function HitlWorkspace() {
 					id: op.id || `op_auto_${Date.now()}_${i}`,
 					name: op.name || `${op.type || op.operation_type} Operation`,
 					type: (op.type || op.operation_type) as OperationType,
-					toolId: op.tool_id || 't1', // fallback
+					toolId: op.tool_id || '', // No fallback to 't1' if blocked/unassigned
 					feature_id: op.feature_id,
 					setup_id: op.setup_id,
 					status: op.status,
@@ -1174,7 +1231,7 @@ export default function HitlWorkspace() {
 													<div className="absolute inset-0 bg-[url('/grid.svg')] opacity-5" />
 
 													{/* AI Assistant Button in Empty State */}
-													<div className="absolute top-4 right-4 z-50">
+													<div className="absolute top-4 right-4 z-30">
 														<button
 															onClick={() => setIsChatOpen(true)}
 															className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600/90 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)] transition-all pointer-events-auto"
@@ -1579,6 +1636,7 @@ export default function HitlWorkspace() {
 								onGenerateToolpaths={handleGenerateToolpaths}
 								isGeneratingGcode={isGeneratingGcode}
 								gcodeContent={gcodeContent}
+								klartextContent={klartextContent}
 								gcodeErrors={gcodeErrors}
 								camFeatures={camFeatures}
 								setCamFeatures={setCamFeatures}

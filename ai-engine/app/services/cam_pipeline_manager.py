@@ -69,7 +69,8 @@ class CamPipelineManager:
             features, 
             caps, 
             stock_orientation=setup.get("stockOrientation", "top_z") if setup else "top_z",
-            default_tool_axis=setup.get("toolAxis", [0.0, 0.0, 1.0]) if setup else [0.0, 0.0, 1.0]
+            default_tool_axis=setup.get("toolAxis", [0.0, 0.0, 1.0]) if setup else [0.0, 0.0, 1.0],
+            topology_info=topology_info
         )
         
         # 5. Clean API response (Constraint C1 - sanitize OCC objects)
@@ -181,6 +182,7 @@ class CamPipelineManager:
         tool_engine = ToolRecommendationEngine(tool_library)
 
         # 2. Feature Recognition & Geometry Mapping
+        topology_info = self.step_importer.import_and_validate(step_file_path)
         features = self.feature_recognizer.recognize_features(step_file_path)
         mapper = GeometryMapper(self.feature_recognizer.extractor)
         default_setup = {"toolAxis": [0.0, 0.0, 1.0]}
@@ -189,7 +191,7 @@ class CamPipelineManager:
         
         # 3. Setup Planning
         caps = MachineCapability(**machine_config.get("machine_capability", {}))
-        setup_plans = self.setup_planner.plan_setups(features, caps)
+        setup_plans = self.setup_planner.plan_setups(features, caps, topology_info=topology_info)
         
         all_operations = []
         decision_trace = []
@@ -202,6 +204,9 @@ class CamPipelineManager:
             setup_decisions = []
             
             for feature in all_setup_features:
+                # 3.0 Transform feature to setup-local coordinates
+                local_feature = self._transform_feature_to_setup_local(feature, sp)
+                
                 decision = FeatureDecision(feature_id=feature.get("id"), feature_type=feature.get("type", ""))
                 decision.setup_assignment = setup_id
                 
@@ -241,6 +246,8 @@ class CamPipelineManager:
                 decision.status = t_status
                 decision.reason = "Ready for toolpath generation" if t_status == "ready" else "Ready with warnings"
                 
+                # Attach local feature to decision for downstream use
+                decision.parameters["setup_local_feature"] = local_feature.model_dump() if hasattr(local_feature, "model_dump") else local_feature
                 setup_decisions.append(decision)
                 
             decision_trace.extend([d.model_dump() for d in setup_decisions])
@@ -248,6 +255,10 @@ class CamPipelineManager:
             # 3d. Operation Planning (Ordering and Generation)
             ops = self.operation_strategy_planner.plan_operations(setup_decisions, setup_id)
             for op in ops:
+                # Attach the local feature directly to the operation
+                local_feat_dict = next((d.parameters.get("setup_local_feature") for d in setup_decisions if d.feature_id == op.feature_id), None)
+                if local_feat_dict:
+                    op.parameters["setup_local_feature"] = local_feat_dict
                 all_operations.append(op.to_dict())
                 
         # 4. Feature Coverage Validation & Fallback Planning
@@ -630,17 +641,57 @@ class CamPipelineManager:
             # Inject geometry into operations
             op['machiningRegion'] = mr
             
-            # Ensure safe heights exist since UI strips them
-            if 'safe_heights' not in op:
-                z_top = mr.get('topZ', 0.0)
-                z_bottom = mr.get('bottomZ', -10.0)
-                op['safe_heights'] = {
-                    "top": z_top,
-                    "bottom": z_bottom,
-                    "clearance": z_top + 15.0,
-                    "retract": z_top + 5.0,
-                    "feed": z_top + 2.0
-                }
+        # 1. Pre-process and fix inverted Z coordinates, then determine global max Z
+        max_z_top = 0.0
+        for op in operations:
+            mr = op.get('machiningRegion')
+            if mr:
+                z_top = mr.get('topZ')
+                z_bottom = mr.get('bottomZ')
+                if z_top is not None and z_bottom is not None and z_bottom > z_top:
+                    mr['topZ'], mr['bottomZ'] = z_bottom, z_top
+                
+                if mr.get('topZ') is not None:
+                    max_z_top = max(max_z_top, mr.get('topZ'))
+
+        # 2. Assign safe heights using global clearance
+        for op in operations:
+            if not op.get('machiningRegion'):
+                continue
+            mr = op.get('machiningRegion')
+            
+            # Extract basic depth if z_top and z_bottom are zero
+            z_top = mr.get('topZ', 0.0)
+            z_bottom = mr.get('bottomZ', -10.0)
+            
+            # If Z top and bottom evaluate to 0, use feature properties as fallback
+            if z_top == 0.0 and z_bottom == 0.0:
+                # Find feature
+                f_id = op.get('feature_id')
+                feat = next((f for f in features if f.get('id') == f_id), None)
+                if feat:
+                    f_depth = feat.get('depth') or feat.get('dimensions', {}).get('depth') or 0.0
+                    f_height = feat.get('height') or feat.get('dimensions', {}).get('height') or 0.0
+                    
+                    if f_depth > 0:
+                        z_bottom = -f_depth
+                    elif f_height > 0:
+                        z_bottom = -f_height
+
+                mr['topZ'] = z_top
+                mr['bottomZ'] = z_bottom
+
+            clearance_offset = setup.get('clearanceHeight', 15.0)
+            retract_offset = setup.get('retractHeight', 5.0)
+            feed_offset = setup.get('feedHeight', 2.0)
+            
+            op['safe_heights'] = {
+                "top": z_top,
+                "bottom": z_bottom,
+                "clearance": max_z_top + clearance_offset,
+                "retract": z_top + retract_offset,
+                "feed": z_top + feed_offset
+            }
             
         # Ensure mapping of tool to operation
         tool_dict = {t.get('id', t.get('tool_id')): t for t in tools if t.get('id') or t.get('tool_id')}
@@ -727,6 +778,9 @@ class CamPipelineManager:
             else:
                 op["toolpaths"] = valid_toolpaths
                 op["debug_toolpaths"] = debug_toolpaths
+                
+        # Deduplicate drilling operations
+        operations = self._deduplicate_drilling_operations(operations, features)
         
         # DO NOT apply modelToSetupTransform to ToolpathSegments here.
         # The frontend CadViewport renders the model in Model Space, so the toolpaths
@@ -1092,8 +1146,56 @@ class CamPipelineManager:
             "errors": validation_result.get('errors', []) + coord_report.get('errors', []) + cam_validation.get('errors', []),
             "gcode_blocked": has_errors,
             "gcode_block_reason": "One or more operations failed geometry mapping or coordinate validation" if has_errors else None,
-            "camModelHash": model_hash
+            "camModelHash": model_hash,
+            "setup_metadata": {
+                "setupCoordinateSystem": "setup_local",
+                "stockTopZ": 0,
+                "safeZ": setup.get("safeClearanceZ", 15.0) if setup else 15.0,
+                "requiresOperatorPresetConfirmation": True
+            }
         }
+
+    def _transform_feature_to_setup_local(self, feature: Dict[str, Any], setup_plan) -> Any:
+        from app.models.schemas import SetupLocalFeature
+        
+        # We assume Z-shift only for now based on stockTopZ
+        z_shift = -setup_plan.stockTopZ if hasattr(setup_plan, 'stockTopZ') else 0.0
+        
+        center = feature.get("center", [0, 0, 0])
+        axis = feature.get("axis", [0, 0, 1])
+        
+        local_center = [center[0], center[1], center[2] + z_shift]
+        
+        # Calculate local bounds
+        bounds = feature.get("dimensions", {}).get("bounding_box", {})
+        top_z = bounds.get("z_max", 0.0) + z_shift if "z_max" in bounds else 0.0
+        bottom_z = bounds.get("z_min", -10.0) + z_shift if "z_min" in bounds else -10.0
+        depth = top_z - bottom_z
+        
+        local_feat = SetupLocalFeature(
+            featureId=feature.get("id", ""),
+            setupId=setup_plan.setupId,
+            featureType=feature.get("type", ""),
+            localCenter=local_center,
+            localAxis=axis,
+            localTopZ=top_z,
+            localBottomZ=bottom_z,
+            depth=depth,
+            parameters=feature.get("parameters", {})
+        )
+        
+        # Transform machining region if present
+        region = feature.get("machining_region", {})
+        if region:
+            local_region = dict(region)
+            local_region["topZ"] = region.get("topZ", 0.0) + z_shift
+            local_region["bottomZ"] = region.get("bottomZ", 0.0) + z_shift
+            if "center" in region:
+                rc = region["center"]
+                local_region["center"] = [rc[0], rc[1], rc[2] + z_shift]
+            local_feat.machiningRegion = local_region
+            
+        return local_feat
 
     def _validate_cam_output(self, features: List[Dict[str, Any]], operations: List[Dict[str, Any]], model_hash: str) -> Dict[str, Any]:
         """
@@ -1311,3 +1413,93 @@ class CamPipelineManager:
              return tuple(self._sanitize_for_api(i) for i in data)
         else:
             return data
+
+    def _deduplicate_drilling_operations(self, operations: List[Dict[str, Any]], features: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        deduped = []
+        # Group by dedupeKey
+        seen_drills = []
+        for op in operations:
+            if op.get("status") == "error" or op.get("type") != "drilling":
+                deduped.append(op)
+                continue
+                
+            local_feat = op.get("parameters", {}).get("setup_local_feature", {})
+            if not local_feat:
+                deduped.append(op)
+                continue
+                
+            setup_id = op.get("setupId") or op.get("setup_id")
+            tool_id = op.get("toolId") or op.get("tool_id")
+            
+            # Extract coordinates and params
+            center = local_feat.get("localCenter", [0, 0, 0])
+            cx, cy = center[0], center[1]
+            final_z = local_feat.get("localBottomZ", 0.0)
+            
+            # Tool diameter
+            tool = op.get("tool") or {}
+            diameter = tool.get("geometry", {}).get("DC", 0.0)
+            
+            # Check against seen drills
+            is_duplicate = False
+            tolerance = 0.01
+            for seen in seen_drills:
+                if (seen["setup_id"] == setup_id and 
+                    seen["tool_id"] == tool_id and 
+                    abs(seen["cx"] - cx) <= tolerance and 
+                    abs(seen["cy"] - cy) <= tolerance and 
+                    abs(seen["final_z"] - final_z) <= tolerance and 
+                    abs(seen["diameter"] - diameter) <= tolerance):
+                    
+                    is_duplicate = True
+                    # Merge metadata
+                    seen_op = seen["op"]
+                    if "dedupedFromCount" not in seen_op.get("parameters", {}):
+                        seen_op.setdefault("parameters", {})["dedupedFromCount"] = 1
+                        seen_op.setdefault("parameters", {})["sourceFeatureIds"] = [seen_op.get("featureId") or seen_op.get("feature_id")]
+                        seen_op.setdefault("parameters", {})["dedupeReason"] = "Merged colinear/duplicate drilling cycles within 0.01mm tolerance"
+                    
+                    seen_op["parameters"]["dedupedFromCount"] += 1
+                    fid = op.get("featureId") or op.get("feature_id")
+                    if fid not in seen_op["parameters"]["sourceFeatureIds"]:
+                        seen_op["parameters"]["sourceFeatureIds"].append(fid)
+                    break
+                    
+            if not is_duplicate:
+                seen_drills.append({
+                    "setup_id": setup_id,
+                    "tool_id": tool_id,
+                    "cx": cx,
+                    "cy": cy,
+                    "final_z": final_z,
+                    "diameter": diameter,
+                    "op": op
+                })
+                deduped.append(op)
+                
+        # Validate that if multiple drilling ops collapse to same X/Y, they must actually be concentric
+        for op in deduped:
+            if op.get("type") == "drilling" and op.get("status") != "error":
+                source_fids = op.get("parameters", {}).get("sourceFeatureIds", [])
+                if len(source_fids) > 1 and features is not None:
+                    # Check original features
+                    feat_map = {f.get("id") or f.get("feature_id"): f for f in features}
+                    original_centers = []
+                    for fid in source_fids:
+                        if fid in feat_map:
+                            original_centers.append(feat_map[fid].get("center", [0,0,0]))
+                            
+                    if original_centers:
+                        first_orig = original_centers[0]
+                        tolerance = 0.001
+                        all_orig_same_xy = all(
+                            abs(c[0] - first_orig[0]) < tolerance and
+                            abs(c[1] - first_orig[1]) < tolerance
+                            for c in original_centers
+                        )
+                        
+                        if not all_orig_same_xy:
+                            op["status"] = "error"
+                            op.setdefault("parameters", {})["error"] = "Drill center mapping failed"
+
+        return deduped

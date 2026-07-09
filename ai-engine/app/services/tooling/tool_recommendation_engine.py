@@ -41,6 +41,11 @@ class ToolRecommendationEngine:
                 rejections.append(f"{t.name}: wrong type")
                 continue
                 
+            # Prevent fly cutters/face mills from being used as standard end mills
+            if req_type == "end_mill" and ("fly cutter" in t.name.lower() or "face mill" in t.name.lower()):
+                rejections.append(f"{t.name}: inappropriate for {operation_type}")
+                continue
+                
             # 2. Material Match
             material_id_lower = material.material_id.lower()
             material_name_lower = material.material_name.lower() if getattr(material, 'material_name', None) else ""
@@ -85,11 +90,24 @@ class ToolRecommendationEngine:
             target_dia = feature.get("radius", 0) * 2
             if target_dia > 0:
                 # Closest diameter under target
-                candidate_tools.sort(key=lambda t: target_dia - t.diameter)
+                candidate_tools.sort(key=lambda t: abs(target_dia - t.diameter) if t.diameter <= target_dia + 0.1 else 9999)
             else:
                 candidate_tools.sort(key=lambda t: t.diameter, reverse=True)
+        elif "contour" in operation_type.lower() or "profile" in operation_type.lower():
+            # For 2D contours, huge tools (like 40mm) will gouge the part geometry boundaries.
+            # Prefer standard end mills around 6mm - 12mm. Sort by closeness to 10mm.
+            candidate_tools.sort(key=lambda t: abs(t.diameter - 10.0))
+        elif operation_type == "facing":
+            # For facing, we actively want the largest tool possible (e.g. Face Mill, Fly Cutter)
+            candidate_tools.sort(key=lambda t: t.diameter, reverse=True)
         else:
-            # Largest diameter to clear material fastest
+            # Pocketing / other: Use the largest diameter that fits within the feature's minimum corner radius
+            min_radius = feature.get("dimensions", {}).get("min_radius", 0)
+            if min_radius > 0:
+                fitting_tools = [t for t in candidate_tools if t.diameter <= (min_radius * 2) + 0.1]
+                if fitting_tools:
+                    candidate_tools = fitting_tools
+            # Sort by largest diameter to clear material fastest
             candidate_tools.sort(key=lambda t: t.diameter, reverse=True)
             
         best_tool = candidate_tools[0]

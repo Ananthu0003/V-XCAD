@@ -1118,6 +1118,7 @@ class CamGCodeRequest(BaseModel):
     session_id: str
     job_id: str = "default_job"
     cam_run_id: str = ""
+    setup_id: str | None = None
 
 @router.post("/cam/gcode")
 async def cam_generate_gcode(request: CamGCodeRequest):
@@ -1153,6 +1154,9 @@ async def cam_generate_gcode(request: CamGCodeRequest):
                 hashes_data = json.load(f)
             except json.JSONDecodeError:
                 pass
+                
+    if request.setup_id:
+        operations = [op for op in operations if op.get("setup_id") == request.setup_id or op.get("setupId") == request.setup_id]
 
     # Hash matching mock for MVP (assuming matching if exists for now, in a real system we'd compare)
     hashes_match = bool(hashes_data)
@@ -1276,30 +1280,67 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         return {"can_generate_gcode": False, "gcode": None, "errors": [{"level": "error", "message": "No valid operations to generate G-code for."}]}
         
     try:
-        post_processor = PostProcessorFactory.create(resolved_post)
-        gcode = post_processor.generate(valid_operations)
-        
-        # 3. Post Output Validation
-        out_val = PostOutputValidator.validate_gcode(gcode, valid_operations)
-        if not out_val["valid"]:
-            operation_statuses = [
-                {
-                    "operation_id": op.get("id"),
-                    "feature_id": op.get("feature_id"),
-                    "status": "blocked",
-                    "code": "POST_OUTPUT_ERROR",
-                    "blocked_reason": out_val["reason"]
-                }
-                for op in valid_operations
-            ]
-            return {"can_generate_gcode": False, "gcode": None, "errors": [{"level": "error", "code": "POST_OUTPUT_ERROR", "message": out_val["reason"]}], "operation_statuses": operation_statuses}
-        
-        # Save generated gcode
-        gcode_path = job_dir / "generated_gcode.nc"
-        with open(gcode_path, "w") as f:
-            f.write(gcode)
+        if "HEIDENHAIN" in resolved_post.upper():
+            # Generate ISO
+            iso_post = PostProcessorFactory.create("HEIDENHAIN")
+            gcode_iso = iso_post.generate(valid_operations)
+            # Generate Klartext
+            klartext_post = PostProcessorFactory.create("HEIDENHAIN_KLARTEXT")
+            gcode_klartext = klartext_post.generate(valid_operations)
             
-        return {"can_generate_gcode": True, "gcode": gcode, "errors": [], "status": "success"}
+            # Post Output Validation on ISO for safety
+            out_val = PostOutputValidator.validate_gcode(gcode_iso, valid_operations)
+            if not out_val["valid"]:
+                operation_statuses = [
+                    {
+                        "operation_id": op.get("id"),
+                        "feature_id": op.get("feature_id"),
+                        "status": "blocked",
+                        "code": "POST_OUTPUT_ERROR",
+                        "blocked_reason": out_val["reason"]
+                    }
+                    for op in valid_operations
+                ]
+                return {"can_generate_gcode": False, "gcode": None, "errors": [{"level": "error", "code": "POST_OUTPUT_ERROR", "message": out_val["reason"]}], "operation_statuses": operation_statuses}
+            
+            # Save both
+            with open(job_dir / "generated_gcode.nc", "w") as f:
+                f.write(gcode_iso)
+            with open(job_dir / "generated_klartext.h", "w") as f:
+                f.write(gcode_klartext)
+                
+            return {
+                "can_generate_gcode": True, 
+                "gcode": gcode_iso, 
+                "klartext": gcode_klartext,
+                "errors": [], 
+                "status": "success"
+            }
+        else:
+            post_processor = PostProcessorFactory.create(resolved_post)
+            gcode = post_processor.generate(valid_operations)
+            
+            # 3. Post Output Validation
+            out_val = PostOutputValidator.validate_gcode(gcode, valid_operations)
+            if not out_val["valid"]:
+                operation_statuses = [
+                    {
+                        "operation_id": op.get("id"),
+                        "feature_id": op.get("feature_id"),
+                        "status": "blocked",
+                        "code": "POST_OUTPUT_ERROR",
+                        "blocked_reason": out_val["reason"]
+                    }
+                    for op in valid_operations
+                ]
+                return {"can_generate_gcode": False, "gcode": None, "errors": [{"level": "error", "code": "POST_OUTPUT_ERROR", "message": out_val["reason"]}], "operation_statuses": operation_statuses}
+            
+            # Save generated gcode
+            gcode_path = job_dir / "generated_gcode.nc"
+            with open(gcode_path, "w") as f:
+                f.write(gcode)
+                
+            return {"can_generate_gcode": True, "gcode": gcode, "errors": [], "status": "success"}
     except Exception as exc:
         import traceback
         tb = traceback.format_exc()

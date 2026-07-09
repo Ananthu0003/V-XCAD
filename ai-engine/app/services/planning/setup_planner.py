@@ -19,7 +19,8 @@ class SetupPlanner:
         features: List[Dict[str, Any]],
         machine_capability: MachineCapability,
         stock_orientation: str = "top_z",
-        default_tool_axis: List[float] = [0.0, 0.0, 1.0]
+        default_tool_axis: List[float] = [0.0, 0.0, 1.0],
+        topology_info: Dict[str, Any] = None
     ) -> List[CamSetupPlan]:
         """
         Groups features into one or more setups.
@@ -34,12 +35,28 @@ class SetupPlanner:
         base_axis_key = self._format_axis_key(base_setup_axis)
         base_setup_key = f"milling_3axis:{base_axis_key}:top"
         
+        bounds = topology_info.get("bounds", [0, 0, 0, 100, 100, 20]) if topology_info else [0, 0, 0, 100, 100, 20]
+        stock_top_z = bounds[5]
+        stock_bottom_z = bounds[2]
+
+        # For top_z orientation, the transform is just a Z shift
+        # so that Z_setup = Z_model - stockTopZ
+        transform = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, -stock_top_z],
+            [0.0, 0.0, 0.0, 1.0]
+        ]
+
         setups[base_setup_key] = CamSetupPlan(
             setupId=default_setup_id,
             setupName="Setup 1 (Top)",
             setupType="milling_3axis",
             toolAxis=base_setup_axis,
-            workCoordinateSystem="G54"
+            workCoordinateSystem="G54",
+            stockTopZ=stock_top_z,
+            stockBottomZ=stock_bottom_z,
+            modelToSetupTransform=transform
         )
         
         setup_counter = 1
@@ -86,6 +103,7 @@ class SetupPlanner:
                 setup_counter += 1
                 new_setup_id = f"setup_{uuid.uuid4().hex[:8]}"
                 
+                # For side setups, the transform would involve rotation, but we simplify for now
                 setups[setup_key] = CamSetupPlan(
                     setupId=new_setup_id,
                     setupName=f"Setup {setup_counter} ({self._get_axis_name(required_axis)})",
@@ -93,7 +111,10 @@ class SetupPlanner:
                     toolAxis=required_axis,
                     workCoordinateSystem=f"G{53 + min(setup_counter, 6)}",
                     requiresManualReclamp=stype in ("milling_3axis", "turning") and required_axis_key != base_axis_key,
-                    requires4AxisIndexing=stype == "indexed_4axis"
+                    requires4AxisIndexing=stype == "indexed_4axis",
+                    stockTopZ=stock_top_z,
+                    stockBottomZ=stock_bottom_z,
+                    modelToSetupTransform=transform
                 )
                 
             # Machinable statuses → assignedFeatureIds

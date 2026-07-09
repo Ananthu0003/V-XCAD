@@ -80,6 +80,7 @@ class OperationStrategyPlanner:
             if decision.selected_tool:
                 op.tool_id = decision.selected_tool.get("tool_id", "")
                 op.parameters["tool_selection_reason"] = decision.tool_selection_reason
+                op.parameters["tool_diameter"] = decision.selected_tool.get("diameter", 0.0)
                 
             if decision.feeds_and_speeds:
                 op.parameters["feeds_and_speeds"] = decision.feeds_and_speeds

@@ -1,4 +1,4 @@
-import { Cuboid, Layers, Circle, CheckCircle2 } from 'lucide-react';
+import { Cuboid, Layers, Circle, CheckCircle2, Wrench, Package } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 

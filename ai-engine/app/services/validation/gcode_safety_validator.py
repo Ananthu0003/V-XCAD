@@ -67,7 +67,7 @@ class GCodeSafetyValidator:
                 if first_move:
                     # First move MUST be at least at retract_z (ideally clearance)
                     if end_z < retract_z:
-                        return {"valid": False, "reason": "First motion must be at or above safe retract Z.", "code": "FIRST_MOTION_BELOW_RETRACT_Z"}
+                        return {"valid": False, "reason": f"First motion must be at or above safe retract Z (end_z={end_z}, retract_z={retract_z}).", "code": "FIRST_MOTION_BELOW_RETRACT_Z"}
                     first_move = False
                     
             # Check travel limits if machine is provided in setup

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -14,6 +16,11 @@ except ImportError:
     genai = None 
     types = None
 
+
+
+# Cache structure mapping image hash to feature map
+_BLUEPRINT_CACHE: dict[str, dict[str, Any]] = {}
+_BLUEPRINT_CACHE_LOCK = threading.Lock()
 
 # -- System Instructions -------------------------------------------------------
 
@@ -97,6 +104,7 @@ Generate production-grade, mathematically robust, parametric CAD code using the 
 3. **Parametric Stacking (NO MAGIC NUMBERS)**: You may NOT use hardcoded float literals for dimensions anywhere in the `BuildPart` block! EVERY single measurement (radii, lengths, heights, chamfers, fillets, hole offsets) MUST be extracted into the `PARAMETERS` dictionary at the top of the script. Derive downstream coordinates explicitly using these variables.
 4. **Pythonic Structure**: Use the declarative `with BuildPart() as part:` syntax wherever possible.
 5. **Metadata Mapping**: You MUST generate a `PARAMETER_METADATA` dictionary matching the `PARAMETERS` exactly, providing a `"group"`, `"confidence"` (0.0 to 1.0), and `"description"` for every parameter.
+6. **Z=0 Top Surface (CRITICAL)**: The absolute top-most surface of the entire part MUST ALWAYS be exactly at `Z=0`. The entire part must be built extending DOWNWARDS into the negative Z space (i.e., all coordinates must be `Z <= 0`). This is a strict requirement for CAM machining compatibility. DO NOT build upwards from Z=0.
 
 ## 🧠 MANDATORY SPATIAL PLANNING & MENTAL WALKTHROUGH (CRITICAL FOR ACCURACY)
 Before writing the `with bd.BuildPart()` block, you MUST write a multi-line python comment block detailing the spatial coordinates for every single feature. Calculate exact X, Y, Z centers and alignments based on the `PARAMETERS`.
@@ -204,26 +212,27 @@ body_diameter = PARAMETERS["body_diameter"]
 body_height = PARAMETERS["body_height"]
 
 # --- SPATIAL PLAN ---
-# Shank: centered at origin (0,0,0), extrudes UP (+Z) to shank_height.
-# Body: sits on top of shank at Z=shank_height, extrudes UP (+Z) to body_height.
+# Body: Extrudes from Z = -body_height to Z = 0.
+# Shank: Extrudes from Z = -(body_height + shank_height) to Z = -body_height.
 # Through Hole: drilled from Z=0 through entire height.
 # --- MENTAL WALKTHROUGH ---
-# 1. The Shank is built first.
-# 2. The Body connects to the Shank. To guarantee fusion, the Body's Z-origin is pushed 1mm down into the Shank (overlap).
+# 1. The Body is built first at the top.
+# 2. The Shank connects to the Body. To guarantee fusion, the Shank's top Z is pushed 1mm up into the Body (overlap).
 # 3. The Through Hole is cut along -Z, correctly penetrating both solids.
 # --------------------
 
 with bd.BuildPart() as part:
-    # @id: shank
-    with bd.BuildSketch():
-        bd.Circle(radius=shank_diameter/2)
-    bd.extrude(amount=shank_height)
-
     # @id: body
-    with bd.Locations((0, 0, shank_height)):
+    with bd.Locations((0, 0, -body_height)):
         with bd.BuildSketch():
             bd.Circle(radius=body_diameter/2)
         bd.extrude(amount=body_height)
+        
+    # @id: shank
+    with bd.Locations((0, 0, -(body_height + shank_height))):
+        with bd.BuildSketch():
+            bd.Circle(radius=shank_diameter/2)
+        bd.extrude(amount=shank_height)
 
     # @id: through_hole
     with bd.Locations((0, 0, 0)):
@@ -362,10 +371,16 @@ class LLMCodegenService:
         """
         Stage 1 - Analyse a blueprint image/PDF and return a detailed structured JSON feature map.
         """
+        file_hash = hashlib.md5(image_bytes).hexdigest()
+        with _BLUEPRINT_CACHE_LOCK:
+            if file_hash in _BLUEPRINT_CACHE:
+                return _BLUEPRINT_CACHE[file_hash]
+
         def _call() -> Any:
             config_params = {
                 "temperature": 0.0,
                 "response_mime_type": "application/json",
+                "system_instruction": AUDIT_INSTRUCTION,
             }
             if "3.5" in self.model:
                 config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
@@ -373,7 +388,7 @@ class LLMCodegenService:
             return self.client.models.generate_content(
                 model=self.model,
                 contents=[
-                    types.Part.from_text(text=AUDIT_INSTRUCTION),
+                    types.Part.from_text(text="Extract technical drawing features map JSON matching the strict schema."),
                     types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 ],
                 config=types.GenerateContentConfig(**config_params),
@@ -382,7 +397,10 @@ class LLMCodegenService:
         raw = self._call_with_retry(_call, "audit")
         try:
             cleaned = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-            return json.loads(cleaned)
+            result = json.loads(cleaned)
+            with _BLUEPRINT_CACHE_LOCK:
+                _BLUEPRINT_CACHE[file_hash] = result
+            return result
         except Exception:
             return {}
 
@@ -416,13 +434,17 @@ class LLMCodegenService:
 
         # Assemble multimodal contents
         sys_instr = EDIT_SYSTEM_INSTRUCTION if base_code else SYSTEM_INSTRUCTION
-        contents: list[Any] = [types.Part.from_text(text=sys_instr)]
+        contents: list[Any] = []
         if image_bytes and mime_type:
             contents.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
         contents.append(types.Part.from_text(text=user_text))
 
         def _call() -> Any:
-            config_params = {"temperature": 0.0, "max_output_tokens": 1000000}
+            config_params: dict[str, Any] = {
+                "temperature": 0.0, 
+                "max_output_tokens": 1000000,
+                "system_instruction": sys_instr
+            }
             if "3.5" in self.model:
                 config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
             return self.client.models.generate_content(
@@ -459,13 +481,17 @@ class LLMCodegenService:
         user_text = "\n\n".join(parts)
 
         sys_instr = EDIT_SYSTEM_INSTRUCTION if base_code else SYSTEM_INSTRUCTION
-        contents: list[Any] = [types.Part.from_text(text=sys_instr)]
+        contents: list[Any] = []
         if image_bytes and mime_type:
             contents.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
         contents.append(types.Part.from_text(text=user_text))
 
         def _call_stream():
-            config_params = {"temperature": 0.0, "max_output_tokens": 1000000}
+            config_params: dict[str, Any] = {
+                "temperature": 0.0, 
+                "max_output_tokens": 1000000,
+                "system_instruction": sys_instr
+            }
             if "3.5" in self.model:
                 config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
             return self.client.models.generate_content_stream(
@@ -523,12 +549,15 @@ class LLMCodegenService:
         user_text = f"CURRENT_CODE:\n{current_code}\n\nUSER_REQUEST:\n{user_prompt}"
 
         contents = [
-            types.Part.from_text(text=EDIT_SYSTEM_PROMPT),
             types.Part.from_text(text=user_text),
         ]
 
         def _call() -> Any:
-            config_params = {"temperature": 0.0, "max_output_tokens": 1000000}
+            config_params: dict[str, Any] = {
+                "temperature": 0.0, 
+                "max_output_tokens": 1000000,
+                "system_instruction": EDIT_SYSTEM_PROMPT
+            }
             if "3.5" in self.model:
                 config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
             return self.client.models.generate_content(
@@ -551,12 +580,15 @@ class LLMCodegenService:
         user_text = f"CURRENT_CODE:\n{current_code}\n\nERROR_LOG:\n{error_log}"
 
         contents = [
-            types.Part.from_text(text=REPAIR_SYSTEM_PROMPT),
             types.Part.from_text(text=user_text),
         ]
 
         def _call() -> Any:
-            config_params = {"temperature": 0.0, "max_output_tokens": 1000000}
+            config_params: dict[str, Any] = {
+                "temperature": 0.0, 
+                "max_output_tokens": 1000000,
+                "system_instruction": REPAIR_SYSTEM_PROMPT
+            }
             if "3.5" in self.model:
                 config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
             return self.client.models.generate_content(

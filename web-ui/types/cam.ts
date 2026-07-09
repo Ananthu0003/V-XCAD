@@ -24,7 +24,10 @@ export type SetupSettings = {
     originPosition: OriginPosition;
     tolerance: number;
     stockOffset: number;
-    postProcessor?: PostProcessor;
+    machineType?: string;
+    machineProfile?: string;
+    controller?: string;
+    postProcessor?: PostProcessor | string;
     postProcessorSettings?: PostProcessorSettings;
 };
 
@@ -131,6 +134,7 @@ export type Tool = {
     gaugeLength?: number;
     toolLife?: number;
     toolWear?: number;
+    cuttingData?: any; // To store defaults from ToolDefinition
 };
 
 export type OperationType = 'facing' | 'pocket' | '2d_contour' | 'drilling' | 'chamfer' | 'boss_clearing' | 'od_turning' | 'rotary_milling' | 'external_cylinder_unsupported' | 'side_feature' | string;

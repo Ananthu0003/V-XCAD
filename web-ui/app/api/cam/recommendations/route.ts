@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 
 export async function POST(request: NextRequest) {
     try {
@@ -18,62 +16,47 @@ export async function POST(request: NextRequest) {
             requiredToolType = 'face_mill';
         }
 
-        // Fetch cutting data for this workpiece material to find the optimal tool material + coating combination
-        const cuttingData = await prisma.cuttingData.findMany({
-            where: {
-                workpiece_material: workpieceMaterial,
-            },
-            include: {
-                tool_material: true,
-                coating: true,
-            },
-            orderBy: {
-                surface_speed: 'desc' // Prefer higher surface speed (better performance)
-            }
-        });
-
-        const optimalData = cuttingData.length > 0 ? cuttingData[0] : null;
-
         const toolFilters: any = {
             type: requiredToolType,
+            isActive: true
         };
 
-        if (optimalData) {
-            toolFilters.material_id = optimalData.tool_material_id;
-            if (optimalData.coating_id) {
-                toolFilters.coating_id = optimalData.coating_id;
+        // Find tools of the required type
+        let tools = await prisma.tool.findMany({
+            where: toolFilters,
+            include: {
+                geometry: true,
+                offsets: true,
+                assembly: {
+                    include: { holder: true }
+                },
+                cuttingData: true,
+                compatibility: true,
+            }
+        });
+
+        // Filter tools that are compatible with the workpiece material, if specified
+        if (workpieceMaterial) {
+            const materialCompatibleTools = tools.filter(t => {
+                const materials = t.compatibility?.compatibleMaterialsJson 
+                    ? JSON.parse(t.compatibility.compatibleMaterialsJson) 
+                    : [];
+                return materials.includes(workpieceMaterial) || materials.length === 0;
+            });
+            // If we have some that match the material, use them. Otherwise fallback to all tools of that type.
+            if (materialCompatibleTools.length > 0) {
+                tools = materialCompatibleTools;
             }
         }
 
-        // Try to match the exact tool type and material
-        let tools = await prisma.toolDefinition.findMany({
-            where: toolFilters,
-            include: {
-                material: true,
-                coating: true,
-                holder: true,
-            },
-            orderBy: { diameter: 'asc' }
-        });
-
-        // Fallback: If no tool with that material/coating exists, just get the tool type
-        if (tools.length === 0) {
-            tools = await prisma.toolDefinition.findMany({
-                where: { type: requiredToolType },
-                include: {
-                    material: true,
-                    coating: true,
-                    holder: true,
-                },
-                orderBy: { diameter: 'asc' }
-            });
-        }
+        // Sort by diameter ascending
+        tools.sort((a, b) => (a.geometry?.diameter || 0) - (b.geometry?.diameter || 0));
 
         let recommendedTool = tools[0]; // fallback to smallest
 
         if (diameterHint) {
             // Find a tool close to the diameter hint but smaller or equal to it (to fit in a pocket)
-            const fittingTools = tools.filter(t => t.diameter <= diameterHint);
+            const fittingTools = tools.filter(t => (t.geometry?.diameter || 0) <= diameterHint);
             if (fittingTools.length > 0) {
                 // Get the largest one that fits
                 recommendedTool = fittingTools[fittingTools.length - 1];
@@ -84,28 +67,31 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'No compatible tool found' }, { status: 404 });
         }
 
-        // Calculate Speeds & Feeds if we have cutting data
+        // Use the tool's own cutting data if available, otherwise calculate generic fallbacks
         let feedsAndSpeeds = null;
-        if (optimalData) {
-            // Standard formulas:
-            // RPM = (Surface Speed * 1000) / (PI * Diameter)
-            // Feed = RPM * Flutes * Feed per tooth
-            
-            const rpm = Math.round((optimalData.surface_speed * 1000) / (Math.PI * recommendedTool.diameter));
-            const feedRate = Math.round(rpm * recommendedTool.flutes * optimalData.feed_per_tooth);
-            const plungeRate = Math.round(feedRate * optimalData.plunge_multiplier);
-
+        if (recommendedTool.cuttingData) {
+            feedsAndSpeeds = {
+                spindleSpeed: recommendedTool.cuttingData.spindleRpm,
+                feedRate: recommendedTool.cuttingData.feedRate,
+                plungeRate: recommendedTool.cuttingData.plungeRate,
+                coolant: recommendedTool.cuttingData.coolant || 'flood'
+            };
+        } else {
+            // generic fallback
+            const rpm = 5000;
+            const flutes = recommendedTool.geometry?.fluteCount || 2;
+            const feedRate = Math.round(rpm * flutes * 0.05);
             feedsAndSpeeds = {
                 spindleSpeed: rpm,
                 feedRate: feedRate,
-                plungeRate: plungeRate,
+                plungeRate: Math.round(feedRate * 0.5),
                 coolant: 'flood'
             };
         }
 
         return NextResponse.json({
             tool: recommendedTool,
-            cuttingData: optimalData,
+            cuttingData: recommendedTool.cuttingData,
             feedsAndSpeeds
         });
 

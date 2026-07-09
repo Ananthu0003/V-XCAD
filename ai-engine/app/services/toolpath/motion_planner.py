@@ -57,9 +57,27 @@ class MotionPlanner:
         feed_z = safe_heights.get("feed", 2.0)
         top = safe_heights.get("top", 0.0)
         bottom = safe_heights.get("bottom", -10.0)
+        retract_z = safe_heights.get("retract", clearance)
 
         if machiningRegion.get("topZ") is not None: top = machiningRegion["topZ"]
         if machiningRegion.get("bottomZ") is not None: bottom = machiningRegion["bottomZ"]
+
+        # Override with setup-local coordinates if available
+        local_feat = op.get("parameters", {}).get("setup_local_feature")
+        if local_feat:
+            top = local_feat.get("localTopZ", top)
+            bottom = local_feat.get("localBottomZ", bottom)
+            clearance = top + 15.0
+            retract_z = top + 5.0
+            feed_z = top + 2.0
+            # Update safe_heights so downstream functions (like _generate_drilling_path) use them
+            op["safe_heights"] = {
+                "clearance": clearance,
+                "retract": retract_z,
+                "feed": feed_z,
+                "top": top,
+                "bottom": bottom
+            }
 
         op_source = "contour"
         if op_type == "drilling": op_source = "drill"
@@ -105,16 +123,31 @@ class MotionPlanner:
         return commands
 
     def _generate_drilling_path(self, op, machiningRegion, clearance, feed_z, top, bottom, add_cmd, setup):
-        center = machiningRegion.get("center")
+        # Attempt to use setup-local center first, fallback to raw geometry center
+        local_feat_dict = op.get("parameters", {}).get("setup_local_feature")
+        
+        if local_feat_dict and "localCenter" in local_feat_dict:
+            center = local_feat_dict["localCenter"]
+        else:
+            center = machiningRegion.get("center")
+            
         axis = machiningRegion.get("axis")
 
         if not center or not axis:
             raise ValueError("Drilling geometry missing center or axis")
 
+        import math
         cx, cy, cz = center
+        if not math.isfinite(cx) or not math.isfinite(cy):
+            raise ValueError("Invalid drill center: X or Y is not finite")
         
         retract_z = op.get("safe_heights", {}).get("retract", clearance)
         
+        # Calculate correct bottom Z
+        if machiningRegion.get("bottomZ") is None:
+            depth = machiningRegion.get("depth", op.get("parameters", {}).get("depth", 10.0))
+            bottom = top - depth
+
         # Output safe approach segments for the hole
         add_cmd(ToolpathSegmentType.RAPID_CLEARANCE,
                 Point3D(x=cx, y=cy, z=clearance),
@@ -125,11 +158,6 @@ class MotionPlanner:
         add_cmd(ToolpathSegmentType.APPROACH_RETRACT,
                 Point3D(x=cx, y=cy, z=clearance),
                 Point3D(x=cx, y=cy, z=retract_z))
-                
-        if retract_z > feed_z:
-            add_cmd(ToolpathSegmentType.PLUNGE,
-                    Point3D(x=cx, y=cy, z=retract_z),
-                    Point3D(x=cx, y=cy, z=feed_z))
         
         # The post-processor will handle G81/G83 logic safely.
         add_cmd(ToolpathSegmentType.DRILL_CYCLE, 
@@ -330,9 +358,14 @@ class MotionPlanner:
 
         params = (op.get("parameters") or {})
         feeds = params.get("feeds_and_speeds") or {}
-        stepdown = params.get("maxStepdown", params.get("stepdown", feeds.get("stepdown", 1.0)))
+        
+        tool = op.get("tool") or {}
+        tool_diameter = tool.get("geometry", {}).get("DC", 10.0)
+        default_stepdown = tool_diameter * 0.5  # 50% of tool diameter
+        
+        stepdown = params.get("maxStepdown", params.get("stepdown", feeds.get("stepdown", default_stepdown)))
         if stepdown <= 0:
-            stepdown = 1.0
+            stepdown = default_stepdown
 
         total_depth = top - bottom
         passes = max(1, math.ceil(total_depth / stepdown))
@@ -341,20 +374,27 @@ class MotionPlanner:
         safe_heights = op.get("safe_heights", {})
         retract = safe_heights.get("retract", clearance)
 
-        for i in range(passes):
-            z = top - (i + 1) * actual_step
+        for path in paths_2d:
+            if not path or len(path) < 2:
+                continue
 
-            for path in paths_2d:
-                if not path or len(path) < 2:
-                    continue
+            for i in range(passes):
+                z = top - (i + 1) * actual_step
 
                 start_pt_2d = path[0]
-                pt_clearance = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=clearance)
                 pt_retract = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=retract)
                 pt_z = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=z)
 
-                add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_clearance, pt_retract)
-                add_cmd(ToolpathSegmentType.PLUNGE, pt_retract, pt_z)
+                pt_lead_in_retract = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=retract)
+                pt_lead_in_z = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=z)
+
+                if i == 0:
+                    pt_clearance = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=clearance)
+                    add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_clearance, pt_lead_in_retract)
+                else:
+                    add_cmd(ToolpathSegmentType.RAPID_XY, pt_end_retract, pt_lead_in_retract)
+                    
+                add_cmd(ToolpathSegmentType.PLUNGE, pt_lead_in_retract, pt_lead_in_z)
 
                 for j in range(1, len(path)):
                     p1 = path[j-1]
@@ -364,9 +404,12 @@ class MotionPlanner:
                 end_pt_2d = path[-1]
                 pt_end = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=z)
                 pt_end_retract = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=retract)
-                pt_end_clearance = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=clearance)
                 
-                add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE, pt_end, pt_end_clearance)
+                if i == passes - 1:
+                    pt_end_clearance = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=clearance)
+                    add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE, pt_end, pt_end_clearance)
+                else:
+                    add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_end, pt_end_retract)
 
     def _generate_od_turning_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
         # Simplified turning profile (Z = spindle axis, X = radius, Y = 0)
@@ -525,9 +568,14 @@ class MotionPlanner:
 
         params = (op.get("parameters") or {})
         feeds = params.get("feeds_and_speeds") or {}
-        stepdown = params.get("maxStepdown", params.get("stepdown", feeds.get("stepdown", 1.0)))
+        
+        tool = op.get("tool") or {}
+        tool_diameter = tool.get("geometry", {}).get("DC", 10.0)
+        default_stepdown = tool_diameter * 0.5  # 50% of tool diameter
+        
+        stepdown = params.get("maxStepdown", params.get("stepdown", feeds.get("stepdown", default_stepdown)))
         if stepdown <= 0:
-            stepdown = 1.0
+            stepdown = default_stepdown
 
         total_depth = top - bottom
         passes = max(1, math.ceil(total_depth / stepdown))
@@ -536,19 +584,23 @@ class MotionPlanner:
         safe_heights = op.get("safe_heights", {})
         retract = safe_heights.get("retract", clearance)
 
-        for i in range(passes):
-            z = top - (i + 1) * actual_step
+        for path in paths_2d:
+            if not path or len(path) < 2:
+                continue
 
-            for path in paths_2d:
-                if not path or len(path) < 2:
-                    continue
+            for i in range(passes):
+                z = top - (i + 1) * actual_step
 
                 start_pt_2d = path[0]
-                pt_clearance = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=clearance)
                 pt_retract = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=retract)
                 pt_z = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=z)
 
-                add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_clearance, pt_retract)
+                if i == 0:
+                    pt_clearance = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=clearance)
+                    add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_clearance, pt_retract)
+                else:
+                    add_cmd(ToolpathSegmentType.RAPID_XY, pt_end_retract, pt_retract)
+                    
                 add_cmd(ToolpathSegmentType.PLUNGE, pt_retract, pt_z)
 
                 for j in range(1, len(path)):
@@ -559,9 +611,12 @@ class MotionPlanner:
                 end_pt_2d = path[-1]
                 pt_end = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=z)
                 pt_end_retract = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=retract)
-                pt_end_clearance = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=clearance)
                 
-                add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE, pt_end, pt_end_clearance)
+                if i == passes - 1:
+                    pt_end_clearance = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=clearance)
+                    add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE, pt_end, pt_end_clearance)
+                else:
+                    add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_end, pt_end_retract)
 
     def _generate_od_turning_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
         # Simplified turning profile (Z = spindle axis, X = radius, Y = 0)

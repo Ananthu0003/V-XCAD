@@ -24,6 +24,21 @@ class ToolpathEngine:
     def __init__(self):
         pass
 
+    def _get_tool_diameter_mm(self, tool: Dict[str, Any]) -> float:
+        # Check direct diameter field (CamTool schema)
+        dia = tool.get("diameter")
+        if not dia:
+            # Fallback to ISO 13399 geometry.DC field
+            geom = tool.get("geometry", {})
+            dia = geom.get("DC", 0.0)
+            
+        if not isinstance(dia, (int, float)):
+            try:
+                dia = float(dia)
+            except (ValueError, TypeError):
+                return 0.0
+        return float(dia)
+
     def generate_toolpaths_from_commands(self, op: Dict[str, Any], commands: List[MotionCommand], limit: int = 15000) -> List[ToolpathSegment]:
         op['toolpath_schema_version'] = 'semantic_v1'
         op_type = op.get('type', 'unknown')
@@ -42,6 +57,13 @@ class ToolpathEngine:
         if len(commands) > limit:
             op["status"] = "error"
             op.setdefault("parameters", {})["error"] = f"Command count {len(commands)} exceeds limit {limit}"
+            return []
+
+        tool = op.get("tool", {})
+        tool_diameter = self._get_tool_diameter_mm(tool)
+        if op_type in ['2d_contour', '2d_contour_outer'] and tool_diameter <= 0.0:
+            op["status"] = "error"
+            op.setdefault("parameters", {})["error"] = "Missing tool diameter for contour generation"
             return []
 
         for cmd in commands:
@@ -88,8 +110,192 @@ class ToolpathEngine:
                     center=cmd.center,
                     radius=cmd.radius,
                     clockwise=cmd.clockwise,
-                    plane=cmd.plane
+                    plane=cmd.plane,
+                    toolpathType="tool_centerline",
+                    toolRadiusCompensated=True if op_type in ['2d_contour', '2d_contour_outer'] else False,
+                    toolDiameterMm=tool_diameter if tool_diameter > 0 else None,
+                    compensationMode="computer" if op_type in ['2d_contour', '2d_contour_outer'] else None
                 )
             )
 
+        # Apply lead-in / lead-out for contours
+        if op_type in ['2d_contour', '2d_contour_outer']:
+            segments = self._apply_lead_in_out(op, segments, tool_diameter)
+
         return segments
+
+    def _calculate_polygon_area(self, segments: List[ToolpathSegment], start_idx: int, end_idx: int) -> float:
+        area = 0.0
+        pts = []
+        for j in range(start_idx, end_idx):
+            if segments[j].moveType == ToolpathSegmentType.CUT:
+                pts.append(segments[j].start)
+                if j == end_idx - 1:
+                    pts.append(segments[j].end)
+        if len(pts) < 3: return 0.0
+        for i in range(len(pts)):
+            p1 = pts[i]
+            p2 = pts[(i+1) % len(pts)]
+            area += (p1.x * p2.y - p2.x * p1.y)
+        return area / 2.0
+
+    def _apply_lead_in_out(self, op: Dict[str, Any], segments: List[ToolpathSegment], tool_diameter: float) -> List[ToolpathSegment]:
+        import math
+        out_segments = []
+        i = 0
+        n = len(segments)
+        
+        op_type = op.get("type", "")
+
+        while i < n:
+            seg = segments[i]
+            
+            # Look for a PLUNGE followed by CUT
+            if seg.moveType == ToolpathSegmentType.PLUNGE and i + 1 < n and segments[i+1].moveType == ToolpathSegmentType.CUT:
+                plunge_seg = seg
+                cut_seg = segments[i+1]
+                
+                # Find the end of this contour loop (the last CUT before a RETRACT or another PLUNGE)
+                loop_end_idx = i + 1
+                while loop_end_idx < n and segments[loop_end_idx].moveType == ToolpathSegmentType.CUT:
+                    loop_end_idx += 1
+                    
+                last_cut_seg = segments[loop_end_idx - 1]
+                
+                # Determine winding and outside normal
+                area = self._calculate_polygon_area(segments, i+1, loop_end_idx)
+                is_ccw = area > 0
+                
+                # Calculate normal vector for lead-in (based on first cut)
+                dx = cut_seg.end.x - cut_seg.start.x
+                dy = cut_seg.end.y - cut_seg.start.y
+                length = math.hypot(dx, dy)
+                
+                if length > 0.001:
+                    nx, ny = dx/length, dy/length
+                    
+                    if op_type == "2d_contour_outer":
+                        if is_ccw:
+                            norm_x, norm_y = ny, -nx # Right
+                        else:
+                            norm_x, norm_y = -ny, nx # Left
+                    else:
+                        # For inner contours/pockets, the outside is reversed
+                        if is_ccw:
+                            norm_x, norm_y = -ny, nx # Left
+                        else:
+                            norm_x, norm_y = ny, -nx # Right
+                            
+                    lead_dist = tool_diameter
+                    # fallback to 0.5D if segment is small
+                    if length < tool_diameter * 1.5:
+                        lead_dist = tool_diameter * 0.5
+                        
+                    allow_lead_outside = op.get("parameters", {}).get("allowLeadOutsideBlank", True)
+                    
+                    # Calculate new plunge point
+                    new_plunge_x = cut_seg.start.x + norm_x * lead_dist
+                    new_plunge_y = cut_seg.start.y + norm_y * lead_dist
+                    
+                    if not allow_lead_outside:
+                        new_plunge_x = max(-100.0, min(100.0, new_plunge_x))
+                        new_plunge_y = max(-100.0, min(100.0, new_plunge_y))
+                    
+                    # Modify previous APPROACH_RETRACT or RAPID_XY if it ends at the plunge start
+                    if len(out_segments) > 0 and out_segments[-1].end.x == plunge_seg.start.x and out_segments[-1].end.y == plunge_seg.start.y:
+                        out_segments[-1].end.x = new_plunge_x
+                        out_segments[-1].end.y = new_plunge_y
+                        
+                    # Modify plunge segment
+                    plunge_seg.start.x = new_plunge_x
+                    plunge_seg.start.y = new_plunge_y
+                    plunge_seg.end.x = new_plunge_x
+                    plunge_seg.end.y = new_plunge_y
+                    
+                    out_segments.append(plunge_seg)
+                    
+                    # Create lead-in CUT segment
+                    lead_in_cut = plunge_seg.model_copy(deep=True)
+                    lead_in_cut.segmentId = f"{plunge_seg.segmentId}_leadin"
+                    lead_in_cut.moveType = ToolpathSegmentType.CUT
+                    lead_in_cut.segmentRole = "lead_in"
+                    lead_in_cut.start = plunge_seg.end.model_copy()
+                    lead_in_cut.end = cut_seg.start.model_copy()
+                    
+                    out_segments.append(lead_in_cut)
+                    
+                    # Add all contour CUT segments
+                    for j in range(i + 1, loop_end_idx):
+                        cseg = segments[j]
+                        cseg.segmentRole = "cut"
+                        out_segments.append(cseg)
+                        
+                    # Calculate lead-out (exit away from wall, opposite of lead-in relative to edge)
+                    ldx = last_cut_seg.end.x - last_cut_seg.start.x
+                    ldy = last_cut_seg.end.y - last_cut_seg.start.y
+                    llength = math.hypot(ldx, ldy)
+                    if llength > 0.001:
+                        lnx, lny = ldx/llength, ldy/llength
+                        
+                        if op_type == "2d_contour_outer":
+                            if is_ccw:
+                                lnorm_x, lnorm_y = lny, -lnx
+                            else:
+                                lnorm_x, lnorm_y = -lny, lnx
+                        else:
+                            if is_ccw:
+                                lnorm_x, lnorm_y = -lny, lnx
+                            else:
+                                lnorm_x, lnorm_y = lny, -lnx
+                                
+                        l_lead_dist = lead_dist
+                        
+                        # Apply safe space checks for lead-out against last cut segment collinearity
+                        dot = lnx * lnorm_x + lny * lnorm_y
+                        if abs(dot) > 0.99:
+                            # It's collinear! Fallback to perpendicular of the last segment explicitly
+                            pass # Above logic already guarantees perpendicularity to last segment
+                        
+                        new_retract_x = last_cut_seg.end.x + lnorm_x * l_lead_dist
+                        new_retract_y = last_cut_seg.end.y + lnorm_y * l_lead_dist
+                        
+                        if not allow_lead_outside:
+                            new_retract_x = max(-100.0, min(100.0, new_retract_x))
+                            new_retract_y = max(-100.0, min(100.0, new_retract_y))
+                        
+                        # Create lead-out CUT segment
+                        lead_out_cut = cut_seg.model_copy(deep=True)
+                        lead_out_cut.segmentId = f"{last_cut_seg.segmentId}_leadout"
+                        lead_out_cut.moveType = ToolpathSegmentType.CUT
+                        lead_out_cut.segmentRole = "lead_out"
+                        lead_out_cut.start = last_cut_seg.end.model_copy()
+                        lead_out_cut.end.x = new_retract_x
+                        lead_out_cut.end.y = new_retract_y
+                        lead_out_cut.end.z = last_cut_seg.end.z
+                        
+                        out_segments.append(lead_out_cut)
+                        
+                        # Modify the next RETRACT segment if it exists
+                        if loop_end_idx < n and segments[loop_end_idx].moveType in [ToolpathSegmentType.RETRACT_CLEARANCE, ToolpathSegmentType.RAPID_XY, ToolpathSegmentType.APPROACH_RETRACT]:
+                            retract_seg = segments[loop_end_idx]
+                            retract_seg.segmentRole = "retract"
+                            retract_seg.start.x = new_retract_x
+                            retract_seg.start.y = new_retract_y
+                            if retract_seg.moveType in [ToolpathSegmentType.RAPID_XY, ToolpathSegmentType.APPROACH_RETRACT]:
+                                retract_seg.end.x = new_retract_x
+                                retract_seg.end.y = new_retract_y
+                            out_segments.append(retract_seg)
+                            i = loop_end_idx + 1
+                        else:
+                            i = loop_end_idx
+                        continue
+                
+                # If length was 0, just fallback to standard
+                out_segments.append(plunge_seg)
+                i += 1
+            else:
+                # Not a plunge or standard segment
+                out_segments.append(seg)
+                i += 1
+                
+        return out_segments
