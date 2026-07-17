@@ -20,29 +20,39 @@ class ToolRecommendationEngine:
         candidate_tools = []
         
         # Determine tool type requirement based on operation_type
-        req_type = "end_mill"
-        if operation_type in ("drilling", "peck_drilling", "boring"):
+        req_type = "flat_end_mill"
+        if operation_type in ("drilling", "peck_drilling"):
             req_type = "drill"
+        elif operation_type == "boring":
+            req_type = "boring_bar"
+        elif operation_type == "reaming":
+            req_type = "reamer"
+        elif operation_type in ("tapping", "threading"):
+            req_type = "tap"
         elif operation_type == "facing":
             req_type = "face_mill"
         elif operation_type in ("od_turning", "id_turning", "turning"):
             req_type = "turning_tool"
+        elif operation_type in ("parting", "grooving"):
+            req_type = "cut_off_tool"
+        elif operation_type == "knurling":
+            req_type = "knurling_tool"
         elif operation_type == "turning_required":
             # 3-axis mill cannot turn — return blocked immediately, no tool search needed
             return None, "blocked", "Requires lathe, mill-turn, or rotary 4/5-axis setup. No tool will be selected.", {}
-        elif operation_type in ("rotary_milling", "indexed_4axis_milling", "multi_axis_surface_milling"):
-            req_type = "end_mill"
+        elif operation_type in ("rotary_milling", "indexed_4axis_milling", "multi_axis_surface_milling", "pocketing", "boss_clearing", "2d_contour"):
+            req_type = "flat_end_mill"
         rejections = []
         target_depth = feature.get("dimensions", {}).get("depth", feature.get("height", 10.0))
         
         for t in self.tools:
             # 1. Type Match
-            if t.type != req_type and not (req_type == "face_mill" and t.type == "end_mill"):
+            if t.type != req_type and not (req_type == "face_mill" and t.type == "flat_end_mill") and not (req_type == "flat_end_mill" and t.type in ["ball_end_mill", "bull_nose_end_mill", "end_mill"]):
                 rejections.append(f"{t.name}: wrong type")
                 continue
                 
             # Prevent fly cutters/face mills from being used as standard end mills
-            if req_type == "end_mill" and ("fly cutter" in t.name.lower() or "face mill" in t.name.lower()):
+            if req_type == "flat_end_mill" and ("fly cutter" in t.name.lower() or "face mill" in t.name.lower() or t.type == "face_mill"):
                 rejections.append(f"{t.name}: inappropriate for {operation_type}")
                 continue
                 
@@ -67,6 +77,11 @@ class ToolRecommendationEngine:
             # 4. Geometry constraints
             if operation_type == "drilling":
                 target_dia = feature.get("radius", 0) * 2
+                if target_dia == 0 and "dimensions" in feature:
+                    target_dia = feature["dimensions"].get("diameter", 0)
+                    if target_dia == 0 and "radius" in feature["dimensions"]:
+                        target_dia = feature["dimensions"]["radius"] * 2
+                        
                 if target_dia > 0 and t.diameter > target_dia + 0.001:
                     rejections.append(f"{t.name}: too large ({t.diameter}mm > {target_dia}mm)")
                     continue  # Too big
@@ -83,14 +98,30 @@ class ToolRecommendationEngine:
                 f"Required: type={req_type}, min_depth={target_depth}mm, material={material.material_name}. "
                 f"Rejections: {'; '.join(rejections[:5])}"
             )
+            print(f"DEBUG: tool rec blocked for {feature.get('name')}: {reason}")
             return None, "blocked", reason, {}
+            
+        print(f"DEBUG: candidate tools for {feature.get('name')} (depth {target_depth}): {[t.name for t in candidate_tools]}")
             
         # Sort candidates
         if operation_type == "drilling":
             target_dia = feature.get("radius", 0) * 2
+            if target_dia == 0 and "dimensions" in feature:
+                target_dia = feature["dimensions"].get("diameter", 0)
+                if target_dia == 0 and "radius" in feature["dimensions"]:
+                    target_dia = feature["dimensions"]["radius"] * 2
+                    
             if target_dia > 0:
+                # Filter out tools that are too large
+                fitting_tools = [t for t in candidate_tools if t.diameter <= target_dia + 0.1]
+                if fitting_tools:
+                    candidate_tools = fitting_tools
+                else:
+                    rejections.append(f"All remaining tools are larger than {target_dia}mm")
+                    return None, "blocked", f"No drill found smaller than or equal to {target_dia}mm", {}
+                    
                 # Closest diameter under target
-                candidate_tools.sort(key=lambda t: abs(target_dia - t.diameter) if t.diameter <= target_dia + 0.1 else 9999)
+                candidate_tools.sort(key=lambda t: abs(target_dia - t.diameter))
             else:
                 candidate_tools.sort(key=lambda t: t.diameter, reverse=True)
         elif "contour" in operation_type.lower() or "profile" in operation_type.lower():

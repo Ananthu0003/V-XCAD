@@ -66,12 +66,12 @@ type ApiErrorEnvelope = {
 
 type DrawerTab = 'parameters' | 'code' | 'cam';
 
+import { MODEL_REGISTRY } from '@/lib/models-registry';
+
 const DEFAULT_PROMPT = 'generate a 3D model of the attached file.';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const MODEL_OPTIONS = [
-	{ value: 'gemini-3.1-flash-lite', label: 'gemini-3.1-flash-lite' },
-	{ value: 'gemini-3.5-flash', label: 'gemini-3.5-flash' },
-];
+const MODEL_OPTIONS = MODEL_REGISTRY.map(m => ({ value: m.id, label: m.name }));
+
 
 function makeId(prefix: string): string {
 	return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -286,6 +286,7 @@ export default function HitlWorkspace() {
 	const [sessionId, setSessionId] = useState<string | null>(null);
 	const [pythonScript, setPythonScript] = useState('');
 	const [activeDrawerTab, setActiveDrawerTab] = useState<DrawerTab>('parameters');
+	const [activeRightTab, setActiveRightTab] = useState<'cad' | 'cam'>('cad');
 	const [parameters, setParameters] = useState<Record<string, unknown>>({});
 	const [stlUrl, setStlUrl] = useState<string | null>(null);
 	const [stepUrl, setStepUrl] = useState<string | null>(null);
@@ -302,22 +303,24 @@ export default function HitlWorkspace() {
 
 	// CAM Parameters State
 	const [camSetup, setCamSetup] = useState<SetupSettings>(() => migrateLegacyCamSetup({
-		units: 'mm',
-		machine: 'Haas VF-2 (3-Axis VMC)',
-		stockType: 'box',
-		material: 'aluminum_6061',
+		units: undefined,
+		machine: undefined,
+		stockType: undefined,
+		material: undefined,
 		stockDimensions: [100, 100, 20],
-		wcs: 'G54',
-		originPosition: 'top_center',
+		wcs: undefined,
+		originPosition: undefined,
 		tolerance: 0.01,
 		stockOffset: 2,
-	}));
+	} as any));
 	const [camSetups, setCamSetups] = useState<CamSetupPlan[]>([]);
 	const [activeSetupId, setActiveSetupId] = useState<string | null>(null);
 	const [camTools, setCamTools] = useState<Tool[]>([]);
 	const [camOperations, setCamOperations] = useState<CamOperation[]>([]);
+	const [selectedOperationIds, setSelectedOperationIds] = useState<Set<string>>(new Set());
 	const [activeOperationId, setActiveOperationId] = useState<string | null>(null);
 	const [camFeatures, setCamFeatures] = useState<CamFeature[]>([]);
+	const [defaultSetupMetadata, setDefaultSetupMetadata] = useState<any>(undefined);
 	const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
 	const [activeParameter, setActiveParameter] = useState<string | null>(null);
 	const [coordValidation, setCoordValidation] = useState<any>(null);
@@ -333,6 +336,7 @@ export default function HitlWorkspace() {
 
 	const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 	const [isSharing, setIsSharing] = useState(false);
+
 
 	const [isDeveloper, setIsDeveloper] = useState(false);
 	const [developerUsername, setDeveloperUsername] = useState('');
@@ -367,6 +371,14 @@ export default function HitlWorkspace() {
 	const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 	const [selectionContext, setSelectionContext] = useState<[number, number, number] | null>(null);
 
+	useEffect(() => {
+		if (workflowStage === 'cam' || workflowStage === 'gcode') {
+			setActiveRightTab('cam');
+		} else if (workflowStage === 'cad') {
+			setActiveRightTab('cad');
+		}
+	}, [workflowStage]);
+
 	const parameterEntries = Object.entries(parameters).filter(([_, v]) => typeof v === 'number' || typeof v === 'string');
 
 	const handleShare = async () => {
@@ -376,7 +388,7 @@ export default function HitlWorkspace() {
 			const res = await fetch(`/api/sessions/${sessionId}/share`, { method: 'POST' });
 			if (!res.ok) throw new Error('Failed to create share link');
 			const data = await res.json();
-			const url = `${window.location.origin}/share/${data.id}`;
+			const url = `${window.location.origin}/share/${sessionId}`;
 			await navigator.clipboard.writeText(url);
 			toast.success('Share link copied to clipboard!');
 		} catch (error: any) {
@@ -495,6 +507,13 @@ export default function HitlWorkspace() {
 					}
 				} else {
 					setCamFeatures(data.artifacts.features || []);
+				}
+				
+				const setupMeta = data.artifacts.setupMetadata || data.artifacts.setup_metadata;
+				if (setupMeta) {
+					setDefaultSetupMetadata(setupMeta);
+				} else {
+					setDefaultSetupMetadata(undefined);
 				}
 				
 				const features = data.artifacts.features || [];
@@ -683,6 +702,14 @@ export default function HitlWorkspace() {
 				setCamOperations([]);
 				setGcodeContent(null);
 				setGcodeUrl(null);
+				
+				// Extract Setup Metadata correctly from the artifacts
+				const setupMeta = (payload.artifacts as any)?.setupMetadata || (payload.artifacts as any)?.setup_metadata;
+				if (setupMeta) {
+					setDefaultSetupMetadata(setupMeta);
+				} else {
+					setDefaultSetupMetadata(undefined);
+				}
 			}
 			if (payload.artifacts?.step_url) setStepUrl(resolveModelUrl(payload.artifacts.step_url));
 			if (payload.artifacts?.dxf_url) setDxfUrl(resolveModelUrl(payload.artifacts.dxf_url));
@@ -750,6 +777,7 @@ export default function HitlWorkspace() {
 					job_id: sessionId,
 					cam_run_id: latestCamRunId.current || '',
 					setup_id: activeSetupId || '',
+					selected_operation_ids: selectedOperationIds.size > 0 ? Array.from(selectedOperationIds) : undefined,
 				}),
 			});
 
@@ -799,6 +827,7 @@ export default function HitlWorkspace() {
 		}
 	}
 
+
 	async function handleGenerateToolpaths() {
 		if (!sessionId) {
 			toast.error('No session ID available.');
@@ -813,6 +842,10 @@ export default function HitlWorkspace() {
 
 		try {
 			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+			const opsToSend = selectedOperationIds.size > 0 
+				? camOperations.filter(op => selectedOperationIds.has(op.id))
+				: camOperations;
+
 			const res = await fetch(`${backendUrl}/api/v1/cam/toolpaths`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -823,7 +856,7 @@ export default function HitlWorkspace() {
 					setup: camSetup,
 					setups: camSetups,
 					tools: camTools,
-					operations: camOperations,
+					operations: opsToSend,
 					modelHash: cadModelHash || ""
 				})
 			});
@@ -842,23 +875,24 @@ export default function HitlWorkspace() {
 				
 				setToolpaths(data.toolpaths || []);
 				if (data.operations) {
-					// We also want to merge in data.operation_statuses if it exists
-					let mergedOps = data.operations;
-					if (data.operation_statuses && Array.isArray(data.operation_statuses)) {
-					    mergedOps = mergedOps.map((op: any) => {
-					        const override = data.operation_statuses.find((s: any) => s.operation_id === op.id);
-					        if (override) {
-					            return { 
-									...op, 
-									status: override.status, 
-									errorReason: override.blocked_reason,
-									parameters: { ...(op.parameters || {}), error: override.blocked_reason }
-								};
-					        }
-					        return op;
-					    });
-					}
-					setCamOperations(mergedOps);
+					setCamOperations(prevOps => prevOps.map(op => {
+						const updatedOp = data.operations.find((o: any) => o.id === op.id);
+						if (updatedOp) {
+							if (data.operation_statuses && Array.isArray(data.operation_statuses)) {
+								const override = data.operation_statuses.find((s: any) => s.operation_id === updatedOp.id);
+								if (override) {
+									return {
+										...updatedOp,
+										status: override.status,
+										errorReason: override.blocked_reason,
+										parameters: { ...(updatedOp.parameters || {}), error: override.blocked_reason }
+									};
+								}
+							}
+							return updatedOp;
+						}
+						return { ...op, toolpaths: [] };
+					}));
 				}
 				if (data.coordinate_validation) {
 					setCoordValidation(data.coordinate_validation);
@@ -878,6 +912,7 @@ export default function HitlWorkspace() {
 					setStatusText('Toolpaths generated successfully.');
 					toast.success('Toolpaths generated');
 				}
+				setWorkflowStage('cam');
 			}
 		} catch (error) {
 			if (latestCamRunId.current === runId) {
@@ -932,6 +967,17 @@ export default function HitlWorkspace() {
 	async function handleAutoGenerateOperations() {
 		if (!sessionId) {
 			toast.error('No session active. Please import a STEP file first.');
+			return;
+		}
+
+		// Validation: Require Machine and Stock configuration before Auto Planning
+		if (!camSetup.machineProfile && !camSetup.machineProfileId && !camSetup.machine) {
+			toast.error('Missing Machine Configuration', { description: 'Please select a machine profile in the Setup panel before auto-planning operations.' });
+			return;
+		}
+
+		if (!camSetup.material && !camSetup.workpieceMaterialId) {
+			toast.error('Missing Stock Details', { description: 'Please select a stock material in the Setup panel before auto-planning operations.' });
 			return;
 		}
 
@@ -995,7 +1041,8 @@ export default function HitlWorkspace() {
 								stickout: t.assembly?.stickoutLength || t.stickout || 20,
 								compatible_materials: ["all"]
 							};
-						})
+						}),
+						setup: camSetup
 					}
 				})
 			});
@@ -1093,8 +1140,16 @@ export default function HitlWorkspace() {
 					}
 				}));
 				setCamOperations(newOps);
+				
+				if (data.setups && data.setups.length > 0) {
+					setCamSetups(data.setups);
+				}
+				
+				// Do not automatically select blocked or unsupported operations
+				setSelectedOperationIds(new Set(newOps.filter(op => op.status !== 'unsupported' && op.status !== 'blocked').map(op => op.id)));
 				setActiveOperationId(newOps[0].id);
 				toast.success(`Generated ${newOps.length} operations across ${data.setups?.length || 0} setups`);
+				setWorkflowStage('cam');
 			} else {
 				toast.warning('No operations could be planned for these features.');
 			}
@@ -1157,6 +1212,7 @@ export default function HitlWorkspace() {
 		setActiveDrawerTab('parameters');
 		setIsDrawerOpen(true);
 		setStatusText('Restoring session and rebuilding geometry...');
+		setWorkflowStage('cad');
 
 		// Always trigger a sync to ensure the environment matches the script
 		await performSync(session.pythonScript, session.parameters || {}, session.id);
@@ -1336,12 +1392,14 @@ export default function HitlWorkspace() {
 													toolpaths={toolpaths?.filter(t => t.setupId === (activeSetupId || camSetups[0]?.setupId)) as any}
 													showToolpaths={camViewport.showToolpath}
 													camFeatures={camFeatures}
+													camOperations={camOperations}
 													hasBlockedOperations={camOperations.some(op => op.status === 'blocked' || op.status === 'error')}
 													activeFeatureId={activeFeatureId}
 													simulationState={camSimulation}
 													camTools={camTools}
 													debugMode={debugMode}
 													setupToolAxis={camSetups.find(s => s.setupId === (activeSetupId || camSetups[0]?.setupId))?.toolAxis}
+													setupMetadata={camSetups.find(s => s.setupId === (activeSetupId || camSetups[0]?.setupId)) || defaultSetupMetadata}
 													headerActions={
 														<div className="flex items-center gap-2">
 															{/* Debug Mode Toggle */}
@@ -1466,7 +1524,7 @@ export default function HitlWorkspace() {
 																	<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
 																		Material
 																	</span>
-																	<span className="text-[11px] font-bold text-blue-500 uppercase">{camSetup.material.replace('_', ' ')}</span>
+																	<span className="text-[11px] font-bold text-blue-500 uppercase">{camSetup.material?.replace(/_/g, ' ') || 'UNKNOWN MATERIAL'}</span>
 																</div>
 
 																<div className="w-px h-8 bg-muted/50" />
@@ -1580,25 +1638,57 @@ export default function HitlWorkspace() {
 
 									{/* Right: Workspace Settings */}
 									<Panel defaultSize={30} minSize={20}>
-										<div className="h-full w-full bg-card rounded-xl border border-border overflow-hidden relative">
-											<WorkspaceSettings
-												workflowStage={workflowStage}
-												parameters={parameters}
-												activeParameter={activeParameter}
-												onParameterSelect={setActiveParameter}
-												onParameterChange={(key, val) => {
-													const newParams = setParameterValue(parameters, key, val);
-													setParameters(newParams);
-													const newScript = injectParameters(pythonScript, newParams);
-													updatePythonScript(newScript);
-													void performSync(newScript, newParams, sessionId || '');
-												}}
-												parameterMetadata={parameterMetadata}
-												camSetup={camSetup}
-												setCamSetup={setCamSetup}
-												pythonScript={pythonScript}
-												camSummaryElement={
-													(workflowStage === 'cad' || workflowStage === 'cam' || workflowStage === 'gcode') ? (
+										<div className="h-full w-full glass-panel bg-card/40 rounded-xl overflow-hidden relative flex flex-col">
+											{/* Segmented Control Header */}
+											<div className="flex h-14 shrink-0 items-center justify-center px-4 border-b border-border/50 bg-background/50 dark:bg-background/20 backdrop-blur-md">
+												<div className="flex bg-black/5 dark:bg-black/40 p-1 rounded-lg border border-black/5 dark:border-white/5 w-full max-w-[280px]">
+													<button
+														onClick={() => setActiveRightTab('cad')}
+														className={`flex-1 py-1.5 px-3 text-[11px] font-bold tracking-widest uppercase rounded-md transition-all duration-200 ${
+															activeRightTab === 'cad'
+																? 'bg-blue-100/50 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(59,130,246,0.15)]'
+																: 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
+														}`}
+													>
+														📐 CAD Design
+													</button>
+													<button
+														onClick={() => setActiveRightTab('cam')}
+														className={`flex-1 py-1.5 px-3 text-[11px] font-bold tracking-widest uppercase rounded-md transition-all duration-200 ${
+															activeRightTab === 'cam'
+																? 'bg-amber-100/50 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(245,158,11,0.15)]'
+																: 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
+														}`}
+													>
+														⚙️ CAM Setup
+													</button>
+												</div>
+											</div>
+
+											{/* Tab Content */}
+											<div className="flex-1 overflow-y-auto">
+												{activeRightTab === 'cad' && (
+													<WorkspaceSettings
+														workflowStage={workflowStage}
+														parameters={parameters}
+														activeParameter={activeParameter}
+														onParameterSelect={setActiveParameter}
+														onParameterChange={(key, val) => {
+															const newParams = setParameterValue(parameters, key, val);
+															setParameters(newParams);
+															const newScript = injectParameters(pythonScript, newParams);
+															updatePythonScript(newScript);
+															void performSync(newScript, newParams, sessionId || '');
+														}}
+														parameterMetadata={parameterMetadata}
+														camSetup={camSetup}
+														setCamSetup={setCamSetup}
+														pythonScript={pythonScript}
+													/>
+												)}
+
+												{activeRightTab === 'cam' && (
+													<div className="p-5">
 														<CamSummaryPanel 
 															setup={camSetup as any} 
 															setups={camSetups}
@@ -1608,9 +1698,9 @@ export default function HitlWorkspace() {
 															coordValidation={coordValidation}
 															onClickSection={() => {}}
 														/>
-													) : undefined
-												}
-											/>
+													</div>
+												)}
+											</div>
 										</div>
 									</Panel>
 								</PanelGroup>
@@ -1648,6 +1738,8 @@ export default function HitlWorkspace() {
 								setCamOperations={setCamOperations}
 								activeOperationId={activeOperationId}
 								setActiveOperationId={setActiveOperationId}
+								selectedOperationIds={selectedOperationIds}
+								setSelectedOperationIds={setSelectedOperationIds}
 								camSimulation={camSimulation}
 								setCamSimulation={setCamSimulation}
 								toolpathValid={coordValidation?.status !== 'error'}

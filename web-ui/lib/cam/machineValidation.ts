@@ -86,7 +86,7 @@ export function migrateLegacyCamSetup(setup: SetupSettings): SetupSettings {
   let migrated = false;
 
   const legacyMachineMap: Record<string, string> = {
-    "Generic 3-Axis VMC": "generic_3x_vmc",
+    "Generic 3-Axis VMC": "generic_mill_3x_vmc",
     "Haas VF-2 (3-Axis VMC)": "haas_vf2",
     "Generic 4-Axis VMC": "generic_4x_vmc",
     "Generic 5-Axis VMC": "generic_5x_vmc",
@@ -122,18 +122,18 @@ export function migrateLegacyCamSetup(setup: SetupSettings): SetupSettings {
     const profile = MACHINE_MATRIX.machineProfiles.find(p => p.id === newSetup.machineProfile);
     if (profile) {
       newSetup.machineType = profile.machineType;
+      if (!newSetup.controller) {
+        newSetup.controller = profile.defaultController;
+      }
     }
   }
 
-  // Validate post migration
-  const validation = validateMachineControllerPost(newSetup);
-  if (!validation.valid) {
-    // Reset to safe defaults
-    console.warn("Legacy migration failed to produce a valid configuration, resetting to defaults.", validation.error);
-    newSetup.machineType = "MILL_3X_VMC";
-    newSetup.machineProfile = "generic_3x_vmc";
-    newSetup.controller = "FANUC_0I_MF";
-    newSetup.postProcessor = "AUTO";
+  // Validate post migration only if a machine is selected
+  if (newSetup.machineProfile || newSetup.machineType) {
+    const validation = validateMachineControllerPost(newSetup);
+    if (!validation.valid) {
+      console.warn("Configuration validation failed:", validation.error);
+    }
   }
 
   return newSetup;

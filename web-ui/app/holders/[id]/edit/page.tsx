@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from 'next/navigation';
 import { HolderForm } from '@/components/holders/HolderForm';
+import { Suspense } from 'react';
 
 export default async function EditHolderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -18,10 +19,11 @@ export default async function EditHolderPage({ params }: { params: Promise<{ id:
     type: holder.type as any,
     taperType: holder.taperType as any,
   };
-
   return (
     <div className="py-6">
-      <HolderForm initialData={initialData} />
+      <Suspense fallback={<div>Loading...</div>}>
+        <HolderForm initialData={initialData} />
+      </Suspense>
     </div>
   );
 }

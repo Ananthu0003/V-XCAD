@@ -126,7 +126,12 @@ function toFastApiRenderRequest(value: unknown): FastApiRenderRequest | null {
 }
 
 export async function POST(request: Request): Promise<Response> {
-	const body = await request.json().catch(() => null);
+	let body = null;
+	try {
+		body = await request.json();
+	} catch (err) {
+		console.error('Failed to parse JSON body in /api/render:', err);
+	}
 	const headerSessionId = request.headers.get('x-session-id');
 
 	// If body doesn't have session_id but header does, inject it.

@@ -14,13 +14,31 @@ class SetupPlanner:
     def __init__(self):
         pass
 
+    def _increment_wcs(self, base_wcs: str, increment: int) -> str:
+        if not base_wcs or not str(base_wcs).startswith("G"):
+            base_wcs = "G54"
+        try:
+            if base_wcs.startswith("G54.1 P"):
+                base_p = int(base_wcs.replace("G54.1 P", "").strip())
+                return f"G54.1 P{base_p + increment}"
+            else:
+                num = int(base_wcs.replace("G", ""))
+                new_num = num + increment
+                if new_num <= 59:
+                    return f"G{new_num}"
+                else:
+                    return f"G54.1 P{new_num - 59}"
+        except Exception:
+            return f"G{54 + increment}"
+
     def plan_setups(
         self,
         features: List[Dict[str, Any]],
         machine_capability: MachineCapability,
         stock_orientation: str = "top_z",
         default_tool_axis: List[float] = [0.0, 0.0, 1.0],
-        topology_info: Dict[str, Any] = None
+        topology_info: Dict[str, Any] = None,
+        base_wcs: str = "G54"
     ) -> List[CamSetupPlan]:
         """
         Groups features into one or more setups.
@@ -53,7 +71,7 @@ class SetupPlanner:
             setupName="Setup 1 (Top)",
             setupType="milling_3axis",
             toolAxis=base_setup_axis,
-            workCoordinateSystem="G54",
+            workCoordinateSystem=base_wcs,
             stockTopZ=stock_top_z,
             stockBottomZ=stock_bottom_z,
             modelToSetupTransform=transform
@@ -73,10 +91,13 @@ class SetupPlanner:
             feature['machining_info'] = info.model_dump()
             
             # Map legacy fields for backwards compatibility temporarily
-            feature['machinable_in_current_setup'] = info.machinableInCurrentSetup
+            # DO NOT overwrite machinable_in_current_setup for secondary setups!
+            if info.status in ("unsupported", "blocked"):
+                feature['machinable_in_current_setup'] = False
+                feature['blocked_reason'] = info.reason
+            
             feature['requires_reorientation'] = info.requiresSecondarySetup
             feature['requires_4axis_or_secondary_setup'] = info.requires4Axis
-            feature['blocked_reason'] = info.reason
 
             required_axis = info.requiredSetupAxis or base_setup_axis
             required_axis_key = self._format_axis_key(required_axis)
@@ -109,7 +130,7 @@ class SetupPlanner:
                     setupName=f"Setup {setup_counter} ({self._get_axis_name(required_axis)})",
                     setupType=stype,
                     toolAxis=required_axis,
-                    workCoordinateSystem=f"G{53 + min(setup_counter, 6)}",
+                    workCoordinateSystem=base_wcs,
                     requiresManualReclamp=stype in ("milling_3axis", "turning") and required_axis_key != base_axis_key,
                     requires4AxisIndexing=stype == "indexed_4axis",
                     stockTopZ=stock_top_z,

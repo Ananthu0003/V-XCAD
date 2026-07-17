@@ -33,8 +33,8 @@ export async function POST(
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
-        // Toggle the isShared flag
-        const isShared = !session.isShared;
+        // Always enable sharing when requested
+        const isShared = true;
 
         await prisma.cadSession.update({
             where: { id },

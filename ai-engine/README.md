@@ -45,7 +45,7 @@ The engine uses Python boundary representation (B-Rep) libraries to analyze inco
 - Turning profiles (shafts, cylinders)
 
 ### 2. Intelligent Setup Planning
-Based on the provided Machine Profile (3-Axis, 4-Axis Indexed, 5-Axis, Lathe, Mill-Turn), the backend analyzes the tool approach axis for every feature:
+Based on an extensive library of **88 real-world Machine Profiles** (including 3-Axis, 4-Axis Indexed, 5-Axis, Lathe, and Mill-Turn machines from Haas, DMG MORI, Okuma, etc.), the backend analyzes the tool approach axis for every feature:
 - Calculates alignment against the base setup.
 - Automatically clusters features into minimal setups (e.g., rotary indexing operations vs flip/reclamp).
 - Blocks features that the active machine cannot support.

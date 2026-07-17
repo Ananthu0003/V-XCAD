@@ -642,6 +642,12 @@ def run():
         new_args = [_clean_sketch_inputs(arg) for arg in args]
         if "to_revolve" in kwargs:
             kwargs["to_revolve"] = _clean_sketch_inputs(kwargs["to_revolve"])
+            
+        if "angle" in kwargs:
+            kwargs["revolution_arc"] = kwargs.pop("angle")
+        if "revolution_angle" in kwargs:
+            kwargs["revolution_arc"] = kwargs.pop("revolution_angle")
+            
         try:
             return _orig_revolve(*new_args, **kwargs)
         except Exception as exc:
@@ -929,6 +935,10 @@ class ParameterRenderService:
         Returns (True, "") on success, or (False, traceback_string) on failure.
         Uses the same harness as render_to_outputs but with strict error propagation.
         """
+        is_valid_syntax, syn_err = validate_script_syntax(script)
+        if not is_valid_syntax:
+            return False, syn_err
+            
         is_secure, sec_err = validate_script_security(script)
         if not is_secure:
             return False, f"Security validation failed: {sec_err}"
@@ -1028,6 +1038,10 @@ class ParameterRenderService:
         cam_parameters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         self.clear_outputs(prefix=output_basename)
+        is_valid_syntax, syn_err = validate_script_syntax(script)
+        if not is_valid_syntax:
+            raise RuntimeError(syn_err)
+            
         is_secure, sec_err = validate_script_security(script)
         if not is_secure:
             raise ValueError(sec_err)
@@ -1296,7 +1310,7 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
         tree = ast.parse(script)
         
         # Whitelisted top-level modules
-        ALLOWED_MODULES = {"build123d", "math", "re", "ocp_vscode", "typing", "sys", "enum"}
+        ALLOWED_MODULES = {"build123d", "math", "re", "ocp_vscode", "typing", "sys", "enum", "bd_warehouse"}
         
         # Blacklisted built-ins that could be used for execution or system access
         FORBIDDEN_FUNCTIONS = {

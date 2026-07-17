@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { prisma } from '../lib/prisma';
 
-const jsonPath = "c:\\Users\\user\\Downloads\\vexcad_full_cam_tool_library_200_plus (1).json";
+const jsonPath = path.join(__dirname, "comprehensive_tools.json");
 
 function mapType(rawType: string): any {
   const map: Record<string, string> = {
@@ -16,14 +16,21 @@ function mapType(rawType: string): any {
     "Center Drill": "drill",
     "Spot Drill": "drill",
     "Reamer": "reamer",
-    "Spiral Tap": "thread_mill",
+    "Spiral Tap": "tap",
     "Single Profile Thread Mill": "thread_mill",
     "T-Slot Cutter": "t_slot_cutter",
     "Dovetail Cutter": "dovetail_cutter",
     "Keyseat Cutter": "t_slot_cutter",
     "Engraving/V-Bit": "chamfer_mill",
     "Slitting Saw": "custom_profile_tool",
-    "Adjustable Boring Head": "boring_bar"
+    "Adjustable Boring Head": "boring_bar",
+    "Boring Bar": "boring_bar",
+
+    "Turning Tool": "turning_tool",
+    "Threading Tool": "threading_tool",
+    "Cut-off Tool": "cut_off_tool",
+    "Grooving Tool": "cut_off_tool",
+    "Knurling Tool": "knurling_tool"
   };
 
   for (const key of Object.keys(map)) {
@@ -70,7 +77,12 @@ async function run() {
         },
         
         assembly: {
-          stickoutLength: t.geometry.stickout_mm,
+          stickoutLength: t.assembly?.stickout_mm || t.geometry?.stickout_mm || Math.max(50.0, (t.geometry.flute_length_mm || 0) * 1.5, (t.geometry.overall_length_mm || 0) * 0.75),
+        },
+        
+        compatibility: {
+          compatibleMaterialsJson: JSON.stringify(t.recommended_materials || []),
+          compatibleMachinesJson: JSON.stringify(t.machine_compatibility || []),
         }
       };
 
@@ -110,7 +122,7 @@ async function run() {
         };
       }
 
-      const existingTool = await prisma.tool.findUnique({ where: { name: t.name } });
+      const existingTool = await prisma.tool.findUnique({ where: { name: t.name }, include: { compatibility: true } });
 
       if (existingTool) {
         await prisma.tool.update({
@@ -128,6 +140,9 @@ async function run() {
             },
             cuttingData: {
               upsert: { create: payload.cuttingData, update: payload.cuttingData }
+            },
+            compatibility: {
+              upsert: { create: payload.compatibility, update: payload.compatibility }
             }
           }
         });
@@ -140,7 +155,8 @@ async function run() {
             geometry: { create: payload.geometry },
             offsets: { create: payload.offsets },
             assembly: { create: payload.assembly },
-            cuttingData: { create: payload.cuttingData }
+            cuttingData: { create: payload.cuttingData },
+            compatibility: { create: payload.compatibility }
           }
         });
         console.log(`Imported: ${t.name} (type: ${typeStr})`);

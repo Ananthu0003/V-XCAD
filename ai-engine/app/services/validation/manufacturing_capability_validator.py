@@ -42,4 +42,31 @@ class ManufacturingCapabilityValidator:
             if rpm > max_rpm:
                 return {"valid": False, "reason": f"Requested spindle speed ({rpm} RPM) exceeds machine maximum ({max_rpm} RPM)."}
                 
+        # 5. Phase 8 Stage 3: Kinematics Validation
+        # Check if operation requires simultaneous 5-axis
+        if operation.get("requires_continuous_5axis", False) or op_type in ["5x_swarf", "5x_contour"]:
+            return {"valid": False, "reason": "Simultaneous 5-axis output is blocked unless a verified inverse-kinematics solution is available."}
+            
+        # Check Indexed Rotary Machining (3+2)
+        if operation.get("requires_4axis_indexing", False) or operation.get("requires_5axis_indexing", False):
+            # E.g. requiredSetupAxis = [0, 1, 0] instead of [0, 0, 1]
+            req_axis = operation.get("requiredSetupAxis")
+            if req_axis:
+                kinematics = machine.get("kinematics", {})
+                rotary_axes = kinematics.get("rotary_axes", [])
+                if not rotary_axes:
+                    return {"valid": False, "reason": "Indexed machining requires machine kinematics with defined rotary axes."}
+                
+                # Simplified check: just ensuring they don't request a non-Z axis if the machine has no rotary capability
+                # Full validation would compute the Euler angles and compare against min/max limits
+                # For this stage, we verify they have defined axes
+                has_a = any(r.get("axis") == "A" for r in rotary_axes)
+                has_b = any(r.get("axis") == "B" for r in rotary_axes)
+                has_c = any(r.get("axis") == "C" for r in rotary_axes)
+                
+                if abs(req_axis[2]) < 0.99: # Not Z
+                    # We need at least one rotary axis to reposition
+                    if not (has_a or has_b or has_c):
+                        return {"valid": False, "reason": "Machine lacks rotary kinematics to achieve the required indexed setup axis."}
+
         return {"valid": True, "reason": None}

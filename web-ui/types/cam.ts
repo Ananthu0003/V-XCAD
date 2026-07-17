@@ -15,16 +15,52 @@ export type PostProcessorSettings = {
 };
 
 export type SetupSettings = {
-    units: 'mm' | 'in';
-    machine: string;
-    stockType: StockType;
-    material: MaterialType;
-    stockDimensions: [number, number, number]; // length, width, height in mm
-    wcs: WorkCoordinateSystem;
-    originPosition: OriginPosition;
-    tolerance: number;
-    stockOffset: number;
+    // Phase 2 Canonical Setup Data
+    setupSchemaVersion: number;
     machineType?: string;
+    machineProfileId?: string;
+    controllerId?: string;
+    postProcessorId?: string;
+
+    // Units
+    internalUnits: 'mm' | 'in';
+    displayUnits: 'mm' | 'in';
+    postOutputUnits: 'mm' | 'in';
+
+    // Material
+    workpieceMaterialId?: string;
+
+    // Hashes & Validation
+    modelHash?: string;
+    setupHash?: string;
+    validationStatus: 'valid' | 'warning' | 'error' | 'incomplete';
+    requiresSetupReview: boolean;
+
+    // Structured Data
+    stockDefinition?: any;
+    originDefinition?: any;
+    workCoordinateSystem?: any;
+    orientation?: any;
+    modelToSetupTransform?: number[][]; // 4x4 matrix
+    modelPlacement?: any;
+    safetyHeights?: HeightsSettings;
+    workholding?: any;
+    tolerances?: {
+        machining: number;
+        simulation: number;
+        meshing: number;
+    };
+
+    // Legacy fields
+    units?: 'mm' | 'in';
+    machine?: string;
+    stockType?: StockType;
+    material?: MaterialType;
+    stockDimensions?: [number, number, number]; // length, width, height in mm
+    wcs?: WorkCoordinateSystem;
+    originPosition?: OriginPosition;
+    tolerance?: number;
+    stockOffset?: number;
     machineProfile?: string;
     controller?: string;
     postProcessor?: PostProcessor | string;
@@ -137,7 +173,7 @@ export type Tool = {
     cuttingData?: any; // To store defaults from ToolDefinition
 };
 
-export type OperationType = 'facing' | 'pocket' | '2d_contour' | 'drilling' | 'chamfer' | 'boss_clearing' | 'od_turning' | 'rotary_milling' | 'external_cylinder_unsupported' | 'side_feature' | string;
+export type OperationType = 'facing' | 'pocket' | '2d_contour' | 'drilling' | 'chamfer' | 'boss_clearing' | 'od_turning' | 'rotary_milling' | 'indexed_4axis_milling' | 'indexed_5axis_milling' | 'multi_axis_surface_milling' | 'external_cylinder_unsupported' | 'side_feature' | string;
 export type CoolantType = 'off' | 'flood' | 'mist' | 'through_tool' | 'air_blast';
 export type OperationStatus = 'ready' | 'warning' | 'requires_regeneration' | 'missing_tool' | 'missing_geometry' | 'blocked' | 'blocked_requires_reorientation' | 'unsupported' | 'error' | 'planned' | string;
 

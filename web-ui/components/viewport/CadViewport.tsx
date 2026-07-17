@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState, useRef, useEffect, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewport, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2 } from 'lucide-react';
@@ -69,6 +69,9 @@ type CadViewportProps = {
 	simulationState?: any;
 	camTools?: any[];
 	debugMode?: boolean;
+	setupMetadata?: any;
+	camViewport?: any;
+	camOperations?: any[];
 
 	children?: React.ReactNode; // For StlMesh
 	headerActions?: React.ReactNode;
@@ -76,6 +79,26 @@ type CadViewportProps = {
 	onMeshClick?: (point: [number, number, number]) => void;
 	onClearSelection?: () => void;
 };
+
+function AnimatedSetupGroup({ setupToolAxis, children }: { setupToolAxis?: [number, number, number], children: React.ReactNode }) {
+	const groupRef = useRef<THREE.Group>(null);
+	const targetQuaternion = useMemo(() => {
+		return setupToolAxis 
+			? new THREE.Quaternion().setFromUnitVectors(
+					new THREE.Vector3(...setupToolAxis).normalize(),
+					new THREE.Vector3(0, 1, 0)
+			  )
+			: new THREE.Quaternion();
+	}, [setupToolAxis]);
+
+	useFrame((state, delta) => {
+		if (groupRef.current) {
+			groupRef.current.quaternion.slerp(targetQuaternion, 8 * delta);
+		}
+	});
+
+	return <group ref={groupRef}>{children}</group>;
+}
 
 export function CadViewport({
 	stlUrl,
@@ -106,9 +129,12 @@ export function CadViewport({
 	parameters = {},
 	hasBlockedOperations = false,
 	activeFeatureId = null,
-	simulationState,
-	camTools,
+	simulationState = null,
+	camTools = [],
 	debugMode = false,
+	setupMetadata = null,
+	camViewport = { showStock: true },
+	camOperations = [],
 	setupToolAxis,
 	children,
 	headerActions,
@@ -143,6 +169,8 @@ export function CadViewport({
 			plunge: [],
 			retract: [],
 			helix: [],
+			roughing: [],
+			smoothing: [],
 			other: []
 		};
 
@@ -184,12 +212,35 @@ export function CadViewport({
 
             // Map semantic types to rendering groups
             let targetGroupName = 'other';
-            if (['rapid', 'rapid_clearance', 'rapid_xy', 'retract_clearance'].includes(type)) targetGroupName = 'rapid';
-            else if (['feed', 'cut'].includes(type)) targetGroupName = 'feed';
-            else if (['arc', 'arc_cw', 'arc_ccw'].includes(type)) targetGroupName = 'arc';
-            else if (['plunge', 'approach_retract', 'drill_cycle'].includes(type)) targetGroupName = 'plunge';
-            else if (type === 'retract') targetGroupName = 'retract';
-            else if (type === 'helix') targetGroupName = 'helix';
+			
+            let isRoughing = false;
+            let isSmoothing = false;
+            if (camOperations && seg.operationId) {
+                const op = camOperations.find(o => o.id === seg.operationId);
+                if (op && op.type) {
+                    const typeLower = op.type.toLowerCase();
+                    const nameLower = (op.name || '').toLowerCase();
+                    if (typeLower.includes('rough') || nameLower.includes('rough') || typeLower.includes('pocket') || nameLower.includes('pocket') || typeLower.includes('clear') || typeLower.includes('face') || nameLower.includes('face')) {
+                        isRoughing = true;
+                    } else if (typeLower.includes('finish') || typeLower.includes('smooth') || typeLower.includes('contour') || nameLower.includes('finish') || nameLower.includes('smooth')) {
+                        isSmoothing = true;
+                    }
+                }
+            }
+
+            if (['rapid', 'rapid_clearance', 'rapid_xy', 'retract_clearance'].includes(type)) {
+				targetGroupName = 'rapid';
+			} else if (['feed', 'cut', 'arc', 'arc_cw', 'arc_ccw'].includes(type)) {
+				if (isRoughing) targetGroupName = 'roughing';
+				else if (isSmoothing) targetGroupName = 'smoothing';
+				else targetGroupName = ['arc', 'arc_cw', 'arc_ccw'].includes(type) ? 'arc' : 'feed';
+			} else if (['plunge', 'approach_retract', 'drill_cycle'].includes(type)) {
+				targetGroupName = 'plunge';
+			} else if (type === 'retract') {
+				targetGroupName = 'retract';
+			} else if (type === 'helix') {
+				targetGroupName = 'helix';
+			}
 
 			const targetGroup = groups[targetGroupName] || groups.other;
 			if (seg.start && seg.end) {
@@ -204,6 +255,8 @@ export function CadViewport({
 			arc: 0x0ea5e9,      // sky-500
 			plunge: 0x10b981,   // emerald-500
 			retract: 0xf59e0b,  // amber-500
+			roughing: 0xa855f7, // purple-500
+			smoothing: 0x2dd4bf, // teal-400
 			other: 0x64748b     // slate-500
 		};
 
@@ -223,7 +276,7 @@ export function CadViewport({
 						const geometry = new THREE.BufferGeometry().setFromPoints(points);
 						const material = new THREE.LineBasicMaterial({
 							color: colors[type] || colors.other,
-							linewidth: type === 'feed' || type === 'arc' ? 2 : 1.5,
+							linewidth: ['feed', 'arc', 'roughing', 'smoothing'].includes(type) ? 2 : 1.5,
 							opacity: type === 'rapid' ? 0.4 : 0.8,
 							transparent: true,
 							depthTest: true,
@@ -235,7 +288,7 @@ export function CadViewport({
 			hasValidToolpaths: true,
 			allRejected: false
 		};
-	}, [toolpaths, debugMode]);
+	}, [toolpaths, debugMode, camOperations]);
 
 	const [hasSimulated, setHasSimulated] = useState(false);
 	const [featureDebug, setFeatureDebug] = useState<any>(null);
@@ -409,6 +462,7 @@ export function CadViewport({
 					</div>
 				)}
 
+
 				{/* Ambient Background Effects */}
 				<div className="absolute inset-0 z-0 pointer-events-none">
 					<div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-[128px]" />
@@ -432,30 +486,139 @@ export function CadViewport({
 					<Suspense fallback={null}>
 						<Environment files="/potsdamer_platz_1k.hdr" />
 						<Grid infiniteGrid fadeDistance={50} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={1} sectionSize={10} position={[0, -0.01, 0]} />
-						<Stage intensity={0.8} adjustCamera={!hasSimulated} shadows="contact">
-							<group
-								quaternion={
-									setupToolAxis 
-										? new THREE.Quaternion().setFromUnitVectors(
-												new THREE.Vector3(...setupToolAxis).normalize(),
-												new THREE.Vector3(0, 1, 0)
-										  )
-										: new THREE.Quaternion()
+						<Stage intensity={0.8} adjustCamera={!hasSimulated} environment={null} shadows="contact">
+							<AnimatedSetupGroup setupToolAxis={setupToolAxis}>
+								<group>
+									{/* The CAD model MUST be transformed to setup space using modelToSetupTransform */}
+									{console.log("CAD VIEWPORT SETUP METADATA", setupMetadata)}
+									{(() => {
+										const m = setupMetadata?.modelToSetupTransform 
+											? new THREE.Matrix4().fromArray(
+												Array.isArray(setupMetadata.modelToSetupTransform[0]) 
+													? setupMetadata.modelToSetupTransform.flat() 
+													: setupMetadata.modelToSetupTransform
+											).transpose() 
+											: new THREE.Matrix4();
+										
+										const pos = new THREE.Vector3();
+										const quat = new THREE.Quaternion();
+										const scale = new THREE.Vector3();
+										m.decompose(pos, quat, scale);
+										
+										return (
+											<>
+												<group position={pos} quaternion={quat} scale={scale}>
+													{isSolidVisible && children}
+													
+													{/* Overlays - placed next to children so they inherit the exact same transforms */}
+													{geometryInfo && (activeParameter || activeFeatureId) && (
+														<>
+															{activeParameter && (
+																<DimensionOverlay 
+																	annotations={annotations}
+																	activeParameter={activeParameter}
+																	geometryScale={geometryInfo.scale}
+																	geometryCenter={geometryInfo.center}
+																/>
+															)}
+														</>
+													)}
+												</group>
+
+												{isWireframeVisible && (
+													<group
+														scale={1}
+														position={[0, 0, 0]}
+													>
+														{/* Render CAM Toolpaths using optimized buffer geometry */}
+														{groupedToolpaths}
+
+														{/* Active feature indicators have been removed in favor of cam_debug_overlay.json */}
+
+														{/* Render Active Tool for Simulation INSIDE the setup space group */}
+														{showToolpaths && simulationState?.showTool !== false && simulationState?.segments && simulationState.activeSegmentIndex !== undefined && camTools && (
+															(() => {
+																const activeSegment = simulationState.segments[simulationState.activeSegmentIndex];
+																if (!activeSegment) return null;
+																const toolId = activeSegment.toolId || activeSegment.tool_id;
+																const activeTool = camTools.find(t => t.id === toolId || t.tool_name === toolId);
+																if (!activeTool) return null;
+
+																const toolDiameter = activeTool.diameter_mm || activeTool.diameter || 6;
+																const radius = toolDiameter / 2;
+																const isFaceMill = activeTool.type === 'face_mill' || toolDiameter >= 30;
+																
+																// Calculate realistic proportions
+																const cuttingLength = activeTool.cutting_length || activeTool.flute_length || (isFaceMill ? Math.min(radius * 0.5, 15) : Math.min(radius * 3, 40));
+																const shaftRadius = isFaceMill ? Math.max(radius * 0.3, 8) : radius;
+																const stickout = activeTool.length_mm || activeTool.stickout || (isFaceMill ? Math.max(cuttingLength + 40, 60) : Math.min(radius * 5, 80));
+
+																const i = activeSegment.end_i ?? 0;
+																const j = activeSegment.end_j ?? 0;
+																let k = activeSegment.end_k ?? -1;
+																if (i === 0 && j === 0 && k === 0) k = -1;
+
+																const targetVec = new THREE.Vector3(-i, -j, -k).normalize();
+																const upVec = new THREE.Vector3(0, 1, 0);
+																const quaternion = new THREE.Quaternion().setFromUnitVectors(upVec, targetVec);
+
+																const x = activeSegment.end?.x ?? activeSegment.end_x ?? 0;
+																const y = activeSegment.end?.y ?? activeSegment.end_y ?? 0;
+																const z = activeSegment.end?.z ?? activeSegment.end_z ?? 0;
+
+																return (
+																	<group position={[x, y, z]} quaternion={quaternion}>
+																		{/* Cutting Tool / End Mill */}
+																		<mesh position={[0, stickout / 2, 0]}>
+																			<cylinderGeometry
+																				args={[shaftRadius, shaftRadius, stickout, 32]}
+																				ref={(geom) => {
+																					if (geom) {
+																						geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
+																						geom.boundingBox = new THREE.Box3();
+																					}
+																				}}
+																			/>
+																			<meshStandardMaterial color="#cbd5e1" metalness={0.8} roughness={0.2} transparent opacity={0.9} />
+																		</mesh>
+
+																		{/* CNC Spindle / Tool Holder (scaled to look like a small collet) */}
+																		<mesh position={[0, stickout + 15, 0]}>
+																			<cylinderGeometry
+																				args={[Math.max(shaftRadius * 1.5, 15), Math.max(shaftRadius * 1.2, 10), 30, 32]}
+																				ref={(geom) => {
+																					if (geom) {
+																						geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
+																						geom.boundingBox = new THREE.Box3();
+																					}
+																				}}
+																			/>
+																			<meshStandardMaterial color="#334155" metalness={0.5} roughness={0.6} />
+																		</mesh>
+
+
+																	</group>
+																);
+															})()
+														)}
+													</group>
+												)}
+											</>
+										);
+									})()
 								}
-							>
-								{isSolidVisible && children}
 								
-								{/* Overlays - placed next to children so they inherit the exact same Stage/rotation transforms */}
+								{/* Stock Boundaries - Rendered directly in Setup Space */}
+								{setupMetadata?.resolvedStock && camViewport?.showStock !== false && (
+									<mesh position={setupMetadata.resolvedStock.center}>
+										<boxGeometry args={setupMetadata.resolvedStock.dimensions} />
+										<meshBasicMaterial color="#3b82f6" wireframe transparent opacity={0.25} />
+									</mesh>
+								)}
+								
+								{/* FeatureHighlight is already in Setup Space from backend */}
 								{geometryInfo && (activeParameter || activeFeatureId) && (
 									<>
-										{activeParameter && (
-											<DimensionOverlay
-												annotations={annotations}
-												activeParameter={activeParameter}
-												geometryScale={geometryInfo.scale}
-												geometryCenter={geometryInfo.center}
-											/>
-										)}
 										<FeatureHighlight 
 											annotations={annotations} 
 											camFeatures={camFeatures}
@@ -468,92 +631,8 @@ export function CadViewport({
 										/>
 									</>
 								)}
-								{isWireframeVisible && (
-									<group
-										scale={1}
-										position={[0, 0, 0]}
-									>
-										{/* Render CAM Toolpaths using optimized buffer geometry */}
-										{groupedToolpaths}
-
-									{/* Active feature indicators have been removed in favor of cam_debug_overlay.json */}
-
-									{/* Render Active Tool for Simulation INSIDE the scaled/translated group */}
-									{showToolpaths && simulationState?.showTool !== false && simulationState?.segments && simulationState.activeSegmentIndex !== undefined && camTools && (
-										(() => {
-											const activeSegment = simulationState.segments[simulationState.activeSegmentIndex];
-											if (!activeSegment) return null;
-											const toolId = activeSegment.toolId || activeSegment.tool_id;
-											const activeTool = camTools.find(t => t.id === toolId || t.tool_name === toolId);
-											if (!activeTool) return null;
-
-											const toolDiameter = activeTool.diameter_mm || activeTool.diameter || 6;
-											const radius = toolDiameter / 2;
-											const stickout = activeTool.length_mm || activeTool.stickout || (radius * 5); // visually more proportional fallback
-
-											const i = activeSegment.end_i ?? 0;
-											const j = activeSegment.end_j ?? 0;
-											let k = activeSegment.end_k ?? -1;
-											if (i === 0 && j === 0 && k === 0) k = -1;
-
-											const targetVec = new THREE.Vector3(-i, -j, -k).normalize();
-											const upVec = new THREE.Vector3(0, 1, 0);
-											const quaternion = new THREE.Quaternion().setFromUnitVectors(upVec, targetVec);
-
-											const x = activeSegment.end?.x ?? activeSegment.end_x ?? 0;
-											const y = activeSegment.end?.y ?? activeSegment.end_y ?? 0;
-											const z = activeSegment.end?.z ?? activeSegment.end_z ?? 0;
-
-											return (
-												<group position={[x, y, z]} quaternion={quaternion}>
-													{/* Cutting Tool / End Mill */}
-													<mesh position={[0, stickout / 2, 0]}>
-														<cylinderGeometry
-															args={[radius, radius, stickout, 32]}
-															ref={(geom) => {
-																if (geom) {
-																	geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
-																	geom.boundingBox = new THREE.Box3();
-																}
-															}}
-														/>
-														<meshStandardMaterial color="#cbd5e1" metalness={0.8} roughness={0.2} transparent opacity={0.9} />
-													</mesh>
-
-													{/* CNC Spindle / Tool Holder (scaled to look like a small collet) */}
-													<mesh position={[0, stickout + (radius * 1.5), 0]}>
-														<cylinderGeometry
-															args={[radius * 2.2, radius * 1.5, radius * 3, 32]}
-															ref={(geom) => {
-																if (geom) {
-																	geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
-																	geom.boundingBox = new THREE.Box3();
-																}
-															}}
-														/>
-														<meshStandardMaterial color="#334155" metalness={0.5} roughness={0.6} />
-													</mesh>
-
-													{/* Tool tip point */}
-													<mesh position={[0, 0, 0]}>
-														<sphereGeometry
-															args={[Math.max(0.5, radius * 0.2), 16, 16]}
-															ref={(geom) => {
-																if (geom) {
-																	geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
-																	geom.boundingBox = new THREE.Box3();
-																}
-															}}
-														/>
-														<meshBasicMaterial color="#ef4444" depthTest={false} />
-													</mesh>
-												</group>
-											);
-										})()
-									)}
 								</group>
-							)}
-							</group>
+							</AnimatedSetupGroup>
 						</Stage>
 
 						<GizmoHelper alignment="top-right" margin={[50, 50]}>

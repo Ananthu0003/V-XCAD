@@ -221,24 +221,70 @@ class CamOperationSchema(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     toolpaths: Optional[list[ToolpathSegment]] = None
 
+class HeightsSettings(BaseModel):
+    clearanceHeight: float
+    retractHeight: float
+    feedHeight: float
+    topHeight: Any
+    bottomHeight: Any
+
+class Tolerances(BaseModel):
+    machining: float = 0.01
+    simulation: float = 0.01
+    meshing: float = 0.01
+
 class CamSetup(BaseModel):
-    machineType: str = "MILL_3X_VMC"
-    machineProfile: str = "generic_3x_vmc"
-    controller: str = "FANUC_0I_MF"
-    postProcessor: str = "AUTO"
+    # Phase 2 Canonical Setup Data
+    setupSchemaVersion: int = 1
+    machineType: Optional[str] = "MILL_3X_VMC"
+    machineProfileId: Optional[str] = "generic_mill_3x_vmc"
+    controllerId: Optional[str] = "FANUC_0I_MF"
+    postProcessorId: Optional[str] = "AUTO"
     resolved_post_processor: Optional[str] = None
-    material: str = "aluminum_6061"
-    stockType: str = "box"
-    stockDimensions: list[float] = [100.0, 100.0, 20.0]
-    wcs: str = "G54"
-    originPosition: str = "top_center"
-    tolerance: float = 0.01
+
+    # Units
+    internalUnits: Literal["mm", "in"] = "mm"
+    displayUnits: Literal["mm", "in"] = "mm"
+    postOutputUnits: Literal["mm", "in"] = "mm"
+
+    # Material
+    workpieceMaterialId: Optional[str] = "aluminum_6061"
+
+    # Hashes & Validation
+    modelHash: Optional[str] = None
+    setupHash: Optional[str] = None
+    validationStatus: Literal["valid", "warning", "error", "incomplete"] = "incomplete"
+    requiresSetupReview: bool = True
+
+    # Structured Data
+    stockDefinition: Optional[dict[str, Any]] = None
+    originDefinition: Optional[dict[str, Any]] = None
+    workCoordinateSystem: Optional[dict[str, Any]] = None
+    orientation: Optional[dict[str, Any]] = None
+    modelToSetupTransform: Optional[list[list[float]]] = None # 4x4 matrix
+    modelPlacement: Optional[dict[str, Any]] = None
+    safetyHeights: Optional[HeightsSettings] = None
+    workholding: Optional[dict[str, Any]] = None
+    tolerances: Optional[Tolerances] = None
+
+    # Legacy support
+    units: Optional[Literal["mm", "in"]] = None
+    machine: Optional[str] = None
+    stockType: Optional[str] = None
+    material: Optional[str] = None
+    stockDimensions: Optional[list[float]] = None
+    wcs: Optional[str] = None
+    originPosition: Optional[str] = None
+    tolerance: Optional[float] = None
+    stockOffset: Optional[float] = None
+    machineProfile: Optional[str] = None
+    controller: Optional[str] = None
+    postProcessor: Optional[str] = None
     
-    # Phase 2: Enforce Setup-Based CAM
+    # Optional setup orientation hints
     setupType: str = "milling_3axis"
     toolAxis: list[float] = [0.0, 0.0, 1.0]
     stockOrientation: str = "top_z"
-    modelToSetupTransform: Optional[list[float]] = None
 
 class CamTool(BaseModel):
     id: str
@@ -302,6 +348,7 @@ class RenderArtifacts(BaseModel):
     toolpaths: Optional[list[ToolpathSegment]] = None
     annotations: Optional[dict[str, Any]] = None
     features: Optional[list[CamFeatureSchema]] = None
+    setup_metadata: Optional[dict[str, Any]] = Field(default=None, alias="setupMetadata")
     feature_validation_status: Optional[str] = None
     geometry_mapping_summary: Optional[dict[str, Any]] = None
     operations: Optional[list[CamOperationSchema]] = None
@@ -316,7 +363,7 @@ class RenderResponse(BaseModel):
 
 class MachineConfig(BaseModel):
     machine_type: str = "MILL_3X_VMC"
-    machine_profile: str = "generic_3x_vmc"
+    machine_profile: str = "generic_mill_3x_vmc"
     controller: str = "FANUC_0I_MF"
     post_processor: str = "AUTO"
     resolved_post_processor: Optional[str] = None
@@ -342,3 +389,5 @@ class GCodeResponse(BaseModel):
     validation: Optional[GCodeValidationReport] = None
     toolpaths: list[ToolpathSegment] = Field(default_factory=list)
 
+    inferred_fields: list[str] = Field(default_factory=list)
+    defaulted_fields: list[str] = Field(default_factory=list)

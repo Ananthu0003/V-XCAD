@@ -68,8 +68,8 @@ export function BasicInfoStep() {
         <div className="space-y-2">
           <Label>Tool Material</Label>
           <Select 
-            value={toolData.material || 'carbide'} 
-            onValueChange={(v: any) => updateToolData({ material: v })}
+            value={(toolData as any).material || 'carbide'} 
+            onValueChange={(v: any) => updateToolData({ material: v } as any)}
           >
             <SelectTrigger>
               <SelectValue placeholder="Select material" />

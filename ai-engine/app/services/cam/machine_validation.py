@@ -118,3 +118,5 @@ def validate_full_setup(machine_type: str, machine_profile: str, controller: str
                 return False, f"G-code generation is not yet supported for machine profile '{machine_profile}'", resolved_post
                 
     return True, None, resolved_post
+
+# Triggered reload to refresh JSON data

@@ -12,7 +12,6 @@ interface WorkspaceSettingsProps {
   camSetup: SetupSettings;
   setCamSetup: React.Dispatch<React.SetStateAction<SetupSettings>>;
   pythonScript: string;
-  camSummaryElement?: React.ReactNode;
 }
 
 export function WorkspaceSettings({
@@ -25,30 +24,11 @@ export function WorkspaceSettings({
   camSetup,
   setCamSetup,
   pythonScript,
-  camSummaryElement,
 }: WorkspaceSettingsProps) {
   
   return (
-    <aside className="h-full w-full bg-popover flex flex-col font-sans relative border-l border-border">
-      {/* Header */}
-      <div className="flex h-[72px] shrink-0 items-center px-6">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Settings2 className="size-4 text-blue-500" />
-          <h3 className="text-[11px] font-bold uppercase tracking-[0.15em] text-foreground/90">
-            WORKSPACE SETTINGS
-          </h3>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
-        {/* Render CAM Summary Panel if provided */}
-        {camSummaryElement && (
-          <div className="mb-8 animate-in fade-in duration-300">
-            {camSummaryElement}
-          </div>
-        )}
-        
-        <div className="space-y-8">
+    <div className="flex flex-col font-sans h-full w-full bg-transparent">
+      <div className="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-8">
         
         {/* Extracted Parameters */}
         <div className="space-y-4 animate-in fade-in duration-300">
@@ -92,8 +72,15 @@ export function WorkspaceSettings({
               NO SCRIPT GENERATED
             </div>
           ) : (
-            <div className="rounded-xl border border-border bg-background overflow-hidden">
-              <pre className="p-4 text-[10px] font-mono text-primary overflow-x-auto whitespace-pre-wrap max-h-[300px] custom-scrollbar">
+            <div className="rounded-xl border border-black/5 dark:border-white/5 bg-slate-100 dark:bg-black/40 overflow-hidden shadow-inner backdrop-blur-sm">
+              {/* Fake Mac Header */}
+              <div className="flex items-center gap-1.5 px-4 py-2 border-b border-black/5 dark:border-white/5 bg-slate-200 dark:bg-black/20">
+                <div className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
+                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
+                <div className="w-2.5 h-2.5 rounded-full bg-green-500/70" />
+                <span className="ml-2 text-[10px] text-zinc-500 font-mono">model.py</span>
+              </div>
+              <pre className="p-4 text-[11px] leading-relaxed font-mono text-blue-800 dark:text-blue-300 overflow-x-auto whitespace-pre-wrap max-h-[400px] custom-scrollbar selection:bg-blue-500/30">
                 {pythonScript}
               </pre>
             </div>
@@ -102,7 +89,6 @@ export function WorkspaceSettings({
 
 
         </div>
-      </div>
-    </aside>
+    </div>
   );
 }

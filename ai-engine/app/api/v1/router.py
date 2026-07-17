@@ -328,7 +328,7 @@ async def generate(
         if image_bytes and mime_type and not base_code:
             yield f'data: {json.dumps({"status": "auditing blueprint (stage 1 of 2)"})}\n\n'
             try:
-                feature_map = await asyncio.to_thread(svc.audit_blueprint, image_bytes, mime_type)
+                feature_map = await svc.audit_blueprint(image_bytes, mime_type)
             except Exception as e:
                 print(f"Audit failed: {e}")
 
@@ -376,8 +376,7 @@ async def edit(request: EditRequest) -> GenerateResponse:
         raise HTTPException(status_code=500, detail={"error": {"message": str(exc)}})
 
     try:
-        script = await asyncio.to_thread(
-            svc.edit_script,
+        script = await svc.edit_script(
             prompt=request.prompt,
             current_code=request.current_code,
             target_point=request.target_point,
@@ -557,8 +556,7 @@ async def render(
         # ── Auto-healing Loop ──────────────────────────────────────────────────
         try:
             llm_svc = LLMCodegenService()
-            repaired_script = await asyncio.to_thread(
-                llm_svc.repair_script,
+            healed_script = await llm_svc.repair_script(
                 current_code=request.python_script,
                 error_log=str(exc)
             )
@@ -566,7 +564,7 @@ async def render(
             # Re-run render with the repaired script
             result = await svc.render_to_outputs(
                 parameters=request.parameters,
-                script=repaired_script,
+                script=healed_script,
                 output_basename=output_basename,
                 cam_parameters=request.cam_parameters,
             )
@@ -623,6 +621,7 @@ async def render(
         toolpaths=None,
         annotations=result.get("annotations"),
         features=features,
+        setup_metadata=analysis_result.get("setup_metadata") if 'analysis_result' in locals() and analysis_result else None,
         feature_validation_status=validation_status,
         geometry_mapping_summary=mapping_summary,
         operations=None,
@@ -632,7 +631,7 @@ async def render(
         status="ok",
         session_id=session_id,
         artifacts=artifacts,
-        repaired_script=repaired_script if 'repaired_script' in locals() else None,
+        repaired_script=healed_script if 'healed_script' in locals() else None,
     )
 
 
@@ -899,6 +898,7 @@ async def import_step_endpoint(file: UploadFile = File(...)):
                 "stl_url": f"/outputs/{stl_filename}",
                 "step_url": f"/outputs/{step_filename}",
                 "features": features,
+                "setup_metadata": analysis_result.get("setup_metadata") if 'analysis_result' in locals() and analysis_result else None,
                 "feature_validation_status": validation_status,
                 "geometry_mapping_summary": mapping_summary,
             }
@@ -958,20 +958,19 @@ async def legacy_generate(job_id: str):
     svc = LLMCodegenService()
     
     # Extract feature graph (Audit phase)
-    features = await asyncio.to_thread(svc.audit_blueprint, image_bytes, mime_type)
+    features = await svc.audit_blueprint(image_bytes, mime_type)
     
     # Save feature graph to disk
     output_file = job_dir / "feature_graph.json"
     output_file.write_text(json.dumps(features, indent=2), encoding="utf-8")
 
     # Generate build123d code (Codegen phase)
-    prompt = "Create a parametric build123d model based on the extracted features."
-    script = await asyncio.to_thread(
-        svc.generate_script,
-        prompt=prompt,
+    script = await svc.generate_script(
+        prompt="Create a parametric build123d model based on the extracted features.",
         image_bytes=image_bytes,
         mime_type=mime_type,
         feature_map=features,
+        base_code=None
     )
     
     script = _sanitize_script(script)
@@ -1119,6 +1118,7 @@ class CamGCodeRequest(BaseModel):
     job_id: str = "default_job"
     cam_run_id: str = ""
     setup_id: str | None = None
+    selected_operation_ids: list[str] | None = None
 
 @router.post("/cam/gcode")
 async def cam_generate_gcode(request: CamGCodeRequest):
@@ -1131,19 +1131,28 @@ async def cam_generate_gcode(request: CamGCodeRequest):
     # Load data
     toolpaths_data = {}
     if toolpaths_file.exists():
-        with open(toolpaths_file, "r") as f:
-            toolpaths_data = json.load(f)
+        try:
+            with open(toolpaths_file, "r") as f:
+                toolpaths_data = json.load(f)
+        except json.JSONDecodeError:
+            pass
 
     engine_input = {}
     if input_file.exists():
-        with open(input_file, "r") as f:
-            engine_input = json.load(f)
+        try:
+            with open(input_file, "r") as f:
+                engine_input = json.load(f)
+        except json.JSONDecodeError:
+            pass
             
     operations = []
     if ops_file.exists():
-        with open(ops_file, "r") as f:
-            ops_data = json.load(f)
-            operations = ops_data.get("operations", [])
+        try:
+            with open(ops_file, "r") as f:
+                ops_data = json.load(f)
+                operations = ops_data.get("operations", [])
+        except json.JSONDecodeError:
+            operations = engine_input.get("operations", [])
     else:
         operations = engine_input.get("operations", [])
 
@@ -1157,6 +1166,9 @@ async def cam_generate_gcode(request: CamGCodeRequest):
                 
     if request.setup_id:
         operations = [op for op in operations if op.get("setup_id") == request.setup_id or op.get("setupId") == request.setup_id]
+        
+    if request.selected_operation_ids is not None:
+        operations = [op for op in operations if op.get("id") in request.selected_operation_ids]
 
     # Hash matching mock for MVP (assuming matching if exists for now, in a real system we'd compare)
     hashes_match = bool(hashes_data)
@@ -1179,8 +1191,20 @@ async def cam_generate_gcode(request: CamGCodeRequest):
     from app.services.cam.machine_validation import validate_full_setup, validate_post_capabilities_for_operations
     
     engine_setup = engine_input.get("setup", {})
+    
+    # Fallback: if engine_input is empty/corrupted, load setup from cam_setup_analysis.json
+    if not engine_setup:
+        setup_analysis_file = job_dir / "cam_setup_analysis.json"
+        if setup_analysis_file.exists():
+            try:
+                with open(setup_analysis_file, "r") as f:
+                    setup_analysis = json.load(f)
+                    engine_setup = setup_analysis.get("setup", {})
+            except (json.JSONDecodeError, Exception):
+                pass
+    
     machine_type = engine_setup.get("machineType", "MILL_3X_VMC")
-    machine_profile = engine_setup.get("machineProfile", "generic_3x_vmc")
+    machine_profile = engine_setup.get("machineProfile", "generic_mill_3x_vmc")
     controller = engine_setup.get("controller", "FANUC_0I_MF")
     post_processor_req = engine_setup.get("postProcessor", "AUTO")
     
@@ -1212,9 +1236,17 @@ async def cam_generate_gcode(request: CamGCodeRequest):
     machine = {"id": machine_profile, "type": machine_type}
     
     # Load tools
-    # Assuming tools are in engine_input, or we mock them if not present.
+    # Primary source: engine_input (cam_toolpath_engine_input.json)
     tools_list = engine_input.get("tools", [])
-    tools_by_id = {t.get("id"): t for t in tools_list}
+    
+    # Fallback: extract tools embedded inside operations (each op stores its assigned tool inline)
+    if not tools_list:
+        for op in operations:
+            op_tool = op.get("tool")
+            if op_tool and isinstance(op_tool, dict) and (op_tool.get("id") or op_tool.get("tool_id")):
+                tools_list.append(op_tool)
+    
+    tools_by_id = {t.get("id") or t.get("tool_id"): t for t in tools_list if t.get("id") or t.get("tool_id")}
     
     errors = []
     from app.services.validation.manufacturing_capability_validator import ManufacturingCapabilityValidator
@@ -1239,8 +1271,8 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         tool = tools_by_id.get(tool_id, {})
         op["tool"] = tool
         
-        # Skip operations that are not supported in this setup
-        if op.get("status") == "unsupported":
+        # Skip operations that are blocked or unsupported in this setup
+        if op.get("status") in ("unsupported", "blocked"):
             continue
             
         # 1. Capability Validation
@@ -1283,10 +1315,10 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         if "HEIDENHAIN" in resolved_post.upper():
             # Generate ISO
             iso_post = PostProcessorFactory.create("HEIDENHAIN")
-            gcode_iso = iso_post.generate(valid_operations)
+            gcode_iso = iso_post.generate(valid_operations, setup)
             # Generate Klartext
             klartext_post = PostProcessorFactory.create("HEIDENHAIN_KLARTEXT")
-            gcode_klartext = klartext_post.generate(valid_operations)
+            gcode_klartext = klartext_post.generate(valid_operations, setup)
             
             # Post Output Validation on ISO for safety
             out_val = PostOutputValidator.validate_gcode(gcode_iso, valid_operations)
@@ -1318,7 +1350,7 @@ async def cam_generate_gcode(request: CamGCodeRequest):
             }
         else:
             post_processor = PostProcessorFactory.create(resolved_post)
-            gcode = post_processor.generate(valid_operations)
+            gcode = post_processor.generate(valid_operations, setup)
             
             # 3. Post Output Validation
             out_val = PostOutputValidator.validate_gcode(gcode, valid_operations)

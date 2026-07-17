@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Tool, ToolType, ToolMaterial } from '@/types/cam';
 import { Search, Filter, Wrench, X, ChevronDown, ChevronRight, Star, Clock, Zap, Plus, Trash2, Pencil, Info } from 'lucide-react';
 import { ToolTable } from '@/components/tools/ToolTable';
@@ -448,7 +449,7 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 
 			{/* Full Screen Modal Overlay */}
 			{isOpen && (
-				<div className="fixed inset-0 z-[40] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-10">
+				<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-10">
 					<div className="bg-background border border-border dark:border-white/10 shadow-2xl rounded-2xl w-full max-w-5xl h-[85vh] flex overflow-hidden">
 
 						{/* Filters Sidebar */}
@@ -476,35 +477,50 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 
 								<div className="flex flex-col gap-2">
 									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Tool Type</label>
-									<select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none">
-										<option value="">All Types</option>
-										<option value="flat_end_mill">Flat End Mill</option>
-										<option value="ball_end_mill">Ball Nose</option>
-										<option value="drill">Drill</option>
-										<option value="chamfer_mill">Chamfer Mill</option>
-										<option value="face_mill">Face Mill</option>
-									</select>
+									<Select value={typeFilter} onValueChange={(val) => setTypeFilter(val || '')}>
+    <SelectTrigger className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="">All Types</SelectItem>
+										<SelectItem value="flat_end_mill">Flat End Mill</SelectItem>
+										<SelectItem value="ball_end_mill">Ball Nose</SelectItem>
+										<SelectItem value="drill">Drill</SelectItem>
+										<SelectItem value="chamfer_mill">Chamfer Mill</SelectItem>
+										<SelectItem value="face_mill">Face Mill</SelectItem>
+    </SelectContent>
+</Select>
 								</div>
 
 								<div className="flex flex-col gap-2">
 									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Tool Material</label>
-									<select value={materialFilter} onChange={e => setMaterialFilter(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none">
-										<option value="">All Materials</option>
-										<option value="CARBIDE">Solid Carbide</option>
-										<option value="HSS">HSS</option>
-										<option value="HSS_CO">Cobalt HSS</option>
-									</select>
+									<Select value={materialFilter} onValueChange={(val) => setMaterialFilter(val || '')}>
+    <SelectTrigger className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="">All Materials</SelectItem>
+										<SelectItem value="CARBIDE">Solid Carbide</SelectItem>
+										<SelectItem value="HSS">HSS</SelectItem>
+										<SelectItem value="HSS_CO">Cobalt HSS</SelectItem>
+    </SelectContent>
+</Select>
 								</div>
 
 								<div className="flex flex-col gap-2">
 									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Coating</label>
-									<select value={coatingFilter} onChange={e => setCoatingFilter(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none">
-										<option value="">All Coatings</option>
-										<option value="UNCOATED">Uncoated</option>
-										<option value="TIALN">TiAlN</option>
-										<option value="DLC">DLC</option>
-										<option value="TIN">TiN</option>
-									</select>
+									<Select value={coatingFilter} onValueChange={(val) => setCoatingFilter(val || '')}>
+    <SelectTrigger className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="">All Coatings</SelectItem>
+										<SelectItem value="UNCOATED">Uncoated</SelectItem>
+										<SelectItem value="TIALN">TiAlN</SelectItem>
+										<SelectItem value="DLC">DLC</SelectItem>
+										<SelectItem value="TIN">TiN</SelectItem>
+    </SelectContent>
+</Select>
 								</div>
 							</div>
 						</div>
@@ -649,7 +665,7 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 
 			{/* Tool Details Modal */}
 			{viewingTool && (
-				<div className="fixed inset-0 z-[50] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-10">
+				<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-10">
 					<div className="bg-background border border-border dark:border-white/10 shadow-2xl rounded-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
 						<div className="flex items-center justify-between p-4 border-b border-border dark:border-white/5">
 							<div className="flex items-center gap-4">

@@ -2,8 +2,8 @@
 
 import { useMemo } from 'react';
 import { useLoader } from '@react-three/fiber';
-import { STLLoader } from 'three-stdlib';
-import { Box3, BufferGeometry, Color, MeshStandardMaterial, Vector3 } from 'three';
+import { STLLoader, mergeVertices } from 'three-stdlib';
+import { Box3, BufferGeometry, Color, MeshPhysicalMaterial, Vector3 } from 'three';
 
 export type StlGeometryInfo = {
 	scale: number;
@@ -24,7 +24,14 @@ export function StlMesh({ url, onGeometryReady, onMeshClick }: StlMeshProps) {
 	const geometry = useLoader(STLLoader, url);
 
 	const { centeredGeometry, scale, center } = useMemo(() => {
-		const cloned = geometry.clone() as BufferGeometry;
+		let cloned = geometry.clone() as BufferGeometry;
+		
+		try {
+			cloned = mergeVertices(cloned);
+		} catch (e) {
+			console.warn("Could not merge vertices for smooth shading", e);
+		}
+		
 		cloned.computeVertexNormals();
 		cloned.computeBoundingBox();
 		cloned.computeBoundingSphere();
@@ -54,10 +61,12 @@ export function StlMesh({ url, onGeometryReady, onMeshClick }: StlMeshProps) {
 
 	const material = useMemo(
 		() =>
-			new MeshStandardMaterial({
-				color: new Color('#e4e4e7'),
-				metalness: 0.2,
-				roughness: 0.3,
+			new MeshPhysicalMaterial({
+				color: new Color('#a0a5aa'), // realistic machined steel/aluminum color
+				metalness: 0.8,
+				roughness: 0.25, // low roughness for shiny finish
+				clearcoat: 0.3,
+				clearcoatRoughness: 0.2,
 				flatShading: false,
 			}),
 		[]

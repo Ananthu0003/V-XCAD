@@ -69,5 +69,4 @@ outputs/
 
 # Temporary / Scratch
 scratch/
-test/
-tests/
+test_tmp/

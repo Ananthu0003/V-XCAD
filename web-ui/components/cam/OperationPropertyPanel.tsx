@@ -1,4 +1,5 @@
 import type { CamOperation, CuttingParameters, CoolantType } from '@/types/cam';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Settings, Maximize2, GitMerge } from 'lucide-react';
 
 type OperationPropertyPanelProps = {
@@ -58,13 +59,18 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                     </div>
                     <div className="flex flex-col gap-2">
                         <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Coolant</label>
-                        <select value={params.coolant} onChange={(e) => updateParams('coolant', e.target.value)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-                            <option value="off">Off</option>
-                            <option value="flood">Flood (M08)</option>
-                            <option value="mist">Mist (M07)</option>
-                            <option value="through_tool">Through Tool</option>
-                            <option value="air_blast">Air Blast</option>
-                        </select>
+                        <Select value={params.coolant} onValueChange={(val) => updateParams('coolant', val)}>
+    <SelectTrigger className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="off">Off</SelectItem>
+                            <SelectItem value="flood">Flood (M08)</SelectItem>
+                            <SelectItem value="mist">Mist (M07)</SelectItem>
+                            <SelectItem value="through_tool">Through Tool</SelectItem>
+                            <SelectItem value="air_blast">Air Blast</SelectItem>
+    </SelectContent>
+</Select>
                     </div>
                     <div className="flex flex-col gap-2">
                         <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Feed (mm/min)</label>
@@ -88,25 +94,40 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                     <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Side</label>
-                            <select value={params.insideOutside || 'outside'} onChange={(e) => updateParams('insideOutside', e.target.value)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-                                <option value="outside">Outside</option>
-                                <option value="inside">Inside</option>
-                            </select>
+                            <Select value={params.insideOutside || 'outside'} onValueChange={(val) => updateParams('insideOutside', val)}>
+    <SelectTrigger className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="outside">Outside</SelectItem>
+                                <SelectItem value="inside">Inside</SelectItem>
+    </SelectContent>
+</Select>
                         </div>
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Direction</label>
-                            <select value={params.climbConventional || 'climb'} onChange={(e) => updateParams('climbConventional', e.target.value)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-                                <option value="climb">Climb</option>
-                                <option value="conventional">Conventional</option>
-                            </select>
+                            <Select value={params.climbConventional || 'climb'} onValueChange={(val) => updateParams('climbConventional', val)}>
+    <SelectTrigger className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="climb">Climb</SelectItem>
+                                <SelectItem value="conventional">Conventional</SelectItem>
+    </SelectContent>
+</Select>
                         </div>
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Compensation</label>
-                            <select value={params.compensation || 'computer'} onChange={(e) => updateParams('compensation', e.target.value)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-                                <option value="computer">In Computer</option>
-                                <option value="wear">In Control (Wear)</option>
-                                <option value="off">Off</option>
-                            </select>
+                            <Select value={params.compensation || 'computer'} onValueChange={(val) => updateParams('compensation', val)}>
+    <SelectTrigger className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="computer">In Computer</SelectItem>
+                                <SelectItem value="wear">In Control (Wear)</SelectItem>
+                                <SelectItem value="off">Off</SelectItem>
+    </SelectContent>
+</Select>
                         </div>
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Stock to Leave</label>
@@ -146,11 +167,16 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                     <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Pattern</label>
-                            <select value={params.facingPattern || 'zig_zag'} onChange={(e) => updateParams('facingPattern', e.target.value)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-                                <option value="zig_zag">Zig-Zag</option>
-                                <option value="one_way">One Way</option>
-                                <option value="spiral">Spiral</option>
-                            </select>
+                            <Select value={params.facingPattern || 'zig_zag'} onValueChange={(val) => updateParams('facingPattern', val)}>
+    <SelectTrigger className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="zig_zag">Zig-Zag</SelectItem>
+                                <SelectItem value="one_way">One Way</SelectItem>
+                                <SelectItem value="spiral">Spiral</SelectItem>
+    </SelectContent>
+</Select>
                         </div>
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Overlap %</label>
@@ -167,12 +193,17 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                     <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Cycle</label>
-                            <select value={params.drillCycle || 'G81'} onChange={(e) => updateParams('drillCycle', e.target.value)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-                                <option value="G81">G81 (Standard)</option>
-                                <option value="G82">G82 (Dwell)</option>
-                                <option value="G83">G83 (Deep Peck)</option>
-                                <option value="G84">G84 (Tapping)</option>
-                            </select>
+                            <Select value={params.drillCycle || 'G81'} onValueChange={(val) => updateParams('drillCycle', val)}>
+    <SelectTrigger className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="G81">G81 (Standard)</SelectItem>
+                                <SelectItem value="G82">G82 (Dwell)</SelectItem>
+                                <SelectItem value="G83">G83 (Deep Peck)</SelectItem>
+                                <SelectItem value="G84">G84 (Tapping)</SelectItem>
+    </SelectContent>
+</Select>
                         </div>
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Peck Depth</label>
@@ -184,10 +215,15 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                         </div>
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Retract</label>
-                            <select value={params.retractType || 'G98'} onChange={(e) => updateParams('retractType', e.target.value)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-                                <option value="G98">G98 (Clearance)</option>
-                                <option value="G99">G99 (Retract)</option>
-                            </select>
+                            <Select value={params.retractType || 'G98'} onValueChange={(val) => updateParams('retractType', val)}>
+    <SelectTrigger className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="G98">G98 (Clearance)</SelectItem>
+                                <SelectItem value="G99">G99 (Retract)</SelectItem>
+    </SelectContent>
+</Select>
                         </div>
                     </div>
                 )}
@@ -223,18 +259,28 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                     </div>
                     <div className="flex flex-col gap-2">
                         <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Top Height</label>
-                        <select value={heights.topHeight} onChange={(e) => updateHeights('topHeight', e.target.value)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-                            <option value="stock_top">Stock Top</option>
-                            <option value="model_top">Model Top</option>
-                        </select>
+                        <Select value={String(heights.topHeight)} onValueChange={(val) => updateHeights('topHeight', val)}>
+    <SelectTrigger className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="stock_top">Stock Top</SelectItem>
+                            <SelectItem value="model_top">Model Top</SelectItem>
+    </SelectContent>
+</Select>
                     </div>
                     <div className="flex flex-col gap-2">
                         <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Bottom Height</label>
-                        <select value={heights.bottomHeight} onChange={(e) => updateHeights('bottomHeight', e.target.value)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-                            <option value="model_bottom">Model Bottom</option>
-                            <option value="stock_bottom">Stock Bottom</option>
-                            <option value="selection">Selection</option>
-                        </select>
+                        <Select value={String(heights.bottomHeight)} onValueChange={(val) => updateHeights('bottomHeight', val)}>
+    <SelectTrigger className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+        <SelectValue />
+    </SelectTrigger>
+    <SelectContent>
+<SelectItem value="model_bottom">Model Bottom</SelectItem>
+                            <SelectItem value="stock_bottom">Stock Bottom</SelectItem>
+                            <SelectItem value="selection">Selection</SelectItem>
+    </SelectContent>
+</Select>
                     </div>
                 </div>
             </div>

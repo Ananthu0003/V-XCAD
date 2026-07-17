@@ -22,8 +22,8 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
     };
 
     return (
-        <div className="flex flex-col gap-4 p-4 rounded-xl border border-border bg-black/40 shadow-xl overflow-y-auto">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+        <div className="flex flex-col gap-4 pb-4">
+            <h3 className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground flex items-center gap-2 mb-2">
                 <Activity className="size-4" /> CAM Setup Summary
             </h3>
             
@@ -36,9 +36,9 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                         <div key={s.setupId} className="flex flex-col gap-2 mt-2 pt-2 border-t border-border">
                             <div 
                                 onClick={() => onClickSection('setup')}
-                                className="p-3 rounded-lg bg-background hover:bg-accent/50 cursor-pointer border border-transparent hover:border-border transition-all flex flex-col gap-1"
+                                className="p-4 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer transition-all flex flex-col gap-2 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)]"
                             >
-                                <div className="flex items-center gap-2 text-blue-500 font-semibold text-xs uppercase tracking-wide">
+                                <div className="flex items-center gap-2 text-blue-700 dark:text-blue-400 font-bold text-[11px] uppercase tracking-widest">
                                     <Settings2 className="size-3.5" /> {s.setupName} ({s.setupType})
                                 </div>
                                 <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-muted-foreground mt-1">
@@ -48,8 +48,8 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                             </div>
                             
                             {setupFeatures.length > 0 && (
-                                <div className="p-3 rounded-lg bg-background border border-transparent transition-all flex flex-col gap-1">
-                                    <div className="flex items-center gap-2 text-cyan-500 font-semibold text-xs uppercase tracking-wide">
+                                <div className="p-4 mt-2 rounded-xl bg-cyan-50 dark:bg-cyan-900/10 border border-cyan-200 dark:border-cyan-500/20 transition-all flex flex-col gap-2 dark:shadow-[inset_0_1px_0_0_rgba(6,182,212,0.1)]">
+                                    <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-400 font-bold text-[11px] uppercase tracking-widest">
                                         <Target className="size-3.5" /> Setup Features ({setupFeatures.length})
                                     </div>
                                     <div className="flex flex-col gap-1 mt-1">
@@ -93,8 +93,8 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                             )}
 
                             {setupOps.length > 0 && (
-                                <div onClick={() => onClickSection('operations')} className="p-3 rounded-lg bg-background hover:bg-accent/50 cursor-pointer border border-transparent hover:border-border transition-all flex flex-col gap-1">
-                                    <div className="flex items-center gap-2 text-amber-500 font-semibold text-xs uppercase tracking-wide">
+                                <div onClick={() => onClickSection('operations')} className="p-4 mt-2 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-500/20 hover:bg-amber-100 dark:hover:bg-amber-900/20 cursor-pointer transition-all flex flex-col gap-2 dark:shadow-[inset_0_1px_0_0_rgba(245,158,11,0.1)]">
+                                    <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-bold text-[11px] uppercase tracking-widest">
                                         <Layers className="size-3.5" /> Setup Operations ({setupOps.length})
                                     </div>
                                     <div className="flex flex-col gap-1 mt-1">
@@ -102,7 +102,7 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                             return (
                                                 <div key={op.id} className="text-[11px] flex flex-col gap-1 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
                                                     <div className="flex justify-between items-start">
-                                                        <span className="text-foreground font-medium capitalize">{op.name || op.type.replace('_', ' ')}</span>
+                                                        <span className="text-foreground font-medium capitalize">{op.name || op.type?.replace('_', ' ')}</span>
                                                         <span className="text-[10px] whitespace-nowrap">
                                                             {op.status === 'ready' || op.status === 'planned' ? '🟢 OK' : op.status === 'error' ? '🔴 Error' : op.status === 'blocked' || op.status === 'blocked_requires_reorientation' ? '🚧 Blocked' : op.status === 'missing_tool' ? '⚠️ No Tool' : op.status === 'requires_regeneration' ? '⚠️ Needs Regen' : op.status || '🟢 OK'}
                                                         </span>
@@ -138,8 +138,8 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                 <div>Machine:</div><div className="text-foreground capitalize">{MACHINE_MATRIX.machineProfiles.find(p => p.id === setup.machineProfile)?.label || setup.machineProfile || 'Not selected'}</div>
                                 <div>Type:</div><div className="text-foreground capitalize">{(setup as any).setupType || '3-Axis'}</div>
                                 <div>Tool Axis:</div><div className="text-foreground font-mono">[{(setup as any).toolAxis?.join(', ') || '0, 0, 1'}]</div>
-                                <div>Material:</div><div className="text-foreground capitalize">{setup.material.replace('_', ' ')}</div>
-                                <div>Stock:</div><div className="text-foreground">{setup.stockDimensions.join(' x ')} mm</div>
+                                <div>Material:</div><div className="text-foreground capitalize">{setup.material?.replace('_', ' ') || 'Not selected'}</div>
+                                <div>Stock:</div><div className="text-foreground">{setup.stockDimensions?.join(' x ') || 'Not set'} mm</div>
                                 <div>WCS:</div><div className="text-foreground">{setup.wcs}</div>
                             </div>
                         </div>
@@ -220,7 +220,7 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                         return (
                                             <div key={op.id} className="text-[11px] flex flex-col gap-1 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
                                                 <div className="flex justify-between items-start">
-                                                    <span className="text-foreground font-medium capitalize">{op.name || op.type.replace('_', ' ')}</span>
+                                                    <span className="text-foreground font-medium capitalize">{op.name || op.type?.replace('_', ' ')}</span>
                                                     <span className="text-[10px] whitespace-nowrap">
                                                         {displayStatus === 'ready' || displayStatus === 'planned' ? '🟢 OK' : displayStatus === 'error' ? '🔴 Error' : displayStatus === 'blocked' || displayStatus === 'blocked_requires_reorientation' ? '🚧 Blocked' : displayStatus === 'missing_tool' ? '⚠️ No Tool' : displayStatus === 'requires_regeneration' || displayStatus === 'outdated' ? '⚠️ Needs Regen' : displayStatus || '🟢 OK'}
                                                     </span>

@@ -146,7 +146,7 @@ export function ChatPanel({
 
 
 			<div className={`flex h-full flex-col ${!isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'} transition-opacity duration-500`}>
-					<header className={`sticky top-0 z-40 flex min-h-[64px] shrink-0 items-center justify-between border-b border-white/5 bg-transparent backdrop-blur-md px-4 transition-all gap-2`}>
+					<header className={`sticky top-0 z-40 flex min-h-[64px] shrink-0 items-center justify-between border-b border-black/5 dark:border-white/5 bg-transparent backdrop-blur-md px-4 transition-all gap-2`}>
 						<div className="flex items-center gap-2 shrink-0">
 							<div className="flex items-center gap-3 shrink-0">
 								<div className="relative w-8 h-8 flex items-center justify-center shrink-0">
@@ -215,7 +215,7 @@ export function ChatPanel({
 												key={i}
 												type="button"
 												onClick={() => setPrompt(p.body)}
-												className={`group relative flex flex-col items-start gap-2.5 rounded-xl border bg-transparent dark:bg-white/[0.02] p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98] cursor-pointer ${colors.card}`}
+												className={`group relative flex flex-col items-start gap-2.5 rounded-xl border bg-white/50 dark:bg-white/[0.02] p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98] cursor-pointer ${colors.card}`}
 											>
 												<div className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 transition-transform duration-200 group-hover:scale-110 ${colors.icon}`}>
 													<Icon className="w-3.5 h-3.5" />
@@ -300,7 +300,7 @@ export function ChatPanel({
 										</div>
 									</div>
 								)}
-								<div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#030408]/90 shadow-[0_0_20px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-all duration-300 focus-within:border-blue-500/40 focus-within:shadow-[0_0_25px_rgba(59,130,246,0.15)]">
+								<div className="relative overflow-hidden rounded-2xl border border-black/5 dark:border-white/10 bg-white/80 dark:bg-[#030408]/90 shadow-[0_4px_20px_rgba(0,0,0,0.05)] dark:shadow-[0_0_20px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-all duration-300 focus-within:border-blue-400 dark:focus-within:border-blue-500/40 focus-within:shadow-[0_0_25px_rgba(59,130,246,0.15)]">
 									<textarea
 										value={prompt}
 										onChange={(e) => setPrompt(e.target.value)}
@@ -315,7 +315,7 @@ export function ChatPanel({
 										className="w-full resize-none bg-transparent p-5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none font-sans leading-relaxed"
 									/>
 
-									<div className="flex items-center justify-between border-t border-white/5 bg-black/20 px-4 py-3">
+									<div className="flex items-center justify-between border-t border-black/5 dark:border-white/5 bg-black/5 dark:bg-black/20 px-4 py-3">
 										<div className="flex items-center gap-3">
 											{/* Main blueprint upload */}
 											<label

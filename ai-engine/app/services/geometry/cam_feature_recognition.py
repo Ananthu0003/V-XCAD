@@ -144,9 +144,9 @@ class CamFeatureRecognition:
         self.features: List[CamFeature] = []
         self.machining_direction = [0, 0, 1]  # Default Z-up
 
-    def recognize_features(self, step_file_path: str) -> List[Dict[str, Any]]:
+    def recognize_features(self, step_file_path: Optional[str] = None, shape: Optional[Any] = None) -> List[Dict[str, Any]]:
         """
-        Analyse a STEP file and return recognised features.
+        Analyse a STEP file or Shape and return recognised features.
 
         Returns list of dicts with stable topology IDs and dimension metadata.
         No OCC objects in output.
@@ -157,8 +157,13 @@ class CamFeatureRecognition:
         self.features = []
 
         try:
-            # Import and heal
-            shape, metadata = StepImporter.load_and_heal(step_file_path)
+            if shape is not None:
+                self.extractor = TopologyExtractor(shape)
+            elif step_file_path:
+                shape, _ = StepImporter.load_and_heal(step_file_path)
+                self.extractor = TopologyExtractor(shape)
+            else:
+                raise ValueError("Must provide either step_file_path or shape.")
 
             # Safety: limit face count
             faces = shape.faces()

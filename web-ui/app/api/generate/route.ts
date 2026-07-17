@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
+import { getModelById } from '@/lib/models-registry';
+
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -108,6 +110,17 @@ export async function POST(request: Request): Promise<Response> {
 	// FastAPI expects the field named 'model' (alias), not 'model_name'
 	formData.delete('model_name');
 	formData.set('model', modelName);
+
+	const modelMetadata = getModelById(modelName);
+	if (modelMetadata) {
+		formData.set('model_metadata', JSON.stringify(modelMetadata));
+		if (modelMetadata.fallbackModelId) {
+			const fallbackMetadata = getModelById(modelMetadata.fallbackModelId);
+			if (fallbackMetadata) {
+				formData.set('fallback_metadata', JSON.stringify(fallbackMetadata));
+			}
+		}
+	}
 
 	const authSession = await getSession();
 	let validUserId: string | null = null;

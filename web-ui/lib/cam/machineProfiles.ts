@@ -70,7 +70,7 @@ export interface PostProcessorInfo {
   supports: Record<string, boolean>;
 }
 
-export const MACHINE_MATRIX = matrixData as {
+export const MACHINE_MATRIX = matrixData as unknown as {
   machineTypes: { id: MachineType; label: string }[];
   machineProfiles: MachineProfile[];
   controllers: Record<ControllerId, ControllerInfo>;

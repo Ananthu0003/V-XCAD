@@ -238,17 +238,21 @@ async function main() {
 
   console.log('Seeding 100+ Tools...');
   
-  const toolTypes = ['flat_end_mill', 'ball_nose', 'face_mill', 'drill', 'chamfer_mill'];
-  const diameters = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20];
+  const toolTypes = ['flat_end_mill', 'ball_nose', 'face_mill', 'drill', 'chamfer_mill', 'center_drill', 'spot_drill', 'tap', 'turning_tool', 'boring_bar'];
+  const diameters = [1, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 16, 20, 25];
   let toolCount = 0;
 
   for (const d of diameters) {
     for (const t of toolTypes) {
-        // Skip large drills or small face mills to be realistic
+        // Skip unrealistic tool sizes
         if (t === 'face_mill' && d < 10) continue;
-        if (t === 'drill' && d > 12) continue;
+        if (t === 'drill' && d > 25) continue;
+        if (t === 'center_drill' && d > 6) continue;
+        if (t === 'spot_drill' && d > 12) continue;
+        if (t === 'tap' && d > 16) continue;
+        if ((t === 'turning_tool' || t === 'boring_bar') && d < 6) continue;
 
-        const flutes = t === 'drill' ? 2 : (d < 6 ? 2 : 4);
+        const flutes = (t === 'drill' || t === 'center_drill' || t === 'spot_drill' || t === 'tap') ? 2 : (t === 'turning_tool' || t === 'boring_bar' ? 1 : (d < 6 ? 2 : 4));
         
         // HSS variants
         await prisma.toolDefinition.create({
