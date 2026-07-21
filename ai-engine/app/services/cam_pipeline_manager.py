@@ -188,6 +188,33 @@ class CamPipelineManager:
             "setup_metadata": setup_metadata
         }
         
+    def _generate_stock_boundary(self, setup_metadata: Dict[str, Any]) -> list:
+        stock = setup_metadata.get("resolvedStock", {})
+        bounds = stock.get("bounds", {"min": [0,0,0], "max": [0,0,0]})
+        s_min_x, s_min_y, _ = bounds["min"]
+        s_max_x, s_max_y, _ = bounds["max"]
+        
+        if stock.get("stockType") == "cylinder":
+            # Generate a circular polygon for cylindrical stock
+            import math
+            cx = (s_min_x + s_max_x) / 2.0
+            cy = (s_min_y + s_max_y) / 2.0
+            radius = min(s_max_x - s_min_x, s_max_y - s_min_y) / 2.0
+            points = []
+            num_points = 64
+            for i in range(num_points):
+                angle = 2 * math.pi * i / num_points
+                points.append([cx + radius * math.cos(angle), cy + radius * math.sin(angle)])
+            return points
+            
+        # Default box boundary
+        return [
+            [s_min_x, s_min_y],
+            [s_max_x, s_min_y],
+            [s_max_x, s_max_y],
+            [s_min_x, s_max_y]
+        ]
+
     def auto_plan_cam(self, step_file_path: str, machine_config: Dict[str, Any], job_id: str = "default_job") -> Dict[str, Any]:
         """
         Production-Grade Auto Generate Operations Pipeline.
@@ -241,30 +268,46 @@ class CamPipelineManager:
             model_bb = shape_in_setup.bounding_box()
             tol = 0.1
             
+            # Stock bounds are already transformed into setup space by the coordinate resolver
+            s_max_x, s_max_y, s_max_z = stock_bounds["max"]
+            s_min_x, s_min_y, s_min_z = stock_bounds["min"]
+            
             # Facing: if stock max Z > model max Z
-            if stock_bounds["max"][2] > model_bb.max.Z + tol:
+            if s_max_z > model_bb.max.Z + tol:
                 features.insert(0, {
                     "id": f"feat_synthetic_face_{uuid.uuid4().hex[:6]}",
                     "type": "face",
                     "name": "Face Top of Stock",
-                    "geometry": {"status": "synthetic"}
+                    "geometry": {"status": "synthetic"},
+                    "machiningRegion": {
+                        "topZ": s_max_z,
+                        "bottomZ": model_bb.max.Z,
+                        "valid": True,
+                        "boundary": self._generate_stock_boundary(setup_metadata)
+                    }
                 })
                 
             # Boundary Roughing: if stock X or Y > model X or Y
-            if (stock_bounds["max"][0] > model_bb.max.X + tol or 
-                stock_bounds["min"][0] < model_bb.min.X - tol or
-                stock_bounds["max"][1] > model_bb.max.Y + tol or 
-                stock_bounds["min"][1] < model_bb.min.Y - tol):
+            if (s_max_x > model_bb.max.X + tol or 
+                s_min_x < model_bb.min.X - tol or
+                s_max_y > model_bb.max.Y + tol or 
+                s_min_y < model_bb.min.Y - tol):
                 # Clamp depth to not exceed the stock boundary
-                bottom_z = max(model_bb.min.Z, stock_bounds["min"][2])
-                depth = stock_bounds["max"][2] - bottom_z
+                bottom_z = max(model_bb.min.Z, s_min_z)
+                depth = s_max_z - bottom_z
                 features.insert(1, {
                     "id": f"feat_synthetic_rough_{uuid.uuid4().hex[:6]}",
                     "type": "contour",
                     "subtype": "outer_profile",
                     "name": "Rough Outer Boundary",
                     "geometry": {"status": "synthetic"},
-                    "dimensions": {"depth": depth}
+                    "dimensions": {"depth": depth},
+                    "machiningRegion": {
+                        "topZ": s_max_z,
+                        "bottomZ": bottom_z,
+                        "valid": True,
+                        "boundary": self._generate_stock_boundary(setup_metadata)
+                    }
                 })
                 
         mapper = GeometryMapper(self.feature_recognizer.extractor)
@@ -770,32 +813,63 @@ class CamPipelineManager:
             
             if feat_clone.get("geometry", {}).get("status") == "synthetic":
                 bounds = setup_metadata.get("resolvedStock", {}).get("bounds", {"min": [0,0,0], "max": [100,100,10]})
+                # Stock bounds are already transformed into setup space by the coordinate resolver
+                s_max_x, s_max_y, s_max_z = bounds["max"]
+                s_min_x, s_min_y, s_min_z = bounds["min"]
                 model_bb = shape_in_setup.bounding_box()
                 feat_clone["machinable_in_current_setup"] = True
-                pts = [
-                    [bounds["min"][0], bounds["min"][1], bounds["max"][2]],
-                    [bounds["max"][0], bounds["min"][1], bounds["max"][2]],
-                    [bounds["max"][0], bounds["max"][1], bounds["max"][2]],
-                    [bounds["min"][0], bounds["max"][1], bounds["max"][2]],
-                    [bounds["min"][0], bounds["min"][1], bounds["max"][2]]
-                ]
+                stock_type = setup.get("stockType") or setup_metadata.get("resolvedStock", {}).get("stockType", "box")
+                if stock_type == "cylinder":
+                    import math
+                    cx = (s_max_x + s_min_x) / 2.0
+                    cy = (s_max_y + s_min_y) / 2.0
+                    r = (s_max_x - s_min_x) / 2.0
+                    pts = []
+                    for i in range(33): # 32 segments, close the loop
+                        angle = i * (2 * math.pi / 32)
+                        pts.append([cx + r * math.cos(angle), cy + r * math.sin(angle), s_max_z])
+                else:
+                    pts = [
+                        [s_min_x, s_min_y, s_max_z],
+                        [s_max_x, s_min_y, s_max_z],
+                        [s_max_x, s_max_y, s_max_z],
+                        [s_min_x, s_max_y, s_max_z],
+                        [s_min_x, s_min_y, s_max_z]
+                    ]
                 if feat_clone["type"] == "face":
                     feat_clone["machiningRegion"] = {
                         "valid": True,
                         "regionType": "face_boundary",
                         "source": "face_boundary",
                         "boundary": pts,
-                        "topZ": bounds["max"][2],
+                        "topZ": s_max_z,
                         "bottomZ": model_bb.max.Z
                     }
                 elif feat_clone["type"] == "contour":
+                    if stock_type == "cylinder":
+                        import math
+                        c_cx = (model_bb.max.X + model_bb.min.X) / 2.0
+                        c_cy = (model_bb.max.Y + model_bb.min.Y) / 2.0
+                        c_r = max((model_bb.max.X - model_bb.min.X) / 2.0, (model_bb.max.Y - model_bb.min.Y) / 2.0)
+                        contour_pts = []
+                        for i in range(33):
+                            angle = i * (2 * math.pi / 32)
+                            contour_pts.append([c_cx + c_r * math.cos(angle), c_cy + c_r * math.sin(angle), s_max_z])
+                    else:
+                        contour_pts = [
+                            [model_bb.min.X, model_bb.min.Y, s_max_z],
+                            [model_bb.max.X, model_bb.min.Y, s_max_z],
+                            [model_bb.max.X, model_bb.max.Y, s_max_z],
+                            [model_bb.min.X, model_bb.max.Y, s_max_z],
+                            [model_bb.min.X, model_bb.min.Y, s_max_z]
+                        ]
                     feat_clone["machiningRegion"] = {
                         "valid": True,
                         "regionType": "outer_wire",
                         "source": "outer_wire",
-                        "boundary": pts,
-                        "topZ": model_bb.max.Z,
-                        "bottomZ": model_bb.min.Z
+                        "boundary": contour_pts,
+                        "topZ": s_max_z,
+                        "bottomZ": max(model_bb.min.Z, s_min_z)
                     }
             else:
                 mapper.enrich_features([feat_clone], op_setup)
@@ -924,6 +998,57 @@ class CamPipelineManager:
             machiningRegion = op.get("machiningRegion")
             tool = op.get("tool", {})
             try:
+                # Transform machiningRegion to Setup Space
+                transform = setup.get("modelToSetupTransform") if setup else None
+                if transform and machiningRegion and machiningRegion.get("valid"):
+                    import copy
+                    machiningRegion = copy.deepcopy(machiningRegion)
+                    
+                    def transform_pt(pt):
+                        x, y, z = pt[0], pt[1], pt[2] if len(pt) > 2 else 0.0
+                        
+                        # Flatten transform to handle both 1D and 2D arrays
+                        if transform and isinstance(transform[0], list):
+                            e = [item for sublist in transform for item in sublist]
+                        else:
+                            e = transform or [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]
+                            
+                        if len(e) == 16:
+                            # The matrix is row-major (from setup_coordinate_resolver.py)
+                            # e = [m11, m12, m13, tx,  m21, m22, m23, ty,  m31, m32, m33, tz,  0, 0, 0, 1]
+                            nx = e[0]*x + e[1]*y + e[2]*z + e[3]
+                            ny = e[4]*x + e[5]*y + e[6]*z + e[7]
+                            nz = e[8]*x + e[9]*y + e[10]*z + e[11]
+                        else:
+                            nx, ny, nz = x, y, z
+                            
+                        return [nx, ny, nz] if len(pt) > 2 else [nx, ny]
+
+                    if "boundary" in machiningRegion and machiningRegion["boundary"]:
+                        machiningRegion["boundary"] = [transform_pt(p) for p in machiningRegion["boundary"]]
+                    if "islands" in machiningRegion and machiningRegion["islands"]:
+                        machiningRegion["islands"] = [[transform_pt(p) for p in isl] for isl in machiningRegion["islands"]]
+                    if "center" in machiningRegion and machiningRegion["center"]:
+                        machiningRegion["center"] = transform_pt(machiningRegion["center"])
+                    if machiningRegion.get("topZ") is not None:
+                        e = [item for sublist in transform for item in sublist] if (transform and isinstance(transform[0], list)) else (transform or [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1])
+                        machiningRegion["topZ"] = (e[10] * machiningRegion["topZ"]) + e[14]
+                    if machiningRegion.get("bottomZ") is not None:
+                        e = [item for sublist in transform for item in sublist] if (transform and isinstance(transform[0], list)) else (transform or [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1])
+                        machiningRegion["bottomZ"] = (e[10] * machiningRegion["bottomZ"]) + e[14]
+                    if "axis" in machiningRegion and machiningRegion["axis"]:
+                        x, y, z = machiningRegion["axis"]
+                        e = [item for sublist in transform for item in sublist] if (transform and isinstance(transform[0], list)) else (transform or [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1])
+                        if len(e) == 16:
+                            nx = e[0]*x + e[4]*y + e[8]*z
+                            ny = e[1]*x + e[5]*y + e[9]*z
+                            nz = e[2]*x + e[6]*y + e[10]*z
+                        else:
+                            nx, ny, nz = x, y, z
+                        mag = (nx**2 + ny**2 + nz**2)**0.5
+                        if mag > 0:
+                            machiningRegion["axis"] = [nx/mag, ny/mag, nz/mag]
+
                 commands = motion_planner.generate_commands(op, machiningRegion, tool, setup)
                 segments = toolpath_engine.generate_toolpaths_from_commands(op, commands)
                 op["toolpaths"] = [s.model_dump() for s in segments] if segments else []
@@ -978,11 +1103,7 @@ class CamPipelineManager:
                 
         # Deduplicate drilling operations
         operations = self._deduplicate_drilling_operations(operations, features, setup)
-        
-        # DO NOT apply modelToSetupTransform to ToolpathSegments here.
-        # The frontend CadViewport renders the model in Model Space, so the toolpaths
-        # must also be in Model Space to overlap correctly. Transformation to Setup Space 
-        # should only happen at the G-code generation stage.
+
 
         # Clean operations (Constraint C1)
         operations = self._sanitize_for_api(operations)
@@ -1382,18 +1503,25 @@ class CamPipelineManager:
     def _transform_feature_to_setup_local(self, feature: Dict[str, Any], setup_plan) -> Any:
         from app.models.schemas import SetupLocalFeature
         
-        # We assume Z-shift only for now based on stockTopZ
-        z_shift = -setup_plan.stockTopZ if hasattr(setup_plan, 'stockTopZ') else 0.0
+        # Features were extracted from shape_in_setup, so they are ALREADY in setup space.
+        z_shift = 0.0
         
         center = feature.get("center", [0, 0, 0])
         axis = feature.get("axis", [0, 0, 1])
         
         local_center = [center[0], center[1], center[2] + z_shift]
         
-        # Calculate local bounds
-        bounds = feature.get("dimensions", {}).get("bounding_box", {})
-        top_z = bounds.get("z_max", 0.0) + z_shift if "z_max" in bounds else 0.0
-        bottom_z = bounds.get("z_min", -10.0) + z_shift if "z_min" in bounds else -10.0
+        # Calculate local bounds from machiningRegion or dimensions
+        region = feature.get("machiningRegion", {})
+        dims = feature.get("dimensions", {})
+        
+        if "topZ" in region and "bottomZ" in region:
+            top_z = region.get("topZ", 0.0) + z_shift
+            bottom_z = region.get("bottomZ", -10.0) + z_shift
+        else:
+            top_z = dims.get("z_top", 0.0) + z_shift
+            bottom_z = dims.get("z_bottom", -10.0) + z_shift
+            
         depth = top_z - bottom_z
         
         local_feat = SetupLocalFeature(
@@ -1412,8 +1540,8 @@ class CamPipelineManager:
         region = feature.get("machining_region", {})
         if region:
             local_region = dict(region)
-            local_region["topZ"] = region.get("topZ", 0.0) + z_shift
-            local_region["bottomZ"] = region.get("bottomZ", 0.0) + z_shift
+            local_region["topZ"] = region.get("topZ", top_z - z_shift) + z_shift
+            local_region["bottomZ"] = region.get("bottomZ", bottom_z - z_shift) + z_shift
             if "center" in region:
                 rc = region["center"]
                 local_region["center"] = [rc[0], rc[1], rc[2] + z_shift]

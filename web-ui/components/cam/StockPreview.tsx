@@ -83,9 +83,24 @@ export function StockPreview({ stockType = 'box', dimensions, units, origin }: S
             <div className="w-full flex justify-center py-4">
                 <svg width="100%" height="200" viewBox={`${minX} ${minY} ${width} ${height}`} className="overflow-visible">
                     <g className="transition-all duration-500 ease-in-out">
-                        {isCyl ? (
-                            // CYLINDER DRAWING
-                            <g>
+                        {(() => {
+                            const originIndicator = (
+                                <g transform={`translate(${originIso.x}, ${originIso.y})`}>
+                                    <line x1="0" y1="0" x2="-25" y2="14.4" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" /> 
+                                    <line x1="0" y1="0" x2="25" y2="14.4" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" /> 
+                                    <line x1="0" y1="0" x2="0" y2="-25" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" /> 
+                                    
+                                    <circle cx="0" cy="0" r="2" fill="#ef4444" />
+                                    
+                                    <text x="0" y="-32" textAnchor="middle" fill="currentColor" className="text-[10px] font-bold fill-foreground" style={{ filter: 'drop-shadow(0px 2px 2px rgba(0,0,0,0.8))' }}>
+                                        ZERO
+                                    </text>
+                                </g>
+                            );
+
+                            return isCyl ? (
+                                // CYLINDER DRAWING
+                                <g>
                                 {/* Bottom ellipse (back half invisible, but we just draw the whole thing and cover it) */}
                                 <ellipse cx="0" cy="0" rx={rx} ry={ry} fill="rgba(59, 130, 246, 0.05)" stroke="rgba(59, 130, 246, 0.2)" strokeWidth="1" strokeDasharray="4 4" />
                                 
@@ -98,6 +113,8 @@ export function StockPreview({ stockType = 'box', dimensions, units, origin }: S
                                     strokeLinejoin="round" 
                                 />
                                 
+                                {originIndicator}
+
                                 {/* Top ellipse */}
                                 <ellipse 
                                     cx="0" cy={-drawZ} 
@@ -119,6 +136,8 @@ export function StockPreview({ stockType = 'box', dimensions, units, origin }: S
                                 <line x1={p2.x} y1={p2.y} x2={p1.x} y2={p1.y} stroke="rgba(59, 130, 246, 0.2)" strokeWidth="1" strokeDasharray="4 4" />
                                 <line x1={p2.x} y1={p2.y} x2={p6.x} y2={p6.y} stroke="rgba(59, 130, 246, 0.2)" strokeWidth="1" strokeDasharray="4 4" />
                                 
+                                {originIndicator}
+                                
                                 {/* Front faces */}
                                 <polygon points={`${p0.x},${p0.y} ${p1.x},${p1.y} ${p5.x},${p5.y} ${p4.x},${p4.y}`} fill="rgba(59, 130, 246, 0.15)" stroke="rgba(59, 130, 246, 0.5)" strokeWidth="1.5" strokeLinejoin="round" />
                                 <polygon points={`${p0.x},${p0.y} ${p3.x},${p3.y} ${p7.x},${p7.y} ${p4.x},${p4.y}`} fill="rgba(59, 130, 246, 0.25)" stroke="rgba(59, 130, 246, 0.5)" strokeWidth="1.5" strokeLinejoin="round" />
@@ -129,21 +148,8 @@ export function StockPreview({ stockType = 'box', dimensions, units, origin }: S
                                 <line x1={p0.x} y1={p0.y} x2={p3.x} y2={p3.y} stroke="rgba(59, 130, 246, 0.7)" strokeWidth="1.5" />
                                 <line x1={p0.x} y1={p0.y} x2={p4.x} y2={p4.y} stroke="rgba(59, 130, 246, 0.7)" strokeWidth="1.5" />
                             </g>
-                        )}
-                        
-                        {/* Origin indicator */}
-                        <g transform={`translate(${originIso.x}, ${originIso.y})`}>
-                            <line x1="0" y1="0" x2="-25" y2="14.4" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" /> 
-                            <line x1="0" y1="0" x2="25" y2="14.4" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" /> 
-                            <line x1="0" y1="0" x2="0" y2="-25" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" /> 
-                            
-                            <circle cx="0" cy="0" r="4" fill="white" stroke="#000" strokeWidth="1" />
-                            <circle cx="0" cy="0" r="2" fill="#ef4444" />
-                            
-                            <text x="0" y="-32" textAnchor="middle" fill="currentColor" className="text-[10px] font-bold fill-foreground" style={{ filter: 'drop-shadow(0px 2px 2px rgba(0,0,0,0.8))' }}>
-                                ZERO
-                            </text>
-                        </g>
+                            );
+                        })()}
 
                         {/* Dimension Labels */}
                         {isCyl ? (

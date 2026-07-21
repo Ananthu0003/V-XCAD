@@ -4,6 +4,7 @@ import JSON5 from 'json5';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { toast } from 'sonner';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 import { CamSummaryPanel } from '../cam/CamSummaryPanel';
 import { CadViewport } from '@/components/viewport/CadViewport';
@@ -444,15 +445,17 @@ export default function HitlWorkspace() {
 
 	useEffect(() => {
 		if (toolpaths) {
+			const currentSetupId = activeSetupId || camSetups[0]?.setupId;
+			const filteredSegments = toolpaths.filter(t => t.setupId === currentSetupId);
 			setCamSimulation(prev => ({
 				...prev,
-				segments: toolpaths,
+				segments: filteredSegments,
 				progress: 0,
 				activeSegmentIndex: 0,
 				isPlaying: false
 			}));
 		}
-	}, [toolpaths]);
+	}, [toolpaths, activeSetupId, camSetups]);
 
 	const handleStepUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
 		const file = event.target.files?.[0];
@@ -1397,9 +1400,10 @@ export default function HitlWorkspace() {
 													activeFeatureId={activeFeatureId}
 													simulationState={camSimulation}
 													camTools={camTools}
+													camSetup={camSetup}
 													debugMode={debugMode}
 													setupToolAxis={camSetups.find(s => s.setupId === (activeSetupId || camSetups[0]?.setupId))?.toolAxis}
-													setupMetadata={camSetups.find(s => s.setupId === (activeSetupId || camSetups[0]?.setupId)) || defaultSetupMetadata}
+													setupMetadata={{ ...(defaultSetupMetadata || {}), ...(camSetups.find(s => s.setupId === (activeSetupId || camSetups[0]?.setupId)) || {}) }}
 													headerActions={
 														<div className="flex items-center gap-2">
 															{/* Debug Mode Toggle */}
@@ -1419,18 +1423,21 @@ export default function HitlWorkspace() {
 															</button>
 															{/* Setup Selector */}
 															{camSetups.length > 1 && (
-																<select
-																	value={activeSetupId || ''}
-																	onChange={(e) => setActiveSetupId(e.target.value)}
-																	className="px-3 py-1.5 rounded-lg border border-border bg-muted/50 text-foreground text-[10px] font-bold uppercase tracking-widest hover:bg-muted transition-all pointer-events-auto appearance-none cursor-pointer"
-																	title="Switch active setup to view its toolpaths"
-																>
-																	{camSetups.map((s, idx) => (
-																		<option key={s.setupId} value={s.setupId} className="bg-card text-foreground">
-																			{s.setupName || `Setup ${idx + 1}`}
-																		</option>
-																	))}
-																</select>
+																<Select value={activeSetupId || ''} onValueChange={(val: string | null) => val && setActiveSetupId(val)}>
+																	<SelectTrigger 
+																		className="h-8 rounded-lg border-border bg-muted/50 text-foreground text-[10px] font-bold uppercase tracking-widest hover:bg-muted transition-all"
+																		title="Switch active setup to view its toolpaths"
+																	>
+																		<SelectValue placeholder="Select setup" />
+																	</SelectTrigger>
+																	<SelectContent>
+																		{camSetups.map((s, idx) => (
+																			<SelectItem key={s.setupId} value={s.setupId} className="text-xs">
+																				{s.setupName || `Setup ${idx + 1}`}
+																			</SelectItem>
+																		))}
+																	</SelectContent>
+																</Select>
 															)}
 															<div className="relative">
 																<button

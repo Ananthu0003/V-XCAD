@@ -40,7 +40,7 @@ class ToolRecommendationEngine:
         elif operation_type == "turning_required":
             # 3-axis mill cannot turn — return blocked immediately, no tool search needed
             return None, "blocked", "Requires lathe, mill-turn, or rotary 4/5-axis setup. No tool will be selected.", {}
-        elif operation_type in ("rotary_milling", "indexed_4axis_milling", "multi_axis_surface_milling", "pocketing", "boss_clearing", "2d_contour"):
+        elif operation_type in ("rotary_milling", "indexed_4axis_milling", "multi_axis_surface_milling", "pocketing", "boss_clearing", "2d_contour", "2d_contour_outer", "2d_contour_inner"):
             req_type = "flat_end_mill"
         rejections = []
         target_depth = feature.get("dimensions", {}).get("depth", feature.get("height", 10.0))
@@ -129,17 +129,39 @@ class ToolRecommendationEngine:
             # Prefer standard end mills around 6mm - 12mm. Sort by closeness to 10mm.
             candidate_tools.sort(key=lambda t: abs(t.diameter - 10.0))
         elif operation_type == "facing":
-            # For facing, we actively want the largest tool possible (e.g. Face Mill, Fly Cutter)
-            candidate_tools.sort(key=lambda t: t.diameter, reverse=True)
+            # For facing, we want a large tool to clear material quickly, BUT we should cap it based on feature size
+            # to prevent a 100mm face mill from being selected for a tiny 6mm part.
+            max_feature_dim = max(
+                feature.get("dimensions", {}).get("width", 0),
+                feature.get("dimensions", {}).get("length", 0),
+                feature.get("dimensions", {}).get("radius", 0) * 2,
+                50 # Fallback 50mm if no dimensions found
+            )
+            ideal_dia = max_feature_dim * 1.5
+            
+            # Sort by absolute difference to ideal diameter
+            candidate_tools.sort(key=lambda t: abs(t.diameter - ideal_dia))
         else:
-            # Pocketing / other: Use the largest diameter that fits within the feature's minimum corner radius
+            # Pocketing / boss clearing / other
             min_radius = feature.get("dimensions", {}).get("min_radius", 0)
             if min_radius > 0:
                 fitting_tools = [t for t in candidate_tools if t.diameter <= (min_radius * 2) + 0.1]
                 if fitting_tools:
                     candidate_tools = fitting_tools
-            # Sort by largest diameter to clear material fastest
-            candidate_tools.sort(key=lambda t: t.diameter, reverse=True)
+            
+            # Avoid tools that are ridiculously large compared to the feature itself
+            max_feature_dim = max(
+                feature.get("dimensions", {}).get("width", 0),
+                feature.get("dimensions", {}).get("length", 0),
+                feature.get("dimensions", {}).get("radius", 0) * 2,
+                50 # Fallback
+            )
+            
+            # For pockets and bosses, the ideal tool shouldn't be larger than half the feature size
+            ideal_dia = max_feature_dim * 0.5
+            
+            # Sort by largest diameter that is CLOSE to ideal_dia (penalize tools much larger than ideal_dia)
+            candidate_tools.sort(key=lambda t: t.diameter - (100 if t.diameter > max_feature_dim else 0), reverse=True)
             
         best_tool = candidate_tools[0]
         reason = f"Chosen {best_tool.name} (Dia {best_tool.diameter}mm) as it supports material and depth."

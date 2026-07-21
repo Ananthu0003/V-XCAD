@@ -31,7 +31,7 @@ class SetupCoordinateResolver:
         offset = float(self.setup_config.get("stockOffset", 0.0))
         stock_dims = self.setup_config.get("stockDimensions")
 
-        if stock_type == "box":
+        if stock_type in ("box", "cylinder"):
             if stock_dims and len(stock_dims) >= 3:
                 # Use explicit stock dimensions from UI
                 length, width, height = float(stock_dims[0]), float(stock_dims[1]), float(stock_dims[2])

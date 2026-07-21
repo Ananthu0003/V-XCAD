@@ -7,6 +7,7 @@ import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewpo
 import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { DimensionOverlay } from '@/components/viewport/DimensionOverlay';
 import { FeatureHighlight } from '@/components/viewport/FeatureHighlight';
+import { VolumetricStock } from '@/components/cam/VolumetricStock';
 import type { StlGeometryInfo } from '@/components/viewport/StlMesh';
 
 type AnnotationEntry = {
@@ -68,6 +69,7 @@ type CadViewportProps = {
 
 	simulationState?: any;
 	camTools?: any[];
+	camSetup?: any;
 	debugMode?: boolean;
 	setupMetadata?: any;
 	camViewport?: any;
@@ -129,10 +131,11 @@ export function CadViewport({
 	parameters = {},
 	hasBlockedOperations = false,
 	activeFeatureId = null,
-	simulationState = null,
-	camTools = [],
+	simulationState,
+	camTools,
+	camSetup,
 	debugMode = false,
-	setupMetadata = null,
+	setupMetadata,
 	camViewport = { showStock: true },
 	camOperations = [],
 	setupToolAxis,
@@ -155,6 +158,67 @@ export function CadViewport({
 		document.addEventListener('mousedown', handleClickOutside);
 		return () => document.removeEventListener('mousedown', handleClickOutside);
 	}, []);
+
+	const { actualStock } = useMemo(() => {
+		let center = new THREE.Vector3(0, 0, 15);
+		let size = new THREE.Vector3(150, 150, 30);
+
+		if (geometryInfo?.bounding_box) {
+			const setupBox = new THREE.Box3(
+				new THREE.Vector3(...geometryInfo.bounding_box.min),
+				new THREE.Vector3(...geometryInfo.bounding_box.max)
+			);
+			if (setupMetadata?.modelToSetupTransform) {
+				const transformArray = Array.isArray(setupMetadata.modelToSetupTransform[0]) 
+					? (setupMetadata.modelToSetupTransform as number[][]).flat()
+					: setupMetadata.modelToSetupTransform as number[];
+				const m = new THREE.Matrix4().fromArray(transformArray).transpose();
+				setupBox.applyMatrix4(m);
+			}
+			setupBox.getSize(size);
+			setupBox.getCenter(center);
+		}
+
+		// Priority 1: Backend resolved stock (This is in correct setup space coordinates)
+		if (setupMetadata?.resolvedStock) {
+			return { actualStock: setupMetadata.resolvedStock };
+		}
+
+		// Priority 2: User's explicitly defined stock dimensions in CAM Setup (fallback)
+		if (camSetup?.stockDimensions) {
+			return {
+				actualStock: {
+					center: [center.x, center.y, center.z],
+					dimensions: camSetup.stockDimensions
+				}
+			};
+		}
+
+		// Priority 3: Fallback based on CAD geometry
+		return {
+			actualStock: {
+				center: [center.x, center.y, center.z],
+				dimensions: [size.x + 5, size.y + 5, size.z + 2]
+			}
+		};
+	}, [geometryInfo, setupMetadata, camSetup]);
+
+	const dynamicSize = useMemo(() => {
+		let size = 50; 
+		if (geometryInfo?.bounding_box) {
+			const dx = geometryInfo.bounding_box.max[0] - geometryInfo.bounding_box.min[0];
+			const dy = geometryInfo.bounding_box.max[1] - geometryInfo.bounding_box.min[1];
+			const dz = geometryInfo.bounding_box.max[2] - geometryInfo.bounding_box.min[2];
+			size = Math.max(dx, dy, dz);
+		} else if (camSetup?.stockDimensions) {
+			size = Math.max(camSetup.stockDimensions.width || 0, camSetup.stockDimensions.length || 0, camSetup.stockDimensions.height || 0);
+		}
+		return Math.max(size, 1);
+	}, [geometryInfo, camSetup]);
+	
+	const gridFade = dynamicSize * 2.5;
+	const gridCell = Math.pow(10, Math.floor(Math.log10(dynamicSize / 5)));
+	const gridSection = gridCell * 10;
 
 	const isSolidVisible = viewMode === 'both' || viewMode === 'solid';
 	const isWireframeVisible = (viewMode === 'both' || viewMode === 'wireframe') && showToolpaths;
@@ -485,12 +549,11 @@ export function CadViewport({
 
 					<Suspense fallback={null}>
 						<Environment files="/potsdamer_platz_1k.hdr" />
-						<Grid infiniteGrid fadeDistance={50} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={1} sectionSize={10} position={[0, -0.01, 0]} />
+						<Grid infiniteGrid fadeDistance={gridFade} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={gridCell} sectionSize={gridSection} position={[0, -0.01, 0]} />
 						<Stage intensity={0.8} adjustCamera={!hasSimulated} environment={null} shadows="contact">
 							<AnimatedSetupGroup setupToolAxis={setupToolAxis}>
 								<group>
 									{/* The CAD model MUST be transformed to setup space using modelToSetupTransform */}
-									{console.log("CAD VIEWPORT SETUP METADATA", setupMetadata)}
 									{(() => {
 										const m = setupMetadata?.modelToSetupTransform 
 											? new THREE.Matrix4().fromArray(
@@ -504,10 +567,16 @@ export function CadViewport({
 										const quat = new THREE.Quaternion();
 										const scale = new THREE.Vector3();
 										m.decompose(pos, quat, scale);
+
+										const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
+										const offsetAmount = (isCamStage && actualStock) ? actualStock.dimensions[0] * 0.7 : 0;
+										const cadOffset = new THREE.Vector3(-offsetAmount, 0, 0);
+										const simOffset = new THREE.Vector3(offsetAmount, 0, 0);
+										const combinedPos = new THREE.Vector3().copy(pos).add(cadOffset);
 										
 										return (
 											<>
-												<group position={pos} quaternion={quat} scale={scale}>
+												<group position={combinedPos} quaternion={quat} scale={scale}>
 													{isSolidVisible && children}
 													
 													{/* Overlays - placed next to children so they inherit the exact same transforms */}
@@ -528,7 +597,7 @@ export function CadViewport({
 												{isWireframeVisible && (
 													<group
 														scale={1}
-														position={[0, 0, 0]}
+														position={simOffset}
 													>
 														{/* Render CAM Toolpaths using optimized buffer geometry */}
 														{groupedToolpaths}
@@ -544,14 +613,26 @@ export function CadViewport({
 																const activeTool = camTools.find(t => t.id === toolId || t.tool_name === toolId);
 																if (!activeTool) return null;
 
-																const toolDiameter = activeTool.diameter_mm || activeTool.diameter || 6;
+																const internalUnits = setupMetadata?.internalUnits || 'mm';
+																const rawDiameter = activeTool.diameter || activeTool.diameter_mm || 6;
+																const toolDiameter = internalUnits === 'in' ? rawDiameter / 25.4 : rawDiameter;
 																const radius = toolDiameter / 2;
-																const isFaceMill = activeTool.type === 'face_mill' || toolDiameter >= 30;
+																const isFaceMill = activeTool.type === 'face_mill';
 																
-																// Calculate realistic proportions
-																const cuttingLength = activeTool.cutting_length || activeTool.flute_length || (isFaceMill ? Math.min(radius * 0.5, 15) : Math.min(radius * 3, 40));
-																const shaftRadius = isFaceMill ? Math.max(radius * 0.3, 8) : radius;
-																const stickout = activeTool.length_mm || activeTool.stickout || (isFaceMill ? Math.max(cuttingLength + 40, 60) : Math.min(radius * 5, 80));
+																// Calculate purely proportional realistic proportions (no hardcoded absolute caps)
+																const defaultCuttingLength = isFaceMill ? radius * 0.5 : radius * 3;
+																const rawCuttingLength = activeTool.cutting_length || activeTool.flute_length || (defaultCuttingLength * (internalUnits === 'in' ? 25.4 : 1));
+																const cuttingLength = internalUnits === 'in' ? rawCuttingLength / 25.4 : rawCuttingLength;
+																const shaftRadius = isFaceMill ? radius * 0.4 : radius;
+																const defaultStickout = isFaceMill ? cuttingLength + radius * 2 : radius * 5;
+																const rawStickout = activeTool.length_mm || activeTool.stickout || (defaultStickout * (internalUnits === 'in' ? 25.4 : 1));
+																const stickout = internalUnits === 'in' ? rawStickout / 25.4 : rawStickout;
+
+																// Scale the holder completely proportionally to the tool size
+																const colletRadiusBase = shaftRadius * 1.5;
+																const holderTopRad = colletRadiusBase * 1.5;
+																const holderBotRad = colletRadiusBase * 1.2;
+																const holderHeight = shaftRadius * 4;
 
 																const i = activeSegment.end_i ?? 0;
 																const j = activeSegment.end_j ?? 0;
@@ -566,8 +647,21 @@ export function CadViewport({
 																const y = activeSegment.end?.y ?? activeSegment.end_y ?? 0;
 																const z = activeSegment.end?.z ?? activeSegment.end_z ?? 0;
 
+																// Visual override to prevent the tool from completely obscuring parts
+																let toolVisScale = 1;
+																if (actualStock) {
+																	const maxStockDim = Math.max(actualStock.dimensions[0], actualStock.dimensions[1]);
+																	// Allow tool to be a bit larger than the stock, but not overwhelmingly huge
+																	const maxToolVisualSize = maxStockDim * 1.5; 
+																	const currentToolVisualSize = Math.max(toolDiameter, stickout);
+																	
+																	if (currentToolVisualSize > maxToolVisualSize && currentToolVisualSize > 0) {
+																		toolVisScale = maxToolVisualSize / currentToolVisualSize;
+																	}
+																}
+
 																return (
-																	<group position={[x, y, z]} quaternion={quaternion}>
+																	<group position={[x, y, z]} quaternion={quaternion} scale={toolVisScale}>
 																		{/* Cutting Tool / End Mill */}
 																		<mesh position={[0, stickout / 2, 0]}>
 																			<cylinderGeometry
@@ -582,10 +676,10 @@ export function CadViewport({
 																			<meshStandardMaterial color="#cbd5e1" metalness={0.8} roughness={0.2} transparent opacity={0.9} />
 																		</mesh>
 
-																		{/* CNC Spindle / Tool Holder (scaled to look like a small collet) */}
-																		<mesh position={[0, stickout + 15, 0]}>
+																		{/* CNC Spindle / Tool Holder (scaled dynamically) */}
+																		<mesh position={[0, stickout + holderHeight / 2, 0]}>
 																			<cylinderGeometry
-																				args={[Math.max(shaftRadius * 1.5, 15), Math.max(shaftRadius * 1.2, 10), 30, 32]}
+																				args={[holderTopRad, holderBotRad, holderHeight, 32]}
 																				ref={(geom) => {
 																					if (geom) {
 																						geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
@@ -608,17 +702,71 @@ export function CadViewport({
 									})()
 								}
 								
-								{/* Stock Boundaries - Rendered directly in Setup Space */}
-								{setupMetadata?.resolvedStock && camViewport?.showStock !== false && (
-									<mesh position={setupMetadata.resolvedStock.center}>
-										<boxGeometry args={setupMetadata.resolvedStock.dimensions} />
-										<meshBasicMaterial color="#3b82f6" wireframe transparent opacity={0.25} />
-									</mesh>
-								)}
+								{/* Stock Boundaries and Machine Table */}
+								{(() => {
+									const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
+									if (!actualStock) return null;
+									
+									const offsetAmount = (isCamStage && actualStock) ? actualStock.dimensions[0] * 0.7 : 0;
+									const simOffset = new THREE.Vector3(offsetAmount, 0, 0);
+
+									return (
+										<group position={simOffset}>
+											{isCamStage && simulationState?.showStock !== false && simulationState && camTools && (
+												<VolumetricStock 
+													stockType={(camSetup?.stockType as any) || setupMetadata?.stockType || 'box'}
+													stockCenter={actualStock.center as [number, number, number]}
+													stockDimensions={actualStock.dimensions as [number, number, number]}
+													simulationState={simulationState}
+													camTools={camTools}
+													resolution={128}
+													setupUnits={setupMetadata?.internalUnits || 'mm'}
+												/>
+											)}
+											
+											{/* Machine Table / Vise Environment */}
+											{isCamStage && simulationState?.showMachine !== false && (() => {
+												// Determine scale factor based on stock size to prevent tiny models
+												// Reference default stock is 100mm, so we scale relative to that
+												const maxDim = Math.max(actualStock.dimensions[0], actualStock.dimensions[1], 10);
+												const s = maxDim / 100;
+
+												return (
+												<group position={[actualStock.center[0], actualStock.center[1], actualStock.center[2] - actualStock.dimensions[2] / 2 - 30 * s]}>
+													{/* Machine Table */}
+													<mesh position={[0, 0, -25 * s]}>
+														<boxGeometry args={[800 * s, 500 * s, 50 * s]} />
+														<meshStandardMaterial color="#1e293b" metalness={0.7} roughness={0.4} />
+													</mesh>
+													{/* Vise Base */}
+													<mesh position={[0, 0, 10 * s]}>
+														<boxGeometry args={[150 * s, 250 * s, 20 * s]} />
+														<meshStandardMaterial color="#475569" metalness={0.6} roughness={0.5} />
+													</mesh>
+													{/* Fixed Jaw */}
+													<mesh position={[0, -actualStock.dimensions[1] / 2 - 15 * s, 35 * s]}>
+														<boxGeometry args={[140 * s, 30 * s, 30 * s]} />
+														<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
+													</mesh>
+													{/* Moving Jaw */}
+													<mesh position={[0, actualStock.dimensions[1] / 2 + 15 * s, 35 * s]}>
+														<boxGeometry args={[140 * s, 30 * s, 30 * s]} />
+														<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
+													</mesh>
+												</group>
+												);
+											})()}
+										</group>
+									);
+								})()}
 								
 								{/* FeatureHighlight is already in Setup Space from backend */}
 								{geometryInfo && (activeParameter || activeFeatureId) && (
-									<>
+									<group position={(() => {
+										const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
+										const offsetAmount = (isCamStage && actualStock) ? actualStock.dimensions[0] * 0.7 : 0;
+										return new THREE.Vector3(-offsetAmount, 0, 0);
+									})()}>
 										<FeatureHighlight 
 											annotations={annotations} 
 											camFeatures={camFeatures}
@@ -629,7 +777,7 @@ export function CadViewport({
 											debugMode={debugMode}
 											onDebugInfo={setFeatureDebug}
 										/>
-									</>
+									</group>
 								)}
 								</group>
 							</AnimatedSetupGroup>

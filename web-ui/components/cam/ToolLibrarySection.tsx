@@ -413,7 +413,7 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 									const newTools = [...selectedTools];
 									newTools[index].lengthOffsetH = e.target.value;
 									onChange(newTools);
-								}} placeholder="H01" className="w-full bg-background border border-border rounded px-2 py-1 text-xs" />
+								}} placeholder={`H${tool.number?.replace(/\\D/g, '').padStart(2, '0') || '01'}`} className="w-full bg-background border border-border rounded px-2 py-1 text-xs" />
 							</div>
 							<div className="flex flex-col gap-1">
 								<label className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Diam (D)</label>
@@ -421,7 +421,7 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 									const newTools = [...selectedTools];
 									newTools[index].diameterOffsetD = e.target.value;
 									onChange(newTools);
-								}} placeholder="D01" className="w-full bg-background border border-border rounded px-2 py-1 text-xs" />
+								}} placeholder={`D${tool.number?.replace(/\\D/g, '').padStart(2, '0') || '01'}`} className="w-full bg-background border border-border rounded px-2 py-1 text-xs" />
 							</div>
 							<div className="flex flex-col gap-1">
 								<label className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Holder</label>

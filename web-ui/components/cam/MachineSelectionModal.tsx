@@ -36,11 +36,31 @@ export function MachineSelectionModal({
     const currentProfile = MACHINE_MATRIX.machineProfiles.find(p => p.id === currentProfileId);
 
     const filteredProfiles = useMemo(() => {
-        return MACHINE_MATRIX.machineProfiles.filter(p => {
+        const q = searchQuery.toLowerCase().trim();
+        let filtered = MACHINE_MATRIX.machineProfiles.filter(p => {
             const matchesCat = activeCategory === "all" || getCategoryForProfile(p.machineType) === activeCategory;
-            const matchesSearch = p.label.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.toLowerCase().includes(searchQuery.toLowerCase());
+            const machineTypeSearchable = p.machineType.toLowerCase().replace(/_/g, ' ');
+            const matchesSearch = p.label.toLowerCase().includes(q) || 
+                                  p.id.toLowerCase().includes(q) || 
+                                  machineTypeSearchable.includes(q) ||
+                                  `${p.axisCount} axis`.includes(q) ||
+                                  `${p.axisCount}-axis`.includes(q) ||
+                                  p.axisCount.toString() === q;
             return matchesCat && matchesSearch;
         });
+
+        if (q) {
+            filtered.sort((a, b) => {
+                const aAxisMatch = a.axisCount.toString() === q || `${a.axisCount} axis` === q || `${a.axisCount}-axis` === q;
+                const bAxisMatch = b.axisCount.toString() === q || `${b.axisCount} axis` === q || `${b.axisCount}-axis` === q;
+                
+                if (aAxisMatch && !bAxisMatch) return -1;
+                if (!aAxisMatch && bAxisMatch) return 1;
+                return 0;
+            });
+        }
+        
+        return filtered;
     }, [activeCategory, searchQuery]);
 
     const handleSelect = (profile: MachineProfile) => {

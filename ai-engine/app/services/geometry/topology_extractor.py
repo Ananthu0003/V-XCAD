@@ -305,9 +305,12 @@ class TopologyExtractor:
         if geom_type == "line":
             return [geom_info["start"], geom_info["end"]]
             
-        # Arc preservation: use a larger interval for smooth arcs/circles
+        # Arc preservation: use a larger interval for smooth arcs/circles, but ensure a minimum of ~36 points per full circle.
         if geom_type in ("circle", "ellipse"):
-            interval_mm = max(2.0, interval_mm * 4)
+            # Default to 4x standard interval or 2.0mm, but cap it so we get at least 36 segments for the perimeter
+            base_interval = max(2.0, interval_mm * 4)
+            arc_interval = max(0.01, length / 36.0)
+            interval_mm = min(base_interval, arc_interval)
 
         n_pts = max(_MIN_POINTS_PER_EDGE, min(_MAX_POINTS_PER_EDGE, int(length / interval_mm) + 1))
         points = []

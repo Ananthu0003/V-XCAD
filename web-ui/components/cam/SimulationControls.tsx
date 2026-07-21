@@ -126,6 +126,30 @@ export function SimulationControls({ state, onChange, onGenerateToolpath, isGene
 
                     <div className="flex gap-4 items-center">
                         <button
+                            onClick={() => onChange({ ...state, showMachine: state.showMachine === undefined ? false : !state.showMachine })}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all border ${
+                                state.showMachine !== false
+                                    ? 'bg-primary/10 text-primary border-primary/30 shadow-[0_0_10px_rgba(59,130,246,0.15)]' 
+                                    : 'bg-background text-muted-foreground border-border hover:bg-muted'
+                            }`}
+                            title="Toggle Machine Visibility"
+                        >
+                            {state.showMachine !== false ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
+                            Machine
+                        </button>
+                        <button
+                            onClick={() => onChange({ ...state, showStock: state.showStock === undefined ? false : !state.showStock })}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all border ${
+                                state.showStock !== false 
+                                    ? 'bg-primary/10 text-primary border-primary/30 shadow-[0_0_10px_rgba(59,130,246,0.15)]' 
+                                    : 'bg-background text-muted-foreground border-border hover:bg-muted'
+                            }`}
+                            title="Toggle Stock Visibility"
+                        >
+                            {state.showStock !== false ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
+                            Stock
+                        </button>
+                        <button
                             onClick={() => onChange({ ...state, showTool: state.showTool === undefined ? false : !state.showTool })}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all border ${
                                 state.showTool !== false 
@@ -137,8 +161,6 @@ export function SimulationControls({ state, onChange, onGenerateToolpath, isGene
                             {state.showTool !== false ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
                             Tool
                         </button>
-                        
-                        {/* Segmented Speed Control */}
                         <div className="flex items-center bg-muted/40 p-1 rounded-lg border border-border/50">
                             {[1, 2, 5, 10].map(s => (
                                 <button

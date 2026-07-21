@@ -7,6 +7,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ChatBubble } from '@/components/chat/ChatBubble';
 import { SettingsPanel } from '@/components/workspace/SettingsPanel';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // ── Starter prompts shown in the empty-chat welcome screen ──────────────────
 const STARTER_PROMPTS = [
@@ -340,18 +341,21 @@ export function ChatPanel({
 											</label>
 
 											{/* Model Selection */}
-											<select
-												value={selectedModel}
-												onChange={(e) => setSelectedModel(e.target.value)}
-												className="max-w-[130px] rounded-lg border border-border dark:border-white/10 bg-transparent px-2 py-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground outline-none focus:border-blue-500/40 focus:text-foreground transition-colors cursor-pointer truncate"
-												title="Select AI Model"
-											>
-												{modelOptions.map((opt) => (
-													<option key={opt.value} value={opt.value} className="bg-background text-foreground">
-														{opt.label}
-													</option>
-												))}
-											</select>
+											<Select value={selectedModel} onValueChange={(val: string | null) => val && setSelectedModel(val)}>
+												<SelectTrigger 
+													className="h-8 max-w-[130px] rounded-lg border-border dark:border-white/10 bg-transparent px-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground outline-none focus:border-blue-500/40 focus:text-foreground transition-colors truncate"
+													title="Select AI Model"
+												>
+													<SelectValue />
+												</SelectTrigger>
+												<SelectContent>
+													{modelOptions.map((opt) => (
+														<SelectItem key={opt.value} value={opt.value} className="text-xs font-mono uppercase tracking-widest">
+															{opt.label}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
 										</div>
 
 										<button

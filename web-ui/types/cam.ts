@@ -318,4 +318,8 @@ export type SimulationState = {
     activeSegmentIndex?: number;
     currentTimeSec?: number;
     showTool?: boolean;
+    showStock?: boolean;
+    showMachine?: boolean;
 };
+
+export type { ToolpathSegment, SimulationEvent };

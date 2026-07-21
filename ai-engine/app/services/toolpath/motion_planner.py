@@ -46,7 +46,29 @@ class MotionPlanner:
             return []
 
         op_type = op.get("type")
-        tool_radius = (tool.get("diameter", 0.0) / 2.0) if tool else 1.0
+        raw_tool_diameter = tool.get("diameter") or tool.get("diameter_mm") or 2.0 if tool else 2.0
+        internal_units = setup.get("internalUnits", "mm") if setup else "mm"
+        
+        # Heuristic: If the model is tiny (<= 15 units) and the tool is massively larger (> 3x),
+        # it is almost certainly an inch model being machined with a mm tool. 
+        # Correct the units to prevent generating gigantic toolpaths.
+        if internal_units == "mm" and raw_tool_diameter > 5.0:
+            raw_pts = machiningRegion.get("boundary")
+            if raw_pts and len(raw_pts) >= 3:
+                pts_2d = [(p[0], p[1]) for p in raw_pts]
+                min_x = min(p[0] for p in pts_2d)
+                max_x = max(p[0] for p in pts_2d)
+                min_y = min(p[1] for p in pts_2d)
+                max_y = max(p[1] for p in pts_2d)
+                stock_w = max(max_x - min_x, max_y - min_y)
+                
+                if 0.1 < stock_w <= 15.0 and raw_tool_diameter >= (stock_w * 1.5):
+                    internal_units = "in"
+                    print(f"[MotionPlanner] Unit mismatch heuristic: Assumed 'in' units. Tool={raw_tool_diameter}mm, Stock={stock_w:.2f}units.")
+
+        tool_diameter_setup_units = raw_tool_diameter / 25.4 if internal_units == "in" else raw_tool_diameter
+        tool_radius = tool_diameter_setup_units / 2.0
+
         if tool_radius <= 0:
             tool_radius = 1.0
 
@@ -249,14 +271,26 @@ class MotionPlanner:
 
         pts_ext = [(p[0], p[1]) for p in containing_pts]
         pts_int = [(p[0], p[1]) for p in boss_pts]
-        poly = Polygon(pts_ext, [pts_int])
-        if not poly.is_valid:
-            poly = poly.buffer(0)
 
-        # Buffer the boss out by tool radius, and bounding box in by tool radius
-        safe_area = poly.buffer(-tool_radius, join_style=2)
+        stock_poly = Polygon(pts_ext)
+        if not stock_poly.is_valid:
+            stock_poly = stock_poly.buffer(0)
+            
+        boss_poly = Polygon(pts_int)
+        if not boss_poly.is_valid:
+            boss_poly = boss_poly.buffer(0)
+
+        # For an external boss, the tool can enter from outside the stock.
+        # We expand the stock boundary by tool_radius + 2mm to allow the tool center to go outside.
+        machining_area = stock_poly.buffer(tool_radius + 2.0, join_style=2)
+        
+        # We expand the boss by tool_radius + small clearance to prevent gouging
+        boss_keepout = boss_poly.buffer(tool_radius + 0.1, join_style=2)
+        
+        safe_area = machining_area.difference(boss_keepout)
+        
         if safe_area.is_empty:
-            raise ValueError(f"Tool radius ({tool_radius}mm) too large to fit in boss clearance area")
+            raise ValueError(f"Tool radius ({tool_radius}mm) is too large to machine this boss without gouging, even from the outside")
 
         bounds = safe_area.bounds # minx, miny, maxx, maxy
         if not bounds:
@@ -319,6 +353,9 @@ class MotionPlanner:
         poly = Polygon(pts_2d)
         if not poly.is_valid:
             poly = poly.buffer(0)
+            
+        # Add buffer to allow tool to go past the stock edges
+        poly = poly.buffer(tool_radius * 1.1)
             
         bounds = poly.bounds
         if not bounds:
@@ -395,213 +432,6 @@ class MotionPlanner:
                     add_cmd(ToolpathSegmentType.RAPID_XY, pt_end_retract, pt_lead_in_retract)
                     
                 add_cmd(ToolpathSegmentType.PLUNGE, pt_lead_in_retract, pt_lead_in_z)
-
-                for j in range(1, len(path)):
-                    p1 = path[j-1]
-                    p2 = path[j]
-                    add_cmd(ToolpathSegmentType.CUT, Point3D(x=p1[0], y=p1[1], z=z), Point3D(x=p2[0], y=p2[1], z=z))
-
-                end_pt_2d = path[-1]
-                pt_end = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=z)
-                pt_end_retract = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=retract)
-                
-                if i == passes - 1:
-                    pt_end_clearance = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=clearance)
-                    add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE, pt_end, pt_end_clearance)
-                else:
-                    add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_end, pt_end_retract)
-
-    def _generate_od_turning_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
-        # Simplified turning profile (Z = spindle axis, X = radius, Y = 0)
-        # OD Turning runs along the Z-axis while varying X to match the cylinder profile.
-        length = machiningRegion.get("length", 50.0)
-        radius = machiningRegion.get("radius", 20.0)
-
-        # Start away from part
-        start_pt = Point3D(x=radius + clearance, y=0, z=length + clearance)
-        feed_pt = Point3D(x=radius + clearance, y=0, z=length)
-
-        add_cmd(ToolpathSegmentType.RAPID_CLEARANCE, start_pt, feed_pt)
-
-        stepdown = (op.get("parameters") or {}).get("stepdown", 2.0)
-        current_radius = radius + stepdown * 3  # Start from stock radius roughly
-
-        while current_radius > radius:
-            next_radius = max(radius, current_radius - stepdown)
-
-            # Plunge to next pass diameter
-            add_cmd(ToolpathSegmentType.PLUNGE,
-                    Point3D(x=current_radius, y=0, z=length),
-                    Point3D(x=next_radius, y=0, z=length))
-
-            # Cut along Z
-            add_cmd(ToolpathSegmentType.CUT,
-                    Point3D(x=next_radius, y=0, z=length),
-                    Point3D(x=next_radius, y=0, z=0))
-
-            # Retract X
-            add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE,
-                    Point3D(x=next_radius, y=0, z=0),
-                    Point3D(x=next_radius + 1.0, y=0, z=0))
-
-            # Rapid back to start Z
-            add_cmd(ToolpathSegmentType.RAPID_XY,
-                    Point3D(x=next_radius + 1.0, y=0, z=0),
-                    Point3D(x=next_radius + 1.0, y=0, z=length))
-
-            current_radius = next_radius
-
-        boss_pts = machiningRegion.get("islands", [[]])[0]
-        containing_pts = machiningRegion.get("boundary")
-        
-        if not boss_pts or not containing_pts:
-            raise ValueError("Boss geometry missing inner island or outer boundary")
-
-        pts_ext = [(p[0], p[1]) for p in containing_pts]
-        pts_int = [(p[0], p[1]) for p in boss_pts]
-        poly = Polygon(pts_ext, [pts_int])
-        if not poly.is_valid:
-            poly = poly.buffer(0)
-
-        # Buffer the boss out by tool radius, and bounding box in by tool radius
-        safe_area = poly.buffer(-tool_radius, join_style=2)
-        if safe_area.is_empty:
-            raise ValueError(f"Tool radius ({tool_radius}mm) too large to fit in boss clearance area")
-
-        bounds = safe_area.bounds # minx, miny, maxx, maxy
-        if not bounds:
-            raise ValueError("Failed to compute valid boundaries for boss clearing")
-            
-        minx, miny, maxx, maxy = bounds
-        stepover = tool_radius * 1.5
-        
-        raster_lines = []
-        y = miny + stepover / 2.0
-        direction = 1
-        
-        while y < maxy:
-            line = LineString([(minx - 10, y), (maxx + 10, y)])
-            intersection = safe_area.intersection(line)
-            
-            segs = []
-            if intersection.geom_type == "LineString":
-                segs = [list(intersection.coords)]
-            elif intersection.geom_type == "MultiLineString":
-                segs = [list(ls.coords) for ls in intersection.geoms]
-                
-            for seg in segs:
-                if len(seg) >= 2:
-                    if direction == -1:
-                        seg.reverse()
-                    raster_lines.append(seg)
-            
-            y += stepover
-            direction *= -1
-
-        # Profile pass around the boss
-        profile_area = Polygon(pts_int).buffer(tool_radius, join_style=2)
-        if profile_area.geom_type == "Polygon":
-            raster_lines.append(list(profile_area.exterior.coords))
-            
-        # Simplify geometry heavily for boss
-        simplified_lines = []
-        for line in raster_lines:
-            simped = _douglas_peucker(line, 0.05)
-            simplified_lines.append(simped)
-
-        total_segs = sum(len(ln)-1 for ln in simplified_lines)
-        if total_segs > 2000:
-            raise ValueError(f"Boss segment budget exceeded (generated {total_segs}, limit 2000). Try a larger tool.")
-
-        self._apply_z_stepdowns_to_paths(simplified_lines, clearance, top, bottom, op, add_cmd)
-
-    def _generate_facing_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
-        try:
-            from shapely.geometry import Polygon, LineString
-        except ImportError:
-            raise RuntimeError("Shapely required for toolpath generation")
-            
-        raw_pts = machiningRegion.get("boundary")
-        if not raw_pts or len(raw_pts) < 3:
-            raise ValueError("Face missing valid boundary")
-            
-        pts_2d = [(p[0], p[1]) for p in raw_pts]
-        poly = Polygon(pts_2d)
-        if not poly.is_valid:
-            poly = poly.buffer(0)
-            
-        bounds = poly.bounds
-        if not bounds:
-            return
-            
-        minx, miny, maxx, maxy = bounds
-        stepover = tool_radius * 1.5
-        
-        raster_lines = []
-        y = miny
-        direction = 1
-        
-        while y <= maxy + stepover:
-            line = LineString([(minx - 10, y), (maxx + 10, y)])
-            intersection = poly.intersection(line)
-            
-            segs = []
-            if intersection.geom_type == "LineString":
-                segs = [list(intersection.coords)]
-            elif intersection.geom_type == "MultiLineString":
-                segs = [list(ls.coords) for ls in intersection.geoms]
-                
-            for seg in segs:
-                if len(seg) >= 2:
-                    if direction == -1:
-                        seg.reverse()
-                    raster_lines.append(seg)
-                    
-            y += stepover
-            direction *= -1
-
-        self._apply_z_stepdowns_to_paths(raster_lines, clearance, top, bottom, op, add_cmd)
-
-    def _apply_z_stepdowns_to_paths(self, paths_2d, clearance, top, bottom, op, add_cmd):
-        if not paths_2d:
-            return
-
-        params = (op.get("parameters") or {})
-        feeds = params.get("feeds_and_speeds") or {}
-        
-        tool = op.get("tool") or {}
-        tool_diameter = tool.get("geometry", {}).get("DC", 10.0)
-        default_stepdown = tool_diameter * 0.5  # 50% of tool diameter
-        
-        stepdown = params.get("maxStepdown", params.get("stepdown", feeds.get("stepdown", default_stepdown)))
-        if stepdown <= 0:
-            stepdown = default_stepdown
-
-        total_depth = top - bottom
-        passes = max(1, math.ceil(total_depth / stepdown))
-        actual_step = total_depth / passes
-        
-        safe_heights = op.get("safe_heights", {})
-        retract = safe_heights.get("retract", clearance)
-
-        for path in paths_2d:
-            if not path or len(path) < 2:
-                continue
-
-            for i in range(passes):
-                z = top - (i + 1) * actual_step
-
-                start_pt_2d = path[0]
-                pt_retract = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=retract)
-                pt_z = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=z)
-
-                if i == 0:
-                    pt_clearance = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=clearance)
-                    add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_clearance, pt_retract)
-                else:
-                    add_cmd(ToolpathSegmentType.RAPID_XY, pt_end_retract, pt_retract)
-                    
-                add_cmd(ToolpathSegmentType.PLUNGE, pt_retract, pt_z)
 
                 for j in range(1, len(path)):
                     p1 = path[j-1]

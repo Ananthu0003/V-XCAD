@@ -1,6 +1,7 @@
 import React from 'react';
 import { CamOperation } from '../../types/cam';
 import { Activity, AlertTriangle, CheckCircle2, AlertCircle, Wrench, XCircle } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface OperationPlanningTableProps {
     operations: CamOperation[];
@@ -152,7 +153,7 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                 } else if (nameSaysFinish && !nameSaysRough) {
                                                     isSmoothing = true;
                                                 } else {
-                                                    isRoughing = typeLower.includes('rough') || typeLower.includes('pocket') || typeLower.includes('clear') || typeLower.includes('face');
+                                                    isRoughing = typeLower.includes('rough') || typeLower.includes('pocket') || typeLower.includes('clear') || typeLower.includes('face') || typeLower.includes('facing');
                                                     isSmoothing = typeLower.includes('finish') || typeLower.includes('smooth') || typeLower.includes('contour');
                                                 }
 
@@ -186,26 +187,43 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                         </td>
                                                         <td className="py-3 px-4 align-top">
                                                             <div className="relative group">
-                                                                <select
+                                                                <Select
                                                                     value={op.type}
-                                                                    onChange={(e) => onChange?.(op.id, { type: e.target.value, name: e.target.options[e.target.selectedIndex].text })}
+                                                                    onValueChange={(val: string | null) => {
+                                                                        if (!val) return;
+                                                                        const options: Record<string, string> = {
+                                                                            "facing": "Facing",
+                                                                            "pocketing": "Pocketing",
+                                                                            "drilling": "Drilling",
+                                                                            "2d_contour_outer": "Contouring",
+                                                                            "chamfer_milling": "Chamfering",
+                                                                            "boss_clearing": "Boss Clearing",
+                                                                            "od_turning": "Turning (OD)",
+                                                                            "rotary_milling": "Rotary Milling",
+                                                                            "indexed_4axis_milling": "Indexed 4-Axis"
+                                                                        };
+                                                                        onChange?.(op.id!, { type: val as any, name: options[val] || val });
+                                                                    }}
                                                                     disabled={!onChange}
-                                                                    className="w-full md:w-40 appearance-none bg-background border border-border/50 rounded-lg px-3 py-2 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                                                                 >
-                                                                    <option value="facing">Facing</option>
-                                                                    <option value="pocketing">Pocketing</option>
-                                                                    <option value="drilling">Drilling</option>
-                                                                    <option value="2d_contour_outer">Contouring</option>
-                                                                    <option value="chamfer_milling">Chamfering</option>
-                                                                    <option value="boss_clearing">Boss Clearing</option>
-                                                                    <option value="od_turning">Turning (OD)</option>
-                                                                    <option value="rotary_milling">Rotary Milling</option>
-                                                                    <option value="indexed_4axis_milling">Indexed 4-Axis</option>
-                                                                    <option value={op.type}>{op.name || op.type}</option>
-                                                                </select>
-                                                                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">
-                                                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                                                                </div>
+                                                                    <SelectTrigger className="w-full md:w-40 bg-background border-border/50 text-xs text-foreground focus:ring-1 focus:ring-primary/30 h-9">
+                                                                        <SelectValue />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="facing">Facing</SelectItem>
+                                                                        <SelectItem value="pocketing">Pocketing</SelectItem>
+                                                                        <SelectItem value="drilling">Drilling</SelectItem>
+                                                                        <SelectItem value="2d_contour_outer">Contouring</SelectItem>
+                                                                        <SelectItem value="chamfer_milling">Chamfering</SelectItem>
+                                                                        <SelectItem value="boss_clearing">Boss Clearing</SelectItem>
+                                                                        <SelectItem value="od_turning">Turning (OD)</SelectItem>
+                                                                        <SelectItem value="rotary_milling">Rotary Milling</SelectItem>
+                                                                        <SelectItem value="indexed_4axis_milling">Indexed 4-Axis</SelectItem>
+                                                                        {!["facing", "pocketing", "drilling", "2d_contour_outer", "chamfer_milling", "boss_clearing", "od_turning", "rotary_milling", "indexed_4axis_milling"].includes(op.type) && (
+                                                                            <SelectItem value={op.type}>{op.name || op.type}</SelectItem>
+                                                                        )}
+                                                                    </SelectContent>
+                                                                </Select>
                                                             </div>
                                                         </td>
                                                         <td className="py-3 px-4 align-top min-w-[250px] whitespace-normal">

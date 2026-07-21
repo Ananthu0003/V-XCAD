@@ -1,4 +1,5 @@
 import type { CuttingParameters, CoolantType } from '@/types/cam';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 type CuttingParametersSectionProps = {
 	parameters: CuttingParameters;
@@ -26,15 +27,16 @@ export function CuttingParametersSection({ parameters, onChange }: CuttingParame
 				{/* Coolant */}
 				<div className="flex flex-col gap-2">
 					<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Coolant</label>
-					<select
-						value={parameters.coolant}
-						onChange={(e) => update('coolant', e.target.value as CoolantType)}
-						className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner"
-					>
-						<option value="off">Off</option>
-						<option value="flood">Flood</option>
-						<option value="mist">Mist</option>
-					</select>
+					<Select value={parameters.coolant} onValueChange={(val: string | null) => val && update('coolant', val as CoolantType)}>
+						<SelectTrigger className="w-full bg-background border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner h-[42px]">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="off">Off</SelectItem>
+							<SelectItem value="flood">Flood</SelectItem>
+							<SelectItem value="mist">Mist</SelectItem>
+						</SelectContent>
+					</Select>
 				</div>
 			</div>
 
