@@ -64,6 +64,25 @@ class OperationStrategyPlanner:
                 
             op = CamOperation(operation_type=decision.operation_type or "unknown", feature_id=decision.feature_id, setup_id=setup_id)
             
+            # Dynamically set machining strategy if available
+            if decision.manufacturing_strategy:
+                op.machining_strategy = decision.manufacturing_strategy
+                
+            # Dynamically set safe heights based on local feature coordinates
+            local_feat = decision.parameters.get("setup_local_feature", {})
+            if isinstance(local_feat, dict) and "localTopZ" in local_feat:
+                top_z = local_feat.get("localTopZ", 0.0)
+                bottom_z = local_feat.get("localBottomZ", -10.0)
+                op.safe_heights["top"] = top_z
+                op.safe_heights["bottom"] = bottom_z
+                op.safe_heights["clearance"] = top_z + 15.0
+                op.safe_heights["retract"] = top_z + 5.0
+                op.safe_heights["feed"] = top_z + 2.0
+                
+                mr = local_feat.get("machiningRegion")
+                if mr and isinstance(mr, dict):
+                    op.geometry = mr
+            
             # Human-readable operation name
             display_name = self.OPERATION_DISPLAY_NAMES.get(
                 decision.operation_type or "",

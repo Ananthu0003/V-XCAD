@@ -307,14 +307,14 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
             </div>
             
             {/* Toolpath Statistics (if generated) */}
-            {operation.statistics && (
+            {(operation.statistics || operation.estimated_time_s) && (
                 <div className="flex flex-col gap-2 p-3 bg-black/40 border border-border rounded-lg mt-2">
                     <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Statistics</div>
                     <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                        <div className="flex justify-between"><span>Cycle Time:</span><span className="text-foreground">{Math.floor(operation.statistics.cycleTimeSeconds / 60)}m {Math.floor(operation.statistics.cycleTimeSeconds % 60)}s</span></div>
-                        <div className="flex justify-between"><span>Rapid Dist:</span><span className="text-foreground">{operation.statistics.rapidDistance} mm</span></div>
-                        <div className="flex justify-between"><span>Cut Dist:</span><span className="text-foreground">{operation.statistics.cutDistance} mm</span></div>
-                        <div className="flex justify-between"><span>Vol Removed:</span><span className="text-foreground">{operation.statistics.materialRemovedVolume} mm³</span></div>
+                        <div className="flex justify-between"><span>Cycle Time:</span><span className="text-foreground">{Math.floor((operation.estimated_time_s || operation.statistics?.cycleTimeSeconds || 0) / 60)}m {Math.floor((operation.estimated_time_s || operation.statistics?.cycleTimeSeconds || 0) % 60)}s</span></div>
+                        <div className="flex justify-between"><span>Rapid Dist:</span><span className="text-foreground">{operation.statistics?.rapidDistance || 0} mm</span></div>
+                        <div className="flex justify-between"><span>Cut Dist:</span><span className="text-foreground">{operation.statistics?.cutDistance || 0} mm</span></div>
+                        <div className="flex justify-between"><span>Vol Removed:</span><span className="text-foreground">{operation.statistics?.materialRemovedVolume || 0} mm³</span></div>
                     </div>
                 </div>
             )}

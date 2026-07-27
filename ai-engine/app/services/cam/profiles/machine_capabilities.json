@@ -1,0 +1,57 @@
+{
+  "vmc_3axis": {
+    "linear_axes": ["X", "Y", "Z"],
+    "rotary_axes": [],
+    "has_atc": true,
+    "has_pallet_changer": false,
+    "supports_turning": false,
+    "supports_live_tooling": false,
+    "supports_sub_spindle": false,
+    "supports_parallel_channels": false,
+    "tool_change_type": "atc_umbrella"
+  },
+  "vmc_4axis": {
+    "linear_axes": ["X", "Y", "Z"],
+    "rotary_axes": ["A"],
+    "has_atc": true,
+    "has_pallet_changer": false,
+    "supports_turning": false,
+    "supports_live_tooling": false,
+    "supports_sub_spindle": false,
+    "supports_parallel_channels": false,
+    "tool_change_type": "atc_umbrella"
+  },
+  "vmc_5axis": {
+    "linear_axes": ["X", "Y", "Z"],
+    "rotary_axes": ["B", "C"],
+    "has_atc": true,
+    "has_pallet_changer": false,
+    "supports_turning": false,
+    "supports_live_tooling": false,
+    "supports_sub_spindle": false,
+    "supports_parallel_channels": false,
+    "tool_change_type": "atc_arm"
+  },
+  "hmc_3axis": {
+    "linear_axes": ["X", "Y", "Z"],
+    "rotary_axes": [],
+    "has_atc": true,
+    "has_pallet_changer": true,
+    "supports_turning": false,
+    "supports_live_tooling": false,
+    "supports_sub_spindle": false,
+    "supports_parallel_channels": false,
+    "tool_change_type": "atc_arm"
+  },
+  "cnc_router_manual": {
+    "linear_axes": ["X", "Y", "Z"],
+    "rotary_axes": [],
+    "has_atc": false,
+    "has_pallet_changer": false,
+    "supports_turning": false,
+    "supports_live_tooling": false,
+    "supports_sub_spindle": false,
+    "supports_parallel_channels": false,
+    "tool_change_type": "manual"
+  }
+}

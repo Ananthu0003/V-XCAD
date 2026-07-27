@@ -37,30 +37,35 @@ export function MachineSelectionModal({
 
     const filteredProfiles = useMemo(() => {
         const q = searchQuery.toLowerCase().trim();
-        let filtered = MACHINE_MATRIX.machineProfiles.filter(p => {
-            const matchesCat = activeCategory === "all" || getCategoryForProfile(p.machineType) === activeCategory;
-            const machineTypeSearchable = p.machineType.toLowerCase().replace(/_/g, ' ');
-            const matchesSearch = p.label.toLowerCase().includes(q) || 
-                                  p.id.toLowerCase().includes(q) || 
-                                  machineTypeSearchable.includes(q) ||
-                                  `${p.axisCount} axis`.includes(q) ||
-                                  `${p.axisCount}-axis`.includes(q) ||
-                                  p.axisCount.toString() === q;
-            return matchesCat && matchesSearch;
-        });
-
-        if (q) {
-            filtered.sort((a, b) => {
-                const aAxisMatch = a.axisCount.toString() === q || `${a.axisCount} axis` === q || `${a.axisCount}-axis` === q;
-                const bAxisMatch = b.axisCount.toString() === q || `${b.axisCount} axis` === q || `${b.axisCount}-axis` === q;
-                
-                if (aAxisMatch && !bAxisMatch) return -1;
-                if (!aAxisMatch && bAxisMatch) return 1;
-                return 0;
-            });
-        }
+        const axisMatch = /^([23456789])$/.exec(q) || /\b([23456789])(?:-|\s)*(?:axis|axes|ax|x)\b/i.exec(q);
+        const targetAxis = axisMatch ? parseInt(axisMatch[1], 10) : null;
         
-        return filtered;
+        let remainingQuery = q;
+        if (targetAxis !== null) {
+            remainingQuery = q
+                .replace(/^([23456789])$/, '')
+                .replace(/\b([23456789])(?:-|\s)*(?:axis|axes|ax|x)\b/i, '')
+                .trim();
+        }
+
+        return MACHINE_MATRIX.machineProfiles.filter(p => {
+            const matchesCat = activeCategory === "all" || getCategoryForProfile(p.machineType) === activeCategory;
+            if (!matchesCat) return false;
+
+            if (targetAxis !== null && p.axisCount !== targetAxis) {
+                return false;
+            }
+
+            if (!remainingQuery) return true;
+
+            const machineTypeSearchable = p.machineType.toLowerCase().replace(/_/g, ' ');
+            const matchesSearch = p.label.toLowerCase().includes(remainingQuery) || 
+                                  p.id.toLowerCase().includes(remainingQuery) || 
+                                  machineTypeSearchable.includes(remainingQuery) ||
+                                  `${p.axisCount} axis`.includes(remainingQuery) ||
+                                  `${p.axisCount}-axis`.includes(remainingQuery);
+            return matchesSearch;
+        });
     }, [activeCategory, searchQuery]);
 
     const handleSelect = (profile: MachineProfile) => {

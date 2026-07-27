@@ -526,9 +526,9 @@
       "recommendedPost": "HAAS_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -540,12 +540,12 @@
       "compatibleControllers": [
         "MAZAK_SMOOTH_EIA"
       ],
-      "recommendedPost": "MAZAK_SMOOTH_EIA_3X_MILL",
+      "recommendedPost": "MAZAK_SMOOTH_EIA_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -560,9 +560,9 @@
       "recommendedPost": "OKUMA_OSP_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -578,9 +578,9 @@
       "recommendedPost": "FANUC_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -596,9 +596,9 @@
       "recommendedPost": "SIEMENS_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -613,9 +613,9 @@
       "recommendedPost": "HAAS_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -630,9 +630,9 @@
       "recommendedPost": "MAZAK_SMOOTH_EIA_MILL_TURN",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -648,9 +648,9 @@
       "recommendedPost": "FANUC_MILL_TURN",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -718,9 +718,9 @@
       "recommendedPost": "FANUC_SWISS",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -735,9 +735,9 @@
       "recommendedPost": "FANUC_SWISS",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -752,9 +752,9 @@
       "recommendedPost": "FANUC_SWISS",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -1163,580 +1163,6 @@
         "toolpathGeneration": false,
         "gcodeGeneration": false
       }
-    },
-    {
-      "id": "generic_mill_3x_vmc",
-      "label": "Custom / Generic 3-Axis Vertical Machining Center (VMC)",
-      "machineType": "MILL_3X_VMC",
-      "axisCount": 3,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_mill_4x_vmc",
-      "label": "Custom / Generic 4-Axis Vertical Machining Center (VMC)",
-      "machineType": "MILL_4X_VMC",
-      "axisCount": 4,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_mill_5x_vmc",
-      "label": "Custom / Generic 5-Axis Vertical Machining Center (VMC)",
-      "machineType": "MILL_5X_VMC",
-      "axisCount": 5,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_mill_3x_hmc",
-      "label": "Custom / Generic 3-Axis Horizontal Machining Center (HMC)",
-      "machineType": "MILL_3X_HMC",
-      "axisCount": 3,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_mill_4x_hmc",
-      "label": "Custom / Generic 4-Axis Horizontal Machining Center (HMC)",
-      "machineType": "MILL_4X_HMC",
-      "axisCount": 4,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_mill_5x_hmc",
-      "label": "Custom / Generic 5-Axis Horizontal Machining Center (HMC)",
-      "machineType": "MILL_5X_HMC",
-      "axisCount": 5,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_cnc_lathe",
-      "label": "Custom / Generic CNC Turning Center (2-Axis)",
-      "machineType": "CNC_LATHE",
-      "axisCount": 3,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "OKUMA_OSP",
-        "SIEMENS_828D"
-      ],
-      "recommendedPost": "FANUC_2X_LATHE",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_cnc_lathe_live_tooling",
-      "label": "Custom / Generic CNC Turning Center (Live Tooling / Y-Axis)",
-      "machineType": "CNC_LATHE_LIVE_TOOLING",
-      "axisCount": 3,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "OKUMA_OSP",
-        "SIEMENS_828D"
-      ],
-      "recommendedPost": "FANUC_2X_LATHE",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_mill_turn",
-      "label": "Custom / Generic Mill-Turn Center (Multitasking)",
-      "machineType": "MILL_TURN",
-      "axisCount": 5,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_swiss_lathe",
-      "label": "Custom / Generic Swiss-Type Lathe",
-      "machineType": "SWISS_LATHE",
-      "axisCount": 5,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "OKUMA_OSP",
-        "SIEMENS_828D"
-      ],
-      "recommendedPost": "FANUC_2X_LATHE",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_drill_tap_center",
-      "label": "Custom / Generic Drill/Tap Center",
-      "machineType": "DRILL_TAP_CENTER",
-      "axisCount": 3,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_router_3x",
-      "label": "Custom / Generic 3-Axis CNC Router",
-      "machineType": "ROUTER_3X",
-      "axisCount": 3,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_router_4x",
-      "label": "Custom / Generic 4-Axis CNC Router",
-      "machineType": "ROUTER_4X",
-      "axisCount": 4,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_router_5x",
-      "label": "Custom / Generic 5-Axis CNC Router",
-      "machineType": "ROUTER_5X",
-      "axisCount": 5,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_waterjet_2x",
-      "label": "Custom / Generic 2-Axis Waterjet Cutter",
-      "machineType": "WATERJET_2X",
-      "axisCount": 2,
-      "defaultController": "MACH3",
-      "compatibleControllers": [
-        "MACH3",
-        "LINUXCNC",
-        "GRBL",
-        "MASSO_G3"
-      ],
-      "recommendedPost": "MACH3_3X_ROUTER",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_waterjet_3x",
-      "label": "Custom / Generic 3-Axis Waterjet Cutter",
-      "machineType": "WATERJET_3X",
-      "axisCount": 3,
-      "defaultController": "MACH3",
-      "compatibleControllers": [
-        "MACH3",
-        "LINUXCNC",
-        "GRBL",
-        "MASSO_G3"
-      ],
-      "recommendedPost": "MACH3_3X_ROUTER",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_waterjet_5x",
-      "label": "Custom / Generic 5-Axis Waterjet Cutter",
-      "machineType": "WATERJET_5X",
-      "axisCount": 5,
-      "defaultController": "MACH3",
-      "compatibleControllers": [
-        "MACH3",
-        "LINUXCNC",
-        "GRBL",
-        "MASSO_G3"
-      ],
-      "recommendedPost": "MACH3_3X_ROUTER",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_laser_2x",
-      "label": "Custom / Generic 2-Axis Laser Cutter",
-      "machineType": "LASER_2X",
-      "axisCount": 2,
-      "defaultController": "MACH3",
-      "compatibleControllers": [
-        "MACH3",
-        "LINUXCNC",
-        "GRBL",
-        "MASSO_G3"
-      ],
-      "recommendedPost": "MACH3_3X_ROUTER",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_laser_tube",
-      "label": "Custom / Generic Tube Laser Cutter",
-      "machineType": "LASER_TUBE",
-      "axisCount": 4,
-      "defaultController": "MACH3",
-      "compatibleControllers": [
-        "MACH3",
-        "LINUXCNC",
-        "GRBL",
-        "MASSO_G3"
-      ],
-      "recommendedPost": "MACH3_3X_ROUTER",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_laser_5x",
-      "label": "Custom / Generic 5-Axis Laser Cutter",
-      "machineType": "LASER_5X",
-      "axisCount": 5,
-      "defaultController": "MACH3",
-      "compatibleControllers": [
-        "MACH3",
-        "LINUXCNC",
-        "GRBL",
-        "MASSO_G3"
-      ],
-      "recommendedPost": "MACH3_3X_ROUTER",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_plasma_2x",
-      "label": "Custom / Generic 2-Axis Plasma Cutter",
-      "machineType": "PLASMA_2X",
-      "axisCount": 2,
-      "defaultController": "MACH3",
-      "compatibleControllers": [
-        "MACH3",
-        "LINUXCNC",
-        "GRBL",
-        "MASSO_G3"
-      ],
-      "recommendedPost": "MACH3_3X_ROUTER",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_plasma_5x",
-      "label": "Custom / Generic 5-Axis Plasma Cutter",
-      "machineType": "PLASMA_5X",
-      "axisCount": 5,
-      "defaultController": "MACH3",
-      "compatibleControllers": [
-        "MACH3",
-        "LINUXCNC",
-        "GRBL",
-        "MASSO_G3"
-      ],
-      "recommendedPost": "MACH3_3X_ROUTER",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_wire_edm_2x",
-      "label": "Custom / Generic 2-Axis Wire EDM",
-      "machineType": "WIRE_EDM_2X",
-      "axisCount": 2,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "MITSUBISHI_M80_M800"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_wire_edm_4x",
-      "label": "Custom / Generic 4-Axis Wire EDM",
-      "machineType": "WIRE_EDM_4X",
-      "axisCount": 4,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "MITSUBISHI_M80_M800"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_sinker_edm",
-      "label": "Custom / Generic Sinker / Ram EDM",
-      "machineType": "SINKER_EDM",
-      "axisCount": 3,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "MITSUBISHI_M80_M800"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_hole_drill_edm",
-      "label": "Custom / Generic Hole Drilling EDM",
-      "machineType": "HOLE_DRILL_EDM",
-      "axisCount": 3,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "HAAS_NGC",
-        "SIEMENS_828D",
-        "HEIDENHAIN_TNC",
-        "LINUXCNC",
-        "MACH4"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": true,
-        "toolpathGeneration": true,
-        "gcodeGeneration": true
-      }
-    },
-    {
-      "id": "generic_grind_cylindrical",
-      "label": "Custom / Generic Cylindrical Grinder",
-      "machineType": "GRIND_CYLINDRICAL",
-      "axisCount": 3,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "MITSUBISHI_M80_M800"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
-    },
-    {
-      "id": "generic_grind_surface",
-      "label": "Custom / Generic Surface Grinder",
-      "machineType": "GRIND_SURFACE",
-      "axisCount": 3,
-      "defaultController": "FANUC_0I_MF",
-      "compatibleControllers": [
-        "FANUC_0I_MF",
-        "MITSUBISHI_M80_M800"
-      ],
-      "recommendedPost": "FANUC_3X_MILL",
-      "camSupport": {
-        "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
-      }
     }
   ],
   "controllers": {
@@ -1747,7 +1173,8 @@
         "FANUC_3X_MILL",
         "FANUC_4X_MILL",
         "FANUC_2X_LATHE",
-        "FANUC_MILL_TURN"
+        "FANUC_MILL_TURN",
+        "FANUC_5X_MILL"
       ]
     },
     "FANUC_31I": {
@@ -1808,7 +1235,8 @@
         "MAZAK_SMOOTH_EIA_3X_MILL",
         "MAZAK_SMOOTH_EIA_4X_MILL",
         "MAZAK_SMOOTH_EIA_5X_MILL",
-        "MAZAK_SMOOTH_EIA_MILL_TURN"
+        "MAZAK_SMOOTH_EIA_MILL_TURN",
+        "MAZAK_SMOOTH_EIA_2X_LATHE"
       ]
     },
     "MITSUBISHI_M80_M800": {
@@ -1818,7 +1246,8 @@
         "MITSUBISHI_M80_M800_3X_MILL",
         "MITSUBISHI_M80_M800_4X_MILL",
         "MITSUBISHI_M80_M800_5X_MILL",
-        "MITSUBISHI_2X_LATHE"
+        "MITSUBISHI_2X_LATHE",
+        "MITSUBISHI_M80_M800_SWISS"
       ]
     },
     "OKUMA_OSP": {
@@ -2009,9 +1438,15 @@
       "label": "Fanuc 3-Axis",
       "controller": "FANUC_0I_MF",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2029,9 +1464,11 @@
       "label": "Fanuc 4-Axis",
       "controller": "FANUC_0I_MF",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2049,9 +1486,10 @@
       "label": "Fanuc 5-Axis",
       "controller": "FANUC_0I_MF",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2069,9 +1507,15 @@
       "label": "Siemens 828D 3-Axis",
       "controller": "SIEMENS_828D",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2089,9 +1533,11 @@
       "label": "Siemens 828D 4-Axis",
       "controller": "SIEMENS_828D",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2109,9 +1555,10 @@
       "label": "Siemens 828D 5-Axis",
       "controller": "SIEMENS_828D",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2129,9 +1576,15 @@
       "label": "Siemens 840D One 3-Axis",
       "controller": "SIEMENS_840D_ONE",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2149,9 +1602,11 @@
       "label": "Siemens 840D One 4-Axis",
       "controller": "SIEMENS_840D_ONE",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2169,9 +1624,10 @@
       "label": "Siemens 840D One 5-Axis",
       "controller": "SIEMENS_840D_ONE",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2189,9 +1645,15 @@
       "label": "Heidenhain Tnc 3-Axis",
       "controller": "HEIDENHAIN_TNC",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2209,9 +1671,11 @@
       "label": "Heidenhain Tnc 4-Axis",
       "controller": "HEIDENHAIN_TNC",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2229,9 +1693,10 @@
       "label": "Heidenhain Tnc 5-Axis",
       "controller": "HEIDENHAIN_TNC",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2249,9 +1714,15 @@
       "label": "Haas Ngc 3-Axis",
       "controller": "HAAS_NGC",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2269,9 +1740,11 @@
       "label": "Haas Ngc 4-Axis",
       "controller": "HAAS_NGC",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2289,9 +1762,10 @@
       "label": "Haas Ngc 5-Axis",
       "controller": "HAAS_NGC",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2309,9 +1783,15 @@
       "label": "Mazak Smooth Eia 3-Axis",
       "controller": "MAZAK_SMOOTH_EIA",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2329,9 +1809,11 @@
       "label": "Mazak Smooth Eia 4-Axis",
       "controller": "MAZAK_SMOOTH_EIA",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2349,9 +1831,10 @@
       "label": "Mazak Smooth Eia 5-Axis",
       "controller": "MAZAK_SMOOTH_EIA",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2369,9 +1852,15 @@
       "label": "Mitsubishi M80 M800 3-Axis",
       "controller": "MITSUBISHI_M80_M800",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2389,9 +1878,11 @@
       "label": "Mitsubishi M80 M800 4-Axis",
       "controller": "MITSUBISHI_M80_M800",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2409,9 +1900,10 @@
       "label": "Mitsubishi M80 M800 5-Axis",
       "controller": "MITSUBISHI_M80_M800",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2429,9 +1921,15 @@
       "label": "Okuma Osp 3-Axis",
       "controller": "OKUMA_OSP",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2449,9 +1947,11 @@
       "label": "Okuma Osp 4-Axis",
       "controller": "OKUMA_OSP",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2469,9 +1969,10 @@
       "label": "Okuma Osp 5-Axis",
       "controller": "OKUMA_OSP",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2489,9 +1990,15 @@
       "label": "Brother 3-Axis",
       "controller": "BROTHER_CNC_D00",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2509,9 +2016,11 @@
       "label": "Brother 4-Axis",
       "controller": "BROTHER_CNC_D00",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2529,9 +2038,10 @@
       "label": "Brother 5-Axis",
       "controller": "BROTHER_CNC_D00",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2549,9 +2059,15 @@
       "label": "Hurco Winmax 3-Axis",
       "controller": "HURCO_WINMAX",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2569,9 +2085,11 @@
       "label": "Hurco Winmax 4-Axis",
       "controller": "HURCO_WINMAX",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2589,9 +2107,10 @@
       "label": "Hurco Winmax 5-Axis",
       "controller": "HURCO_WINMAX",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2609,9 +2128,15 @@
       "label": "Fagor 8065 3-Axis",
       "controller": "FAGOR_8065",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2629,9 +2154,11 @@
       "label": "Fagor 8065 4-Axis",
       "controller": "FAGOR_8065",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2649,9 +2176,10 @@
       "label": "Fagor 8065 5-Axis",
       "controller": "FAGOR_8065",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2669,9 +2197,15 @@
       "label": "Centroid 3-Axis",
       "controller": "CENTROID_OAK",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2689,9 +2223,11 @@
       "label": "Centroid 4-Axis",
       "controller": "CENTROID_OAK",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2709,9 +2245,10 @@
       "label": "Centroid 5-Axis",
       "controller": "CENTROID_OAK",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2729,9 +2266,15 @@
       "label": "Num 3-Axis",
       "controller": "NUM_FLEXIUM",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2749,9 +2292,11 @@
       "label": "Num 4-Axis",
       "controller": "NUM_FLEXIUM",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2769,9 +2314,10 @@
       "label": "Num 5-Axis",
       "controller": "NUM_FLEXIUM",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2789,9 +2335,15 @@
       "label": "Yaskawa 3-Axis",
       "controller": "YASKAWA_YASNAC",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2809,9 +2361,11 @@
       "label": "Yaskawa 4-Axis",
       "controller": "YASKAWA_YASNAC",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2829,9 +2383,10 @@
       "label": "Yaskawa 5-Axis",
       "controller": "YASKAWA_YASNAC",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2849,9 +2404,15 @@
       "label": "Makino Pro6 3-Axis",
       "controller": "MAKINO_PRO6",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2869,9 +2430,11 @@
       "label": "Makino Pro6 4-Axis",
       "controller": "MAKINO_PRO6",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2889,9 +2452,10 @@
       "label": "Makino Pro6 5-Axis",
       "controller": "MAKINO_PRO6",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2909,9 +2473,15 @@
       "label": "Linuxcnc 3-Axis",
       "controller": "LINUXCNC",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2929,9 +2499,11 @@
       "label": "Linuxcnc 4-Axis",
       "controller": "LINUXCNC",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -2949,9 +2521,10 @@
       "label": "Linuxcnc 5-Axis",
       "controller": "LINUXCNC",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -2969,9 +2542,15 @@
       "label": "Mach3 3-Axis",
       "controller": "MACH3",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -2989,9 +2568,11 @@
       "label": "Mach3 4-Axis",
       "controller": "MACH3",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -3009,9 +2590,10 @@
       "label": "Mach3 5-Axis",
       "controller": "MACH3",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -3029,9 +2611,15 @@
       "label": "Mach4 3-Axis",
       "controller": "MACH4",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -3049,9 +2637,11 @@
       "label": "Mach4 4-Axis",
       "controller": "MACH4",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -3069,9 +2659,10 @@
       "label": "Mach4 5-Axis",
       "controller": "MACH4",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -3089,9 +2680,15 @@
       "label": "Grbl 3-Axis",
       "controller": "GRBL",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -3109,9 +2706,11 @@
       "label": "Grbl 4-Axis",
       "controller": "GRBL",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -3129,9 +2728,10 @@
       "label": "Grbl 5-Axis",
       "controller": "GRBL",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -3149,9 +2749,15 @@
       "label": "Masso 3-Axis",
       "controller": "MASSO_G3",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -3169,9 +2775,11 @@
       "label": "Masso 4-Axis",
       "controller": "MASSO_G3",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -3189,9 +2797,10 @@
       "label": "Masso 5-Axis",
       "controller": "MASSO_G3",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -3209,9 +2818,15 @@
       "label": "Planetcnc 3-Axis",
       "controller": "PLANETCNC",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -3229,9 +2844,11 @@
       "label": "Planetcnc 4-Axis",
       "controller": "PLANETCNC",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -3249,9 +2866,10 @@
       "label": "Planetcnc 5-Axis",
       "controller": "PLANETCNC",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -3269,9 +2887,15 @@
       "label": "Syntec 3-Axis",
       "controller": "SYNTEC",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -3289,9 +2913,11 @@
       "label": "Syntec 4-Axis",
       "controller": "SYNTEC",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -3309,9 +2935,10 @@
       "label": "Syntec 5-Axis",
       "controller": "SYNTEC",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -3329,9 +2956,15 @@
       "label": "Lnc 3-Axis",
       "controller": "LNC",
       "machineTypes": [
-        "MILL_3X_VMC",
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
         "MILL_3X_HMC",
-        "ROUTER_3X"
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -3349,9 +2982,11 @@
       "label": "Lnc 4-Axis",
       "controller": "LNC",
       "machineTypes": [
-        "MILL_4X_VMC",
+        "LASER_TUBE",
         "MILL_4X_HMC",
-        "ROUTER_4X"
+        "MILL_4X_VMC",
+        "ROUTER_4X",
+        "WIRE_EDM_4X"
       ],
       "supports": {
         "toolChange": true,
@@ -3369,9 +3004,10 @@
       "label": "Lnc 5-Axis",
       "controller": "LNC",
       "machineTypes": [
-        "MILL_5X_VMC",
         "MILL_5X_HMC",
-        "ROUTER_5X"
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -3389,7 +3025,9 @@
       "label": "Fanuc 2-Axis Lathe",
       "controller": "FANUC_0I_MF",
       "machineTypes": [
-        "CNC_LATHE"
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL"
       ],
       "supports": {
         "toolChange": true,
@@ -3403,7 +3041,9 @@
       "label": "Siemens 2-Axis Lathe",
       "controller": "SIEMENS",
       "machineTypes": [
-        "CNC_LATHE"
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL"
       ],
       "supports": {
         "toolChange": true,
@@ -3417,7 +3057,9 @@
       "label": "Haas 2-Axis Lathe",
       "controller": "HAAS",
       "machineTypes": [
-        "CNC_LATHE"
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL"
       ],
       "supports": {
         "toolChange": true,
@@ -3431,7 +3073,9 @@
       "label": "Okuma Osp 2-Axis Lathe",
       "controller": "OKUMA_OSP",
       "machineTypes": [
-        "CNC_LATHE"
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL"
       ],
       "supports": {
         "toolChange": true,
@@ -3445,7 +3089,9 @@
       "label": "Fagor 8055 2-Axis Lathe",
       "controller": "FAGOR_8055",
       "machineTypes": [
-        "CNC_LATHE"
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL"
       ],
       "supports": {
         "toolChange": true,
@@ -3459,7 +3105,9 @@
       "label": "Centroid 2-Axis Lathe",
       "controller": "CENTROID",
       "machineTypes": [
-        "CNC_LATHE"
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL"
       ],
       "supports": {
         "toolChange": true,
@@ -3473,7 +3121,9 @@
       "label": "Masso 2-Axis Lathe",
       "controller": "MASSO",
       "machineTypes": [
-        "CNC_LATHE"
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL"
       ],
       "supports": {
         "toolChange": true,
@@ -3487,7 +3137,9 @@
       "label": "Syntec 2-Axis Lathe",
       "controller": "SYNTEC",
       "machineTypes": [
-        "CNC_LATHE"
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL"
       ],
       "supports": {
         "toolChange": true,
@@ -3501,7 +3153,9 @@
       "label": "Lnc 2-Axis Lathe",
       "controller": "LNC",
       "machineTypes": [
-        "CNC_LATHE"
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL"
       ],
       "supports": {
         "toolChange": true,
@@ -3515,6 +3169,7 @@
       "label": "Fanuc Mill-Turn",
       "controller": "FANUC_31I",
       "machineTypes": [
+        "CNC_LATHE_LIVE_TOOLING",
         "MILL_TURN"
       ],
       "supports": {
@@ -3530,6 +3185,7 @@
       "label": "Siemens 840D Mill-Turn",
       "controller": "SIEMENS_840D_ONE",
       "machineTypes": [
+        "CNC_LATHE_LIVE_TOOLING",
         "MILL_TURN"
       ],
       "supports": {
@@ -3545,6 +3201,7 @@
       "label": "Mazak Smooth EIA Mill-Turn",
       "controller": "MAZAK_SMOOTH_EIA",
       "machineTypes": [
+        "CNC_LATHE_LIVE_TOOLING",
         "MILL_TURN"
       ],
       "supports": {
@@ -3560,6 +3217,8 @@
       "label": "Fanuc Swiss-Type Lathe",
       "controller": "FANUC_31I",
       "machineTypes": [
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
         "SWISS_LATHE"
       ],
       "supports": {
@@ -3575,8 +3234,15 @@
       "label": "Heidenhain Klartext 3-Axis",
       "controller": "HEIDENHAIN_TNC",
       "machineTypes": [
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
+        "MILL_3X_HMC",
         "MILL_3X_VMC",
-        "MILL_3X_HMC"
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -3593,8 +3259,10 @@
       "label": "Heidenhain Klartext 5-Axis",
       "controller": "HEIDENHAIN_TNC",
       "machineTypes": [
+        "MILL_5X_HMC",
         "MILL_5X_VMC",
-        "MILL_5X_HMC"
+        "ROUTER_5X",
+        "WATERJET_5X"
       ],
       "supports": {
         "toolChange": true,
@@ -3611,7 +3279,15 @@
       "label": "Fagor 8055 3-Axis Mill",
       "controller": "FAGOR_8055",
       "machineTypes": [
-        "MILL_3X_VMC"
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
+        "MILL_3X_HMC",
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
       ],
       "supports": {
         "toolChange": true,
@@ -3619,6 +3295,100 @@
         "lengthCompensation": true,
         "cannedCycles": true,
         "arcs": true
+      }
+    },
+    "OKUMA_OSP_MILL_TURN": {
+      "label": "Okuma OSP (Mill-Turn / Live Tooling)",
+      "extension": "min",
+      "machineTypes": [
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL",
+        "MILL_TURN"
+      ],
+      "supports": {
+        "cannedCycles": true,
+        "toolCompensation": true,
+        "subroutines": true,
+        "fourAxis": true,
+        "fiveAxis": false,
+        "rigidTapping": true
+      }
+    },
+    "MAZAK_SMOOTH_EIA_2X_LATHE": {
+      "label": "Mazak MAZATROL / Smooth EIA (2-Axis Lathe)",
+      "extension": "eia",
+      "machineTypes": [
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL"
+      ],
+      "supports": {
+        "cannedCycles": true,
+        "toolCompensation": true,
+        "subroutines": true,
+        "fourAxis": false,
+        "fiveAxis": false,
+        "rigidTapping": true
+      }
+    },
+    "MACH4_3X_ROUTER": {
+      "label": "Mach4 CNC (3-Axis Router / Plasma / Waterjet)",
+      "extension": "tap",
+      "machineTypes": [
+        "DRILL_TAP_CENTER",
+        "GRIND_SURFACE",
+        "LASER_2X",
+        "MILL_3X_HMC",
+        "MILL_3X_VMC",
+        "PLASMA_2X",
+        "ROUTER_3X",
+        "SINKER_EDM",
+        "WATERJET_3X"
+      ],
+      "supports": {
+        "cannedCycles": false,
+        "toolCompensation": true,
+        "subroutines": false,
+        "fourAxis": false,
+        "fiveAxis": false,
+        "rigidTapping": false
+      }
+    },
+    "MACH4_5X_ROUTER": {
+      "label": "Mach4 CNC (5-Axis Router / Waterjet)",
+      "extension": "tap",
+      "machineTypes": [
+        "MILL_5X_HMC",
+        "MILL_5X_VMC",
+        "ROUTER_5X",
+        "WATERJET_5X"
+      ],
+      "supports": {
+        "cannedCycles": false,
+        "toolCompensation": true,
+        "subroutines": false,
+        "fourAxis": true,
+        "fiveAxis": true,
+        "rigidTapping": false
+      }
+    },
+    "MITSUBISHI_M80_M800_SWISS": {
+      "label": "Mitsubishi M80/M800 (Swiss-Type Lathe)",
+      "extension": "nc",
+      "machineTypes": [
+        "CNC_LATHE",
+        "CNC_LATHE_LIVE_TOOLING",
+        "GRIND_CYLINDRICAL",
+        "SWISS_LATHE"
+      ],
+      "supports": {
+        "cannedCycles": true,
+        "toolCompensation": true,
+        "subroutines": true,
+        "fourAxis": true,
+        "fiveAxis": false,
+        "rigidTapping": true
       }
     }
   }

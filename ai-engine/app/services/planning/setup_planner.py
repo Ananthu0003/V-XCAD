@@ -51,7 +51,21 @@ class SetupPlanner:
         # We start with a default Setup 1
         default_setup_id = f"setup_{uuid.uuid4().hex[:8]}"
         base_axis_key = self._format_axis_key(base_setup_axis)
-        base_setup_key = f"milling_3axis:{base_axis_key}:top"
+        
+        if machine_capability.mill_turn:
+            default_stype = "mill_turn"
+            default_name = "Setup 1 (Main Spindle)"
+        elif machine_capability.turning and not machine_capability.milling_3axis:
+            default_stype = "turning"
+            default_name = "Setup 1 (Main Spindle)"
+        elif machine_capability.turning:
+            default_stype = "turning"
+            default_name = "Setup 1 (Main Spindle)"
+        else:
+            default_stype = "milling_3axis"
+            default_name = "Setup 1 (Top)"
+
+        base_setup_key = f"{default_stype}:{base_axis_key}:top"
         
         bounds = topology_info.get("bounds", [0, 0, 0, 100, 100, 20]) if topology_info else [0, 0, 0, 100, 100, 20]
         stock_top_z = bounds[5]
@@ -68,8 +82,8 @@ class SetupPlanner:
 
         setups[base_setup_key] = CamSetupPlan(
             setupId=default_setup_id,
-            setupName="Setup 1 (Top)",
-            setupType="milling_3axis",
+            setupName=default_name,
+            setupType=default_stype,
             toolAxis=base_setup_axis,
             workCoordinateSystem=base_wcs,
             stockTopZ=stock_top_z,
@@ -258,10 +272,18 @@ class SetupPlanner:
                         info.requiredSetupAxis = assigned_axis
                         info.reason = f"Hole entry face requires setup with tool axis {self._get_axis_name(assigned_axis)}"
                 else:
-                    # No entry face detected — default to active setup
-                    info.status = "machinable_in_active_setup"
-                    info.machinableInCurrentSetup = True
-                    info.requiredSetupAxis = base_tool_axis
+                    # No entry face detected (e.g. parametric features) — rely on the axis defined by the feature extractor
+                    signed_alignment = self._axis_alignment(info.preferredToolAxis, base_tool_axis)
+                    if signed_alignment >= _ALIGNMENT_THRESHOLD:
+                        info.status = "machinable_in_active_setup"
+                        info.machinableInCurrentSetup = True
+                        info.requiredSetupAxis = base_tool_axis
+                    else:
+                        info.status = "machinable_in_secondary_setup"
+                        info.machinableInCurrentSetup = False
+                        info.requiresSecondarySetup = True
+                        info.requiredSetupAxis = info.preferredToolAxis
+                        info.reason = f"Opposite-side parametric hole (axis {info.preferredToolAxis}) requires secondary setup"
                     
             elif abs_alignment >= _ALIGNMENT_THRESHOLD:
                 # Non-hole feature, aligned (signed or unsigned)

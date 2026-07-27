@@ -108,7 +108,7 @@ export function PostProcessorSelectionModal({
 
                         {availablePosts.map(post => (
                             <button
-                                key={post.id}
+                                key={`${post.controller}-${post.id}`}
                                 onClick={() => handleSelect(post.id, post.controller)}
                                 className={`text-left flex flex-col p-4 rounded-xl border transition-all ${currentPostId === post.id ? 'bg-emerald-500/10 border-emerald-500 shadow-sm' : 'bg-background/40 border-border/40 hover:border-emerald-500/40 hover:bg-background'}`}
                             >

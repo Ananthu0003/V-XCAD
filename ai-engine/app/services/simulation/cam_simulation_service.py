@@ -50,11 +50,15 @@ class CamSimulationService:
                 
             all_segments.extend(segments)
 
-        events = self.timeline_builder.build_timeline(all_segments, setup, tools, operations)
+        events, timeline = self.timeline_builder.build_timeline(operations, setup, tools)
         for ev in events:
             ev["simulation_run_id"] = run_id
-
-        total_runtime = sum(seg.get("estimated_time_sec", 0) for seg in all_segments)
+            
+        # Optional: We can map the specific timings from timeline.entries back to segments if needed,
+        # but for now we just use the accurate total runtimes.
+        
+        # We need to re-calculate distances from segments since they are still built here for rendering
+        total_runtime = timeline.total_duration_seconds
         total_dist = sum(seg.get("length_mm", 0) for seg in all_segments)
         cut_dist = sum(seg.get("length_mm", 0) for seg in all_segments if seg.get("move_type") != "rapid")
         rapid_dist = sum(seg.get("length_mm", 0) for seg in all_segments if seg.get("move_type") == "rapid")

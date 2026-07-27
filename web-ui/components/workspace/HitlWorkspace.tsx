@@ -18,7 +18,8 @@ import { EngineeringConsole } from '@/components/workspace/EngineeringConsole';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { SessionBrowserModal } from '@/components/workspace/SessionBrowserModal';
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { History } from 'lucide-react';
+import { History, Cuboid } from 'lucide-react';
+import Link from 'next/link';
 import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, CamFeature, PostProcessor, OperationType, ToolType, ToolMaterial, CoolantType, CamSetupPlan } from '@/types/cam';
 
 type ChatRole = 'user' | 'assistant' | 'system';
@@ -184,7 +185,8 @@ function extractParameters(script: string): Record<string, unknown> {
 	const normalized = literal
 		.replace(/\bTrue\b/g, 'true')
 		.replace(/\bFalse\b/g, 'false')
-		.replace(/\bNone\b/g, 'null');
+		.replace(/\bNone\b/g, 'null')
+		.replace(/#[^\n]*/g, '');
 
 	try {
 		const parsed = JSON5.parse(normalized);
@@ -270,17 +272,12 @@ export default function HitlWorkspace() {
 	const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
 	const isResizing = useRef(false);
 	const fileUploadRef = useRef<HTMLInputElement>(null);
-	const stepUploadRef = useRef<HTMLInputElement>(null);
-	const [messages, setMessages] = useState<ChatMessage[]>([
-		{
-			id: 'system_welcome',
-			role: 'system',
-			content: 'Upload a blueprint, pick a model, and hit Generate.',
-		},
-	]);
+
+	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
 	const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
+	const [sourceFilename, setSourceFilename] = useState<string | null>(null);
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [isRecompiling, setIsRecompiling] = useState(false);
 	const [isDrawerOpen, setIsDrawerOpen] = useState(true);
@@ -334,6 +331,7 @@ export default function HitlWorkspace() {
 	const [camReadinessScore, setCamReadinessScore] = useState<number | null>(null);
 	const [camStatus, setCamStatus] = useState<string | null>(null);
 	const [canGenerateGcode, setCanGenerateGcode] = useState<boolean>(false);
+	const [plannedCycleTimeSeconds, setPlannedCycleTimeSeconds] = useState<number>(0);
 
 	const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 	const [isSharing, setIsSharing] = useState(false);
@@ -445,8 +443,13 @@ export default function HitlWorkspace() {
 
 	useEffect(() => {
 		if (toolpaths) {
-			const currentSetupId = activeSetupId || camSetups[0]?.setupId;
-			const filteredSegments = toolpaths.filter(t => t.setupId === currentSetupId);
+			let filteredSegments = toolpaths;
+			if (selectedOperationIds && selectedOperationIds.size > 0) {
+				filteredSegments = toolpaths.filter(t => selectedOperationIds.has(t.operationId));
+			} else {
+				const currentSetupId = activeSetupId || camSetups[0]?.setupId;
+				filteredSegments = toolpaths.filter(t => t.setupId === currentSetupId);
+			}
 			setCamSimulation(prev => ({
 				...prev,
 				segments: filteredSegments,
@@ -455,100 +458,8 @@ export default function HitlWorkspace() {
 				isPlaying: false
 			}));
 		}
-	}, [toolpaths, activeSetupId, camSetups]);
+	}, [toolpaths, activeSetupId, camSetups, selectedOperationIds]);
 
-	const handleStepUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-		const file = event.target.files?.[0];
-		if (!file) return;
-
-		setStatusText('Importing STEP File...');
-		setWorkflowStage('cad');
-		setIsRecompiling(true);
-		
-		const formData = new FormData();
-		formData.append('file', file);
-
-		try {
-			// Proxy the request through our Next.js API route to save to DB
-			const response = await fetch('/api/import_step', {
-				method: 'POST',
-				body: formData
-			});
-
-			if (!response.ok) throw new Error('Failed to import STEP file');
-			
-			const data = await response.json();
-			if (data.session_id) setSessionId(data.session_id);
-			if (data.script) updatePythonScript(data.script);
-			
-			if (data.artifacts) {
-				const backendUrl = 'http://localhost:8001';
-				if (data.artifacts.stl_url) setStlUrl(backendUrl + data.artifacts.stl_url);
-				if (data.artifacts.step_url) setStepUrl(backendUrl + data.artifacts.step_url);
-				if (data.artifacts.dxf_url) setDxfUrl(backendUrl + data.artifacts.dxf_url);
-				if (data.artifacts.gcode_url) setGcodeUrl(backendUrl + data.artifacts.gcode_url);
-				if (data.artifacts.annotations) {
-					setAnnotations(data.artifacts.annotations);
-					const annotationsAny = data.artifacts.annotations as any;
-					const featuresUrl = annotationsAny.cam_features_url as string | undefined;
-					if (featuresUrl) {
-						try {
-							const resolvedUrl = backendUrl + featuresUrl;
-							const featuresRes = await fetch(resolvedUrl);
-							if (featuresRes.ok) {
-								const featuresData = await featuresRes.json();
-								setCamFeatures(featuresData || []);
-							} else {
-								setCamFeatures([]);
-							}
-						} catch (e) {
-							console.error("Failed to load CAM features:", e);
-							setCamFeatures([]);
-						}
-					} else {
-						setCamFeatures(data.artifacts.features || []);
-					}
-				} else {
-					setCamFeatures(data.artifacts.features || []);
-				}
-				
-				const setupMeta = data.artifacts.setupMetadata || data.artifacts.setup_metadata;
-				if (setupMeta) {
-					setDefaultSetupMetadata(setupMeta);
-				} else {
-					setDefaultSetupMetadata(undefined);
-				}
-				
-				const features = data.artifacts.features || [];
-				if (features.length > 0) {
-					setCamOperations([
-						{
-							id: 'op1',
-							name: 'Profile',
-							type: '2d_contour',
-							toolId: 't1',
-							feature_id: features[0].id,
-							parameters: { feedRate: 800, plungeRate: 200, maxStepdown: 1.0, totalDepth: 5.0, spindleSpeed: 12000, stepoverPercentage: 40, tolerance: 0.01, coolant: 'off' }
-						}
-					]);
-					setActiveOperationId('op1');
-				} else {
-					setCamOperations([]);
-					setActiveOperationId(null);
-				}
-				setGcodeContent(null);
-			}
-			
-			toast.success('STEP file imported successfully');
-			setStatusText('Ready');
-		} catch (error: any) {
-			toast.error('Failed to import STEP', { description: error.message });
-			setStatusText('Failed to import STEP');
-		} finally {
-			setIsRecompiling(false);
-			if (stepUploadRef.current) stepUploadRef.current.value = '';
-		}
-	};
 
 	async function handleGenerate(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -574,6 +485,7 @@ export default function HitlWorkspace() {
 
 		// Clear input fields after securing the payload
 		setPrompt('');
+		setSourceFilename(selectedFile?.name || null);
 		setSelectedFile(null);
 		setSelectionContext(null);
 
@@ -703,6 +615,7 @@ export default function HitlWorkspace() {
 				setToolpaths(null);
 				setCamFeatures(payload.artifacts?.features || []);
 				setCamOperations([]);
+				setPlannedCycleTimeSeconds(0);
 				setGcodeContent(null);
 				setGcodeUrl(null);
 				
@@ -779,7 +692,7 @@ export default function HitlWorkspace() {
 					session_id: sessionId,
 					job_id: sessionId,
 					cam_run_id: latestCamRunId.current || '',
-					setup_id: activeSetupId || '',
+					setup_id: selectedOperationIds.size > 0 ? null : (activeSetupId || null),
 					selected_operation_ids: selectedOperationIds.size > 0 ? Array.from(selectedOperationIds) : undefined,
 				}),
 			});
@@ -797,12 +710,30 @@ export default function HitlWorkspace() {
 				setGcodeErrors([]);
 				setStatusText('G-Code generated successfully.');
 				toast.success('G-Code generated with full CAM configuration');
+				
+				if (payload.planned_cycle_time_seconds) {
+					setPlannedCycleTimeSeconds(payload.planned_cycle_time_seconds);
+				}
+
+				if (payload.toolpaths && payload.toolpaths.length > 0) {
+					setToolpaths(payload.toolpaths);
+					setCamSimulation(prev => ({
+						...prev,
+						segments: payload.toolpaths,
+						progress: 0,
+						activeSegmentIndex: 0,
+						isPlaying: false
+					}));
+				}
 			} else {
 				setGcodeContent(null);
 				setKlartextContent(null);
 				setGcodeErrors(payload.errors || []);
-				setStatusText('G-Code generation failed due to safety/validation errors.');
-				toast.error('G-Code generation failed');
+				const errMsg = payload.errors && payload.errors.length > 0 
+					? payload.errors.map((e: any) => e.message || e.code).join(' | ') 
+					: 'Safety/validation errors.';
+				setStatusText(`G-Code generation failed: ${errMsg}`);
+				toast.error('G-Code generation failed', { description: errMsg });
 			}
 
 			if (payload.operation_statuses && Array.isArray(payload.operation_statuses)) {
@@ -860,7 +791,9 @@ export default function HitlWorkspace() {
 					setups: camSetups,
 					tools: camTools,
 					operations: opsToSend,
-					modelHash: cadModelHash || ""
+					features: camFeatures,
+					modelHash: cadModelHash || "",
+					parameters: parameters
 				})
 			});
 
@@ -876,7 +809,15 @@ export default function HitlWorkspace() {
 				setGcodeContent(null);
 				// (Assuming validationErrors is cleared if applicable, we clear gcode errors here)
 				
-				setToolpaths(data.toolpaths || []);
+				const fetchedToolpaths = data.toolpaths || [];
+				setToolpaths(fetchedToolpaths);
+				setCamSimulation(prev => ({
+					...prev,
+					segments: fetchedToolpaths,
+					progress: 0,
+					activeSegmentIndex: 0,
+					isPlaying: false
+				}));
 				if (data.operations) {
 					setCamOperations(prevOps => prevOps.map(op => {
 						const updatedOp = data.operations.find((o: any) => o.id === op.id);
@@ -907,8 +848,12 @@ export default function HitlWorkspace() {
 				if (data.cam_readiness_score !== undefined) setCamReadinessScore(data.cam_readiness_score);
 				if (data.cam_status !== undefined) setCamStatus(data.cam_status);
 				if (data.can_generate_gcode !== undefined) setCanGenerateGcode(data.can_generate_gcode);
+				if (data.planned_cycle_time_seconds !== undefined) setPlannedCycleTimeSeconds(data.planned_cycle_time_seconds);
 				
-				if (data.status === 'operations_blocked' || data.status === 'toolpaths_generated_with_blocks') {
+				if (!data.toolpaths || data.toolpaths.length === 0) {
+					setStatusText('No toolpaths were generated.');
+					toast.warning('No toolpath moves generated for these operations.');
+				} else if (data.status === 'operations_blocked' || data.status === 'toolpaths_generated_with_blocks') {
 					setStatusText('Toolpaths generated, but some operations need attention.');
 					toast.warning('Toolpaths generated, but some operations need attention.');
 				} else {
@@ -945,7 +890,7 @@ export default function HitlWorkspace() {
 			const res = await fetch(`${backendUrl}/api/v1/cam/analyze`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ session_id: sessionId })
+				body: JSON.stringify({ session_id: sessionId, parameters: parameters })
 			});
 			
 			if (!res.ok) {
@@ -969,40 +914,38 @@ export default function HitlWorkspace() {
 
 	async function handleAutoGenerateOperations() {
 		if (!sessionId) {
-			toast.error('No session active. Please import a STEP file first.');
+			toast.error('No session active. Please generate a model first.');
 			return;
 		}
 
-		// Validation: Require Machine and Stock configuration before Auto Planning
-		if (!camSetup.machineProfile && !camSetup.machineProfileId && !camSetup.machine) {
-			toast.error('Missing Machine Configuration', { description: 'Please select a machine profile in the Setup panel before auto-planning operations.' });
-			return;
-		}
-
-		if (!camSetup.material && !camSetup.workpieceMaterialId) {
-			toast.error('Missing Stock Details', { description: 'Please select a stock material in the Setup panel before auto-planning operations.' });
-			return;
-		}
+		// Ensure Machine and Material defaults if missing
+		const effectiveSetup = {
+			...camSetup,
+			machine: camSetup.machine || camSetup.machineProfile || 'haas_umc750',
+			material: camSetup.material || camSetup.workpieceMaterialId || 'aluminum_6061',
+			workpieceMaterialId: camSetup.workpieceMaterialId || camSetup.material || 'aluminum_6061',
+		};
 
 		setIsGenerating(true);
 		setStatusText('Auto Planning CAM...');
 
 		try {
-			const machineType = camSetup.machineType || 'MILL_3X_VMC';
+			const machineType = effectiveSetup.machineType || 'MILL_5X_VMC';
 			const is5Axis = machineType === 'MILL_5X_VMC';
 			const is4Axis = machineType === 'MILL_4X_VMC' || is5Axis;
-			const isLathe = machineType === 'CNC_LATHE';
+			const isLathe = machineType === 'CNC_LATHE' || machineType === 'CNC_LATHE_LIVE_TOOLING' || machineType === 'SWISS_LATHE';
 			const isMillTurn = machineType === 'MILL_TURN';
+			const hasLiveTooling = machineType === 'CNC_LATHE_LIVE_TOOLING' || machineType === 'SWISS_LATHE' || isMillTurn;
 
 			const machine_capability = {
 				turning: isLathe || isMillTurn,
-				milling_3axis: !isLathe || isMillTurn,
+				milling_3axis: !isLathe || hasLiveTooling,
 				drilling: true,
-				pocketing: !isLathe || isMillTurn,
-				indexed_4axis: is4Axis || isMillTurn,
+				pocketing: !isLathe || hasLiveTooling,
+				indexed_4axis: is4Axis || isMillTurn || hasLiveTooling,
 				continuous_4axis: is4Axis || isMillTurn,
 				milling_5axis: is5Axis,
-				mill_turn: isMillTurn
+				mill_turn: isMillTurn || hasLiveTooling
 			};
 
 			// Fetch the full global tool library so the AI picks from existing tools instead of inventing them.
@@ -1012,9 +955,9 @@ export default function HitlWorkspace() {
 				if (toolsRes.ok) {
 					const data = await toolsRes.json();
 					if (data.tools && data.tools.length > 0) {
-						// Merge global tools with any currently active job tools (prioritizing global)
-						// Actually, just pass the global tools to let the AI pick from the library.
-						globalTools = data.tools;
+						// Merge local and remote tools, preferring local ones if there's a conflict
+						const remoteTools = data.tools.filter((rt: any) => !globalTools.some(lt => lt.id === rt.id));
+						globalTools = [...globalTools, ...remoteTools];
 					}
 				}
 			} catch (e) {
@@ -1028,6 +971,7 @@ export default function HitlWorkspace() {
 				body: JSON.stringify({
 					session_id: sessionId,
 					job_id: sessionId,
+					parameters: parameters,
 					machine_config: {
 						machine_capability: machine_capability,
 						tool_library: globalTools.map((t: any) => {
@@ -1045,7 +989,7 @@ export default function HitlWorkspace() {
 								compatible_materials: ["all"]
 							};
 						}),
-						setup: camSetup
+						setup: effectiveSetup
 					}
 				})
 			});
@@ -1062,33 +1006,52 @@ export default function HitlWorkspace() {
 				setActiveSetupId(data.setups[0].setupId);
 			}
 			
-			if (data.tools) {
-				// 1. Identify which tool IDs were actually assigned to an operation
-				const assignedToolIds = new Set(
-					(data.operations || [])
-						.map((o: any) => o.tool_id)
-						.filter(Boolean)
-				);
+			if (data.planned_cycle_time_seconds !== undefined) {
+				setPlannedCycleTimeSeconds(data.planned_cycle_time_seconds);
+			}
+			
+			if (data.tools || data.operations) {
+				// Gather all backend tools from data.tools AND inline op.tool / op.selected_tool
+				const toolsMap = new Map<string, any>();
+				(data.tools || []).forEach((t: any) => {
+					const tid = t.tool_id || t.id;
+					if (tid) toolsMap.set(tid, t);
+				});
 
-				// 2. Only process tools that were actually assigned
-				const assignedTools = data.tools.filter((t: any) => assignedToolIds.has(t.tool_id || t.id));
+				(data.operations || []).forEach((op: any) => {
+					const tid = op.tool_id || op.toolId;
+					const toolObj = op.tool || op.selected_tool;
+					if (tid && !toolsMap.has(tid) && toolObj && typeof toolObj === 'object') {
+						toolsMap.set(tid, {
+							tool_id: tid,
+							id: tid,
+							name: toolObj.name || `Tool ${tid}`,
+							type: toolObj.type || 'drill',
+							diameter: toolObj.diameter || 1.0,
+							flute_count: toolObj.flute_count || toolObj.flutes || 2,
+							cutting_length: toolObj.cutting_length || toolObj.stickout || 20,
+							stickout: toolObj.stickout || 30
+						});
+					}
+				});
+
+				const allAssignedBackendTools = Array.from(toolsMap.values());
 
 				// Map backend tools to frontend Tools
-				const newTools = assignedTools.map((t: any, i: number) => ({
+				const newTools = allAssignedBackendTools.map((t: any, i: number) => ({
 					id: t.tool_id || t.id,
 					dbId: t.tool_id || t.id,
 					name: t.name || `Auto Tool ${i+1}`,
 					number: `T`, // Will be assigned sequentially below
-					type: t.type as ToolType,
+					type: (t.type === 'end_mill' ? 'flat_end_mill' : t.type === 'ball_mill' ? 'ball_nose' : t.type) as ToolType,
 					diameter: t.diameter || 3.175,
-					flutes: t.flutes || 2,
-					stickout: t.stickout || 20,
-					material: (t.material?.material_code || 'carbide') as ToolMaterial,
-					coating: t.coating?.coating_name,
+					flutes: t.flute_count || t.flutes || 2,
+					stickout: t.stickout || t.cutting_length || 20,
+					material: (t.material?.material_code || t.material || 'carbide') as ToolMaterial,
+					coating: t.coating?.coating_name || t.coating,
 					cuttingData: t.cuttingData || (() => {
-						// Fallback: try to find an operation using this tool and extract its speeds & feeds
 						const ops = data.operations || [];
-						const op = ops.find((o: any) => o.tool_id === t.tool_id || o.tool_id === t.id);
+						const op = ops.find((o: any) => o.tool_id === (t.tool_id || t.id) || o.toolId === (t.tool_id || t.id));
 						if (op) {
 							return {
 								spindleRpm: op.parameters?.feeds_and_speeds?.spindleSpeed || op.parameters?.spindleSpeed || 10000,
@@ -1097,7 +1060,6 @@ export default function HitlWorkspace() {
 								coolant: op.parameters?.coolant || 'flood'
 							};
 						}
-						// Absolute fallback if no operation is found
 						return {
 							spindleRpm: 10000,
 							feedRate: 1000,
@@ -1123,35 +1085,41 @@ export default function HitlWorkspace() {
 
 			if (data.operations && data.operations.length > 0) {
 				// Map operations
-				const newOps: CamOperation[] = data.operations.map((op: any, i: number) => ({
-					id: op.id || `op_auto_${Date.now()}_${i}`,
-					name: op.name || `${op.type || op.operation_type} Operation`,
-					type: (op.type || op.operation_type) as OperationType,
-					toolId: op.tool_id || '', // No fallback to 't1' if blocked/unassigned
-					feature_id: op.feature_id,
-					setup_id: op.setup_id,
-					status: op.status,
-					parameters: {
-						...op.parameters,
-						feedRate: op.parameters?.feeds_and_speeds?.feedRate || op.parameters?.feedRate || 1000,
-						plungeRate: op.parameters?.feeds_and_speeds?.plungeRate || op.parameters?.plungeRate || 300,
-						maxStepdown: op.parameters?.feeds_and_speeds?.maxStepdown || op.parameters?.maxStepdown || 2.0,
-						spindleSpeed: op.parameters?.feeds_and_speeds?.spindleSpeed || op.parameters?.spindleSpeed || 10000,
-						stepoverPercentage: op.parameters?.stepoverPercentage || 40,
-						tolerance: op.parameters?.tolerance || 0.01,
-						coolant: op.parameters?.coolant || 'flood'
-					}
-				}));
+				const newOps: CamOperation[] = data.operations.map((op: any, i: number) => {
+					const resolvedToolId = op.tool_id || op.toolId || op.tool?.tool_id || op.tool?.id || '';
+					const isOpValid = Boolean(resolvedToolId);
+					return {
+						id: op.id || `op_auto_${Date.now()}_${i}`,
+						name: op.name || `${op.type || op.operation_type} Operation`,
+						type: (op.type || op.operation_type) as OperationType,
+						toolId: resolvedToolId,
+						tool: op.tool || op.selected_tool,
+						feature_id: op.feature_id,
+						setup_id: op.setup_id || 'setup_1',
+						status: isOpValid ? (op.status === 'blocked' ? 'generated' : (op.status || 'generated')) : 'blocked',
+						safe_heights: op.safe_heights,
+						estimated_time_s: op.estimated_time_s || 0,
+						parameters: {
+							...op.parameters,
+							feedRate: op.parameters?.feeds_and_speeds?.feedRate || op.parameters?.feedRate || 1000,
+							plungeRate: op.parameters?.feeds_and_speeds?.plungeRate || op.parameters?.plungeRate || 300,
+							maxStepdown: op.parameters?.feeds_and_speeds?.maxStepdown || op.parameters?.maxStepdown || 2.0,
+							spindleSpeed: op.parameters?.feeds_and_speeds?.spindleSpeed || op.parameters?.spindleSpeed || 10000,
+							stepoverPercentage: op.parameters?.stepoverPercentage || 40,
+							tolerance: op.parameters?.tolerance || 0.01,
+							coolant: op.parameters?.coolant || 'flood'
+						}
+					};
+				});
 				setCamOperations(newOps);
 				
 				if (data.setups && data.setups.length > 0) {
 					setCamSetups(data.setups);
 				}
 				
-				// Do not automatically select blocked or unsupported operations
 				setSelectedOperationIds(new Set(newOps.filter(op => op.status !== 'unsupported' && op.status !== 'blocked').map(op => op.id)));
-				setActiveOperationId(newOps[0].id);
-				toast.success(`Generated ${newOps.length} operations across ${data.setups?.length || 0} setups`);
+				if (newOps.length > 0) setActiveOperationId(newOps[0].id);
+				toast.success(`Generated ${newOps.length} operations across ${data.setups?.length || 1} setup(s)`);
 				setWorkflowStage('cam');
 			} else {
 				toast.warning('No operations could be planned for these features.');
@@ -1187,7 +1155,13 @@ export default function HitlWorkspace() {
 			const objectUrl = URL.createObjectURL(blob);
 			const link = document.createElement('a');
 			link.href = objectUrl;
-			const filename = url.split('/').pop()?.split('?')[0] || `model.${label}`;
+			let filename = url.split('/').pop()?.split('?')[0] || `model.${label}`;
+			
+			if (sourceFilename) {
+				const baseName = sourceFilename.substring(0, sourceFilename.lastIndexOf('.')) || sourceFilename;
+				filename = `${baseName}.${label}`;
+			}
+			
 			link.download = filename;
 			document.body.appendChild(link);
 			link.click();
@@ -1228,14 +1202,15 @@ export default function HitlWorkspace() {
 	const hasDxf = Boolean(dxfUrl);
 
 
-	const handleClear = () => {
-		setMessages([
-			{
-				id: 'system_welcome',
-				role: 'system',
-				content: 'Upload a blueprint, pick a model, and hit Generate.',
-			},
-		]);
+	const handleClear = async () => {
+		if (sessionId) {
+			try {
+				await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+			} catch (err) {
+				console.error('Failed to delete session', err);
+			}
+		}
+		setMessages([]);
 		setPrompt(DEFAULT_PROMPT);
 		setSelectedFile(null);
 		setSessionId(null);
@@ -1263,11 +1238,30 @@ export default function HitlWorkspace() {
 						<div className="h-full w-full flex">
 
 							{/* 1. Left Navigation (Fixed Width) */}
-							<div className="w-[260px] shrink-0 h-full overflow-hidden flex flex-col z-10 border-r border-border bg-background">
-								<WorkflowNav
-									workflowStage={workflowStage}
-									setWorkflowStage={setWorkflowStage}
-								/>
+							<div className="w-[360px] shrink-0 h-full overflow-hidden flex flex-col z-10 border-r border-border bg-popover/95 backdrop-blur-xl relative">
+								{/* Chat Panel */}
+								<div className="flex-1 overflow-hidden relative">
+									<ChatPanel
+										messages={messages}
+										prompt={prompt}
+										setPrompt={setPrompt}
+										selectedModel={selectedModel}
+										setSelectedModel={setSelectedModel}
+										modelOptions={MODEL_OPTIONS}
+										selectedFile={selectedFile}
+										handleFileChange={setSelectedFile}
+										isGenerating={isGenerating}
+										onSubmit={handleGenerate}
+										onClear={handleClear}
+										width={360}
+										isOpen={true}
+										setIsOpen={setIsChatOpen}
+										fileInputRef={fileUploadRef}
+										onOpenAuthModal={() => setIsAuthModalOpen(true)}
+										selectionContext={selectionContext}
+										onClearSelectionContext={() => setSelectionContext(null)}
+									/>
+								</div>
 							</div>
 
 							{/* 2. Resizable Viewport and Settings */}
@@ -1288,19 +1282,6 @@ export default function HitlWorkspace() {
 													}}
 												>
 													<div className="absolute inset-0 bg-[url('/grid.svg')] opacity-5" />
-
-													{/* AI Assistant Button in Empty State */}
-													<div className="absolute top-4 right-4 z-30">
-														<button
-															onClick={() => setIsChatOpen(true)}
-															className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600/90 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)] transition-all pointer-events-auto"
-														>
-															<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-																<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-															</svg>
-															<span className="text-[10px] font-bold uppercase tracking-widest">AI Assistant</span>
-														</button>
-													</div>
 
 													{/* Faint Hexagon Watermark */}
 													<div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-5 flex items-center justify-center">
@@ -1337,20 +1318,7 @@ export default function HitlWorkspace() {
 																	<div className="text-[10px] text-muted-foreground">PDF, PNG, JPG</div>
 																</div>
 															</button>
-															<button
-																onClick={() => stepUploadRef.current?.click()}
-																className="flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/50 hover:bg-muted hover:border-blue-500/30 transition-all text-left group"
-															>
-																<div className="size-8 rounded-lg bg-black/50 dark:bg-black/50 border border-border flex items-center justify-center shrink-0">
-																	<svg className="size-4 text-muted-foreground group-hover:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-																		<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-																	</svg>
-																</div>
-																<div>
-																	<div className="text-sm font-bold text-foreground group-hover:text-blue-400 transition-colors">Import STEP File</div>
-																	<div className="text-[10px] text-muted-foreground">Direct 3D import</div>
-																</div>
-															</button>
+
 															<button
 																onClick={() => setIsSessionBrowserOpen(true)}
 																className="flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/50 hover:bg-muted hover:border-blue-500/30 transition-all text-left group"
@@ -1392,7 +1360,7 @@ export default function HitlWorkspace() {
 													onDownloadGcode={() => handleDownloadArtifact(null, 'gcode')}
 													isSharing={isSharing}
 													onShare={handleShare}
-													toolpaths={toolpaths?.filter(t => t.setupId === (activeSetupId || camSetups[0]?.setupId)) as any}
+													toolpaths={toolpaths?.filter(t => !t.setupId || t.setupId === (activeSetupId || camSetups[0]?.setupId)) as any}
 													showToolpaths={camViewport.showToolpath}
 													camFeatures={camFeatures}
 													camOperations={camOperations}
@@ -1406,21 +1374,7 @@ export default function HitlWorkspace() {
 													setupMetadata={{ ...(defaultSetupMetadata || {}), ...(camSetups.find(s => s.setupId === (activeSetupId || camSetups[0]?.setupId)) || {}) }}
 													headerActions={
 														<div className="flex items-center gap-2">
-															{/* Debug Mode Toggle */}
-															<button
-																onClick={() => setDebugMode(!debugMode)}
-																className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all pointer-events-auto text-[10px] font-bold uppercase tracking-widest ${
-																	debugMode
-																		? 'bg-orange-500/20 border-orange-500/40 text-orange-400 hover:bg-orange-500/30'
-																		: 'bg-muted/50 border-border text-foreground/50 hover:bg-muted hover:text-foreground'
-																}`}
-																title={debugMode ? 'Debug mode ON ?" showing all geometry' : 'Debug mode OFF ?" showing clean toolpaths only'}
-															>
-																<svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-																	<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-																</svg>
-																Debug
-															</button>
+
 															{/* Setup Selector */}
 															{camSetups.length > 1 && (
 																<Select value={activeSetupId || ''} onValueChange={(val: string | null) => val && setActiveSetupId(val)}>
@@ -1466,20 +1420,7 @@ export default function HitlWorkspace() {
 																				<span className="text-[11px] font-bold uppercase tracking-wider text-foreground">Upload Blueprint</span>
 																			</div>
 																		</button>
-																		<button
-																			onClick={() => {
-																				setIsWorkspaceMenuOpen(false);
-																				stepUploadRef.current?.click();
-																			}}
-																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted transition-colors"
-																		>
-																			<svg className="size-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-																				<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-																			</svg>
-																			<div className="flex flex-col">
-																				<span className="text-[11px] font-bold uppercase tracking-wider text-foreground">Import STEP File</span>
-																			</div>
-																		</button>
+
 																		<button
 																			onClick={() => {
 																				setIsWorkspaceMenuOpen(false);
@@ -1495,19 +1436,14 @@ export default function HitlWorkspace() {
 																	</div>
 																)}
 															</div>
-															<button
-																onClick={() => setIsChatOpen(true)}
-																className="flex items-center gap-2 px-4 py-2 mr-2 rounded-lg bg-blue-600/90 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)] transition-all pointer-events-auto"
-															>
-																<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-																	<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-																</svg>
-																<span className="text-[10px] font-bold uppercase tracking-widest">AI Assistant</span>
-															</button>
 														</div>
 													}
 												>
-													{stlUrl ? <StlMesh url={stlUrl} onGeometryReady={setGeometryInfo} onMeshClick={(p) => setSelectionContext(p)} /> : null}
+													{stlUrl ? <StlMesh url={stlUrl} expectedSize={(() => {
+														if (!parameters) return undefined;
+														const vals = Object.values(parameters).filter(v => typeof v === 'number') as number[];
+														return vals.length > 0 ? Math.max(...vals) : undefined;
+													})()} onGeometryReady={setGeometryInfo} onMeshClick={(p) => setSelectionContext(p)} /> : null}
 													{selectionContext && (
 														<mesh position={selectionContext}>
 															<sphereGeometry args={[1.5, 16, 16]} />
@@ -1578,7 +1514,16 @@ export default function HitlWorkspace() {
 																		<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
 																		Cycle Time
 																	</span>
-																	<span className="text-[11px] font-bold text-yellow-500 uppercase">06:24</span>
+																	<span className="text-[11px] font-bold text-yellow-500 uppercase">
+																		{(() => {
+																			const opsTime = camOperations.reduce((acc, op) => acc + (op.estimated_time_s || op.statistics?.cycleTimeSeconds || 0), 0);
+																			const totalCycleTimeSeconds = opsTime > 0 ? opsTime : plannedCycleTimeSeconds;
+																			if (!totalCycleTimeSeconds) return '00:00';
+																			const m = Math.floor(totalCycleTimeSeconds / 60);
+																			const s = Math.floor(totalCycleTimeSeconds % 60);
+																			return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+																		})()}
+																	</span>
 																</div>
 
 																<div className="flex flex-col gap-1 items-start min-w-[80px]">
@@ -1604,38 +1549,7 @@ export default function HitlWorkspace() {
 											</div>
 
 											{/* Modals & Overlays */}
-											<input
-												type="file"
-												ref={stepUploadRef}
-												accept=".step,.stp"
-												className="hidden"
-												onChange={handleStepUpload}
-											/>
-											<ChatPanel
-												messages={messages}
-												prompt={prompt}
-												setPrompt={setPrompt}
-												selectedModel={selectedModel}
-												setSelectedModel={setSelectedModel}
-												modelOptions={MODEL_OPTIONS}
-												selectedFile={selectedFile}
-												handleFileChange={setSelectedFile}
-												isGenerating={isGenerating}
-												onSubmit={handleGenerate}
-												onClear={() => {
-													setMessages([{ id: makeId('system'), role: 'system', content: 'Upload a blueprint, pick a model, and hit Generate.' }]);
-													setPrompt(DEFAULT_PROMPT);
-													setSelectedFile(null);
-													setWorkflowStage('blueprint');
-												}}
-												width={chatWidth}
-												isOpen={isChatOpen}
-												setIsOpen={setIsChatOpen}
-												fileInputRef={fileUploadRef}
-												onOpenAuthModal={() => setIsAuthModalOpen(true)}
-												selectionContext={selectionContext}
-												onClearSelectionContext={() => setSelectionContext(null)}
-											/>
+
 										</div>
 									</Panel>
 
@@ -1723,9 +1637,11 @@ export default function HitlWorkspace() {
 					<Panel defaultSize={25} minSize={10}>
 						<div className="h-full w-full bg-card rounded-xl border border-border overflow-hidden relative">
 							<EngineeringConsole
+								sourceFilename={sourceFilename}
 								workflowStage={workflowStage}
 								camSetup={camSetup}
 								camSetups={camSetups}
+								activeSetupId={activeSetupId}
 								setCamSetup={setCamSetup}
 								camTools={camTools}
 								setCamTools={setCamTools}
@@ -1754,19 +1670,28 @@ export default function HitlWorkspace() {
 								camReadinessScore={camReadinessScore}
 								camStatus={camStatus}
 								canGenerateGcode={canGenerateGcode}
+								parameters={parameters}
+								setupMetadata={{
+									...(defaultSetupMetadata || {}),
+									topology: {
+										...(defaultSetupMetadata?.topology || {}),
+										bounds: geometryInfo?.bounding_box ? [
+											geometryInfo.bounding_box.min[0],
+											geometryInfo.bounding_box.min[1],
+											geometryInfo.bounding_box.min[2],
+											geometryInfo.bounding_box.max[0],
+											geometryInfo.bounding_box.max[1],
+											geometryInfo.bounding_box.max[2],
+										] : defaultSetupMetadata?.topology?.bounds
+									}
+								}}
 								camValidation={undefined}
 							/>
 						</div>
 					</Panel>
 				</PanelGroup>
 
-				<input
-					type="file"
-					ref={stepUploadRef}
-					accept=".step,.stp"
-					className="hidden"
-					onChange={handleStepUpload}
-				/>
+
 				<SessionBrowserModal
 					isOpen={isSessionBrowserOpen}
 					onClose={() => setIsSessionBrowserOpen(false)}

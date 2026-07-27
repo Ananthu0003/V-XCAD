@@ -4,7 +4,7 @@ import { Suspense, useState, useRef, useEffect, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewport, Grid, Environment, ContactShadows } from '@react-three/drei';
-import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera } from 'lucide-react';
 import { DimensionOverlay } from '@/components/viewport/DimensionOverlay';
 import { FeatureHighlight } from '@/components/viewport/FeatureHighlight';
 import { VolumetricStock } from '@/components/cam/VolumetricStock';
@@ -85,12 +85,13 @@ type CadViewportProps = {
 function AnimatedSetupGroup({ setupToolAxis, children }: { setupToolAxis?: [number, number, number], children: React.ReactNode }) {
 	const groupRef = useRef<THREE.Group>(null);
 	const targetQuaternion = useMemo(() => {
-		return setupToolAxis 
-			? new THREE.Quaternion().setFromUnitVectors(
-					new THREE.Vector3(...setupToolAxis).normalize(),
-					new THREE.Vector3(0, 1, 0)
-			  )
-			: new THREE.Quaternion();
+		// By default, map CAD Z (0,0,1) to Three.js Y (0,1,0) so the spindle is always UP
+		// If setupToolAxis is provided, map that axis to Three.js Y.
+		const axis = setupToolAxis ? new THREE.Vector3(...setupToolAxis).normalize() : new THREE.Vector3(0, 0, 1);
+		
+		// If axis is already [0,1,0], we still want to map CAD Z to Y for the rest of the scene?
+		// Actually, setupToolAxis is in CAD coordinates. We want setupToolAxis to point UP (0,1,0).
+		return new THREE.Quaternion().setFromUnitVectors(axis, new THREE.Vector3(0, 1, 0));
 	}, [setupToolAxis]);
 
 	useFrame((state, delta) => {
@@ -144,9 +145,10 @@ export function CadViewport({
 	onMeshClick,
 	onClearSelection,
 }: CadViewportProps) {
-	const [exportOpen, setExportOpen] = useState(false);
+	const groupRef = useRef<THREE.Group>(null);
 	const exportRef = useRef<HTMLDivElement>(null);
-
+	const orbitRef = useRef<any>(null);
+	const [exportOpen, setExportOpen] = useState(false);
 	const [viewMode, setViewMode] = useState<'both' | 'solid' | 'wireframe'>('both');
 
 	useEffect(() => {
@@ -160,47 +162,68 @@ export function CadViewport({
 	}, []);
 
 	const { actualStock } = useMemo(() => {
-		let center = new THREE.Vector3(0, 0, 15);
-		let size = new THREE.Vector3(150, 150, 30);
+		let center: [number, number, number] = [0, 0, 0];
+		let defaultBoxSize: [number, number, number] = [10, 10, 10];
 
-		if (geometryInfo?.bounding_box) {
-			const setupBox = new THREE.Box3(
-				new THREE.Vector3(...geometryInfo.bounding_box.min),
-				new THREE.Vector3(...geometryInfo.bounding_box.max)
-			);
-			if (setupMetadata?.modelToSetupTransform) {
-				const transformArray = Array.isArray(setupMetadata.modelToSetupTransform[0]) 
-					? (setupMetadata.modelToSetupTransform as number[][]).flat()
-					: setupMetadata.modelToSetupTransform as number[];
-				const m = new THREE.Matrix4().fromArray(transformArray).transpose();
-				setupBox.applyMatrix4(m);
+		if (setupMetadata?.resolvedStock?.center) {
+			center = setupMetadata.resolvedStock.center as [number, number, number];
+		} else if (geometryInfo?.bounding_box) {
+			const min = geometryInfo.bounding_box.min;
+			const max = geometryInfo.bounding_box.max;
+			const cx = (min[0] + max[0]) / 2;
+			const cy = (min[1] + max[1]) / 2;
+			const cz = (min[2] + max[2]) / 2;
+			center = [cx, cy, cz];
+			defaultBoxSize = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+		}
+
+		const currentStockType = String(camSetup?.stockType || setupMetadata?.stockType || 'box').toLowerCase();
+		const isCyl = currentStockType.includes('cylin') || currentStockType.includes('bar');
+
+		if (isCyl) {
+			let dia = camSetup?.cylinderDiameter;
+			let len = camSetup?.cylinderLength;
+
+			if ((!dia || dia <= 0) && camSetup?.stockDimensions && Array.isArray(camSetup.stockDimensions) && camSetup.stockDimensions.length >= 2) {
+				dia = Math.max(camSetup.stockDimensions[0], camSetup.stockDimensions[1]);
 			}
-			setupBox.getSize(size);
-			setupBox.getCenter(center);
-		}
+			if ((!len || len <= 0) && camSetup?.stockDimensions && Array.isArray(camSetup.stockDimensions) && camSetup.stockDimensions.length >= 3) {
+				len = camSetup.stockDimensions[2];
+			}
 
-		// Priority 1: Backend resolved stock (This is in correct setup space coordinates)
-		if (setupMetadata?.resolvedStock) {
-			return { actualStock: setupMetadata.resolvedStock };
-		}
+			if (!dia || dia <= 0) dia = Math.max(defaultBoxSize[0], defaultBoxSize[1]);
+			if (!len || len <= 0) len = defaultBoxSize[2];
 
-		// Priority 2: User's explicitly defined stock dimensions in CAM Setup (fallback)
-		if (camSetup?.stockDimensions) {
 			return {
 				actualStock: {
-					center: [center.x, center.y, center.z],
-					dimensions: camSetup.stockDimensions
+					center,
+					dimensions: [dia, dia, len],
+					stockType: currentStockType
+				}
+			};
+		} else {
+			let dims: [number, number, number] = [10, 10, 10];
+
+			if (camSetup?.stockDimensions && Array.isArray(camSetup.stockDimensions) && camSetup.stockDimensions.length >= 3) {
+				dims = [
+					Number(camSetup.stockDimensions[0]) || 10,
+					Number(camSetup.stockDimensions[1]) || 10,
+					Number(camSetup.stockDimensions[2]) || 10
+				];
+			} else if (setupMetadata?.resolvedStock?.dimensions) {
+				dims = setupMetadata.resolvedStock.dimensions as [number, number, number];
+			} else {
+				dims = [defaultBoxSize[0] + 2, defaultBoxSize[1] + 2, defaultBoxSize[2] + 2];
+			}
+
+			return {
+				actualStock: {
+					center,
+					dimensions: dims,
+					stockType: currentStockType
 				}
 			};
 		}
-
-		// Priority 3: Fallback based on CAD geometry
-		return {
-			actualStock: {
-				center: [center.x, center.y, center.z],
-				dimensions: [size.x + 5, size.y + 5, size.z + 2]
-			}
-		};
 	}, [geometryInfo, setupMetadata, camSetup]);
 
 	const dynamicSize = useMemo(() => {
@@ -423,6 +446,15 @@ export function CadViewport({
 
 				<div className="flex items-center gap-2">
 					{headerActions}
+					
+					<button
+						onClick={() => orbitRef.current?.reset()}
+						className="flex h-9 items-center gap-2 rounded-lg border border-transparent bg-background px-4 text-[11px] font-bold uppercase tracking-wider text-foreground hover:border-blue-500 hover:text-blue-500 transition-all"
+						title="Reset Camera View"
+					>
+						<Camera className="size-3" />
+						Reset
+					</button>
 
 					{onShare && (
 						<button
@@ -707,15 +739,28 @@ export function CadViewport({
 									const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
 									if (!actualStock) return null;
 									
+									const m = setupMetadata?.modelToSetupTransform 
+										? new THREE.Matrix4().fromArray(
+											Array.isArray(setupMetadata.modelToSetupTransform[0]) 
+												? setupMetadata.modelToSetupTransform.flat() 
+												: setupMetadata.modelToSetupTransform
+										).transpose() 
+										: new THREE.Matrix4();
+									
+									const transformedCenter = new THREE.Vector3(...(actualStock.center as [number, number, number])).applyMatrix4(m);
+									const transformedCenterArr: [number, number, number] = [transformedCenter.x, transformedCenter.y, transformedCenter.z];
+
 									const offsetAmount = (isCamStage && actualStock) ? actualStock.dimensions[0] * 0.7 : 0;
 									const simOffset = new THREE.Vector3(offsetAmount, 0, 0);
 
 									return (
 										<group position={simOffset}>
+
+
 											{isCamStage && simulationState?.showStock !== false && simulationState && camTools && (
 												<VolumetricStock 
 													stockType={(camSetup?.stockType as any) || setupMetadata?.stockType || 'box'}
-													stockCenter={actualStock.center as [number, number, number]}
+													stockCenter={transformedCenterArr}
 													stockDimensions={actualStock.dimensions as [number, number, number]}
 													simulationState={simulationState}
 													camTools={camTools}
@@ -730,29 +775,40 @@ export function CadViewport({
 												// Reference default stock is 100mm, so we scale relative to that
 												const maxDim = Math.max(actualStock.dimensions[0], actualStock.dimensions[1], 10);
 												const s = maxDim / 100;
+												
+												const axis = setupToolAxis ? new THREE.Vector3(...setupToolAxis).normalize() : new THREE.Vector3(0, 0, 1);
+												const tableQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), axis);
+												
+												// We must dynamically pick the thickness of the stock along the tool axis
+												let stockThickness = actualStock.dimensions[2];
+												let stockGrip = actualStock.dimensions[1];
+												if (Math.abs(axis.x) > 0.9) { stockThickness = actualStock.dimensions[0]; stockGrip = actualStock.dimensions[1]; }
+												else if (Math.abs(axis.y) > 0.9) { stockThickness = actualStock.dimensions[1]; stockGrip = actualStock.dimensions[0]; }
 
 												return (
-												<group position={[actualStock.center[0], actualStock.center[1], actualStock.center[2] - actualStock.dimensions[2] / 2 - 30 * s]}>
-													{/* Machine Table */}
-													<mesh position={[0, 0, -25 * s]}>
-														<boxGeometry args={[800 * s, 500 * s, 50 * s]} />
-														<meshStandardMaterial color="#1e293b" metalness={0.7} roughness={0.4} />
-													</mesh>
-													{/* Vise Base */}
-													<mesh position={[0, 0, 10 * s]}>
-														<boxGeometry args={[150 * s, 250 * s, 20 * s]} />
-														<meshStandardMaterial color="#475569" metalness={0.6} roughness={0.5} />
-													</mesh>
-													{/* Fixed Jaw */}
-													<mesh position={[0, -actualStock.dimensions[1] / 2 - 15 * s, 35 * s]}>
-														<boxGeometry args={[140 * s, 30 * s, 30 * s]} />
-														<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
-													</mesh>
-													{/* Moving Jaw */}
-													<mesh position={[0, actualStock.dimensions[1] / 2 + 15 * s, 35 * s]}>
-														<boxGeometry args={[140 * s, 30 * s, 30 * s]} />
-														<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
-													</mesh>
+												<group position={transformedCenterArr} quaternion={tableQuat}>
+													<group position={[0, 0, -stockThickness / 2 - 30 * s]}>
+														{/* Machine Table */}
+														<mesh position={[0, 0, -25 * s]}>
+															<boxGeometry args={[800 * s, 500 * s, 50 * s]} />
+															<meshStandardMaterial color="#1e293b" metalness={0.7} roughness={0.4} />
+														</mesh>
+														{/* Vise Base */}
+														<mesh position={[0, 0, 10 * s]}>
+															<boxGeometry args={[150 * s, 250 * s, 20 * s]} />
+															<meshStandardMaterial color="#475569" metalness={0.6} roughness={0.5} />
+														</mesh>
+														{/* Fixed Jaw */}
+														<mesh position={[0, -stockGrip / 2 - 15 * s, 35 * s]}>
+															<boxGeometry args={[140 * s, 30 * s, 30 * s]} />
+															<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
+														</mesh>
+														{/* Moving Jaw */}
+														<mesh position={[0, stockGrip / 2 + 15 * s, 35 * s]}>
+															<boxGeometry args={[140 * s, 30 * s, 30 * s]} />
+															<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
+														</mesh>
+													</group>
 												</group>
 												);
 											})()}
@@ -790,7 +846,7 @@ export function CadViewport({
 
 					{/* Dimension overlay was moved inside Stage */}
 
-					<OrbitControls makeDefault enableDamping dampingFactor={0.05} minPolarAngle={0} maxPolarAngle={Math.PI / 1.75} />
+					<OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.05} minPolarAngle={0} maxPolarAngle={Math.PI / 1.75} />
 				</Canvas>
 
 				{!stlUrl && !isRecompiling && (

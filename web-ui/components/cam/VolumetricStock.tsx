@@ -4,7 +4,7 @@ import { useFrame } from '@react-three/fiber';
 import { SimulationState, ToolpathSegment, Tool as CamTool } from '@/types/cam';
 
 interface VolumetricStockProps {
-    stockType?: 'box' | 'cylinder';
+    stockType?: string;
     stockCenter: [number, number, number];
     stockDimensions: [number, number, number];
     simulationState: SimulationState;
@@ -195,10 +195,10 @@ export function VolumetricStock({
                     customProgramCacheKey={() => `${stockType}-${stockDimensions[0]}`}
                     color="#94a3b8" 
                     metalness={0.6} 
-                    roughness={0.4} 
-                    side={THREE.DoubleSide}
+                    roughness={0.4}
                     onBeforeCompile={(shader) => {
-                        if (stockType === 'cylinder') {
+                        const isCylStock = String(stockType || '').toLowerCase().includes('cylin') || String(stockType || '').toLowerCase().includes('bar');
+                        if (isCylStock) {
                             shader.uniforms.uRadius = { value: stockDimensions[0] / 2 };
                             
                             shader.vertexShader = `
@@ -223,23 +223,13 @@ export function VolumetricStock({
                     }}
                 />
             </mesh>
-            {/* 
-                The plane only acts as the top surface of the stock. 
-                For a true volumetric look, we render an inverted box as the "walls" 
-                of the stock block so you can't see through the bottom/sides.
-            */}
-            {/* 
-                Use a single BoxGeometry for the solid walls/bottom.
-                In Three.js, BoxGeometry faces are: 0: +X, 1: -X, 2: +Y, 3: -Y, 4: +Z (Top), 5: -Z (Bottom)
-                We use a memoized array of materials to hide the top face.
-            */}
-            {stockType === 'cylinder' ? (
+            {(String(stockType || '').toLowerCase().includes('cylin') || String(stockType || '').toLowerCase().includes('bar')) ? (
                 <>
                     <mesh rotation={[Math.PI / 2, 0, 0]}>
                         <cylinderGeometry args={[stockDimensions[0] / 2, stockDimensions[0] / 2, stockDimensions[2], 64, 1, true]} />
                         <meshStandardMaterial color="#94a3b8" metalness={0.6} roughness={0.4} side={THREE.DoubleSide} />
                     </mesh>
-                    <mesh position={[0, 0, -stockDimensions[2] / 2]}>
+                    <mesh position={[0, -stockDimensions[2] / 2, 0]} rotation={[Math.PI / 2, 0, 0]}>
                         <circleGeometry args={[stockDimensions[0] / 2, 64]} />
                         <meshStandardMaterial color="#94a3b8" metalness={0.6} roughness={0.4} side={THREE.DoubleSide} />
                     </mesh>

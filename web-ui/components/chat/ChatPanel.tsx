@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useRef, useEffect, useState } from 'react';
-import { Bot, LogOut, Loader2, SendHorizontal, Zap, Upload, FileImage, Settings, BrainCircuit } from 'lucide-react';
+import { Bot, LogOut, Loader2, SendHorizontal, Zap, Upload, FileImage, Settings, BrainCircuit, Cuboid, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -135,33 +135,24 @@ export function ChatPanel({
 			onClose={() => setIsSettingsOpen(false)}
 			user={user}
 		/>
-		<aside 
-			className={`absolute right-0 top-0 bottom-0 z-50 flex flex-col border-l border-border bg-popover/95 backdrop-blur-xl shadow-2xl transition-all duration-300 ease-in-out font-sans overflow-hidden`}
-			style={{ 
-				width, 
-				transform: isOpen ? 'translateX(0)' : 'translateX(120%)',
-				opacity: isOpen ? 1 : 0,
-				pointerEvents: isOpen ? 'auto' : 'none'
-			}}
-		>
-
-
-			<div className={`flex h-full flex-col ${!isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'} transition-opacity duration-500`}>
-					<header className={`sticky top-0 z-40 flex min-h-[64px] shrink-0 items-center justify-between border-b border-black/5 dark:border-white/5 bg-transparent backdrop-blur-md px-4 transition-all gap-2`}>
-						<div className="flex items-center gap-2 shrink-0">
-							<div className="flex items-center gap-3 shrink-0">
-								<div className="relative w-8 h-8 flex items-center justify-center shrink-0">
-									<div className="absolute inset-0 bg-blue-500 rounded-lg transform rotate-45 opacity-20 animate-pulse"></div>
-									<BrainCircuit className="w-4 h-4 text-blue-400 relative z-10" />
-								</div>
-								<div className="flex flex-col">
-									<h1 className="text-[14px] font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-300 font-sans uppercase shrink-0 leading-none">VEX AI</h1>
-									<span className="text-[8px] font-bold tracking-widest uppercase text-blue-500/50 mt-1">Co-Pilot System</span>
-								</div>
+		<div className="relative h-full w-full flex flex-col bg-transparent font-sans overflow-hidden">
+			<div className="flex h-full flex-col opacity-100">
+					<header className={`sticky top-0 z-40 flex h-[72px] shrink-0 items-center justify-between border-b border-black/5 dark:border-white/5 bg-transparent backdrop-blur-md px-6 transition-all gap-2`}>
+						<Link href="/" className="flex items-center gap-3 group hover:opacity-80 transition-opacity">
+							<div className="relative flex size-10 items-center justify-center rounded-full bg-[#1e293b]/50">
+								<Cuboid className="size-5 text-blue-500 relative z-10" />
 							</div>
-						</div>
+							<div className="flex items-baseline gap-2">
+								<span className="text-xl font-bold tracking-[0.2em] text-white uppercase font-sans">
+									VEXCAD
+								</span>
+								<span className="text-[10px] font-mono text-muted-foreground/50">v0.1.0</span>
+							</div>
+						</Link>
 
 						<div className="flex items-center gap-2 flex-1 justify-end min-w-0">
+
+
 							{/* Settings Button */}
 							<button
 								onClick={() => setIsSettingsOpen(true)}
@@ -171,17 +162,7 @@ export function ChatPanel({
 								<Settings className="size-3.5" />
 							</button>
 							
-							{/* Close Button */}
-							<button
-								onClick={() => setIsOpen(false)}
-								className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border dark:border-white/10 bg-black/5 dark:bg-white/5 text-muted-foreground transition-all hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-500 dark:hover:text-red-400"
-								title="Close Chat"
-							>
-								<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-									<path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-								</svg>
-							</button>
-							
+
 							{/* Logout Button */}
 							<button
 								onClick={handleLogout}
@@ -247,9 +228,8 @@ export function ChatPanel({
 						)}
 					</div>
 
-					{/* Action Card & Input */}
-					<div className="px-5 pb-5 pt-2">
-							<form onSubmit={onSubmit} className="relative group/form flex flex-col gap-3">
+					<div className="px-4 pb-4 pt-2">
+							<form onSubmit={onSubmit} className="relative group/form flex flex-col gap-2">
 								{/* File Context Indicator */}
 								{selectedFile && (
 									<div className="animate-message">
@@ -301,7 +281,7 @@ export function ChatPanel({
 										</div>
 									</div>
 								)}
-								<div className="relative overflow-hidden rounded-2xl border border-black/5 dark:border-white/10 bg-white/80 dark:bg-[#030408]/90 shadow-[0_4px_20px_rgba(0,0,0,0.05)] dark:shadow-[0_0_20px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-all duration-300 focus-within:border-blue-400 dark:focus-within:border-blue-500/40 focus-within:shadow-[0_0_25px_rgba(59,130,246,0.15)]">
+								<div className="relative flex flex-col rounded-[24px] bg-black/5 dark:bg-zinc-900/60 border border-black/10 dark:border-white/5 shadow-sm backdrop-blur-xl focus-within:border-blue-500/50 focus-within:ring-1 focus-within:ring-blue-500/20 transition-all duration-300">
 									<textarea
 										value={prompt}
 										onChange={(e) => setPrompt(e.target.value)}
@@ -311,23 +291,22 @@ export function ChatPanel({
 												onSubmit(e as any);
 											}
 										}}
-										rows={3}
-										placeholder="Describe your design intent or paste dimensions..."
-										className="w-full resize-none bg-transparent p-5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none font-sans leading-relaxed"
+										rows={2}
+										placeholder="Ask VEX AI..."
+										className="w-full resize-none bg-transparent px-5 pt-4 pb-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none font-sans leading-relaxed"
 									/>
 
-									<div className="flex items-center justify-between border-t border-black/5 dark:border-white/5 bg-black/5 dark:bg-black/20 px-4 py-3">
-										<div className="flex items-center gap-3">
-											{/* Main blueprint upload */}
+									<div className="flex items-center justify-between px-3 pb-3 pt-1">
+										<div className="flex items-center gap-1">
+											{/* Minimal Upload Button */}
 											<label
-												className={`group/btn relative flex cursor-pointer items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[10px] font-mono font-bold uppercase tracking-wider transition-all duration-200 ${selectedFile
-													? 'border border-blue-500/20 bg-blue-500/5 text-blue-500'
-													: 'text-muted-foreground hover:bg-accent hover:text-foreground'
+												className={`flex size-8 cursor-pointer items-center justify-center rounded-full transition-all duration-200 ${selectedFile
+													? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20'
+													: 'text-muted-foreground hover:bg-white/10 hover:text-foreground'
 													}`}
-												title="Upload engineering blueprint drawing"
+												title="Upload blueprint"
 											>
-												<Upload className="size-3.5 shrink-0" />
-												<span className="whitespace-nowrap">{selectedFile ? 'Blueprint' : 'Upload'}</span>
+												<Upload className="size-4" />
 												<input
 													ref={fileInputRef}
 													type="file"
@@ -340,10 +319,9 @@ export function ChatPanel({
 												/>
 											</label>
 
-											{/* Model Selection */}
 											<Select value={selectedModel} onValueChange={(val: string | null) => val && setSelectedModel(val)}>
 												<SelectTrigger 
-													className="h-8 max-w-[130px] rounded-lg border-border dark:border-white/10 bg-transparent px-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground outline-none focus:border-blue-500/40 focus:text-foreground transition-colors truncate"
+													className="h-7 border-none bg-transparent px-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground outline-none focus:ring-0 shadow-none hover:text-foreground transition-colors truncate w-auto"
 													title="Select AI Model"
 												>
 													<SelectValue />
@@ -358,29 +336,21 @@ export function ChatPanel({
 											</Select>
 										</div>
 
+										{/* Sleek Send Button */}
 										<button
 											type="submit"
 											disabled={isGenerating || !prompt.trim()}
-											className={`group/btn relative flex h-9 items-center gap-2 rounded-lg px-4 text-[11px] font-bold uppercase tracking-[0.2em] transition-all overflow-hidden ${isGenerating
-												? 'border border-blue-500/30 bg-blue-500/10 text-blue-500 animate-pulse'
+											className={`flex size-8 items-center justify-center rounded-full transition-all duration-300 ${isGenerating
+												? 'bg-blue-500/20 text-blue-500 cursor-wait'
 												: !prompt.trim()
-													? 'bg-black/5 dark:bg-white/5 text-muted-foreground border border-border dark:border-white/10 cursor-not-allowed'
-													: 'bg-gradient-to-b from-blue-500 to-blue-700 text-white border border-blue-400/30 shadow-md hover:from-blue-400 hover:to-blue-600 hover:scale-[1.02] active:scale-[0.98]'
+													? 'bg-muted text-muted-foreground opacity-50 cursor-not-allowed'
+													: 'bg-white text-black hover:scale-105 active:scale-95 shadow-md'
 												}`}
 										>
 											{isGenerating ? (
-												<>
-													<Loader2 className="size-3.5 animate-spin shrink-0 text-blue-500" />
-													<span className="whitespace-nowrap tracking-widest text-[9px] text-blue-500">Running</span>
-												</>
+												<Loader2 className="size-4 animate-spin shrink-0" />
 											) : (
-												<>
-													<SendHorizontal className="size-3.5 shrink-0" />
-													<span className="whitespace-nowrap">Generate</span>
-												</>
-											)}
-											{!isGenerating && (
-												<div className="absolute inset-0 -translate-x-full bg-linear-to-r from-transparent via-white/30 to-transparent group-hover/btn:translate-x-full transition-transform duration-700" />
+												<SendHorizontal className="size-4 shrink-0" />
 											)}
 										</button>
 									</div>
@@ -391,15 +361,7 @@ export function ChatPanel({
 					{/* Professional Profile Section Removed for Sleeker AI Look */}
 				</div>
 
-			{!isOpen && (
-				<div className="absolute top-0 left-0 right-0 h-1/2 flex flex-col items-center justify-center gap-8 pointer-events-none animate-in fade-in duration-300">
-					<div className="rotate-270 whitespace-nowrap text-[9px] font-black uppercase tracking-[0.5em] text-muted-foreground/50">
-						Design Assistant
-					</div>
-					<div className="w-px h-12 bg-linear-to-b from-border dark:from-zinc-800 to-transparent" />
-				</div>
-			)}
-		</aside>
+		</div>
 		</>
 	);
 }

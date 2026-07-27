@@ -7,6 +7,7 @@ interface OperationPlanningTableProps {
     operations: CamOperation[];
     camValidation?: any;
     camSetups?: any[];
+    tools?: any[];
     selectedOperationIds?: Set<string>;
     features?: any[];
     onToggleOperation?: (opId: string) => void;
@@ -15,14 +16,42 @@ interface OperationPlanningTableProps {
 }
 
 const truncateId = (id: string) => {
+    if (!id) return '';
     if (id.length > 12) return id.substring(0, 8) + '...';
     return id;
 };
+
+function getToolTypeWarning(opType: string, toolType: string | undefined, toolName: string | undefined): string | null {
+    if (!toolType && !toolName) return null;
+    const tt = (toolType || '').toLowerCase();
+    const tn = (toolName || '').toLowerCase();
+    const ot = (opType || '').toLowerCase();
+
+    const isKnurling = tt.includes('knurl') || tn.includes('knurl');
+    const isTurning = tt.includes('turn') || tn.includes('turn') || tt.includes('cut_off');
+    const isDrill = tt === 'drill' || tn.includes('drill');
+    const isFaceMill = tt === 'face_mill' || tn.includes('face mill');
+
+    if (isKnurling) {
+        if (ot !== 'knurling') return 'Knurling tool incompatible with milling/drilling';
+    }
+    if (ot === 'drilling' && (isFaceMill || isTurning || isKnurling)) {
+        return 'Incompatible tool for drilling';
+    }
+    if (ot === 'facing' && (isDrill || isKnurling || isTurning)) {
+        return 'Incompatible tool for facing';
+    }
+    if ((ot === 'pocketing' || ot === 'boss_clearing' || ot.includes('contour')) && (isKnurling || isTurning)) {
+        return 'Incompatible tool for milling';
+    }
+    return null;
+}
 
 export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({ 
     operations, 
     camValidation, 
     camSetups, 
+    tools,
     selectedOperationIds,
     features,
     onToggleOperation,
@@ -153,7 +182,7 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                 } else if (nameSaysFinish && !nameSaysRough) {
                                                     isSmoothing = true;
                                                 } else {
-                                                    isRoughing = typeLower.includes('rough') || typeLower.includes('pocket') || typeLower.includes('clear') || typeLower.includes('face') || typeLower.includes('facing');
+                                                    isRoughing = typeLower.includes('rough') || typeLower.includes('pocket') || typeLower.includes('clear') || typeLower.includes('face') || typeLower.includes('facing') || typeLower.includes('drill');
                                                     isSmoothing = typeLower.includes('finish') || typeLower.includes('smooth') || typeLower.includes('contour');
                                                 }
 
@@ -227,23 +256,73 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                             </div>
                                                         </td>
                                                         <td className="py-3 px-4 align-top min-w-[250px] whitespace-normal">
-                                                            {op.toolId ? (
-                                                                <div className="flex flex-col gap-1.5">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <Wrench className="size-3 text-muted-foreground" />
-                                                                        <span className="font-mono text-[9px] bg-muted/40 border border-border/50 px-1.5 py-0.5 rounded text-muted-foreground">
-                                                                            {truncateId(op.toolId)}
-                                                                        </span>
+                                                            {(() => {
+                                                                const activeToolId = op.toolId || (op as any).tool_id || (op as any).tool?.id || (op as any).tool?.tool_id;
+                                                                const activeToolObj = tools?.find(t => t.id === activeToolId || t.tool_id === activeToolId || t.dbId === activeToolId) || (op as any).tool;
+                                                                const toolWarning = getToolTypeWarning(op.type, activeToolObj?.type, activeToolObj?.name);
+
+                                                                return (
+                                                                    <div className="flex flex-col gap-1.5">
+                                                                        {tools && tools.length > 0 ? (
+                                                                            <Select
+                                                                                value={activeToolId || ''}
+                                                                                onValueChange={(val: string | null) => {
+                                                                                    if (!val) return;
+                                                                                    const selTool = tools.find(t => t.id === val || t.tool_id === val || t.dbId === val);
+                                                                                    onChange?.(op.id!, {
+                                                                                        toolId: val,
+                                                                                        tool: selTool
+                                                                                    } as any);
+                                                                                }}
+                                                                                disabled={!onChange}
+                                                                            >
+                                                                                <SelectTrigger className="w-full bg-background border-border/50 text-xs text-foreground focus:ring-1 focus:ring-primary/30 h-9">
+                                                                                    <SelectValue placeholder="Select Tool..." />
+                                                                                </SelectTrigger>
+                                                                                <SelectContent>
+                                                                                    {tools.map(t => {
+                                                                                        const tid = t.id || t.tool_id || t.dbId;
+                                                                                        const tName = t.name || t.number || `Tool ${tid}`;
+                                                                                        const tType = t.type ? String(t.type).replace(/_/g, ' ') : '';
+                                                                                        const tDia = t.diameter || t.geometry?.diameter ? `Ø${t.diameter || t.geometry?.diameter}mm` : '';
+                                                                                        return (
+                                                                                            <SelectItem key={tid} value={tid}>
+                                                                                                <div className="flex items-center gap-2">
+                                                                                                    <span className="font-semibold">{tName}</span>
+                                                                                                    {tDia && <span className="text-[10px] opacity-70">({tDia})</span>}
+                                                                                                    {tType && <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-muted/40 text-muted-foreground">{tType}</span>}
+                                                                                                </div>
+                                                                                            </SelectItem>
+                                                                                        );
+                                                                                    })}
+                                                                                </SelectContent>
+                                                                            </Select>
+                                                                        ) : activeToolId ? (
+                                                                            <div className="flex items-center gap-2">
+                                                                                <Wrench className="size-3 text-muted-foreground" />
+                                                                                <span className="font-mono text-[9px] bg-muted/40 border border-border/50 px-1.5 py-0.5 rounded text-muted-foreground">
+                                                                                    {activeToolObj?.name || truncateId(activeToolId)}
+                                                                                </span>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span className="text-xs text-muted-foreground/50 italic">No tool selected</span>
+                                                                        )}
+
+                                                                        {toolWarning && (
+                                                                            <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-medium">
+                                                                                <AlertTriangle className="size-3 shrink-0 text-amber-400" />
+                                                                                <span>{toolWarning}</span>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {op.parameters?.tool_selection_reason && !toolWarning && (
+                                                                            <span className="text-[10px] text-foreground/60 leading-relaxed">
+                                                                                {op.parameters.tool_selection_reason}
+                                                                            </span>
+                                                                        )}
                                                                     </div>
-                                                                    {op.parameters?.tool_selection_reason && (
-                                                                        <span className="text-xs text-foreground/70 leading-relaxed">
-                                                                            {op.parameters.tool_selection_reason}
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                            ) : (
-                                                                <span className="text-xs text-muted-foreground/50 italic">No tool selected</span>
-                                                            )}
+                                                                );
+                                                            })()}
                                                         </td>
                                                         <td className="py-3 px-4 align-top">
                                                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[10px] font-bold uppercase tracking-wider ${statusColor}`}>

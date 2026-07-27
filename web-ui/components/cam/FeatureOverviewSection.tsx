@@ -144,18 +144,30 @@ export function FeatureOverviewSection({
                             )}
                             
                             <div className="flex gap-4 text-[10px]">
-                                {Object.entries(feat.dimensions || {}).slice(0, 3).map(([key, value]) => {
-                                    let displayValue: string | number = value as string | number;
-                                    if (typeof value === 'number') {
-                                        displayValue = Number.isInteger(value) ? value : value.toFixed(2);
+                                {(() => {
+                                    const dims = feat.dimensions || {};
+                                    // If no explicit dimensions object, try to extract from root
+                                    if (Object.keys(dims).length === 0) {
+                                        const rawFeat = feat as any;
+                                        if (rawFeat.diameter !== undefined) dims.diameter = rawFeat.diameter;
+                                        if (rawFeat.depth !== undefined) dims.depth = rawFeat.depth;
+                                        if (rawFeat.width !== undefined) dims.width = rawFeat.width;
+                                        if (rawFeat.length !== undefined) dims.length = rawFeat.length;
                                     }
-                                    return (
-                                        <div key={key} className="flex flex-col gap-0.5">
-                                            <span className="text-muted-foreground/70 uppercase tracking-wider font-semibold text-[9px]">{key}</span>
-                                            <span className="font-mono text-foreground/90 font-medium">{displayValue}mm</span>
-                                        </div>
-                                    );
-                                })}
+                                    
+                                    return Object.entries(dims).slice(0, 3).map(([key, value]) => {
+                                        let displayValue: string | number = value as string | number;
+                                        if (typeof value === 'number') {
+                                            displayValue = Number.isInteger(value) ? value : value.toFixed(2);
+                                        }
+                                        return (
+                                            <div key={key} className="flex flex-col gap-0.5">
+                                                <span className="text-muted-foreground/70 uppercase tracking-wider font-semibold text-[9px]">{key}</span>
+                                                <span className="font-mono text-foreground/90 font-medium">{displayValue}mm</span>
+                                            </div>
+                                        );
+                                    });
+                                })()}
                             </div>
                         </div>
                     );

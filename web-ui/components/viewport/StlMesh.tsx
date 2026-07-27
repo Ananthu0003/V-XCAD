@@ -16,11 +16,12 @@ export type StlGeometryInfo = {
 
 type StlMeshProps = {
 	url: string;
+	expectedSize?: number;
 	onGeometryReady?: (info: StlGeometryInfo) => void;
 	onMeshClick?: (point: [number, number, number]) => void;
 };
 
-export function StlMesh({ url, onGeometryReady, onMeshClick }: StlMeshProps) {
+export function StlMesh({ url, expectedSize, onGeometryReady, onMeshClick }: StlMeshProps) {
 	const geometry = useLoader(STLLoader, url);
 
 	const { centeredGeometry, scale, center } = useMemo(() => {
@@ -36,11 +37,31 @@ export function StlMesh({ url, onGeometryReady, onMeshClick }: StlMeshProps) {
 		cloned.computeBoundingBox();
 		cloned.computeBoundingSphere();
 
-		// Do NOT center or scale the mesh. We want true 1:1 CAD coordinates.
-		const safeScale = 1.0;
-		const centerVec = new Vector3();
 		const box = cloned.boundingBox ?? new Box3();
-		box.getCenter(centerVec);
+		const size = new Vector3();
+		box.getSize(size);
+		const maxDim = Math.max(size.x, size.y, size.z);
+
+		let safeScale = 1.0;
+		// Auto-detect inch vs mm mismatch
+		if (expectedSize && maxDim > 0) {
+			const ratio = expectedSize / maxDim;
+			if (ratio > 15 && ratio < 35) {
+				safeScale = 25.4; // Auto-scale inches to mm
+			} else if (ratio < 0.06 && ratio > 0.02) {
+				safeScale = 1 / 25.4; // Auto-scale mm to inches
+			}
+		}
+
+		if (safeScale !== 1.0) {
+			cloned.scale(safeScale, safeScale, safeScale);
+			cloned.computeBoundingBox();
+			cloned.computeBoundingSphere();
+		}
+
+		const scaledBox = cloned.boundingBox ?? new Box3();
+		const centerVec = new Vector3();
+		scaledBox.getCenter(centerVec);
 
 		// Notify parent of the computed geometry metrics
 		onGeometryReady?.({
@@ -54,10 +75,10 @@ export function StlMesh({ url, onGeometryReady, onMeshClick }: StlMeshProps) {
 
 		return {
 			centeredGeometry: cloned,
-			scale: safeScale,
+			scale: 1.0, // Scale is baked into geometry
 			center: centerVec
 		};
-	}, [geometry]);
+	}, [geometry, expectedSize]);
 
 	const material = useMemo(
 		() =>

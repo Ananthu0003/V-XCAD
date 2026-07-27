@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Tool, ToolType, ToolMaterial } from '@/types/cam';
+import { getMaterialLabel } from '@/lib/cam/materialProfiles';
 import { Search, Filter, Wrench, X, ChevronDown, ChevronRight, Star, Clock, Zap, Plus, Trash2, Pencil, Info } from 'lucide-react';
 import { ToolTable } from '@/components/tools/ToolTable';
 import { HolderTable } from '@/components/holders/HolderTable';
@@ -368,9 +369,14 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 									<span className="text-xs font-bold text-foreground">
 										{tool.name || `${tool.type.replace('_', ' ')} A~${tool.diameter}mm`}
 									</span>
-									<span className="text-[10px] text-muted-foreground uppercase">
-										{tool.number} • {tool.flutes} Flutes • {tool.material} {tool.coating ? `• ${tool.coating}` : ''}
-									</span>
+									<div className="flex flex-wrap gap-1.5 mt-1.5">
+										<span className="text-[11px] font-semibold bg-white/5 border border-white/10 px-2 py-0.5 rounded text-foreground">{tool.number}</span>
+										<span className="text-[11px] font-semibold bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded text-blue-400">Ø {tool.diameter}mm</span>
+										<span className="text-[11px] font-medium bg-white/5 border border-white/10 px-2 py-0.5 rounded text-muted-foreground">STK {tool.stickout || '--'}mm</span>
+										<span className="text-[11px] font-medium bg-white/5 border border-white/10 px-2 py-0.5 rounded text-muted-foreground">{tool.flutes} FLUTES</span>
+										{tool.material && <span className="text-[11px] font-medium bg-white/5 border border-white/10 px-2 py-0.5 rounded text-muted-foreground uppercase">{tool.material}</span>}
+										{tool.coating && <span className="text-[11px] font-medium bg-white/5 border border-white/10 px-2 py-0.5 rounded text-muted-foreground uppercase">{tool.coating}</span>}
+									</div>
 								</div>
 							</div>
 							<div className="flex items-center gap-2">
@@ -544,7 +550,7 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 									<div className="flex flex-col gap-3">
 										<h3 className="text-xs font-bold uppercase tracking-wider text-emerald-500 flex items-center gap-2">
 											<Zap className="size-3.5" />
-											Optimized for {workpieceMaterial.replace('_', ' ')}
+											Optimized for {getMaterialLabel(workpieceMaterial)}
 										</h3>
 										<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
 											{materialOptimized.slice(0, 3).map(t => (

@@ -1,6 +1,7 @@
 import { SetupSettings, Tool, CamOperation, CamFeature, CamSetupPlan } from '@/types/cam';
 import { Target, Layers, Settings2, Scissors, Activity, FileCode } from 'lucide-react';
 import { MACHINE_MATRIX } from '@/lib/cam/machineProfiles';
+import { getMaterialLabel } from '@/lib/cam/materialProfiles';
 
 type CamSummaryPanelProps = {
     setup: SetupSettings;
@@ -13,7 +14,7 @@ type CamSummaryPanelProps = {
 };
 
 export function CamSummaryPanel({ setup, setups = [], tools, operations, features = [], coordValidation, onClickSection }: CamSummaryPanelProps) {
-    const totalCycleTime = operations.reduce((acc, op) => acc + (op.statistics?.cycleTimeSeconds || 0), 0);
+    const totalCycleTime = operations.reduce((acc, op) => acc + (op.estimated_time_s || op.statistics?.cycleTimeSeconds || 0), 0);
     const formatTime = (seconds: number) => {
         if (!seconds) return 'N/A';
         const m = Math.floor(seconds / 60);
@@ -110,6 +111,9 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                                     <div className="flex flex-col gap-0.5 text-[9px] text-muted-foreground font-mono ml-1 border-l border-border/50 pl-2">
                                                         <div><span className="text-foreground/60">Strategy:</span> {op.type}</div>
                                                         <div><span className="text-foreground/60">Tool ID:</span> {op.toolId}</div>
+                                                        {(op.estimated_time_s || op.statistics?.cycleTimeSeconds) && (
+                                                            <div className="text-blue-500/80"><span className="text-foreground/60">Cycle Time:</span> {formatTime(op.estimated_time_s || op.statistics?.cycleTimeSeconds || 0)}</div>
+                                                        )}
                                                         {(op.status === 'blocked' || op.status === 'error') && op.parameters?.error && (
                                                             <div className="text-red-400 mt-1 whitespace-pre-wrap font-sans text-[10px]">
                                                                 {op.parameters.error}
@@ -138,7 +142,7 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                 <div>Machine:</div><div className="text-foreground capitalize">{MACHINE_MATRIX.machineProfiles.find(p => p.id === setup.machineProfile)?.label || setup.machineProfile || 'Not selected'}</div>
                                 <div>Type:</div><div className="text-foreground capitalize">{(setup as any).setupType || '3-Axis'}</div>
                                 <div>Tool Axis:</div><div className="text-foreground font-mono">[{(setup as any).toolAxis?.join(', ') || '0, 0, 1'}]</div>
-                                <div>Material:</div><div className="text-foreground capitalize">{setup.material?.replace('_', ' ') || 'Not selected'}</div>
+                                <div>Material:</div><div className="text-foreground font-medium">{getMaterialLabel(setup.material)}</div>
                                 <div>Stock:</div><div className="text-foreground">{setup.stockDimensions?.join(' x ') || 'Not set'} mm</div>
                                 <div>WCS:</div><div className="text-foreground">{setup.wcs}</div>
                             </div>
@@ -229,6 +233,9 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                                     <div><span className="text-foreground/60">Feature ID:</span> {op.feature_id || 'None'}</div>
                                                     <div><span className="text-foreground/60">Strategy:</span> {op.type}</div>
                                                     <div><span className="text-foreground/60">Segments:</span> <span className={numSegments > 2000 ? "text-amber-500 font-bold" : ""}>{numSegments}</span></div>
+                                                    {(op.estimated_time_s || op.statistics?.cycleTimeSeconds) && (
+                                                        <div className="text-blue-500/80"><span className="text-foreground/60">Cycle Time:</span> {formatTime(op.estimated_time_s || op.statistics?.cycleTimeSeconds || 0)}</div>
+                                                    )}
                                                     {op.parameters?.diagnostics && (
                                                         <>
                                                             <div><span className="text-foreground/60">Region Area:</span> {op.parameters.diagnostics.region_area} mm²</div>

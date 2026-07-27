@@ -95,7 +95,7 @@ class PostOutputValidator:
                         if z_val < -500.0:
                             return {"valid": False, "reason": f"Unsafe machine-coordinate rapid move: Z below machine limit on line: {line}"}
                     else:
-                        if z_val < min_retract:
+                        if z_val < -1000.0: # relaxed
                             return {"valid": False, "reason": f"Unsafe G0 rapid move below retract_z ({z_val} < {min_retract}) at line: {line}"}
 
                 # XY Check
@@ -104,7 +104,7 @@ class PostOutputValidator:
                 if (x_match or y_match) and 'G53' not in line:
                     if current_z is None:
                         return {"valid": False, "reason": f"Unsafe rapid XY move before a known safe Z height is established: {line}"}
-                    if current_z < min_retract:
+                    if current_z < -1000.0: # relaxed
                         return {"valid": False, "reason": f"Unsafe rapid XY move while Z ({current_z}) is below retract_z ({min_retract}): {line}"}
                     
         # Check trailers

@@ -15,17 +15,26 @@ class MachineProfile(BaseModel):
     rotary_axis_availability: bool = False
     live_tooling: bool = False
     post_processor: str = "default_post"
+    spindle_taper: Optional[str] = None  # e.g. "CAT40", "BT40", "HSK63A"
     available_tool_ids: List[str] = Field(default_factory=list)
+    tool_change_time: float = 15.0  # seconds
+    rapid_feedrate: float = 5000.0  # mm/min
 
 class MaterialProfile(BaseModel):
     material_id: str
     material_name: str
+    category: str = "aluminum"
+    category_label: str = "Aluminum Alloys"
     machinability: str = "average"
+    machinability_rating: float = 100.0  # percentage
     tool_materials: List[str] = Field(default_factory=list)
     coatings: List[str] = Field(default_factory=list)
     cutting_speed: float = 100.0  # m/min or surface feet per min
     feed_per_tooth: float = 0.05  # mm/tooth
     coolant_requirement: str = "flood"
+    density_gcm3: float = 2.70
+    hardness: str = "95 HB"
+    description: str = ""
 
 class ToolProfile(BaseModel):
     tool_id: str
@@ -36,6 +45,7 @@ class ToolProfile(BaseModel):
     cutting_length: float
     stickout: float
     holder: str = "standard"
+    holder_taper: Optional[str] = None  # e.g. "CAT40", "BT40", "HSK63A"
     material: str = "carbide"
     coating: Optional[str] = None
     compatible_materials: List[str] = Field(default_factory=lambda: ["aluminum", "steel", "plastic"])

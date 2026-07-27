@@ -38,7 +38,12 @@ export function ReviewSaveStep() {
       });
       
       if (!res.ok) {
-        throw new Error('Failed to save tool');
+        let errorMsg = 'Failed to save tool';
+        try {
+          const errData = await res.json();
+          if (errData.error) errorMsg = errData.error;
+        } catch(e) {}
+        throw new Error(errorMsg);
       }
 
       if (redirect) {

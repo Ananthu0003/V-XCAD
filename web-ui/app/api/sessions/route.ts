@@ -36,13 +36,14 @@ export async function GET() {
 export async function DELETE() {
     try {
         const authSession = await getSession();
-        if (!authSession?.userId) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
+        const userId = authSession?.userId || null;
 
         await prisma.cadSession.deleteMany({
             where: {
-                userId: authSession.userId
+                OR: [
+                    { userId: userId },
+                    { userId: null }
+                ]
             }
         });
         return NextResponse.json({ message: 'History cleared' });

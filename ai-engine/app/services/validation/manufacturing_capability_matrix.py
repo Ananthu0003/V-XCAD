@@ -15,12 +15,15 @@ class ManufacturingCapabilityMatrix:
         feat_type = feature.get("type", "")
         feat_subtype = feature.get("subtype", "")
         
+        mtype_str = str(machine.machine_type).lower() if machine and machine.machine_type else ""
+        is_turning_machine = any(t in mtype_str for t in ("lathe", "turning", "mill_turn", "swiss", "cnc_lathe"))
+
         # 1. Turning features (external cylinder, shaft)
         if feat_type in ("external_cylinder", "shaft") or feat_subtype in ("shaft", "external_cylinder"):
             feature_axis = feature.get("axis", [0, 0, 1])
             dot = sum(a*b for a, b in zip(feature_axis, setup_axis)) if setup_axis else 0
             
-            if machine.machine_type in ("lathe", "turning_center", "mill_turn"):
+            if is_turning_machine:
                 return True, "Turning center supports external cylinder", ""
             elif machine.machine_type in ("4_axis_mill", "5_axis_mill") and machine.rotary_axis_availability:
                 return True, "Multi-axis mill supports rotary milling for cylinder", ""
@@ -31,14 +34,14 @@ class ManufacturingCapabilityMatrix:
                 
         # 2. Multi-axis features (side protrusion, angled holes)
         if feat_type == "side_protrusion":
-            if machine.machine_type in ("4_axis_mill", "5_axis_mill", "mill_turn"):
+            if machine.machine_type in ("4_axis_mill", "5_axis_mill", "mill_turn") or is_turning_machine:
                 return True, "Machine supports multi-axis/indexing", ""
             else:
                 return False, "Side protrusion requires 4-axis indexing or mill-turn", "4_axis_mill"
                 
         # 3. Drilling & Boring
         if feat_type in ("hole", "blind_hole", "through_hole", "bore"):
-            if "drilling" not in machine.supported_operations:
+            if "drilling" not in machine.supported_operations and not is_turning_machine:
                 return False, "Machine does not support drilling", "3_axis_mill"
                 
             # Basic setup axis check: if the hole is on the side, we need 4-axis or turning
@@ -53,9 +56,12 @@ class ManufacturingCapabilityMatrix:
             return True, "Machine supports drilling in this orientation", ""
             
         # 4. Standard 2.5D Milling (pocket, contour, face, slot, boss, step)
-        if feat_type in ("pocket", "contour", "face", "slot", "boss", "step"):
-            if machine.machine_type == "lathe" and not machine.live_tooling:
-                return False, "Standard lathe cannot perform milling operations", "turning_center"
+        if feat_type == "face":
+            return True, "Machine supports facing", ""
+
+        if feat_type in ("pocket", "contour", "slot", "boss", "step"):
+            if is_turning_machine and not machine.live_tooling and not any(t in mtype_str for t in ("mill_turn", "swiss", "live")):
+                return False, "Standard lathe cannot perform milling operations without live tooling", "mill_turn"
             return True, "Machine supports standard 2.5D milling", ""
             
         # Catch all

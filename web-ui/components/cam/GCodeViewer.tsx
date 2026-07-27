@@ -7,6 +7,7 @@ import { Copy, Download, Check, Code2, Clock, Wrench, Hash } from 'lucide-react'
 interface GCodeViewerProps {
 	content: string;
 	onDownload?: () => void;
+	setupName?: string;
 }
 
 function highlightGCodeLine(line: string): ReactNode {
@@ -50,7 +51,7 @@ function highlightGCodeLine(line: string): ReactNode {
 	);
 }
 
-export function GCodeViewer({ content, onDownload }: GCodeViewerProps) {
+export function GCodeViewer({ content, onDownload, setupName }: GCodeViewerProps) {
 	const [copied, setCopied] = useState(false);
 
 	const lines = useMemo(() => content.split('\n'), [content]);
@@ -95,6 +96,15 @@ export function GCodeViewer({ content, onDownload }: GCodeViewerProps) {
 		<div className="flex flex-col gap-4 h-full">
 			{/* Stats Bar */}
 			<div className="flex items-center gap-6 px-4 py-3 bg-background rounded-xl border border-white/5">
+				{setupName && (
+					<>
+						<div className="flex items-center gap-2">
+							<span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Setup</span>
+							<span className="text-xs font-bold text-white ml-1">{setupName}</span>
+						</div>
+						<div className="w-px h-5 bg-white/10" />
+					</>
+				)}
 				<div className="flex items-center gap-2">
 					<Hash className="size-3.5 text-blue-400" />
 					<span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Lines</span>

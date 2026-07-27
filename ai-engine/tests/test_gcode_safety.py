@@ -65,7 +65,7 @@ def test_heidenhain_cycle_depth_validation():
             "safe_heights": {"clearance": 50.0, "retract": 5.0}
         }
     ]
-    res = gen.generate(operations, setup_plan={"postProcessor": "HEIDENHAIN_KLARTEXT"})
+    res = gen.generate(operations, setup_plan={"postProcessor": "HEIDENHAIN_KLARTEXT", "controller": "HEIDENHAIN_TNC"})
     assert res["validation"]["status"] == "passed"
     assert "Q201=-15.0" in res["gcode"]
 
@@ -496,3 +496,27 @@ def test_klartext_header_contains_setup_preset_note():
     assert "; Z0 = STOCK TOP" in gcode
     assert "; XY ZERO = SETUP ORIGIN FROM VEXCAD" in gcode
     assert "; OPERATOR MUST CONFIRM ACTIVE HEIDENHAIN PRESET BEFORE RUNNING" in gcode
+
+def test_blocked_export_for_incompatible_post_processor():
+    gen = GCodeGenerator()
+    operations = [
+        {
+            "name": "drilling",
+            "type": "drilling",
+            "tool": {"number": 1},
+            "toolpaths": [
+                {"moveType": "drill_cycle", "end": {"x": 10, "y": 10, "z": -15.0}}
+            ],
+            "safe_heights": {"clearance": 50.0, "retract": 5.0}
+        }
+    ]
+    # Requesting a Heidenhain post on a Fanuc controller should be blocked
+    res = gen.generate(operations, setup_plan={"postProcessor": "HEIDENHAIN_KLARTEXT", "controller": "FANUC_0I_MF"})
+    assert res["validation"]["status"] == "error"
+    assert res["gcode"] == ""
+    assert any(i["type"] == "incompatible_post_processor" for i in res["validation"]["issues"])
+
+def test_unsupported_controller_raises_error():
+    from app.cam.posts import get_post_processor
+    with pytest.raises(ValueError, match="NC export is blocked for unvalidated machine configurations"):
+        get_post_processor("UNKNOWN_UNVERIFIED_CNC", {})

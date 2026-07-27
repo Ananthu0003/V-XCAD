@@ -86,13 +86,23 @@ export function migrateLegacyCamSetup(setup: SetupSettings): SetupSettings {
   let migrated = false;
 
   const legacyMachineMap: Record<string, string> = {
-    "Generic 3-Axis VMC": "generic_mill_3x_vmc",
+    "Generic 3-Axis VMC": "haas_vf2",
+    "generic_mill_3x_vmc": "haas_vf2",
     "Haas VF-2 (3-Axis VMC)": "haas_vf2",
-    "Generic 4-Axis VMC": "generic_4x_vmc",
-    "Generic 5-Axis VMC": "generic_5x_vmc",
-    "Generic CNC Lathe": "generic_cnc_turning_center",
-    "Generic Mill-Turn Machine": "generic_mill_turn",
-    "Generic 3-Axis CNC Router": "generic_3x_router"
+    "Generic 4-Axis VMC": "haas_vf2_hrt160",
+    "generic_mill_4x_vmc": "haas_vf2_hrt160",
+    "generic_4x_vmc": "haas_vf2_hrt160",
+    "Generic 5-Axis VMC": "haas_umc750",
+    "generic_mill_5x_vmc": "haas_umc750",
+    "generic_5x_vmc": "haas_umc750",
+    "Generic CNC Lathe": "haas_st20",
+    "generic_cnc_lathe": "haas_st20",
+    "generic_cnc_turning_center": "haas_st20",
+    "Generic Mill-Turn Machine": "mazak_integrex_i200",
+    "generic_mill_turn": "mazak_integrex_i200",
+    "Generic 3-Axis CNC Router": "haas_gr510",
+    "generic_router_3x": "haas_gr510",
+    "generic_3x_router": "haas_gr510"
   };
 
   const legacyControllerMap: Record<string, string> = {
@@ -107,9 +117,14 @@ export function migrateLegacyCamSetup(setup: SetupSettings): SetupSettings {
     "GRBL": "GRBL"
   };
 
-  // If using legacy `machine` property instead of `machineProfile`
-  if (newSetup.machine && !newSetup.machineProfile) {
-    newSetup.machineProfile = legacyMachineMap[newSetup.machine] || newSetup.machine;
+  // Migrate legacy machine names and deleted generic IDs to standard real-world profiles
+  const currentMachine = newSetup.machineProfile || newSetup.machine;
+  if (currentMachine && legacyMachineMap[currentMachine]) {
+    newSetup.machineProfile = legacyMachineMap[currentMachine];
+    newSetup.machine = legacyMachineMap[currentMachine];
+    migrated = true;
+  } else if (newSetup.machine && !newSetup.machineProfile) {
+    newSetup.machineProfile = newSetup.machine;
     migrated = true;
   }
 
@@ -128,12 +143,13 @@ export function migrateLegacyCamSetup(setup: SetupSettings): SetupSettings {
     }
   }
 
-  // Validate post migration only if a machine is selected
-  if (newSetup.machineProfile || newSetup.machineType) {
-    const validation = validateMachineControllerPost(newSetup);
-    if (!validation.valid) {
-      console.warn("Configuration validation failed:", validation.error);
-    }
+  if (!newSetup.material && !newSetup.workpieceMaterialId) {
+    newSetup.material = "aluminum_6061";
+    newSetup.workpieceMaterialId = "aluminum_6061";
+  }
+  if (!newSetup.machineProfile && !newSetup.machine) {
+    newSetup.machine = "haas_vf2";
+    newSetup.machineProfile = "haas_vf2";
   }
 
   return newSetup;

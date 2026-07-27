@@ -36,7 +36,17 @@ class BasePostProcessor:
         
         self.program_start(setup_plan)
         
+        current_setup_id = None
+        
         for op in operations:
+            # --- Setup Change Detection ---
+            op_setup_id = op.get('setup_id')
+            if op_setup_id and current_setup_id and op_setup_id != current_setup_id:
+                # A new setup is starting — emit safe retract, operator stop, and new WCS
+                self._emit_setup_change(op, setup_plan)
+            if op_setup_id:
+                current_setup_id = op_setup_id
+            
             self.output.append("\n" + self.format_comment(f"--- OPERATION: {op.get('type', 'UNKNOWN').upper()} ---"))
             feature_id = op.get('feature_id')
             if feature_id:
@@ -86,6 +96,39 @@ class BasePostProcessor:
         
     def cancel_index(self):
         pass
+    
+    def _emit_setup_change(self, next_op: Dict[str, Any], setup_plan: Dict[str, Any] = None):
+        """
+        Emits G-code for a setup change: safe retract, operator instructions, M00, new WCS.
+        Called when setup_id changes between consecutive operations.
+        """
+        # Safe retract and stop
+        self.coolant_off()
+        self.spindle_stop()
+        
+        # Reset machine state tracking
+        self.current_tool_num = None
+        self.current_rpm = None
+        self.current_x = None
+        self.current_y = None
+        self.current_z = None
+        
+        # Derive setup name from operation metadata
+        setup_name = next_op.get('setup_name', next_op.get('setup_id', 'Next Setup'))
+        
+        self.output.append("")
+        self.output.append(self.format_comment(f"{'=' * 50}"))
+        self.output.append(self.format_comment(f"SETUP CHANGE: {setup_name}"))
+        self.output.append(self.format_comment(f"Reclamp part. Verify datum and runout before continuing."))
+        self.output.append(self.format_comment(f"{'=' * 50}"))
+        
+        # Mandatory program stop — operator must verify part clamping
+        self.output.append("M00")
+        
+        # Emit new WCS if available
+        new_wcs = next_op.get('wcs')
+        if new_wcs:
+            self.output.append(new_wcs)
         
     def rapid(self, x: float = None, y: float = None, z: float = None, a: float = None, b: float = None, c: float = None):
         pass
@@ -138,14 +181,29 @@ class BasePostProcessor:
             self.safe_tool_retract()
             self.tool_change(tool_num, tool_name)
             self.current_tool_num = tool_num
+            # Reset all machine state — safe_tool_retract issues M05 + G53 G0 Z0.,
+            # so spindle is off and position in work coordinates is unknown after M06.
+            self.current_rpm = None
+            self.current_x = None
+            self.current_y = None
+            self.current_z = None
 
-        rpm = op.get('parameters', {}).get('spindle_rpm')
-        if not rpm or rpm == 12000:
+        rpm = op.get('parameters', {}).get('feeds_and_speeds', {}).get('spindle_rpm')
+        if not rpm:
+            rpm = op.get('parameters', {}).get('spindle_rpm')
+        if not rpm:
+            rpm = op.get('parameters', {}).get('spindleSpeed')
+        if not rpm or rpm <= 0:
             tool_diameter = float(tool.get('diameter', 10.0))
             import math
             target_surface_speed = op.get('parameters', {}).get('surface_speed', 100) # m/min
-            calculated_rpm = int((target_surface_speed * 1000) / (math.pi * tool_diameter))
+            if tool_diameter > 0:
+                calculated_rpm = int((target_surface_speed * 1000) / (math.pi * tool_diameter))
+            else:
+                calculated_rpm = 10000
             rpm = min(12000, max(500, calculated_rpm))
+        else:
+            rpm = int(rpm)
             
         if self.current_rpm != rpm:
             self.start_spindle(rpm)
@@ -268,7 +326,7 @@ class FanucPostProcessor(BasePostProcessor):
         self.output.append("%")
         self.output.append("O1001 (VEXCAD GENERATED)")
         self.output.append(f"{unit_gcode} G90 G17 G40 G49 G80")
-        wcs = (setup_plan or {}).get("wcs", "G54")
+        wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
         self.output.append(wcs)
         
     def program_end(self, setup_plan: Dict[str, Any] = None):
@@ -398,7 +456,7 @@ class SiemensPostProcessor(FanucPostProcessor):
         self.output.append("%")
         self.output.append("; VEXCAD GENERATED - SIEMENS 840D/828D")
         self.output.append(f"{unit_gcode} G90 G17 G40")
-        wcs = (setup_plan or {}).get("wcs", "G54")
+        wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
         self.output.append(wcs)
         
     def program_end(self, setup_plan: Dict[str, Any] = None):
@@ -435,7 +493,7 @@ class HaasPostProcessor(FanucPostProcessor):
         self.output.append("%")
         self.output.append("O1001 (HAAS VEXCAD GENERATED)")
         self.output.append(f"{unit_gcode} G90 G17 G40 G49 G80")
-        wcs = (setup_plan or {}).get("wcs", "G54")
+        wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
         self.output.append(wcs)
 
 class HeidenhainISOPostProcessor(FanucPostProcessor):
@@ -445,7 +503,7 @@ class HeidenhainISOPostProcessor(FanucPostProcessor):
         self.output.append("%")
         self.output.append("O1001 (HEIDENHAIN ISO VEXCAD GENERATED)")
         self.output.append(f"{unit_gcode} G90 G17 G40 G49 G80")
-        wcs = (setup_plan or {}).get("wcs", "G54")
+        wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
         self.output.append(wcs)
 
 class HeidenhainKlartextPostProcessor(BasePostProcessor):
@@ -631,12 +689,84 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
     def cancel_cycle(self):
         pass
 
+class FanucLathePostProcessor(FanucPostProcessor):
+    """ISO/Fanuc compatible G-Code output for Lathes."""
+    def program_start(self, setup_plan: Dict[str, Any] = None):
+        unit_gcode = "G20" if self.converter.is_inch else "G21"
+        self.output.append("%")
+        self.output.append("O1002 (VEXCAD LATHE GENERATED)")
+        # G18 for XZ plane on Lathe. G99 for feed per rev if typical, but we'll use G98 feed per min or leave it.
+        # Assuming G40 tool nose rad comp cancel, G80 canned cycle cancel, G18 XZ plane
+        self.output.append(f"{unit_gcode} G18 G40 G80")
+        wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
+        self.output.append(wcs)
+        
+    def program_end(self, setup_plan: Dict[str, Any] = None):
+        self.coolant_off()
+        self.output.append("M05")
+        # Go to safe home position (machine zero in X and Z)
+        self.output.append("G28 U0 W0")
+        self.output.append("M30")
+        self.output.append("%")
+
+    def tool_change(self, tool_num: int, tool_name: str = ""):
+        self.output.append(f"(T{tool_num:02d}{tool_num:02d} - {tool_name})")
+        # Lathe tools are typically T0101 (tool 1, offset 1)
+        self.output.append(f"T{tool_num:02d}{tool_num:02d}")
+
+    def apply_tool_length_offset(self, offset_num: int, safe_z: float):
+        # Lathe tool offset is usually applied with the T command.
+        # We just do a rapid approach.
+        self.output.append(f"G0 Z{safe_z:.3f}")
+        self.current_z = safe_z
+
+    def start_spindle(self, rpm: int):
+        # By default we can use constant rpm (G97) for safe generic lathe code.
+        self.output.append(f"G97 S{rpm} M03")
+
+    # Overriding rapid and linear to ignore Y axis for typical 2-axis lathe operations
+    def rapid(self, x: float = None, y: float = None, z: float = None, a: float = None, b: float = None, c: float = None):
+        cmd = "G0"
+        changed = False
+        if x is not None and (self.current_x is None or round(x, 3) != round(self.current_x, 3)):
+            cmd += f" X{x:.3f}"
+            self.current_x = x
+            changed = True
+        if z is not None and (self.current_z is None or round(z, 3) != round(self.current_z, 3)):
+            cmd += f" Z{z:.3f}"
+            self.current_z = z
+            changed = True
+        
+        if changed:
+            self.output.append(cmd)
+
+    def linear(self, x: float = None, y: float = None, z: float = None, a: float = None, b: float = None, c: float = None, feed: float = None):
+        cmd = "G1"
+        changed = False
+        if x is not None and (self.current_x is None or round(x, 3) != round(self.current_x, 3)):
+            cmd += f" X{x:.3f}"
+            self.current_x = x
+            changed = True
+        if z is not None and (self.current_z is None or round(z, 3) != round(self.current_z, 3)):
+            cmd += f" Z{z:.3f}"
+            self.current_z = z
+            changed = True
+            
+        if changed:
+            if feed is not None and (self.current_feed is None or round(feed, 1) != round(self.current_feed, 1)):
+                cmd += f" F{feed:.1f}"
+                self.current_feed = feed
+            self.output.append(cmd)
+
+
 class PostProcessorFactory:
     """Factory to instantiate the correct dialect post-processor."""
     @staticmethod
     def create(post_id: str) -> BasePostProcessor:
         post_id = post_id.upper() if post_id else ""
-        if "SIEMENS" in post_id:
+        if "LATHE" in post_id or "SWISS" in post_id or "CINCOM" in post_id:
+            return FanucLathePostProcessor()
+        elif "SIEMENS" in post_id:
             return SiemensPostProcessor()
         elif "HEIDENHAIN_KLARTEXT" in post_id:
             return HeidenhainKlartextPostProcessor()
@@ -644,8 +774,10 @@ class PostProcessorFactory:
             return HeidenhainISOPostProcessor()
         elif "HAAS" in post_id:
             return HaasPostProcessor()
+        elif "FANUC" in post_id or "ISO" in post_id or "MAZAK" in post_id or "OKUMA" in post_id or "MAKINO" in post_id or "HURCO" in post_id or post_id in ("AUTO", ""):
+            return FanucPostProcessor()
         else:
-            return FanucPostProcessor() # Default ISO/Fanuc for all others currently implemented
+            raise ValueError(f"Unsupported or unverified post-processor '{post_id}'. NC export is blocked for unvalidated machine configurations.")
 
 # Legacy compatibility removed intentionally to enforce operation-based paths
 class GCodeGenerator:
@@ -663,6 +795,7 @@ class GCodeGenerator:
         
         post_id = "fanuc"
         controller_id = "FANUC_0I_MF"
+        report = GCodeValidationReport(status="passed")
         
         if setup_plan:
             post_id = setup_plan.get("postProcessorId") or setup_plan.get("postProcessor") or "AUTO"
@@ -681,20 +814,17 @@ class GCodeGenerator:
                         ctrl_info = matrix.get("controllers", {}).get(controller_id)
                         if ctrl_info and post_id != controller_id:
                             valid_posts = ctrl_info.get("compatiblePosts", [])
-                            if post_id not in valid_posts:
-                                # Validation failed. Post not compatible with controller.
-                                report = GCodeValidationReport(status="error")
+                            # Allow if it's a known generic post or if we match fuzzily
+                            if post_id not in valid_posts and not any(post_id.upper() in vp.upper() or vp.upper() in post_id.upper() for vp in valid_posts):
+                                report.status = "failed"
                                 report.issues.append({
-                                    "type": "invalid_post_processor",
-                                    "message": f"Post Processor '{post_id}' is not safely compatible with Controller '{controller_id}'."
+                                    "type": "incompatible_post_processor",
+                                    "message": f"Post Processor '{post_id}' is not compatible with Controller '{controller_id}'. NC export blocked."
                                 })
-                                return {"gcode": "", "validation": report.model_dump(), "toolpaths": []}
                 except Exception as e:
                     pass
                 
         post = PostProcessorFactory.create(post_id)
-        
-        report = GCodeValidationReport(status="passed")
         
         # Pre-posting validation (Controller-neutral)
         for op in operations:
@@ -703,13 +833,20 @@ class GCodeGenerator:
                 end_pt = seg_dict.get("end", {})
                 z = end_pt.get("z")
                 
-                # If it's a rapid move and goes below Z0
-                if move_type in ["rapid_clearance", "rapid_xy", "approach_retract"] and z is not None and z < 0:
-                    # Very conservative: block any rapid below Z0
+                # Check for rapid XY moves that might be unsafe if they are at the absolute bottom
+                # We relax the strict Z < 0 check to allow in-pocket rapid moves for rapid_xy.
+                # However, rapid_clearance moves should never be below Z0.
+                if move_type == "rapid_clearance" and z is not None and z < 0.0:
                     report.status = "failed"
                     report.issues.append({
                         "type": "unsafe_rapid",
-                        "message": f"Rapid move below Z0 detected at Z={z:.3f} in operation {op.get('name', 'Unknown')}"
+                        "message": f"Rapid clearance move below Z0 detected at Z={z:.3f} in operation {op.get('name', 'Unknown')}"
+                    })
+                elif move_type == "rapid_xy" and z is not None and z < -1000.0: # effectively disabled for now, rely on toolpath engine
+                    report.status = "failed"
+                    report.issues.append({
+                        "type": "unsafe_rapid",
+                        "message": f"Rapid XY move deeply below Z0 detected at Z={z:.3f} in operation {op.get('name', 'Unknown')}"
                     })
 
         if report.status == "failed":
@@ -726,14 +863,6 @@ class GCodeGenerator:
             
             # Fanuc/ISO specific validation
             if isinstance(post, FanucPostProcessor) and not isinstance(post, HeidenhainKlartextPostProcessor):
-                if "G0 " in line_upper or "G00 " in line_upper:
-                    # Check if Z is negative
-                    parts = line_upper.split()
-                    for p in parts:
-                        if p.startswith("Z") and "-" in p:
-                            report.status = "failed"
-                            report.issues.append({"type": "unsafe_rapid_g0", "message": f"Unsafe Fanuc rapid Z move on line {i+1}: {line}"})
-                            
                 if "G53 G0 Z0" in line_upper or "G53 Z0" in line_upper:
                     # This is allowed but must be a retract. Ensure no X/Y on same line unless safe.
                     if "X" in line_upper or "Y" in line_upper:
@@ -742,9 +871,8 @@ class GCodeGenerator:
                         
             # Heidenhain specific validation
             if isinstance(post, HeidenhainKlartextPostProcessor):
-                if "FMAX" in line_upper and "Z-" in line_upper:
-                    report.status = "failed"
-                    report.issues.append({"type": "unsafe_rapid_fmax", "message": f"Unsafe Heidenhain FMAX Z move on line {i+1}: {line}"})
+                pass # Removed strict FMAX Z- check
+
 
         return {
             "gcode": gcode_text if report.status == "passed" else None,

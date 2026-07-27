@@ -45,8 +45,12 @@ export function SessionBrowserModal({ isOpen, onClose, onSelectSession }: Sessio
 		if (!confirm('Are you sure you want to clear your entire project history?')) return;
 		setIsClearing(true);
 		try {
-			await fetch('/api/sessions', { method: 'DELETE' });
-			setSessions([]);
+			const res = await fetch('/api/sessions', { method: 'DELETE' });
+			if (res.ok) {
+				setSessions([]);
+			} else {
+				console.error('Failed to clear sessions', await res.text());
+			}
 		} catch (err) {
 			console.error(err);
 		} finally {

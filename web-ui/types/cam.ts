@@ -1,7 +1,32 @@
 import type { ToolpathSegment, SimulationEvent } from './cam_simulation';
 
-export type StockType = 'box' | 'cylinder' | 'from_model';
-export type MaterialType = 'aluminum_6061' | 'mild_steel' | 'stainless_steel' | 'brass' | 'plastic';
+export type StockType = 
+    | 'relative_box'      // 1. Relative Size Box (Part Bounding Box + Padding Allowances)
+    | 'fixed_box'         // 2. Fixed Size Box (Absolute Width, Depth, Height Block)
+    | 'relative_cylinder' // 3. Relative Size Cylinder (Part Bounds + Radial & Axial Allowances)
+    | 'fixed_cylinder'    // 4. Fixed Size Cylinder (Absolute Diameter & Length Bar)
+    | 'from_solid'        // 5. From Solid Model (CAD Solid Body Selection)
+    | 'from_file'         // 6. From External File (STEP / STL Stock File)
+    | 'box'               // Legacy Box
+    | 'cylinder'          // Legacy Cylinder
+    | 'from_model';       // Legacy Solid Model
+export type MaterialType = 
+    // Aluminum Alloys
+    | 'aluminum_6061' | 'aluminum_7075' | 'aluminum_2024' | 'aluminum_5052' | 'aluminum_7050' | 'aluminum_cast'
+    // Carbon & Alloy Steels
+    | 'mild_steel' | 'steel_1045' | 'alloy_steel_4140' | 'alloy_steel_4340' | 'steel_8620'
+    // Tool Steels & Hardened Steels
+    | 'tool_steel_d2' | 'tool_steel_a2' | 'tool_steel_o1' | 'tool_steel_h13' | 'tool_steel_s7' | 'hardened_steel'
+    // Stainless Steels
+    | 'stainless_steel' | 'stainless_316' | 'stainless_17_4ph' | 'stainless_303' | 'stainless_416' | 'stainless_440c'
+    // Titanium & Superalloys
+    | 'titanium_gr5' | 'titanium_gr2' | 'inconel_718' | 'inconel_625' | 'hastelloy_c276' | 'monel_400'
+    // Copper, Brass & Bronze
+    | 'brass' | 'brass_c260' | 'copper_c110' | 'bronze_c932' | 'aluminum_bronze' | 'beryllium_copper' | 'tellurium_copper' | 'phosphor_bronze'
+    // Cast Irons
+    | 'cast_iron_gray' | 'cast_iron_ductile'
+    // Engineering Plastics
+    | 'plastic' | 'nylon_66' | 'peek' | 'abs_plastic' | 'polycarbonate' | 'ptfe_teflon' | 'uhmw_pe' | 'garolite_g10';
 export type WorkCoordinateSystem = 'G54' | 'G55' | 'G56' | 'G57' | 'G58' | 'G59';
 export type OriginPosition = 'top_center' | 'model_center' | 'bottom_center' | 'front_left_top';
 
@@ -61,10 +86,24 @@ export type SetupSettings = {
     originPosition?: OriginPosition;
     tolerance?: number;
     stockOffset?: number;
+    stockOffsetXY?: number;
+    stockOffsetTop?: number;
+    stockOffsetBottom?: number;
+    radialOffset?: number;
+    axialOffsetTop?: number;
+    axialOffsetBottom?: number;
+    cylinderDiameter?: number;
+    cylinderLength?: number;
+    stockSolidId?: string;
+    stockFilePath?: string;
+    stockFileName?: string;
     machineProfile?: string;
     controller?: string;
     postProcessor?: PostProcessor | string;
     postProcessorSettings?: PostProcessorSettings;
+    clampingAllowance?: number;
+    clampingPosition?: 'top' | 'center' | 'bottom';
+    fixtureClearance?: number;
 };
 
 export type FeatureMachiningInfo = {

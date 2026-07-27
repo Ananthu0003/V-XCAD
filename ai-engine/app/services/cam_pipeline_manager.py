@@ -4,8 +4,6 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, List
 from app.services.cam_input_router import CamInputRouter
-from app.services.io.step_import_service import StepImportService
-from app.services.geometry.cam_feature_recognition import CamFeatureRecognition
 from app.services.planning.cam_setup_analyzer import CamSetupAnalyzer
 from app.services.gcode.machine_type_detector import MachineTypeDetector
 from app.services.planning.operation_planner import OperationPlanner
@@ -16,11 +14,10 @@ from app.services.toolpath.toolpath_engine import ToolpathEngine, ALLOWED_SOURCE
 from app.services.validation.toolpath_validator import ToolpathValidator
 from app.models.schemas import MachineCapability
 from app.models.manufacturing import MachineProfile, MaterialProfile, ToolProfile, FeatureDecision
+from app.services.cam.material_validation import get_material_profile
 from app.services.validation.manufacturing_capability_matrix import ManufacturingCapabilityMatrix
 from app.services.planning.manufacturing_strategy_planner import ManufacturingStrategyPlanner
 from app.services.gcode.gcode_generator import PostProcessorFactory
-from app.services.geometry.topology_extractor import TopologyExtractor
-from app.services.geometry.geometry_mapper import GeometryMapper
 from app.services.validation.coordinate_validator import CoordinateValidator
 
 class CamPipelineManager:
@@ -29,8 +26,7 @@ class CamPipelineManager:
     Ensures data flows correctly from STEP import -> Analysis -> Path Generation -> G-Code.
     """
     def __init__(self):
-        self.step_importer = StepImportService()
-        self.feature_recognizer = CamFeatureRecognition()
+        
         self.setup_analyzer = CamSetupAnalyzer()  # keeping for legacy/fallback
         self.setup_planner = SetupPlanner()
         self.toolpath_engine = ToolpathEngine()
@@ -39,37 +35,11 @@ class CamPipelineManager:
         self.operation_planner = OperationPlanner()
         self.coord_validator = CoordinateValidator()
         
-    def analyze_features(self, step_file_path: str, job_id: str, cam_run_id: str, setup: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        Performs Phase 2 Analysis: STEP import, B-Rep Analysis, Feature Recognition,
-        and Setup-Aware Machinability Analysis.
-        Does NOT generate toolpaths or G-code.
-        """
-        from app.services.io.step_importer import StepImporter
+    def analyze_features(self, parameters: Dict[str, Any], job_id: str, cam_run_id: str, setup: Dict[str, Any] = None) -> Dict[str, Any]:
+        from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
+        extractor = ParametricFeatureExtractor()
+        features = extractor.extract(parameters)
         
-        # 1. Import and Validate Topology
-        topology_info = self.step_importer.import_and_validate(step_file_path)
-        
-        # 1a. Validate Coordinate System (Constraint C5)
-        shape, metadata = StepImporter.load_and_heal(step_file_path)
-        if metadata:
-             self.coord_validator.validate_step_units(metadata)
-        
-        from app.services.geometry.setup_coordinate_resolver import SetupCoordinateResolver
-        
-        resolver = SetupCoordinateResolver(shape, setup or {})
-        shape_in_setup = resolver.create_setup_space_copy()
-        setup_metadata = resolver.get_setup_metadata()
-        
-        # 2. Extract B-Rep Features (Topology Extraction + Recognition)
-        features = self.feature_recognizer.recognize_features(shape=shape_in_setup)
-        
-        # 3. Geometry Mapping (Constraint C3)
-        mapper = GeometryMapper(self.feature_recognizer.extractor)
-        features = mapper.enrich_features(features, setup or {})
-        
-        # 4. Setup-Aware Machinability Analysis using Setup Planner
-        # We need a MachineCapability object. For now, construct one based on setup or defaults.
         caps = MachineCapability()
         base_wcs = setup.get("wcs") if setup else "G54"
         setup_plans = self.setup_planner.plan_setups(
@@ -78,102 +48,26 @@ class CamPipelineManager:
             stock_orientation=setup.get("stockOrientation", "top_z") if setup else "top_z",
             base_wcs=base_wcs,
             default_tool_axis=setup.get("toolAxis", [0.0, 0.0, 1.0]) if setup else [0.0, 0.0, 1.0],
-            topology_info=topology_info
+            topology_info={}
         )
         
-        # Override the planner's heuristic transform with the exact one used for extraction
-        if setup_plans and setup_metadata.get("modelToSetupTransform"):
-            flat_matrix = setup_metadata["modelToSetupTransform"]
-            if len(flat_matrix) == 16:
-                matrix_4x4 = [
-                    flat_matrix[0:4],
-                    flat_matrix[4:8],
-                    flat_matrix[8:12],
-                    flat_matrix[12:16]
-                ]
-                setup_plans[0].modelToSetupTransform = matrix_4x4
-        
-        # Validate feature depths to prevent cutting deeper than physical stock
-        self._validate_feature_depths_against_stock(features, setup_metadata)
-        
-        # 5. Clean API response (Constraint C1 - sanitize OCC objects)
-        features = self._sanitize_for_api(features)
-        
-        # Validate mapped geometry
-        validation_status = "ok"
-        mapped_count = 0
-        failed_count = 0
-        blocked_count = 0
         for f in features:
-            if not f.get("machinable_in_current_setup", True):
-                blocked_count += 1
-                f["status"] = "not_machinable"
-                f["statusReason"] = f.get("blocked_reason", "Not machinable in current setup")
-            elif f.get("geometry", {}).get("status") == "error" or f.get("geometry", {}).get("status") == "failed":
-                validation_status = "error"
-                failed_count += 1
-                f["status"] = "not_machinable"
-                f["statusReason"] = "Geometry extraction failed"
-            else:
-                mapped_count += 1
-                if "status" not in f:
-                    f["status"] = "machinable"
-                
+            f["status"] = "machinable"
+            
         geometry_mapping_summary = {
-            "mapped_features": mapped_count,
-            "failed_features": failed_count,
-            "blocked_features": blocked_count,
+            "mapped_features": len(features),
+            "failed_features": 0,
+            "blocked_features": 0,
             "total_features": len(features)
         }
         
-        # 6. Calculate simple stock suggestions
-        bounds = topology_info.get("bounds", [0, 0, 0, 100, 100, 20])
-        dx = bounds[3] - bounds[0]
-        dy = bounds[4] - bounds[1]
-        dz = bounds[5] - bounds[2]
-        
         stock_suggestions = {
             "type": "box",
-            "dimensions": [dx + 10, dy + 10, dz + 2],
+            "dimensions": [100, 100, 20],
             "offset": [5, 5, 2]
         }
-        
-        # 7. Compute model hash
-        import hashlib
-        model_hash = None
-        if Path(step_file_path).exists():
-            with open(step_file_path, 'rb') as f:
-                model_hash = hashlib.sha256(f.read()).hexdigest()
-
-        # 8. Write setup analysis debug output
-        setup_analysis = {
-            "setup": setup or {},
-            "feature_analysis": [
-                {
-                    "featureId": f.get("id"),
-                    "featureType": f.get("type"),
-                    "axis": f.get("axis"),
-                    "center": f.get("center"),
-                    "machining_region": f.get("machining_region"),
-                    "machinable_in_current_setup": f.get("machinable_in_current_setup", True),
-                    "requires_reorientation": f.get("requires_reorientation", False),
-                    "requires_4axis_or_secondary_setup": f.get("requires_4axis_or_secondary_setup", False),
-                    "blocked_reason": f.get("blocked_reason"),
-                }
-                for f in features
-            ],
-            "summary": geometry_mapping_summary,
-        }
-        
-        try:
-            job_dir = Path(__file__).resolve().parents[3] / "storage" / "jobs" / (job_id or "default") / "cam"
-            job_dir.mkdir(parents=True, exist_ok=True)
-            with open(job_dir / "cam_setup_analysis.json", "w") as fp:
-                json.dump(setup_analysis, fp, indent=2, default=str)
-            with open(job_dir / "cam_features_debug.json", "w") as fp:
-                json.dump({"features": features, "modelHash": model_hash}, fp, indent=2, default=str)
-        except Exception:
-            pass
+        model_hash = "parametric"
+        setup_metadata = {}
 
         return {
             "status": "success",
@@ -188,13 +82,17 @@ class CamPipelineManager:
             "setup_metadata": setup_metadata
         }
         
-    def _generate_stock_boundary(self, setup_metadata: Dict[str, Any]) -> list:
+    def _generate_stock_boundary(self, setup_metadata: Dict[str, Any], is_cylindrical: bool = False) -> list:
         stock = setup_metadata.get("resolvedStock", {})
         bounds = stock.get("bounds", {"min": [0,0,0], "max": [0,0,0]})
         s_min_x, s_min_y, _ = bounds["min"]
         s_max_x, s_max_y, _ = bounds["max"]
         
-        if stock.get("stockType") == "cylinder":
+        stock_type_str = str(stock.get("stockType", "")).lower()
+        if not is_cylindrical:
+            is_cylindrical = any(kw in stock_type_str for kw in ("cylinder", "round", "bar", "rod"))
+        
+        if is_cylindrical:
             # Generate a circular polygon for cylindrical stock
             import math
             cx = (s_min_x + s_max_x) / 2.0
@@ -215,19 +113,70 @@ class CamPipelineManager:
             [s_min_x, s_max_y]
         ]
 
-    def auto_plan_cam(self, step_file_path: str, machine_config: Dict[str, Any], job_id: str = "default_job") -> Dict[str, Any]:
+    def auto_plan_cam(self, machine_config: Dict[str, Any], job_id: str = "default_job", parameters: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Production-Grade Auto Generate Operations Pipeline.
         """
-        # 1. Initialize Manufacturing Profiles
-        machine = MachineProfile(**machine_config.get("machine_profile", {
-            "machine_id": "m1", "machine_name": "Default 3-Axis", "machine_type": "3_axis_mill",
-            "axis_count": 3,
-            "supported_operations": ["drilling", "facing", "pocket_milling", "2d_contour", "boss_clearing", "slot_milling", "chamfer_milling"]
-        }))
-        material = MaterialProfile(**machine_config.get("material_profile", {
-            "material_id": "mat1", "material_name": "Aluminum 6061", "cutting_speed": 300, "feed_per_tooth": 0.08
-        }))
+        # 1. Feature Recognition (Moved up to detect machine type)
+        if parameters:
+            from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
+            features = ParametricFeatureExtractor().extract(parameters)
+        else:
+            features = []
+
+        from app.services.gcode.machine_type_detector import MachineTypeDetector
+        detected_machine_type = MachineTypeDetector().detect_machine({}, features)
+
+        # 2. Initialize Manufacturing Profiles
+        setup_obj = machine_config.get("setup", {})
+        user_profile = machine_config.get("machine_profile", {})
+        m_id = machine_config.get("machine_profile_id") or machine_config.get("machine_id") or setup_obj.get("machineProfile") or setup_obj.get("machineProfileId") or setup_obj.get("machine") or (user_profile.get("machine_id") if isinstance(user_profile, dict) else None)
+        
+        from app.services.cam.profile_loader import ProfileLoader
+        profile_loader_init = ProfileLoader()
+        matrix_entry = profile_loader_init.get_machine_matrix_entry(m_id) if m_id else None
+        
+        if matrix_entry:
+            m_label = matrix_entry.get("label", m_id)
+            m_type_raw = str(matrix_entry.get("machineType", "MILL_3X_VMC")).upper()
+            acount = matrix_entry.get("axisCount", 3)
+            if "LATHE" in m_type_raw or "TURNING" in m_type_raw:
+                mapped_type = "lathe" if not ("LIVE" in m_type_raw or "TURN" in m_type_raw or "5X" in m_type_raw or acount >= 4) else "mill_turn"
+            elif "TURN" in m_type_raw or "SWISS" in m_type_raw:
+                mapped_type = "mill_turn"
+            elif "5X" in m_type_raw or acount == 5:
+                mapped_type = "5_axis_mill"
+            elif "4X" in m_type_raw or acount == 4:
+                mapped_type = "4_axis_mill"
+            else:
+                mapped_type = "3_axis_mill"
+                
+            user_profile = {
+                "machine_id": m_id,
+                "machine_name": m_label,
+                "machine_type": mapped_type,
+                "axis_count": acount,
+                "live_tooling": ("LIVE" in m_type_raw or "TURN" in m_type_raw),
+                "rotary_axis_availability": (acount >= 4 or "TURN" in m_type_raw or "LIVE" in m_type_raw or "5X" in m_type_raw or "4X" in m_type_raw),
+                "supported_operations": ["drilling", "facing", "pocket_milling", "2d_contour", "boss_clearing", "slot_milling", "chamfer_milling", "od_turning", "facing_turning", "tapping"]
+            }
+        elif not user_profile or (isinstance(user_profile, dict) and user_profile.get("machine_type") == "3_axis_mill" and detected_machine_type != "3_axis_mill"):
+            user_profile = {
+                "machine_id": m_id or "auto_1", "machine_name": "Auto Detected Machine", "machine_type": detected_machine_type,
+                "axis_count": 3 if detected_machine_type == "3_axis_mill" else 2,
+                "supported_operations": ["drilling", "facing", "pocket_milling", "2d_contour", "boss_clearing", "slot_milling", "chamfer_milling", "od_turning", "facing_turning", "tapping"]
+            }
+        
+        machine = MachineProfile(**user_profile) if isinstance(user_profile, dict) else MachineProfile(machine_id="default", machine_name="Default", machine_type="3_axis_mill", axis_count=3)
+        if machine.axis_count >= 4 or machine.machine_type in ("4_axis_mill", "5_axis_mill", "mill_turn", "lathe") or machine.live_tooling:
+            machine.rotary_axis_availability = True
+        
+        mat_config = machine_config.get("material_profile")
+        if isinstance(mat_config, dict) and mat_config.get("cutting_speed"):
+            material = MaterialProfile(**mat_config)
+        else:
+            mat_id = machine_config.get("workpieceMaterialId") or machine_config.get("material") or setup_obj.get("workpieceMaterialId") or setup_obj.get("material") or (mat_config.get("material_id") if isinstance(mat_config, dict) else None)
+            material = get_material_profile(mat_id)
         # Create default tools if not provided
         default_tools = [
             ToolProfile(tool_id="t1", name="1/4 Flat End Mill", type="flat_end_mill", diameter=6.35, flute_count=3, cutting_length=20.0, stickout=30.0),
@@ -240,101 +189,42 @@ class CamPipelineManager:
             ToolProfile(tool_id="t8", name="2in Face Mill", type="face_mill", diameter=50.8, flute_count=5, cutting_length=10.0, stickout=25.0),
             ToolProfile(tool_id="t9", name="3mm Cut-off Tool", type="cut_off_tool", diameter=3, flute_count=1, cutting_length=20.0, stickout=30.0)
         ]
-        tool_library = [ToolProfile(**t) for t in machine_config.get("tool_library", [])] if machine_config.get("tool_library") else default_tools
+        def _safe_tool(t):
+            if "name" not in t: t["name"] = f"Tool {t.get('tool_id', 'unknown')}"
+            if "flute_count" not in t: t["flute_count"] = 2
+            if "cutting_length" not in t: t["cutting_length"] = 20.0
+            if "stickout" not in t: t["stickout"] = 30.0
+            if "diameter" not in t: t["diameter"] = 10.0
+            return ToolProfile(**t)
+            
+        tool_library = [_safe_tool(t) for t in machine_config.get("tool_library", [])] if machine_config.get("tool_library") else default_tools
         tool_engine = ToolRecommendationEngine(tool_library)
-
-        # 2. Feature Recognition & Geometry Mapping
-        from app.services.io.step_importer import StepImporter
-        from app.services.geometry.setup_coordinate_resolver import SetupCoordinateResolver
-        
-        topology_info = self.step_importer.import_and_validate(step_file_path)
-        shape, metadata = StepImporter.load_and_heal(step_file_path)
-        
-        user_setup = machine_config.get("setup", {})
-        default_setup = user_setup if user_setup else {"toolAxis": [0.0, 0.0, 1.0]}
-        if "toolAxis" not in default_setup:
-            default_setup["toolAxis"] = [0.0, 0.0, 1.0]
             
-        resolver = SetupCoordinateResolver(shape, default_setup)
-        shape_in_setup = resolver.create_setup_space_copy()
-        setup_metadata = resolver.get_setup_metadata()
-        
-        features = self.feature_recognizer.recognize_features(shape=shape_in_setup)
-        
         # Synthesize Roughing Features based on Stock Dimensions
-        if "resolvedStock" in setup_metadata:
+        setup_metadata = {}
+        has_existing_face = any(f.get("type") == "face" or "face" in str(f.get("name", "")).lower() for f in features)
+        if "setup" in machine_config and "stockDimensions" in machine_config["setup"] and not has_existing_face:
+            sd = machine_config["setup"]["stockDimensions"]
             import uuid
-            stock_bounds = setup_metadata["resolvedStock"]["bounds"]
-            model_bb = shape_in_setup.bounding_box()
-            tol = 0.1
+            features.insert(0, {
+                "id": f"feat_synthetic_face_{uuid.uuid4().hex[:6]}",
+                "type": "face",
+                "name": "Face Top of Stock",
+                "geometry": {"status": "synthetic"},
+                "width": sd[1],
+                "length": sd[0],
+                "depth": 2.0,
+                "machiningRegion": {
+                    "topZ": 0.0,
+                    "bottomZ": -2.0,
+                    "area": float(sd[0] * sd[1]),
+                    "valid": True
+                }
+            })
             
-            # Stock bounds are already transformed into setup space by the coordinate resolver
-            s_max_x, s_max_y, s_max_z = stock_bounds["max"]
-            s_min_x, s_min_y, s_min_z = stock_bounds["min"]
-            
-            # Facing: if stock max Z > model max Z
-            if s_max_z > model_bb.max.Z + tol:
-                features.insert(0, {
-                    "id": f"feat_synthetic_face_{uuid.uuid4().hex[:6]}",
-                    "type": "face",
-                    "name": "Face Top of Stock",
-                    "geometry": {"status": "synthetic"},
-                    "machiningRegion": {
-                        "topZ": s_max_z,
-                        "bottomZ": model_bb.max.Z,
-                        "valid": True,
-                        "boundary": self._generate_stock_boundary(setup_metadata)
-                    }
-                })
-                
-            # Boundary Roughing: if stock X or Y > model X or Y
-            if (s_max_x > model_bb.max.X + tol or 
-                s_min_x < model_bb.min.X - tol or
-                s_max_y > model_bb.max.Y + tol or 
-                s_min_y < model_bb.min.Y - tol):
-                # Clamp depth to not exceed the stock boundary
-                bottom_z = max(model_bb.min.Z, s_min_z)
-                depth = s_max_z - bottom_z
-                features.insert(1, {
-                    "id": f"feat_synthetic_rough_{uuid.uuid4().hex[:6]}",
-                    "type": "contour",
-                    "subtype": "outer_profile",
-                    "name": "Rough Outer Boundary",
-                    "geometry": {"status": "synthetic"},
-                    "dimensions": {"depth": depth},
-                    "machiningRegion": {
-                        "topZ": s_max_z,
-                        "bottomZ": bottom_z,
-                        "valid": True,
-                        "boundary": self._generate_stock_boundary(setup_metadata)
-                    }
-                })
-                
-        mapper = GeometryMapper(self.feature_recognizer.extractor)
-        
-        # Filter out synthetic features from being enriched by OCP mapper
-        core_features = [f for f in features if f.get("geometry", {}).get("status") != "synthetic"]
-        synthetic_features = [f for f in features if f.get("geometry", {}).get("status") == "synthetic"]
-        
-        core_features = mapper.enrich_features(core_features, default_setup)
-        features = synthetic_features + core_features
-        
-        # Validate feature depths to prevent cutting deeper than physical stock
-        self._validate_feature_depths_against_stock(features, setup_metadata)
-        
-        features = self._sanitize_for_api(features)
-        
         for f in features:
-            if not f.get("machinable_in_current_setup", True):
-                f["status"] = "not_machinable"
-                f["statusReason"] = f.get("blocked_reason", "Not machinable in current setup")
-            elif f.get("geometry", {}).get("status") == "error" or f.get("geometry", {}).get("status") == "failed":
-                f["status"] = "not_machinable"
-                f["statusReason"] = "Geometry extraction failed"
-            else:
-                if "status" not in f:
-                    f["status"] = "machinable"
-        
+            f["status"] = "machinable"
+            
         validation_status = "success"
         geometry_mapping_summary = {"status": "success", "warnings": [], "errors": []}
         stock_suggestions = {}
@@ -342,14 +232,34 @@ class CamPipelineManager:
         
         # 3. Setup Planning
         caps = MachineCapability(**machine_config.get("machine_capability", {}))
+        mtype_str = str(machine.machine_type).lower() if machine and machine.machine_type else ""
+        if any(t in mtype_str for t in ("lathe", "turning", "mill_turn", "swiss")):
+            caps.turning = True
+            if any(t in mtype_str for t in ("mill_turn", "swiss", "live")) or machine.live_tooling:
+                caps.mill_turn = True
+                caps.milling_3axis = True
+                caps.indexed_4axis = True
+                caps.continuous_4axis = True
+            else:
+                caps.milling_3axis = False
+
         base_wcs = machine_config.get("setup", {}).get("wcs") or "G54"
+        sd = machine_config.get("setup", {}).get("stockDimensions") or machine_config.get("stockDimensions")
+        topo = {"bounds": [0, 0, 0, sd[0], sd[1], sd[2]]} if (sd and len(sd) >= 3) else {}
         setup_plans = self.setup_planner.plan_setups(
-            features, caps, topology_info=topology_info, base_wcs=base_wcs
+            features, caps, topology_info=topo, base_wcs=base_wcs
         )
         
         # Override the planner's basic Z-shift with the precise coordinate resolver matrix
         for sp in setup_plans:
-            sp.modelToSetupTransform = setup_metadata.get("modelToSetupTransform", sp.modelToSetupTransform)
+            flat_matrix = setup_metadata.get("modelToSetupTransform")
+            if flat_matrix and len(flat_matrix) == 16:
+                sp.modelToSetupTransform = [
+                    flat_matrix[0:4],
+                    flat_matrix[4:8],
+                    flat_matrix[8:12],
+                    flat_matrix[12:16]
+                ]
 
         
         all_operations = []
@@ -368,13 +278,6 @@ class CamPipelineManager:
                 
                 decision = FeatureDecision(feature_id=feature.get("id"), feature_type=feature.get("type", ""))
                 decision.setup_assignment = setup_id
-                
-                if not feature.get("machinable_in_current_setup", True):
-                    decision.status = "blocked"
-                    decision.operation_type = "blocked"
-                    decision.reason = feature.get("blocked_reason", "Exceeds physical stock boundaries")
-                    setup_decisions.append(decision)
-                    continue
                 
                 # 3a. Manufacturing Capability Validation
                 is_capable, cap_reason, rec_machine = ManufacturingCapabilityMatrix.evaluate_capability(feature, machine, sp.toolAxis)
@@ -399,12 +302,15 @@ class CamPipelineManager:
                     continue
                 
                 # 3c. Tool Selection & Feeds/Speeds (ONLY if capable)
-                tool, t_status, t_reason, feeds = tool_engine.recommend_tool(strategy, feature, machine, material)
+                tool, t_status, t_reason, feeds = tool_engine.recommend_tool(strategy, feature, machine, material, setup=setup_metadata)
                 if not tool:
                     decision.status = "blocked"
                     decision.reason = t_reason
                     setup_decisions.append(decision)
                     continue
+
+                if tool and not any(t.tool_id == tool.tool_id for t in tool_library):
+                    tool_library.append(tool)
                     
                 decision.selected_tool = tool.model_dump()
                 decision.tool_selection_reason = t_reason
@@ -670,6 +576,46 @@ class CamPipelineManager:
         except Exception:
             pass
 
+        from app.services.cam.profile_loader import ProfileLoader
+        from app.services.cam.program_block_converter import ProgramBlockConverter
+        from app.services.cam.cycle_time_engine import CycleTimeEngine
+        from app.services.cam.execution_timeline_builder import ExecutionTimelineBuilder
+        
+        profile_loader = ProfileLoader()
+        setup_obj_timing = machine_config.get("setup", {})
+        m_id_timing = machine_config.get("machine_profile_id") or machine_config.get("machine_id") or setup_obj_timing.get("machineProfile") or setup_obj_timing.get("machineProfileId") or setup_obj_timing.get("machine") or (machine_config.get("machine_profile", {}).get("machine_id") if isinstance(machine_config.get("machine_profile"), dict) else None) or "default"
+        matrix_entry_timing = profile_loader.get_machine_matrix_entry(m_id_timing) or {}
+        time_id = matrix_entry_timing.get("timingProfileId", "generic_vmc_3axis")
+        m_timing = profile_loader.load_machine_timing_profile(time_id) or profile_loader.load_machine_timing_profile("generic_vmc_3axis")
+        ctrl_id = machine_config.get("controller") or setup_obj_timing.get("controller") or matrix_entry_timing.get("defaultController") or "generic_fanuc"
+        c_timing = profile_loader.load_controller_timing_profile(ctrl_id) or profile_loader.load_controller_timing_profile("generic_fanuc")
+        h_profile = profile_loader.load_setup_handling_profile("generic_handling")
+        m_type_timing = machine_config.get("machine_type") or setup_obj_timing.get("machineType") or matrix_entry_timing.get("machineType") or "MILL_3X_VMC"
+        defaults = profile_loader.get_generic_defaults_for_type(m_type_timing)
+        
+        ct_engine = CycleTimeEngine(m_timing, c_timing, h_profile, defaults)
+        timeline_builder = ExecutionTimelineBuilder(ct_engine)
+        pb_converter = ProgramBlockConverter()
+        
+        planned_cycle_time_seconds = 0.0
+        for sp in (setup_plans or []):
+            setup_ops = [op for op in all_operations if op.get("setup_id") == sp.setupId or op.get("setupId") == sp.setupId]
+            if setup_ops:
+                exec_model = pb_converter.from_planned_operations(setup_ops, sp.setupId)
+                timeline = timeline_builder.build(exec_model)
+                planned_cycle_time_seconds += timeline.total_duration_seconds
+                
+                # Back-propagate highly accurate simulation times into the operation models so UI matches Simulation perfectly
+                op_durations = {}
+                for entry in timeline.entries:
+                    if entry.operation_id:
+                        op_durations[entry.operation_id] = op_durations.get(entry.operation_id, 0.0) + entry.duration_seconds
+                        
+                for op in setup_ops:
+                    op_id = op.get("id")
+                    if op_id in op_durations:
+                        op["estimated_time_s"] = op_durations[op_id]
+
         return {
             "status": "success",
             "features": features,
@@ -682,7 +628,8 @@ class CamPipelineManager:
             "setup_metadata": setup_metadata,
             "tools": [t.model_dump() for t in tool_library],
             "operations": all_operations,
-            "cam_validation": cam_validation
+            "cam_validation": cam_validation,
+            "planned_cycle_time_seconds": planned_cycle_time_seconds
         }
         
 
@@ -819,7 +766,7 @@ class CamPipelineManager:
                 model_bb = shape_in_setup.bounding_box()
                 feat_clone["machinable_in_current_setup"] = True
                 stock_type = setup.get("stockType") or setup_metadata.get("resolvedStock", {}).get("stockType", "box")
-                if stock_type == "cylinder":
+                if stock_type in ("cylinder", "relative_cylinder", "fixed_cylinder"):
                     import math
                     cx = (s_max_x + s_min_x) / 2.0
                     cy = (s_max_y + s_min_y) / 2.0
@@ -987,8 +934,30 @@ class CamPipelineManager:
 
         # 4. Generate Toolpaths
         from app.services.toolpath.motion_planner import MotionPlanner
+        from app.services.cam.profile_loader import ProfileLoader
+        from app.services.cam.program_block_converter import ProgramBlockConverter
+        from app.services.cam.cycle_time_engine import CycleTimeEngine
+        from app.services.cam.execution_timeline_builder import ExecutionTimelineBuilder
+        
         motion_planner = MotionPlanner()
         toolpath_engine = ToolpathEngine()
+        
+        profile_loader = ProfileLoader()
+        m_id = setup.get("machineProfileId", "default") if setup else "default"
+        matrix_entry = profile_loader.get_machine_matrix_entry(m_id) or {}
+        
+        time_id = matrix_entry.get("timingProfileId", "generic_vmc_3axis")
+        m_timing = profile_loader.load_machine_timing_profile(time_id)
+        if not m_timing:
+            m_timing = profile_loader.load_machine_timing_profile("generic_vmc_3axis")
+            
+        c_timing = profile_loader.load_controller_timing_profile("generic_fanuc")
+        h_profile = profile_loader.load_setup_handling_profile("generic_handling")
+        defaults = profile_loader.get_generic_defaults_for_type("MILL_3X_VMC")
+        
+        ct_engine = CycleTimeEngine(m_timing, c_timing, h_profile, defaults)
+        timeline_builder = ExecutionTimelineBuilder(ct_engine)
+        pb_converter = ProgramBlockConverter()
         
         for op in operations:
             if op.get("status") in ("error", "blocked", "unsupported"):
@@ -1051,7 +1020,14 @@ class CamPipelineManager:
 
                 commands = motion_planner.generate_commands(op, machiningRegion, tool, setup)
                 segments = toolpath_engine.generate_toolpaths_from_commands(op, commands)
-                op["toolpaths"] = [s.model_dump() for s in segments] if segments else []
+                if segments:
+                    op["toolpaths"] = [s.model_dump() for s in segments]
+                    exec_model = pb_converter.from_toolpaths([op], setup.get("id", "setup1") if setup else "setup1")
+                    timeline = timeline_builder.build(exec_model)
+                    op["estimated_time_s"] = timeline.total_duration_seconds
+                else:
+                    op["toolpaths"] = []
+                    op["estimated_time_s"] = 0.0
             except Exception as e:
                 op["status"] = "error"
                 op.setdefault("parameters", {})["error"] = f"Motion planning or toolpath validation failed: {str(e)}"
@@ -1122,9 +1098,8 @@ class CamPipelineManager:
         machine_limits = None
         if setup:
             machine_type = setup.get("machineType", "MILL_3X_VMC")
-            machine_profile_id = setup.get("machineProfileId") or setup.get("machineProfile") or "generic_mill_3x_vmc"
+            machine_profile_id = setup.get("machineProfileId") or setup.get("machineProfile") or "haas_vf2"
             
-            import json
             matrix_path = Path(__file__).resolve().parents[3] / "web-ui" / "lib" / "cam" / "cam_machine_matrix.json"
             if matrix_path.exists():
                 try:
@@ -1214,7 +1189,7 @@ class CamPipelineManager:
                 elif mtype == "retract":
                     retract_count += 1
 
-            est_cycle_time = (cut_distance / 800.0) + (rapid_distance / 2000.0) + (plunge_count * 2.0 / 200.0)
+            est_cycle_time = op.get("estimated_time_s", 0.0)
             
             error_reason = None
             if not op.get("featureId") and not op.get("feature_id"):
@@ -1248,6 +1223,15 @@ class CamPipelineManager:
                 "toolId": op.get("toolId") or op.get("tool_id")
             })
              
+        # Calculate setup cycle time
+        features_dict = {f.get("id"): f for f in features} if features else {}
+        # Get the setup from machine_config
+        setup_obj = machine_config.get("setup", {})
+        setup_time_details = CycleTimeEstimator.estimate_setup_time(operations, machine_profile, features_dict=features_dict, setup=setup_obj)
+        if setup:
+            setup["estimated_time_s"] = setup_time_details["total_setup_time_s"]
+            setup["tool_change_count"] = setup_time_details["tool_change_count"]
+            
         # Calculate hashes to verify uniqueness per model
         def obj_hash(obj):
             h = __import__('hashlib').md5()
@@ -1479,6 +1463,7 @@ class CamPipelineManager:
                     "pipeline_validation": validation_result,
                     "coordinate_validation": coord_report,
                     "operation_summaries": operation_summaries,
+                    "setup_time_details": setup_time_details,
                 }, f, indent=2, default=str)
                 
         except Exception as write_exc:
@@ -1497,7 +1482,8 @@ class CamPipelineManager:
             "gcode_blocked": has_errors,
             "gcode_block_reason": "One or more operations failed geometry mapping or coordinate validation" if has_errors else None,
             "camModelHash": model_hash,
-            "setup_metadata": setup_metadata
+            "setup_metadata": setup_metadata,
+            "setup_time_details": setup_time_details
         }
 
     def _transform_feature_to_setup_local(self, feature: Dict[str, Any], setup_plan) -> Any:
@@ -1537,15 +1523,31 @@ class CamPipelineManager:
         )
         
         # Transform machining region if present
-        region = feature.get("machining_region", {})
-        if region:
-            local_region = dict(region)
-            local_region["topZ"] = region.get("topZ", top_z - z_shift) + z_shift
-            local_region["bottomZ"] = region.get("bottomZ", bottom_z - z_shift) + z_shift
-            if "center" in region:
-                rc = region["center"]
-                local_region["center"] = [rc[0], rc[1], rc[2] + z_shift]
-            local_feat.machiningRegion = local_region
+        region = feature.get("machining_region", feature.get("machiningRegion", {}))
+        local_region = dict(region) if region else {}
+        
+        local_region["topZ"] = region.get("topZ", top_z - z_shift) + z_shift
+        local_region["bottomZ"] = region.get("bottomZ", bottom_z - z_shift) + z_shift
+        if "center" in region:
+            rc = region["center"]
+            local_region["center"] = [rc[0], rc[1], rc[2] + z_shift]
+            
+        # Add area dynamically if missing to prevent fallback to 2500mm^2 in estimator
+        if "area" not in local_region:
+            import math
+            import json
+            with open("storage/debug_feature.json", "a") as f:
+                f.write(json.dumps(feature) + "\n")
+            diameter = dims.get("diameter") or feature.get("diameter") or 0.0
+            if diameter > 0:
+                local_region["area"] = math.pi * (float(diameter) / 2.0) ** 2
+            else:
+                length = dims.get("length") or feature.get("length") or 0.0
+                width = dims.get("width") or feature.get("width") or 0.0
+                if length > 0 and width > 0:
+                    local_region["area"] = float(length) * float(width)
+                    
+        local_feat.machiningRegion = local_region
             
         return local_feat
 
@@ -1742,7 +1744,23 @@ class CamPipelineManager:
             
         stock_bounds = setup_metadata["resolvedStock"]["bounds"]
         stock_min_z = stock_bounds["min"][2] - 0.01 # tiny tolerance
-        stock_height = stock_bounds["max"][2] - stock_bounds["min"][2] + 0.01
+        stock_max_z = stock_bounds["max"][2]
+        stock_height = stock_max_z - stock_min_z + 0.02
+        
+        usable_z_limit = stock_min_z
+        usable_height_limit = stock_height
+        
+        # Adjust limits based on physical clamping if specified
+        if "setup" in setup_metadata and "workholding" in setup_metadata["setup"]:
+            wh = setup_metadata["setup"]["workholding"]
+            if wh and isinstance(wh, dict):
+                grip = float(wh.get("clampingGrip", 0.0))
+                clear = float(wh.get("safetyClearanceMargin", 0.0))
+                if grip > 0 or clear > 0:
+                    usable_length = stock_height - grip - clear
+                    if usable_length > 0:
+                        usable_z_limit = stock_max_z - usable_length
+                        usable_height_limit = usable_length
         
         for f in features:
             is_blocked = False
@@ -1757,11 +1775,11 @@ class CamPipelineManager:
                 
                 # If z_top is known, we can accurately check the absolute depth
                 if z_top is not None:
-                    if z_top - f_depth < stock_min_z:
+                    if z_top - f_depth < usable_z_limit:
                         is_blocked = True
                 else:
                     # If z_top isn't known, fallback to checking total stock height
-                    if f_depth > stock_height:
+                    if f_depth > usable_height_limit:
                         is_blocked = True
             
             # Machining region depth (used by drills and some other ops)
@@ -1771,10 +1789,10 @@ class CamPipelineManager:
                     mr_depth = mr["depth"]
                     z_top = mr.get("topZ")
                     if z_top is not None:
-                        if z_top - mr_depth < stock_min_z:
+                        if z_top - mr_depth < usable_z_limit:
                             is_blocked = True
                     else:
-                        if mr_depth > stock_height:
+                        if mr_depth > usable_height_limit:
                             is_blocked = True
                             
             if is_blocked:

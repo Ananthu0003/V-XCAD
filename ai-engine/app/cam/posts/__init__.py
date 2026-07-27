@@ -17,5 +17,7 @@ def get_post_processor(controller_name: str, cam_params: dict) -> BasePostProces
         return SiemensPostProcessor(cam_params)
     elif name == "heidenhain":
         return HeidenhainPostProcessor(cam_params)
-    # Default fallback
-    return IsoPostProcessor(cam_params)
+    elif name in ("iso", "rs-274", "rs274", "iso_6983", "generic_iso", "rs274d"):
+        return IsoPostProcessor(cam_params)
+        
+    raise ValueError(f"Unsupported or unverified controller '{controller_name}'. NC export is blocked for unvalidated machine configurations.")

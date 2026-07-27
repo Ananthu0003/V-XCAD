@@ -7,7 +7,8 @@ export type MachineType =
   | "CNC_LATHE" 
   | "MILL_TURN" 
   | "DRILL_TAP_CENTER" 
-  | "ROUTER_3X";
+  | "ROUTER_3X"
+  | string;
 
 export type ControllerId = 
   | "FANUC_0I_MF" 
@@ -21,7 +22,8 @@ export type ControllerId =
   | "BROTHER_CNC_D00" 
   | "LINUXCNC" 
   | "MACH3" 
-  | "GRBL";
+  | "GRBL"
+  | string;
 
 export type PostProcessorId = 
   | "AUTO" 
@@ -36,7 +38,9 @@ export type PostProcessorId =
   | "BROTHER_DRILL_TAP_MILL" 
   | "LINUXCNC_3X_MILL" 
   | "MACH3_3X_ROUTER" 
-  | "GRBL_3X_ROUTER";
+  | "GRBL_3X_ROUTER"
+  | string;
+
 
 export interface CamSupport {
   setup: boolean;

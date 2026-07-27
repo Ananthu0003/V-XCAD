@@ -2,7 +2,15 @@ from typing import List, Dict, Any, Tuple
 import datetime
 
 class BasePostProcessor:
-    """Base class for CNC Post Processors."""
+    """
+    Base class for CNC Post Processors.
+    
+    IMPORTANT: Common G-codes (e.g., G43 tool length compensation, G54-G59 work offsets, 
+    G81-G83 canned drilling cycles) and M-codes (e.g., M08/M09 flood coolant) must NOT be 
+    treated as universally available across all machines. Their availability, parameters, 
+    and behavior depend on the target machine kinematics, controller firmware, and enabled options.
+    Post-processors must validate these capabilities before outputting NC commands.
+    """
     
     def __init__(self, post_data: Dict[str, Any]):
         self.setup = post_data.get("setup", {})

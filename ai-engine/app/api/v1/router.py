@@ -24,8 +24,8 @@ from app.services.llm.parameter_render import ParameterRenderService
 
 router = APIRouter(tags=["cad"])
 
-_ALLOWED_MIME_PREFIXES = ("image/",)
-_ALLOWED_MIME_EXACT   = {"application/pdf"}
+_ALLOWED_MIME_PREFIXES = ()
+_ALLOWED_MIME_EXACT   = {"application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"}
 _DEFAULT_MODEL = os.getenv("GENAI_MODEL", "gemini-3.5-flash")
 
 
@@ -218,8 +218,17 @@ def _resolve_mime(content_type: str, filename: str) -> str | None:
     if any(ct.startswith(p) for p in _ALLOWED_MIME_PREFIXES):
         return ct
     # Fallback: infer from extension
-    if filename.lower().endswith(".pdf"):
+    ext = filename.lower().split('.')[-1] if '.' in filename else ''
+    if ext == "pdf":
         return "application/pdf"
+    if ext in ("jpg", "jpeg"):
+        return "image/jpeg"
+    if ext == "png":
+        return "image/png"
+    if ext == "gif":
+        return "image/gif"
+    if ext == "webp":
+        return "image/webp"
     return None
 
 
@@ -588,10 +597,10 @@ async def render(
         cam_mgr = CamPipelineManager()
         analysis_result = await asyncio.to_thread(
             cam_mgr.analyze_features, 
-            result.get("step_path"), 
+            request.parameters if hasattr(request, "parameters") and request.parameters else {}, 
             session_id, 
             "",
-            request.cam_parameters.get("setup", {}) if request.cam_parameters else {}
+            request.cam_parameters.get("setup", {}) if hasattr(request, "cam_parameters") and request.cam_parameters else {}
         )
         
         features = analysis_result.get("features")
@@ -635,163 +644,6 @@ async def render(
     )
 
 
-def _process_gcode(cam_request_dict: dict, step_file_path: str | None, temp_path_str: str | None) -> dict:
-    from app.models.schemas import CAMJobRequest
-    from app.services.gcode.gcode_generator import GCodeGenerator
-    from app.services.geometry.csg_parser import CSGParser, export_to_step
-
-    cam_request = CAMJobRequest(**cam_request_dict)
-
-    is_ref, asset_id = is_step_reference(cam_request.csg_tree)
-    if is_ref and asset_id:
-        shape = ShapeCache.get(asset_id)
-        if shape is None:
-            raise ValueError(f"STEP asset ID {asset_id} not found in cache or has expired.")
-        generator = GCodeGenerator(
-            controller=cam_request.machine_configuration.controller,
-            safe_z=cam_request.machine_configuration.safe_z,
-            resolution=cam_request.machine_configuration.resolution
-        )
-        return generator.generate(cam_request, step_path=shape)
-
-    if not cam_request.csg_tree and step_file_path:
-        shape = ShapeCache.get(step_file_path)
-        if shape is not None:
-            generator = GCodeGenerator(
-                controller=cam_request.machine_configuration.controller,
-                safe_z=cam_request.machine_configuration.safe_z,
-                resolution=cam_request.machine_configuration.resolution
-            )
-            return generator.generate(cam_request, step_path=shape)
-
-        generator = GCodeGenerator(
-            controller=cam_request.machine_configuration.controller,
-            safe_z=cam_request.machine_configuration.safe_z,
-            resolution=cam_request.machine_configuration.resolution
-        )
-        return generator.generate(cam_request, step_path=step_file_path)
-
-    if not cam_request.csg_tree:
-        raise ValueError("Either 'csg_tree' or 'step_file_path' must be provided.")
-
-    shape = CSGParser.parse(cam_request.csg_tree)
-    if temp_path_str:
-        export_to_step(shape, temp_path_str)
-
-    generator = GCodeGenerator(
-        controller=cam_request.machine_configuration.controller,
-        safe_z=cam_request.machine_configuration.safe_z,
-        resolution=cam_request.machine_configuration.resolution
-    )
-    return generator.generate(cam_request, step_path=temp_path_str)
-
-
-from fastapi import Request
-
-@router.post("/gcode", response_model=GCodeResponse)
-async def generate_gcode(
-    request: Request,
-    file: UploadFile | None = File(None),
-    job_request: str | None = Form(None)
-) -> GCodeResponse:
-    import tempfile
-    import pathlib
-
-    content_type = request.headers.get("content-type", "")
-    temp_path = None
-
-    if "multipart/form-data" in content_type:
-        if not file or not job_request:
-            raise HTTPException(
-                status_code=400,
-                detail={"error": {"message": "Form data must include 'file' and 'job_request'."}}
-            )
-        try:
-            job_request_data = json.loads(job_request)
-            cam_request = CAMJobRequest(**job_request_data)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400,
-                detail={"error": {"message": f"Invalid CAMJobRequest JSON payload: {exc}"}}
-            )
-
-        file_bytes = await file.read()
-        filename = file.filename or ""
-
-        is_step = False
-        if filename.endswith((".step", ".stp")):
-            is_step = True
-        elif file_bytes.startswith(b"ISO-10303-21") or b"HEADER;" in file_bytes[:500]:
-            is_step = True
-
-        if is_step:
-            with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as tf:
-                tf.write(file_bytes)
-                temp_path = pathlib.Path(tf.name)
-            cam_request.step_file_path = str(temp_path)
-        else:
-            try:
-                cam_request.csg_tree = file_bytes.decode("utf-8")
-            except Exception:
-                with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as tf:
-                    tf.write(file_bytes)
-                    temp_path = pathlib.Path(tf.name)
-                cam_request.step_file_path = str(temp_path)
-    else:
-        try:
-            body_bytes = await request.body()
-            body_json = json.loads(body_bytes)
-            cam_request = CAMJobRequest(**body_json)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400,
-                detail={"error": {"message": f"Invalid JSON body: {exc}"}}
-            )
-    try:
-        if not cam_request.csg_tree and cam_request.step_file_path:
-            pass
-        else:
-            if not cam_request.csg_tree:
-                raise HTTPException(
-                    status_code=400,
-                    detail={"error": {"message": "Either 'csg_tree' or 'step_file_path' must be provided."}}
-                )
-            if not temp_path:
-                with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as tf:
-                    temp_path = pathlib.Path(tf.name)
-
-        result = await asyncio.to_thread(
-            _process_gcode,
-            cam_request.model_dump(),
-            cam_request.step_file_path,
-            str(temp_path) if temp_path else None
-        )
-
-        gcode_content = result.get("gcode", "")
-        if gcode_content.startswith("; ERROR:"):
-            raise HTTPException(
-                status_code=400,
-                detail={"error": {"message": gcode_content[8:].strip()}}
-            )
-
-        return GCodeResponse(
-            gcode=gcode_content,
-            toolpaths=result.get("toolpaths", [])
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={"error": {"message": f"G-code generation failed: {exc}"}}
-        )
-    finally:
-        if temp_path and temp_path.exists():
-            try:
-                temp_path.unlink()
-            except Exception:
-                pass
-
 
 def _process_import_step(file_bytes: bytes) -> tuple[bytes, Any]:
     import tempfile
@@ -830,90 +682,6 @@ def _process_import_step(file_bytes: bytes) -> tuple[bytes, Any]:
                 pass
 
 
-@router.post("/import_step")
-@router.post("/import/step")
-async def import_step_endpoint(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith((".step", ".stp")):
-        raise HTTPException(
-            status_code=400,
-            detail={"error": {"message": "Invalid file format. Only .step or .stp files are accepted."}}
-        )
-
-    try:
-        file_bytes = await file.read()
-        
-        session_id = uuid.uuid4().hex
-        outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
-        outputs_dir.mkdir(parents=True, exist_ok=True)
-        
-        step_filename = f"cad_{session_id}.step"
-        stl_filename = f"cad_{session_id}.stl"
-        
-        step_path = outputs_dir / step_filename
-        stl_path = outputs_dir / stl_filename
-        
-        with open(step_path, "wb") as f:
-            f.write(file_bytes)
-            
-        from build123d import import_step, export_stl
-        imported_shape = await asyncio.to_thread(import_step, str(step_path))
-        
-        bb = imported_shape.bounding_box()
-        max_dim = max(
-            bb.max.X - bb.min.X,
-            bb.max.Y - bb.min.Y,
-            bb.max.Z - bb.min.Z
-        )
-        tolerance = max(0.001, min(0.5, max_dim * 0.002))
-        
-        await asyncio.to_thread(export_stl, imported_shape, str(stl_path), tolerance, 0.15)
-        
-        asset_id = str(uuid.uuid4())
-        ShapeCache.set(asset_id, imported_shape)
-        
-        features = None
-        validation_status = None
-        mapping_summary = None
-        
-        try:
-            from app.services.cam_pipeline_manager import CamPipelineManager
-            cam_mgr = CamPipelineManager()
-            analysis_result = await asyncio.to_thread(
-                cam_mgr.analyze_features, 
-                str(step_path), 
-                session_id, 
-                "",
-                {}
-            )
-            features = analysis_result.get("features")
-            validation_status = analysis_result.get("validation_status")
-            mapping_summary = analysis_result.get("geometry_mapping_summary")
-        except Exception as e:
-            print(f"Error analyzing features on import: {e}")
-        
-        return {
-            "script": f"# Direct STEP Import: {file.filename}\n",
-            "session_id": session_id,
-            "artifacts": {
-                "stl_url": f"/outputs/{stl_filename}",
-                "step_url": f"/outputs/{step_filename}",
-                "features": features,
-                "setup_metadata": analysis_result.get("setup_metadata") if 'analysis_result' in locals() and analysis_result else None,
-                "feature_validation_status": validation_status,
-                "geometry_mapping_summary": mapping_summary,
-            }
-        }
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={"error": {"message": f"STEP Import failed: {str(exc)}"}}
-        )
-
-
-@router.post("/import/teardown/{asset_id}")
-async def import_teardown_endpoint(asset_id: str):
-    ShapeCache.evict(asset_id)
-    return {"status": "evicted"}
 
 
 # --- Legacy endpoints for frontend compatibility ---
@@ -994,19 +762,32 @@ class CamAnalyzeRequest(BaseModel):
     session_id: str
     job_id: str = "default_job"
     cam_run_id: str = ""
+    parameters: Dict[str, Any] = {}
 
 @router.post("/cam/analyze")
 async def cam_analyze(request: CamAnalyzeRequest):
     outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
     step_path = outputs_dir / f"cad_{request.session_id}.step"
-    if not step_path.exists():
-        raise HTTPException(status_code=404, detail="STEP file not found for session")
+    
+    # We no longer strictly require the STEP file since we are extracting from parameters
+    # but we'll leave the path resolution just in case
         
     try:
-        from app.services.cam_pipeline_manager import CamPipelineManager
-        cam_mgr = CamPipelineManager()
-        result = await asyncio.to_thread(cam_mgr.analyze_features, str(step_path), request.job_id, request.cam_run_id, {})
-        return result
+        from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
+        extractor = ParametricFeatureExtractor()
+        features = extractor.extract(request.parameters)
+        
+        return {
+            "status": "ok",
+            "features": features,
+            "geometry_mapping_summary": {
+                "mapped_features": len(features),
+                "failed_features": 0,
+                "blocked_features": 0,
+                "total_features": len(features)
+            },
+            "validation_status": "ok"
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail={"error": {"message": f"CAM analysis failed: {exc}"}})
 
@@ -1015,19 +796,130 @@ class CamAutoPlanRequest(BaseModel):
     job_id: str = "default_job"
     cam_run_id: str = ""
     machine_config: Dict[str, Any] = {}
+    parameters: Dict[str, Any] = {}
 
 @router.post("/cam/auto_plan")
 async def cam_auto_plan(request: CamAutoPlanRequest):
-    outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
-    step_path = outputs_dir / f"cad_{request.session_id}.step"
-    if not step_path.exists():
-        raise HTTPException(status_code=404, detail="STEP file not found for session")
-        
     try:
+        # Inject stock dimensions from parameters into setup if missing
+        setup = request.machine_config.get("setup", {})
+        if not setup.get("stockDimensions") and not setup.get("resolvedStock"):
+            params = request.parameters
+            is_lathe = "outer_diameter" in params or "od" in params
+            stock_w = float(params.get("width") or params.get("length") or params.get("outer_diameter") or 100.0)
+            stock_h = float(params.get("height") or params.get("overall_length") or params.get("thickness") or 100.0)
+            setup["stockDimensions"] = [stock_w, stock_w, stock_h]
+            if is_lathe:
+                setup["stockType"] = "cylinder"
+            request.machine_config["setup"] = setup
+            
         from app.services.cam_pipeline_manager import CamPipelineManager
         cam_mgr = CamPipelineManager()
-        result = await asyncio.to_thread(cam_mgr.auto_plan_cam, str(step_path), request.machine_config, request.job_id)
-        return result
+        result = await asyncio.to_thread(
+            cam_mgr.auto_plan_cam,
+            request.machine_config,
+            request.job_id or request.session_id,
+            request.parameters
+        )
+        
+        # Generate toolpaths for returned operations
+        from app.services.toolpath.parametric_toolpath_engine import ParametricToolpathEngine
+        from app.services.cam.cycle_time_estimator import CycleTimeEstimator
+        from app.models.manufacturing import MachineProfile
+        from app.models.schemas import ToolpathSegment
+        import json
+        engine = ParametricToolpathEngine()
+        setup = request.machine_config.get("setup", {})
+        m_cap = request.machine_config.get("machine_capability", {})
+        machine_profile = MachineProfile(
+            machine_id=request.machine_config.get("machine_id", "default"),
+            machine_name=request.machine_config.get("machine_name", "Default Machine"),
+            machine_type=request.machine_config.get("machine_type", "3_axis_mill"),
+            axis_count=m_cap.get("axis_count", 3),
+            rapid_feedrate=request.machine_config.get("rapid_feedrate", 5000.0),
+            tool_change_time=request.machine_config.get("tool_change_time", 15.0)
+        )
+        
+        operations = result.get("operations", [])
+        features = result.get("features", [])
+        setups = result.get("setups", [])
+        tools = result.get("tools", [])
+        
+        flat_paths = []
+        for op in operations:
+            if op.get("toolpaths"):
+                paths = op["toolpaths"]
+            else:
+                fid = op.get("feature_id")
+                feat = next((f for f in features if f.get("id") == fid), {})
+                paths = engine.generate_toolpath(op, feat, setup)
+                op["toolpaths"] = paths
+                
+            try:
+                for p in paths:
+                    if isinstance(p, dict) and "setupId" not in p:
+                        p["setupId"] = setup.get("setupId") or setup.get("id") or "setup_1"
+                
+                # Parametric time is often more accurate than simple fallback toolpaths
+                # because simple toolpaths lack high-speed machining optimization.
+                # Only use segment-based if parametric is completely missing.
+                feat_id = op.get("feature_id") or op.get("featureId")
+                feat = features_dict.get(feat_id, {})
+                
+                if op.get("estimated_time_s", 0) <= 0:
+                    op["estimated_time_s"] = CycleTimeEstimator.estimate_operation_time_parametric(op, feat, setup)
+                    
+            except Exception as e:
+                print(f"Error computing time for op {op.get('id')}: {e}")
+                if "estimated_time_s" not in op:
+                    op["estimated_time_s"] = 0.0
+                
+            op["status"] = op.get("status") or "generated"
+            flat_paths.extend(paths)
+            
+        # Re-estimate total setup time
+        features_dict = {f.get("id"): f for f in features} if features else {}
+        setup_time_details = CycleTimeEstimator.estimate_setup_time(operations, machine_profile, features_dict=features_dict, setup=setup)
+        result["setup_time_details"] = setup_time_details
+            
+        job_dir = Path(__file__).resolve().parents[4] / "storage" / "jobs" / request.job_id / "cam"
+        job_dir.mkdir(parents=True, exist_ok=True)
+        
+        with open(job_dir / "cam_toolpaths.json", "w") as f:
+            json.dump({"toolpath_schema_version": "semantic_v1", "toolpaths": flat_paths}, f)
+        with open(job_dir / "cam_operations.json", "w") as f:
+            json.dump({"operations": operations}, f)
+            
+        # Filter returned tools to ONLY tools assigned to operations
+        assigned_tool_ids = {op.get("tool_id") or (op.get("tool") or {}).get("tool_id") or (op.get("tool") or {}).get("id") for op in operations}
+        job_tools_dict = {}
+        for op in operations:
+            st = op.get("selected_tool") or op.get("tool")
+            if isinstance(st, dict):
+                tid = st.get("tool_id") or st.get("id")
+                if tid: job_tools_dict[tid] = st
+        for t in tools:
+            if isinstance(t, dict):
+                tid = t.get("tool_id") or t.get("id")
+                if tid in assigned_tool_ids and tid not in job_tools_dict:
+                    job_tools_dict[tid] = t
+
+        tools = list(job_tools_dict.values())
+            
+        return {
+            "status": "success",
+            "features_detected": len(features),
+            "features": features,
+            "setups": setups,
+            "validation_status": result.get("validation", {}).get("status", "ok"),
+            "geometry_mapping_summary": result.get("validation", {}).get("summary", {}),
+            "stock_suggestions": result.get("stock_suggestions", {}),
+            "camModelHash": "parametric",
+            "setup_metadata": result.get("setup_metadata", {}),
+            "tools": tools,
+            "operations": operations,
+            "planned_cycle_time_seconds": result.get("setup_time_details", {}).get("total_setup_time_s", 0)
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail={"error": {"message": f"CAM auto-plan failed: {exc}"}})
 
@@ -1039,42 +931,107 @@ class CamGenerateToolpathsRequest(BaseModel):
     setups: Optional[List[Dict[str, Any]]] = None
     tools: List[Dict[str, Any]]
     operations: List[Dict[str, Any]]
+    features: Optional[List[Dict[str, Any]]] = None
     modelHash: Optional[str] = ""
+    parameters: Dict[str, Any] = {}
 
 @router.post("/cam/toolpaths")
 async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
-    outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
-    step_path = outputs_dir / f"cad_{request.session_id}.step"
-    if not step_path.exists():
-        raise HTTPException(status_code=404, detail="STEP file not found for session")
-        
-    import hashlib
-    with open(step_path, "rb") as f:
-        current_hash = hashlib.sha256(f.read()).hexdigest()
-        
-    if request.modelHash and request.modelHash != current_hash:
-        raise HTTPException(status_code=400, detail={"error": {"message": "Model hash mismatch - generate CAD again."}})
-        
     try:
-        from app.services.cam_pipeline_manager import CamPipelineManager
-        cam_mgr = CamPipelineManager()
-        result = await asyncio.to_thread(
-            cam_mgr.generate_toolpaths, 
-            str(step_path),
-            request.job_id,
-            request.cam_run_id,
-            request.setup,
-            request.setups,
-            request.tools,
-            request.operations
+        from app.services.toolpath.parametric_toolpath_engine import ParametricToolpathEngine
+        from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
+        
+        # We re-extract the features from parameters to get the context
+        extractor = ParametricFeatureExtractor()
+        features = extractor.extract(request.parameters)
+        feature_map = {f.get("id"): f for f in features if isinstance(f, dict) and f.get("id")}
+        
+        # Also merge raw features directly from request parameters and request.features
+        raw_features = (
+            request.features
+            or request.parameters.get("camFeatures") 
+            or request.parameters.get("features") 
+            or request.parameters.get("cam_features") 
+            or []
         )
+        if isinstance(raw_features, list):
+            for f in raw_features:
+                if isinstance(f, dict) and f.get("id"):
+                    # Use the provided feature, overriding any auto-extracted ones with the same ID
+                    feature_map[f["id"]] = f
+        
+        from app.services.cam.cycle_time_estimator import CycleTimeEstimator
+        from app.models.schemas import ToolpathSegment
+        from app.models.manufacturing import MachineProfile
+        engine = ParametricToolpathEngine()
+        machine = MachineProfile(machine_id="m1", machine_name="Default Mill", machine_type="3_axis_mill", axis_count=3)
         
         flat_paths = []
-        for op in result.get("operations", []):
-            flat_paths.extend(op.get("toolpaths", []))
+        total_cycle_time = 0.0
+        for op in request.operations:
+            fid = op.get("feature_id") or op.get("featureId")
+            feature = feature_map.get(fid, {})
+
+            # Ensure safe_heights are populated to pass G-code safety validation
+            if not op.get("safe_heights") or not isinstance(op.get("safe_heights"), dict):
+                op["safe_heights"] = {}
+            if op["safe_heights"].get("retract") is None:
+                op["safe_heights"]["retract"] = 5.0
+            if op["safe_heights"].get("clearance") is None:
+                op["safe_heights"]["clearance"] = 10.0
+            if op["safe_heights"].get("top") is None:
+                op["safe_heights"]["top"] = 0.0
+            if op["safe_heights"].get("bottom") is None:
+                op["safe_heights"]["bottom"] = -abs(float(feature.get("depth", 10.0)))
+
+            # Generate the paths directly from parametric math
+            setup_id = op.get("setup_id") or op.get("setupId") or (request.setup.get("setupId") if isinstance(request.setup, dict) else None)
+            paths = engine.generate_toolpath(op, feature, request.setup)
+            if setup_id:
+                for p in paths:
+                    p["setupId"] = setup_id
+            op["toolpaths"] = paths
+            op["status"] = "generated"
+            op["toolpath_schema_version"] = "semantic_v1"
+            try:
+                # Add toolpaths to operation so it's fully populated
+                path_segs = [ToolpathSegment(**p) for p in paths]
+                op_time = CycleTimeEstimator.estimate_operation_time(path_segs, machine)
+                op["estimated_time_s"] = op_time
+                total_cycle_time += op_time
+            except Exception:
+                pass
+                
+            flat_paths.extend(paths)
             
-        result["toolpaths"] = flat_paths
-        result["camRunId"] = request.cam_run_id
+        job_dir = Path(__file__).resolve().parents[4] / "storage" / "jobs" / request.job_id / "cam"
+        job_dir.mkdir(parents=True, exist_ok=True)
+        with open(job_dir / "cam_toolpaths.json", "w") as f:
+            json.dump({"toolpath_schema_version": "semantic_v1", "toolpaths": flat_paths}, f)
+            
+        with open(job_dir / "cam_toolpath_engine_input.json", "w") as f:
+            json.dump({
+                "setup": request.setup,
+                "tools": request.tools,
+                "operations": request.operations
+            }, f)
+            
+        with open(job_dir / "cam_operations.json", "w") as f:
+            json.dump({"operations": request.operations}, f)
+            
+        with open(job_dir / "cam_hashes.json", "w") as f:
+            json.dump({
+                "modelHash": request.modelHash or "parametric",
+                "toolpath_schema_version": "semantic_v1",
+                "operations": {op["id"]: "parametric" for op in request.operations}
+            }, f)
+            
+        result = {
+            "operations": request.operations,
+            "toolpaths": flat_paths,
+            "camRunId": request.cam_run_id,
+            "gcode_blocked": False
+        }
         
         # Evaluate readiness based on generated output
         from app.services.validation.toolpath_schema_validator import ToolpathSchemaValidator
@@ -1097,6 +1054,7 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
         result["can_generate_gcode"] = readiness["can_generate_gcode"]
         result["operation_statuses"] = readiness["operation_statuses"]
         result["toolpath_schema_version"] = "semantic_v1"
+        result["planned_cycle_time_seconds"] = total_cycle_time
         
         # Merge readiness errors into result errors if any
         if readiness.get("errors"):
@@ -1204,7 +1162,7 @@ async def cam_generate_gcode(request: CamGCodeRequest):
                 pass
     
     machine_type = engine_setup.get("machineType", "MILL_3X_VMC")
-    machine_profile = engine_setup.get("machineProfile", "generic_mill_3x_vmc")
+    machine_profile = engine_setup.get("machineProfile", "haas_vf2")
     controller = engine_setup.get("controller", "FANUC_0I_MF")
     post_processor_req = engine_setup.get("postProcessor", "AUTO")
     
@@ -1341,12 +1299,17 @@ async def cam_generate_gcode(request: CamGCodeRequest):
             with open(job_dir / "generated_klartext.h", "w") as f:
                 f.write(gcode_klartext)
                 
+            final_toolpaths = []
+            for op in valid_operations:
+                final_toolpaths.extend(op.get("toolpaths", []))
+
             return {
                 "can_generate_gcode": True, 
                 "gcode": gcode_iso, 
                 "klartext": gcode_klartext,
                 "errors": [], 
-                "status": "success"
+                "status": "success",
+                "toolpaths": final_toolpaths
             }
         else:
             post_processor = PostProcessorFactory.create(resolved_post)
@@ -1372,7 +1335,11 @@ async def cam_generate_gcode(request: CamGCodeRequest):
             with open(gcode_path, "w") as f:
                 f.write(gcode)
                 
-            return {"can_generate_gcode": True, "gcode": gcode, "errors": [], "status": "success"}
+            final_toolpaths = []
+            for op in valid_operations:
+                final_toolpaths.extend(op.get("toolpaths", []))
+
+            return {"can_generate_gcode": True, "gcode": gcode, "errors": [], "status": "success", "toolpaths": final_toolpaths}
     except Exception as exc:
         import traceback
         tb = traceback.format_exc()

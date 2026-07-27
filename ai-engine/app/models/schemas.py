@@ -68,6 +68,8 @@ class CamSetupPlan(BaseModel):
     machinableFeatures: list[str] = Field(default_factory=list)
     deferredFeatures: list[str] = Field(default_factory=list)
     unsupportedFeatures: list[str] = Field(default_factory=list)
+    estimated_time_s: float = 0.0
+    tool_change_count: int = 0
 
 class SetupLocalFeature(BaseModel):
     featureId: str
@@ -220,6 +222,7 @@ class CamOperationSchema(BaseModel):
     safe_heights: dict[str, float] = Field(default_factory=dict)
     parameters: dict[str, Any] = Field(default_factory=dict)
     toolpaths: Optional[list[ToolpathSegment]] = None
+    estimated_time_s: float = 0.0
 
 class HeightsSettings(BaseModel):
     clearanceHeight: float
@@ -237,7 +240,7 @@ class CamSetup(BaseModel):
     # Phase 2 Canonical Setup Data
     setupSchemaVersion: int = 1
     machineType: Optional[str] = "MILL_3X_VMC"
-    machineProfileId: Optional[str] = "generic_mill_3x_vmc"
+    machineProfileId: Optional[str] = "haas_vf2"
     controllerId: Optional[str] = "FANUC_0I_MF"
     postProcessorId: Optional[str] = "AUTO"
     resolved_post_processor: Optional[str] = None
@@ -285,6 +288,7 @@ class CamSetup(BaseModel):
     setupType: str = "milling_3axis"
     toolAxis: list[float] = [0.0, 0.0, 1.0]
     stockOrientation: str = "top_z"
+    estimated_time_s: float = 0.0
 
 class CamTool(BaseModel):
     id: str
@@ -363,7 +367,7 @@ class RenderResponse(BaseModel):
 
 class MachineConfig(BaseModel):
     machine_type: str = "MILL_3X_VMC"
-    machine_profile: str = "generic_mill_3x_vmc"
+    machine_profile: str = "haas_vf2"
     controller: str = "FANUC_0I_MF"
     post_processor: str = "AUTO"
     resolved_post_processor: Optional[str] = None

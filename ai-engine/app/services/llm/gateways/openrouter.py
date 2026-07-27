@@ -42,7 +42,7 @@ class OpenRouterGateway(BaseLLMGateway):
         # Handle specific model features via standard openAI config
         payload["temperature"] = 0.0
         if metadata.maxTokens:
-            payload["max_tokens"] = metadata.maxTokens
+            payload["max_tokens"] = min(metadata.maxTokens, 8192)
 
         if response_json:
             payload["response_format"] = {"type": "json_object"}

@@ -87,14 +87,16 @@ class CamReadinessEvaluator:
                     op_blocked_reason = params.get("error") or params.get("errorReason") or op.get("reason")
                     op_code = "OPERATION_ERROR"
                     
-                    if op_blocked_reason:
-                        errors.append({
-                            "level": "error",
-                            "operation_id": op_id,
-                            "feature_id": feat_id,
-                            "code": op_code,
-                            "message": op_blocked_reason
-                        })
+                    if not op_blocked_reason:
+                        op_blocked_reason = f"Operation is {op_status} but no specific reason was provided."
+                        
+                    errors.append({
+                        "level": "error",
+                        "operation_id": op_id,
+                        "feature_id": feat_id,
+                        "code": op_code,
+                        "message": op_blocked_reason
+                    })
                 elif op_status == "unsupported":
                     # Unsupported features (like turning on a mill) shouldn't block the rest of the G-Code
                     score = min(score, 80)
@@ -124,6 +126,7 @@ class CamReadinessEvaluator:
             score = 20
             can_generate_gcode = False
             blocking_reasons.append("No operations found.")
+            errors.append({"level": "error", "code": "NO_OPERATIONS", "message": "No operations found. Please plan operations before generating G-Code."})
 
         msg = ""
         if not can_generate_gcode and status == "toolpaths_outdated":

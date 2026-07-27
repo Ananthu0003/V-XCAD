@@ -66,20 +66,21 @@ class MotionPlanner:
                     internal_units = "in"
                     print(f"[MotionPlanner] Unit mismatch heuristic: Assumed 'in' units. Tool={raw_tool_diameter}mm, Stock={stock_w:.2f}units.")
 
-        tool_diameter_setup_units = raw_tool_diameter / 25.4 if internal_units == "in" else raw_tool_diameter
+        unit_scale = 1.0 / 25.4 if internal_units == "in" else 1.0
+        tool_diameter_setup_units = raw_tool_diameter * unit_scale
         tool_radius = tool_diameter_setup_units / 2.0
 
         if tool_radius <= 0:
-            tool_radius = 1.0
+            tool_radius = 1.0 * unit_scale
 
         commands: List[MotionCommand] = []
 
         safe_heights = op.get("safe_heights", {})
-        clearance = safe_heights.get("clearance", 15.0)
-        feed_z = safe_heights.get("feed", 2.0)
+        clearance = safe_heights.get("clearance", 15.0) * unit_scale
+        feed_z = safe_heights.get("feed", 2.0) * unit_scale
         top = safe_heights.get("top", 0.0)
-        bottom = safe_heights.get("bottom", -10.0)
-        retract_z = safe_heights.get("retract", clearance)
+        bottom = safe_heights.get("bottom", -10.0 * unit_scale)
+        retract_z = safe_heights.get("retract", 15.0) * unit_scale
 
         if machiningRegion.get("topZ") is not None: top = machiningRegion["topZ"]
         if machiningRegion.get("bottomZ") is not None: bottom = machiningRegion["bottomZ"]
@@ -89,9 +90,9 @@ class MotionPlanner:
         if local_feat:
             top = local_feat.get("localTopZ", top)
             bottom = local_feat.get("localBottomZ", bottom)
-            clearance = top + 15.0
-            retract_z = top + 5.0
-            feed_z = top + 2.0
+            clearance = top + (15.0 * unit_scale)
+            retract_z = top + (5.0 * unit_scale)
+            feed_z = top + (2.0 * unit_scale)
             # Update safe_heights so downstream functions (like _generate_drilling_path) use them
             op["safe_heights"] = {
                 "clearance": clearance,
@@ -128,17 +129,17 @@ class MotionPlanner:
         if op_type == "drilling":
             self._generate_drilling_path(op, machiningRegion, clearance, feed_z, top, bottom, add_cmd, setup)
         elif op_type in ("2d_contour", "2d_contour_outer", "step"):
-            self._generate_contour_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd)
+            self._generate_contour_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
         elif op_type == "boss_clearing":
-            self._generate_boss_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd)
+            self._generate_boss_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
         elif op_type == "pocketing":
-            self._generate_pocket_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd)
+            self._generate_pocket_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
         elif op_type == "facing":
-            self._generate_facing_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd)
+            self._generate_facing_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
         elif op_type == "od_turning":
             self._generate_od_turning_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd)
         elif op_type in ("indexed_4axis_milling", "rotary_milling", "multi_axis_surface_milling"):
-            self._generate_indexed_4axis_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd)
+            self._generate_indexed_4axis_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
         else:
             raise NotImplementedError(f"Motion generation not implemented for {op_type}")
 
@@ -190,7 +191,7 @@ class MotionPlanner:
                 Point3D(x=cx, y=cy, z=bottom),
                 Point3D(x=cx, y=cy, z=clearance))
 
-    def _generate_contour_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
+    def _generate_contour_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale=1.0):
         try:
             from shapely.geometry import Polygon, LineString
         except ImportError:
@@ -221,9 +222,9 @@ class MotionPlanner:
             for p in current_poly.geoms:
                 paths_2d.append(list(p.exterior.coords))
 
-        self._apply_z_stepdowns_to_paths(paths_2d, clearance, top, bottom, op, add_cmd)
+        self._apply_z_stepdowns_to_paths(paths_2d, clearance, top, bottom, op, add_cmd, unit_scale)
 
-    def _generate_pocket_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
+    def _generate_pocket_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale=1.0):
         try:
             from shapely.geometry import Polygon
         except ImportError:
@@ -251,9 +252,9 @@ class MotionPlanner:
             current_poly = current_poly.buffer(-stepover, join_style=2)
             
         all_paths_2d.reverse()
-        self._apply_z_stepdowns_to_paths(all_paths_2d, clearance, top, bottom, op, add_cmd)
+        self._apply_z_stepdowns_to_paths(all_paths_2d, clearance, top, bottom, op, add_cmd, unit_scale)
 
-    def _generate_boss_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
+    def _generate_boss_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale=1.0):
         """
         Uses raster/zigzag strategy instead of nested offsets to prevent segment explosion.
         """
@@ -281,11 +282,11 @@ class MotionPlanner:
             boss_poly = boss_poly.buffer(0)
 
         # For an external boss, the tool can enter from outside the stock.
-        # We expand the stock boundary by tool_radius + 2mm to allow the tool center to go outside.
-        machining_area = stock_poly.buffer(tool_radius + 2.0, join_style=2)
+        # We expand the stock boundary by tool_radius + 2mm (scaled) to allow the tool center to go outside.
+        machining_area = stock_poly.buffer(tool_radius + (2.0 * unit_scale), join_style=2)
         
         # We expand the boss by tool_radius + small clearance to prevent gouging
-        boss_keepout = boss_poly.buffer(tool_radius + 0.1, join_style=2)
+        boss_keepout = boss_poly.buffer(tool_radius + (0.1 * unit_scale), join_style=2)
         
         safe_area = machining_area.difference(boss_keepout)
         
@@ -304,7 +305,7 @@ class MotionPlanner:
         direction = 1
         
         while y < maxy:
-            line = LineString([(minx - 10, y), (maxx + 10, y)])
+            line = LineString([(minx - (10.0 * unit_scale), y), (maxx + (10.0 * unit_scale), y)])
             intersection = safe_area.intersection(line)
             
             segs = []
@@ -337,9 +338,9 @@ class MotionPlanner:
         if total_segs > 2000:
             raise ValueError(f"Boss segment budget exceeded (generated {total_segs}, limit 2000). Try a larger tool.")
 
-        self._apply_z_stepdowns_to_paths(simplified_lines, clearance, top, bottom, op, add_cmd)
+        self._apply_z_stepdowns_to_paths(simplified_lines, clearance, top, bottom, op, add_cmd, unit_scale)
 
-    def _generate_facing_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
+    def _generate_facing_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale=1.0):
         try:
             from shapely.geometry import Polygon, LineString
         except ImportError:
@@ -369,7 +370,7 @@ class MotionPlanner:
         direction = 1
         
         while y <= maxy + stepover:
-            line = LineString([(minx - 10, y), (maxx + 10, y)])
+            line = LineString([(minx - (10.0 * unit_scale), y), (maxx + (10.0 * unit_scale), y)])
             intersection = poly.intersection(line)
             
             segs = []
@@ -387,9 +388,9 @@ class MotionPlanner:
             y += stepover
             direction *= -1
 
-        self._apply_z_stepdowns_to_paths(raster_lines, clearance, top, bottom, op, add_cmd)
+        self._apply_z_stepdowns_to_paths(raster_lines, clearance, top, bottom, op, add_cmd, unit_scale)
 
-    def _apply_z_stepdowns_to_paths(self, paths_2d, clearance, top, bottom, op, add_cmd):
+    def _apply_z_stepdowns_to_paths(self, paths_2d, clearance, top, bottom, op, add_cmd, unit_scale=1.0):
         if not paths_2d:
             return
 
@@ -398,11 +399,17 @@ class MotionPlanner:
         
         tool = op.get("tool") or {}
         tool_diameter = tool.get("geometry", {}).get("DC", 10.0)
-        default_stepdown = tool_diameter * 0.5  # 50% of tool diameter
+        # default_stepdown is in mm, scale it if units are inches
+        default_stepdown = (tool_diameter * 0.5) * unit_scale
         
         stepdown = params.get("maxStepdown", params.get("stepdown", feeds.get("stepdown", default_stepdown)))
         if stepdown <= 0:
             stepdown = default_stepdown
+        
+        # If user explicitly provided stepdown from parameters, we MUST scale it if the UI gave it in mm!
+        # Assuming the UI always passes parameters in mm, we scale it.
+        if stepdown != default_stepdown:
+            stepdown *= unit_scale
 
         total_depth = top - bottom
         passes = max(1, math.ceil(total_depth / stepdown))

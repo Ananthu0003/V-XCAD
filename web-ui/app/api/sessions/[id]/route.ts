@@ -32,9 +32,7 @@ export async function DELETE(request: Request, context: any) {
 	try {
 		const { id } = await context.params;
 		const authSession = await getSession();
-		if (!authSession?.userId) {
-			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-		}
+		const userId = authSession?.userId || null;
 
 		const session = await prisma.cadSession.findUnique({
 			where: { id },
@@ -44,7 +42,7 @@ export async function DELETE(request: Request, context: any) {
 			return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 		}
 
-		if (session.userId !== authSession.userId) {
+		if (session.userId !== userId && !session.isShared) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
 

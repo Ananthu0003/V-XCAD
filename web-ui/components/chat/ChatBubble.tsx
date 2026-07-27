@@ -19,12 +19,36 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 	const isUser = role === 'user';
 	const isAssistant = role === 'assistant';
 
-	// System messages render as a compact inline hint strip
+	// System messages render as a premium centered pill
 	if (role === 'system') {
+		const isRestoring = content.startsWith('Restoring session');
+		const displayText = isRestoring ? content.replace('Restoring session:', '').replace('Restoring session', '').trim() : content;
+		
 		return (
-			<div className="flex items-center gap-2.5 rounded-xl border border-transparent/50 dark:border-border bg-background dark:bg-muted/50 shadow-sm px-3.5 py-2.5 animate-message">
-				<Info className="size-3.5 shrink-0 text-blue-500/60" />
-				<p className="text-[11px] leading-snug text-muted-foreground font-sans">{content}</p>
+			<div className="flex justify-center w-full my-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
+				<div className="flex items-center gap-3 rounded-full border border-blue-500/20 bg-blue-500/10 backdrop-blur-md px-4 py-2 shadow-[0_0_20px_rgba(59,130,246,0.1)] relative overflow-hidden group max-w-[90%]">
+					{/* Animated shine effect on hover */}
+					<div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-400/10 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] pointer-events-none" />
+					
+					{isRestoring ? (
+						<>
+							<div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-blue-500/20 border border-blue-500/30">
+								<Info className="size-3.5 text-blue-400" />
+							</div>
+							<div className="flex flex-col min-w-0">
+								<span className="text-[9px] font-bold uppercase tracking-[0.2em] text-blue-400">Session Restored</span>
+								<span className="text-[11px] font-medium text-slate-300 truncate" title={displayText}>
+									{displayText || 'Workspace loaded'}
+								</span>
+							</div>
+						</>
+					) : (
+						<>
+							<Info className="size-4 shrink-0 text-muted-foreground" />
+							<p className="text-[11px] font-medium text-muted-foreground truncate">{content}</p>
+						</>
+					)}
+				</div>
 			</div>
 		);
 	}
@@ -50,7 +74,7 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 				<span className="opacity-80">{role === 'assistant' ? 'AI Co-Pilot' : 'Engineer'}</span>
 			</div>
 
-			<div className={`relative max-w-[88%] rounded-2xl px-5 py-4 text-sm leading-[1.6] ${bubbleClass} ${isUser ? 'rounded-tr-none' : 'rounded-tl-none'}`}>
+			<div className={`relative w-full rounded-2xl px-4 py-3 text-sm leading-[1.6] ${bubbleClass} ${isUser ? 'rounded-tr-none ml-auto max-w-[92%]' : 'rounded-tl-none max-w-[96%]'}`}>
 				{fileName && isUser && (
 					<div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-black/5 dark:bg-black/20 border border-transparent dark:border-border w-fit backdrop-blur-sm shadow-inner">
 						<FileImage className="size-3.5 text-blue-400" />
@@ -65,63 +89,31 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 								const codeText = String(children).replace(/\n$/, '');
 
 								// Professional Engineering Report Transformation
-								if (match && match[1] === 'python' && codeText.includes('PARAMETERS')) {
-									const paramsMatch = codeText.match(/PARAMETERS\s*=\s*\{([\s\S]*?)\}/);
-									const params: Record<string, string> = {};
-									
-									if (paramsMatch) {
-										const lines = paramsMatch[1].split('\n');
-										lines.forEach(line => {
-											const m = line.match(/"(\w+)":\s*([\d.]+)/);
-											if (m) params[m[1]] = m[2];
-										});
-									}
-
+								if (match && match[1] === 'python') {
 									return (
-										<div className="my-6 overflow-hidden rounded-2xl border border-transparent dark:border-border bg-accent/50 dark:bg-zinc-950/40 backdrop-blur-sm shadow-2xl">
-											<div className="flex items-center justify-between bg-background dark:bg-zinc-900/50 px-5 py-3.5 border-b border-transparent dark:border-border">
-												<div className="flex items-center gap-3">
-													<div className="size-2 rounded-full bg-cyan-500 animate-pulse shadow-[0_0_10px_rgba(6,182,212,0.25)]" />
-													<span className="text-[10px] font-black uppercase tracking-[0.05em] text-foreground dark:text-zinc-300">Technical Analysis Report</span>
-												</div>
-												<div className="flex items-center gap-2 px-2 py-0.5 rounded-full bg-black/5 dark:bg-black/40 border border-transparent dark:border-border">
-													<span className="text-[8px] font-bold text-muted-foreground uppercase tracking-wide">Model Fidelity: High</span>
+										<div className="my-4 overflow-hidden rounded-2xl border border-transparent dark:border-border bg-accent/50 dark:bg-zinc-950/40 backdrop-blur-sm shadow-2xl">
+											<div className="flex items-center justify-between bg-background dark:bg-zinc-900/50 px-4 py-3 border-b border-transparent dark:border-border">
+												<div className="flex items-center gap-2.5">
+													<div className="size-2 rounded-full bg-cyan-500 animate-pulse shadow-[0_0_10px_rgba(6,182,212,0.25)] shrink-0" />
+													<span className="text-[10px] font-black uppercase tracking-[0.05em] text-foreground dark:text-zinc-300 truncate">VexCAD AI Engine</span>
 												</div>
 											</div>
 											
-											<div className="p-5">
-												<div className="mb-4 flex items-center gap-4">
-													<h3 className="text-[9px] font-black uppercase tracking-[0.1em] text-blue-500/80">Extracted Dimensions</h3>
-													<div className="h-px flex-1 bg-linear-to-r from-white/10 to-transparent" />
-												</div>
-												
-												<div className="grid grid-cols-1 gap-3 mb-6">
-													{Object.entries(params).map(([key, val]) => (
-														<div key={key} className="flex items-center justify-between group/item gap-4">
-															<span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider group-hover/item:text-foreground transition-colors truncate" title={key.replace(/_/g, ' ')}>
-																{key.replace(/_/g, ' ')}
-															</span>
-															<div className="flex items-center gap-1.5">
-																<span className="text-[11px] font-mono font-bold text-blue-500 dark:text-blue-400">{val}</span>
-																<span className="text-[8px] font-bold text-muted-foreground">mm</span>
-															</div>
+											<div className="p-4">
+												<div className="mb-4 flex flex-col gap-3">
+													<div className="flex flex-col gap-2 rounded-lg bg-blue-500/10 border border-blue-500/20 p-3">
+														<span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Project Workflow Initialized</span>
+														<div className="text-[11px] text-muted-foreground flex flex-col gap-1.5 mt-1">
+															<div className="flex items-center gap-2"><Check className="size-3 text-blue-400" /> Blueprint analyzed</div>
+															<div className="flex items-center gap-2"><Check className="size-3 text-blue-400" /> Features extracted</div>
+															<div className="flex items-center gap-2"><Check className="size-3 text-blue-400" /> Generating 3D model...</div>
 														</div>
-													))}
-												</div>
-
-												<div className="pt-4 border-t border-transparent dark:border-border flex items-center justify-between">
-													<div className="flex items-center gap-4">
-														<div className="flex -space-x-1">
-															{[1,2,3].map(i => (
-																<div key={i} className="size-4 rounded-full border border-background dark:border-zinc-950 bg-accent dark:bg-zinc-800 flex items-center justify-center">
-																	<div className="size-1 rounded-full bg-blue-500/50" />
-																</div>
-															))}
-														</div>
-														<span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide italic">Core logic dispatched to engine</span>
 													</div>
-													<div className="text-[10px] font-black uppercase tracking-wide text-muted-foreground border-b border-blue-500/20 pb-0.5">
-														Ready for Sync
+													
+													<div className="font-mono text-[9px] text-muted-foreground/70 uppercase tracking-widest space-y-2 pl-3 mt-2 border-l-2 border-blue-500/30 overflow-hidden">
+														<div className="animate-pulse truncate">_ Compiling Script</div>
+														<div className="animate-pulse truncate" style={{ animationDelay: '150ms' }}>_ Synthesizing 3D Model</div>
+														<div className="text-blue-400/80 truncate">_ Ready for Preview</div>
 													</div>
 												</div>
 											</div>
