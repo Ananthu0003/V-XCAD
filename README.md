@@ -73,9 +73,11 @@ vexcad/
 - AI-driven CAD generation from images/prompts or direct STEP file uploads
 - Automated Feature Recognition (drilling, pocketing, turning, etc.)
 - 88 Industry-standard CNC Machine Profiles (Haas, DMG MORI, Okuma, Makino, Hermle, etc.) with real-world controllers (Fanuc, Siemens, Heidenhain)
+- Comprehensive Material Profiles with Feeds & Speeds calculation capabilities
 - Intelligent Setup Planning for 3-axis, indexed 4/5-axis, and mill-turn machines
 - Interactive Operation Tree for editing and managing generated toolpaths
 - 3D Viewport with dynamic setup rotation and real-time toolpath simulation
+- Accurate Machining Cycle Time estimation based on exact machine acceleration and kinematic limits
 - Modern, sleek UI interface tailored for an industrial-grade professional CAM experience
 - G-Code generation with configurable post-processors
 - Comprehensive readiness evaluation blocking unsupported features

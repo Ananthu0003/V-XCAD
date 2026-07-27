@@ -35,3 +35,9 @@ outputs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
