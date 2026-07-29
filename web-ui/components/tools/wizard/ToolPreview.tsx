@@ -145,14 +145,39 @@ export function ToolPreview({ toolData: propToolData }: ToolPreviewProps = {}) {
     Z
   ` : "";
 
+  let shankD = D;
+  const isTSlot = type === 't_slot_mill' || type === 't_slot_cutter' || type === 'woodruff_cutter' || type === 'slitting_saw';
+  
+  if (geometry?.shankDiameter && geometry.shankDiameter > 0) {
+    shankD = geometry.shankDiameter;
+  } else if (isTSlot) {
+    shankD = Math.max(D * 0.4, 6); // Realistic default for T-Slot cutters if undefined
+  }
+
   const shankLength = Math.max(0, stickout - FL);
-  const shankPath = `
-    M ${-D/2} 0
-    L ${-D/2} ${shankLength}
-    L ${D/2} ${shankLength}
-    L ${D/2} 0
-    Z
-  `;
+  
+  // Transition taper (neck) between shank and cutter body
+  let shankPath = '';
+  if (Math.abs(shankD - D) > 0.001) {
+    const taperH = isTSlot ? Math.min((D - shankD), shankLength * 0.3) : Math.min(Math.abs(D - shankD), shankLength * 0.1);
+    shankPath = `
+      M ${-shankD/2} 0
+      L ${-shankD/2} ${shankLength - taperH}
+      L ${-D/2} ${shankLength}
+      L ${D/2} ${shankLength}
+      L ${shankD/2} ${shankLength - taperH}
+      L ${shankD/2} 0
+      Z
+    `;
+  } else {
+    shankPath = `
+      M ${-D/2} 0
+      L ${-D/2} ${shankLength}
+      L ${D/2} ${shankLength}
+      L ${D/2} 0
+      Z
+    `;
+  }
 
   // Realistic Collet/Holder Visualization
   const colletNutPath = `

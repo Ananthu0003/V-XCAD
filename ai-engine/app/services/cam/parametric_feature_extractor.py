@@ -39,7 +39,7 @@ class ParametricFeatureExtractor:
             parts = normalized_key.split('_')
             
             # Known dimension suffixes
-            dim_suffixes = {"dia", "diameter", "radius", "width", "depth", "length", "size", "height"}
+            dim_suffixes = {"dia", "diameter", "radius", "width", "depth", "length", "size", "height", "offset"}
             
             if len(parts) > 1 and parts[-1] in dim_suffixes:
                 prefix = "_".join(parts[:-1])
@@ -66,7 +66,7 @@ class ParametricFeatureExtractor:
             
             # Identify Holes / Bores / Drills
             if self._matches_any(tokens, {"hole", "drill", "bore", "drilling", "boring"}):
-                feat = self._create_hole_feature(prefix, dims, axis, side_label, part_length)
+                feat = self._create_hole_feature(prefix, dims, axis, side_label, part_length, part_od)
                 if feat:
                     features.append(feat)
                     
@@ -77,8 +77,8 @@ class ParametricFeatureExtractor:
                     features.append(feat)
                     
             # Identify Bosses / Steps / Pads
-            elif self._matches_any(tokens, {"boss", "step", "pad", "protrusion", "raised"}):
-                feat = self._create_boss_feature(prefix, dims, axis)
+            elif self._matches_any(tokens, {"boss", "step", "pad", "protrusion", "raised", "collar", "flange", "shoulder"}):
+                feat = self._create_boss_feature(prefix, dims, axis, part_od)
                 if feat:
                     features.append(feat)
         
@@ -120,6 +120,15 @@ class ParametricFeatureExtractor:
         primary_match = tokens.intersection(_PRIMARY_SIDE_TOKENS)
         opposite_match = tokens.intersection(_OPPOSITE_SIDE_TOKENS)
         
+        # Check for explicit axis tokens (requested by LLM prompt for off-axis features)
+        if "x" in tokens or "x_axis" in tokens or "xaxis" in tokens:
+            return [1.0, 0.0, 0.0], "radial_x"
+        if "y" in tokens or "y_axis" in tokens or "yaxis" in tokens:
+            return [0.0, 1.0, 0.0], "radial_y"
+        if "radial" in tokens:
+            # Fallback to X if radial is specified without a specific axis
+            return [1.0, 0.0, 0.0], "radial"
+            
         if opposite_match and not primary_match:
             return _OPPOSITE_AXIS, "opposite"
         elif primary_match and not opposite_match:
@@ -133,7 +142,7 @@ class ParametricFeatureExtractor:
     # -------------------------------------------------------------------------
     
     def _create_hole_feature(self, prefix: str, dims: Dict, axis: List[float], 
-                              side_label: str, part_length: Optional[float]) -> Optional[Dict[str, Any]]:
+                              side_label: str, part_length: Optional[float], part_od: Optional[float] = None) -> Optional[Dict[str, Any]]:
         diameter = float(dims.get("dia", dims.get("size", dims.get("value", 0))))
         if "radius" in dims:
             diameter = float(dims["radius"]) * 2.0
@@ -146,6 +155,9 @@ class ParametricFeatureExtractor:
         
         # Compute center position based on side
         center = self._compute_center_for_side(axis, part_length)
+        if "offset" in dims:
+            # If there's an offset (like cross hole offset), apply it to Z
+            center[2] = float(dims["offset"])
         
         # Compute topZ/bottomZ in the feature's local frame
         # For primary side: tool enters from Z=0 downward → topZ=0, bottomZ=-depth
@@ -222,11 +234,14 @@ class ParametricFeatureExtractor:
             }
         }
     
-    def _create_boss_feature(self, prefix: str, dims: Dict, axis: List[float]) -> Optional[Dict[str, Any]]:
+    def _create_boss_feature(self, prefix: str, dims: Dict, axis: List[float], part_od: Optional[float] = None) -> Optional[Dict[str, Any]]:
         width = float(dims.get("width", dims.get("value", 20.0)))
         length = float(dims.get("length", dims.get("value", 20.0)))
-        height = float(dims.get("height", dims.get("depth", 5.0)))
+        height = float(dims.get("height", dims.get("depth", dims.get("length", 5.0))))
         diameter = dims.get("dia")
+        
+        if not diameter and "collar" in prefix.lower() and part_od:
+             diameter = part_od
         
         feat_id = f"feat_{uuid.uuid4().hex[:8]}"
         return {

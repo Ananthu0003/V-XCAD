@@ -10,6 +10,7 @@ import { AnimatedCode } from '@/components/landing/AnimatedCode';
 import { WorkflowStep } from '@/components/workspace/WorkflowStep';
 import { LandingClient } from '@/components/landing/LandingClient';
 import { BackToTop } from '@/components/landing/BackToTop';
+import { ValueGrid } from '@/components/landing/ValueGrid';
 
 export default async function LandingPage() {
   const session = await getSession();
@@ -73,23 +74,21 @@ export default async function LandingPage() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
             </span>
-            AI-Powered CAD Copilot
+            AI-Powered CAM & Quoting
           </div>
         </AnimatedSection>
 
         <AnimatedSection delay={0.1} direction="up" duration={0.9}>
           <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight leading-[1.05] mb-6">
-            <span className="block text-zinc-900 dark:text-white mb-1">Describe It.</span>
-            <span className="block text-primary">Generate It.</span>
-            <span className="block text-zinc-900 dark:text-white mt-1">Perfect It.</span>
+            <span className="block text-zinc-900 dark:text-white mb-1">From Sketch to Spindle.</span>
+            <span className="block text-primary">In Seconds.</span>
+            <span className="block text-zinc-900 dark:text-white mt-1">Powered by AI.</span>
           </h1>
         </AnimatedSection>
 
         <AnimatedSection delay={0.22} direction="up" duration={0.8}>
           <p className="text-lg md:text-xl text-zinc-600 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed mt-4">
-            Upload a 2D sketch or PDF, describe your part in plain English — and VΞXCAD streams a fully
-            parametric <span className="text-blue-400 font-medium">build123d Python script</span>, renders it to
-            a 3D model, and generates production-ready <span className="text-emerald-400 font-medium">CNC G-code</span> in real time.
+            Stop wrestling with disconnected CAD and CAM software. VΞXCAD instantly transforms your 2D sketches and PDFs into parametric 3D models and production-ready G-code—right in your browser.
           </p>
         </AnimatedSection>
 
@@ -355,108 +354,8 @@ export default async function LandingPage() {
         </div>
       </section>
 
-      {/* ── Feature Showcase ── */}
-      <section id="features" className="relative z-10 py-28 border-t border-black/10 dark:border-white/5">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-950/5 to-transparent pointer-events-none" />
-        <div className="max-w-6xl mx-auto px-6 relative">
-          <AnimatedSection direction="up" duration={0.7}>
-            <div className="text-center mb-16">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-xs font-semibold tracking-widest mb-5 uppercase">
-                Capabilities
-              </div>
-              <h2 className="text-3xl md:text-5xl font-bold text-zinc-900 dark:text-white mb-4 tracking-tight">
-                Everything You Need to
-                <span className="block text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-blue-500">Go from Idea to Part</span>
-              </h2>
-              <p className="text-zinc-600 dark:text-gray-400 max-w-xl mx-auto text-lg">
-                A complete AI CAD/CAM workspace — no external tools required.
-              </p>
-            </div>
-          </AnimatedSection>
-
-          <div className="grid md:grid-cols-3 gap-5">
-
-            {/* Feature: Image/PDF Input */}
-            <AnimatedSection delay={0} direction="up" duration={0.7}>
-              <div className="p-6 rounded-2xl bg-black/5 dark:bg-white/3 border border-black/5 dark:border-white/6 hover:border-blue-500/30 hover:bg-black/5 dark:bg-white/5 transition-all duration-300 group hover:-translate-y-1 cursor-default h-full">
-                <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-5 group-hover:bg-zinc-800 dark:hover:bg-blue-500/20 group-hover:scale-110 transition-all duration-300">
-                  <FileImage className="w-6 h-6 text-blue-400" />
-                </div>
-                <h3 className="text-zinc-900 dark:text-white font-bold text-base mb-2">Image & PDF Input</h3>
-                <p className="text-zinc-600 dark:text-gray-400 text-sm leading-relaxed">
-                  Upload sketches, engineering drawings, or multi-page PDFs as reference input for the AI to analyze and convert.
-                </p>
-              </div>
-            </AnimatedSection>
-
-            {/* Feature: Streaming */}
-            <AnimatedSection delay={0.08} direction="up" duration={0.7}>
-              <div className="p-6 rounded-2xl bg-black/5 dark:bg-white/3 border border-black/5 dark:border-white/6 hover:border-cyan-500/30 hover:bg-black/5 dark:bg-white/5 transition-all duration-300 group hover:-translate-y-1 cursor-default h-full">
-                <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mb-5 group-hover:bg-cyan-500/20 group-hover:scale-110 transition-all duration-300">
-                  <Zap className="w-6 h-6 text-cyan-400" />
-                </div>
-                <h3 className="text-zinc-900 dark:text-white font-bold text-base mb-2">Real-Time Streaming</h3>
-                <p className="text-zinc-600 dark:text-gray-400 text-sm leading-relaxed">
-                  The build123d Python script is streamed token-by-token via SSE — watch your CAD code appear live as it's generated.
-                </p>
-              </div>
-            </AnimatedSection>
-
-            {/* Feature: Parameter Drawer */}
-            <AnimatedSection delay={0.16} direction="up" duration={0.7}>
-              <div className="p-6 rounded-2xl bg-black/5 dark:bg-white/3 border border-black/5 dark:border-white/6 hover:border-violet-500/30 hover:bg-black/5 dark:bg-white/5 transition-all duration-300 group hover:-translate-y-1 cursor-default h-full">
-                <div className="w-12 h-12 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mb-5 group-hover:bg-violet-500/20 group-hover:scale-110 transition-all duration-300">
-                  <Sliders className="w-6 h-6 text-violet-400" />
-                </div>
-                <h3 className="text-zinc-900 dark:text-white font-bold text-base mb-2">Visual Parameter Drawer</h3>
-                <p className="text-zinc-600 dark:text-gray-400 text-sm leading-relaxed">
-                  Auto-parsed <code className="text-violet-400 text-xs bg-black/5 dark:bg-white/5 px-1 rounded">PARAMETERS</code> dict exposed as interactive sliders and inputs — no code editing needed.
-                </p>
-              </div>
-            </AnimatedSection>
-
-            {/* Feature: Monaco Editor */}
-            <AnimatedSection delay={0.24} direction="up" duration={0.7}>
-              <div className="p-6 rounded-2xl bg-black/5 dark:bg-white/3 border border-black/5 dark:border-white/6 hover:border-blue-500/30 hover:bg-black/5 dark:bg-white/5 transition-all duration-300 group hover:-translate-y-1 cursor-default h-full">
-                <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-5 group-hover:bg-zinc-800 dark:hover:bg-blue-500/20 group-hover:scale-110 transition-all duration-300">
-                  <Code2 className="w-6 h-6 text-blue-400" />
-                </div>
-                <h3 className="text-zinc-900 dark:text-white font-bold text-base mb-2">Monaco Code Engine</h3>
-                <p className="text-zinc-600 dark:text-gray-400 text-sm leading-relaxed">
-                  Full VS Code-quality editor for the generated Python script. Modify the logic directly and sync back to the engine.
-                </p>
-              </div>
-            </AnimatedSection>
-
-            {/* Feature: 3D Viewport */}
-            <AnimatedSection delay={0.32} direction="up" duration={0.7}>
-              <div className="p-6 rounded-2xl bg-black/5 dark:bg-white/3 border border-black/5 dark:border-white/6 hover:border-cyan-500/30 hover:bg-black/5 dark:bg-white/5 transition-all duration-300 group hover:-translate-y-1 cursor-default h-full">
-                <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mb-5 group-hover:bg-cyan-500/20 group-hover:scale-110 transition-all duration-300">
-                  <Box className="w-6 h-6 text-cyan-400" />
-                </div>
-                <h3 className="text-zinc-900 dark:text-white font-bold text-base mb-2">Interactive 3D Viewport</h3>
-                <p className="text-zinc-600 dark:text-gray-400 text-sm leading-relaxed">
-                  React Three Fiber STL viewer with orbit controls. Inspect your model from every angle right in the browser.
-                </p>
-              </div>
-            </AnimatedSection>
-
-            {/* Feature: CNC Export */}
-            <AnimatedSection delay={0.40} direction="up" duration={0.7}>
-              <div className="p-6 rounded-2xl bg-black/5 dark:bg-white/3 border border-black/5 dark:border-white/6 hover:border-emerald-500/30 hover:bg-black/5 dark:bg-white/5 transition-all duration-300 group hover:-translate-y-1 cursor-default h-full">
-                <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-5 group-hover:bg-emerald-500/20 group-hover:scale-110 transition-all duration-300">
-                  <History className="w-6 h-6 text-emerald-400" />
-                </div>
-                <h3 className="text-zinc-900 dark:text-white font-bold text-base mb-2">Manufacture with CAM</h3>
-                <p className="text-zinc-600 dark:text-gray-400 text-sm leading-relaxed">
-                  Go from idea to physical part effortlessly. Export standard STL or STEP files, or instantly generate toolpaths and CNC G-Code.
-                </p>
-              </div>
-            </AnimatedSection>
-
-          </div>
-        </div>
-      </section>
+      {/* ── Value Grid ── */}
+      <ValueGrid />
 
       {/* ── Prompt demo strip ── */}
       <LandingClient />

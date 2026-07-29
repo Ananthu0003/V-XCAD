@@ -239,7 +239,12 @@ class MotionPlanner:
         if not poly.is_valid:
             poly = poly.buffer(0)
 
-        stepover = tool_radius * 1.5
+        stepover_pct = op.get("parameters", {}).get("stepoverPercentage", 40.0)
+        stepover_abs = op.get("parameters", {}).get("stepover")
+        if stepover_abs is None or float(stepover_abs) <= 0:
+            stepover = (tool_radius * 2.0) * (float(stepover_pct) / 100.0)
+        else:
+            stepover = float(stepover_abs) * unit_scale
         all_paths_2d = []
 
         current_poly = poly.buffer(-tool_radius, join_style=2)
@@ -298,7 +303,12 @@ class MotionPlanner:
             raise ValueError("Failed to compute valid boundaries for boss clearing")
             
         minx, miny, maxx, maxy = bounds
-        stepover = tool_radius * 1.5
+        stepover_pct = op.get("parameters", {}).get("stepoverPercentage", 40.0)
+        stepover_abs = op.get("parameters", {}).get("stepover")
+        if stepover_abs is None or float(stepover_abs) <= 0:
+            stepover = (tool_radius * 2.0) * (float(stepover_pct) / 100.0)
+        else:
+            stepover = float(stepover_abs) * unit_scale
         
         raster_lines = []
         y = miny + stepover / 2.0
@@ -363,7 +373,12 @@ class MotionPlanner:
             return
             
         minx, miny, maxx, maxy = bounds
-        stepover = tool_radius * 1.5
+        stepover_pct = op.get("parameters", {}).get("stepoverPercentage", 40.0)
+        stepover_abs = op.get("parameters", {}).get("stepover")
+        if stepover_abs is None or float(stepover_abs) <= 0:
+            stepover = (tool_radius * 2.0) * (float(stepover_pct) / 100.0)
+        else:
+            stepover = float(stepover_abs) * unit_scale
         
         raster_lines = []
         y = miny
@@ -402,18 +417,47 @@ class MotionPlanner:
         # default_stepdown is in mm, scale it if units are inches
         default_stepdown = (tool_diameter * 0.5) * unit_scale
         
-        stepdown = params.get("maxStepdown", params.get("stepdown", feeds.get("stepdown", default_stepdown)))
-        if stepdown <= 0:
-            stepdown = default_stepdown
-        
-        # If user explicitly provided stepdown from parameters, we MUST scale it if the UI gave it in mm!
-        # Assuming the UI always passes parameters in mm, we scale it.
-        if stepdown != default_stepdown:
-            stepdown *= unit_scale
+        depth_cuts_enabled = params.get("depthCutsEnabled", True)
+        rough_stepdown = params.get("maxStepdown", params.get("stepdown", feeds.get("stepdown", default_stepdown)))
+        finish_stepdown = params.get("finishStepdown", rough_stepdown)
+        finish_cuts = int(params.get("finishCuts", 0))
 
-        total_depth = top - bottom
-        passes = max(1, math.ceil(total_depth / stepdown))
-        actual_step = total_depth / passes
+        if not depth_cuts_enabled:
+            rough_stepdown = top - bottom
+            finish_stepdown = top - bottom
+            finish_cuts = 0
+
+        if rough_stepdown <= 0:
+            rough_stepdown = default_stepdown
+        if finish_stepdown <= 0:
+            finish_stepdown = rough_stepdown
+
+        if rough_stepdown != default_stepdown:
+            rough_stepdown *= unit_scale
+        if finish_stepdown != default_stepdown and finish_stepdown != rough_stepdown:
+            finish_stepdown *= unit_scale
+
+        z_passes = []
+        target_rough_z = bottom
+        if finish_cuts > 0:
+            target_rough_z = bottom + (finish_cuts * finish_stepdown)
+
+        if target_rough_z < top:
+            curr_z = top
+            while curr_z > target_rough_z + 0.001:
+                curr_z -= rough_stepdown
+                if curr_z < target_rough_z: curr_z = target_rough_z
+                z_passes.append(curr_z)
+        
+        if finish_cuts > 0:
+            curr_z = target_rough_z
+            for _ in range(finish_cuts):
+                curr_z -= finish_stepdown
+                if curr_z < bottom: curr_z = bottom
+                z_passes.append(curr_z)
+                
+        if not z_passes:
+            z_passes = [bottom]
         
         safe_heights = op.get("safe_heights", {})
         retract = safe_heights.get("retract", clearance)
@@ -422,8 +466,7 @@ class MotionPlanner:
             if not path or len(path) < 2:
                 continue
 
-            for i in range(passes):
-                z = top - (i + 1) * actual_step
+            for i, z in enumerate(z_passes):
 
                 start_pt_2d = path[0]
                 pt_retract = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=retract)
@@ -449,7 +492,7 @@ class MotionPlanner:
                 pt_end = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=z)
                 pt_end_retract = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=retract)
                 
-                if i == passes - 1:
+                if i == len(z_passes) - 1:
                     pt_end_clearance = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=clearance)
                     add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE, pt_end, pt_end_clearance)
                 else:

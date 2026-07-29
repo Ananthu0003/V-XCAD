@@ -78,12 +78,12 @@ function SelectContent({
         align={align}
         alignOffset={alignOffset}
         alignItemWithTrigger={alignItemWithTrigger}
-        className="isolate z-50"
+        className="isolate z-[9999]"
       >
         <SelectPrimitive.Popup
           data-slot="select-content"
           data-align-trigger={alignItemWithTrigger}
-          className={cn("relative isolate z-50 max-h-[var(--available-height)] w-[var(--anchor-width)] min-w-[12rem] origin-[var(--transform-origin)] overflow-x-hidden overflow-y-auto rounded-md bg-popover border border-border p-1 text-popover-foreground shadow-md duration-200 font-sans data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95", className )}
+          className={cn("relative isolate z-[9999] max-h-[var(--available-height)] w-[var(--anchor-width)] min-w-[12rem] origin-[var(--transform-origin)] overflow-x-hidden overflow-y-auto rounded-md bg-popover border border-border p-1 text-popover-foreground shadow-md duration-200 font-sans data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95", className )}
           {...props}
         >
           <SelectScrollUpButton />

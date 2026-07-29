@@ -113,6 +113,7 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                 <th className="py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Feature</th>
                                 <th className="py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Machining Strategy</th>
                                 <th className="py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Selected Tool</th>
+                                <th className="py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Cycle Time</th>
                                 <th className="py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Status</th>
                                 <th className="py-3 px-4 text-[10px] font-bold uppercase tracking-wider">Reason</th>
                             </tr>
@@ -323,6 +324,24 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                                     </div>
                                                                 );
                                                             })()}
+                                                        </td>
+                                                        <td className="py-3 px-4 align-top">
+                                                            {op.estimated_time_s !== undefined && op.estimated_time_s > 0 ? (
+                                                                <div className="flex flex-col gap-1">
+                                                                    <span className="text-xs font-mono text-foreground/90 font-medium">
+                                                                        {op.estimated_time_s < 60 
+                                                                            ? `${op.estimated_time_s.toFixed(1)}s` 
+                                                                            : `${Math.floor(op.estimated_time_s / 60)}m ${Math.round(op.estimated_time_s % 60)}s`}
+                                                                    </span>
+                                                                    {op.estimated_breakdown?.cutting_time_seconds !== undefined && (
+                                                                        <span className="text-[9px] text-muted-foreground/70 uppercase tracking-wider font-semibold">
+                                                                            Cut: {op.estimated_breakdown.cutting_time_seconds.toFixed(1)}s
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-xs text-muted-foreground/40 italic">-</span>
+                                                            )}
                                                         </td>
                                                         <td className="py-3 px-4 align-top">
                                                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[10px] font-bold uppercase tracking-wider ${statusColor}`}>

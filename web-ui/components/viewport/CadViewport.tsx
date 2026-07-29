@@ -3,8 +3,9 @@
 import { Suspense, useState, useRef, useEffect, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewport, Grid, Environment, ContactShadows } from '@react-three/drei';
-import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera } from 'lucide-react';
+import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewcube, Grid, Environment, ContactShadows } from '@react-three/drei';
+import { ViewportController } from '@/components/viewport/ViewportController';
+import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home } from 'lucide-react';
 import { DimensionOverlay } from '@/components/viewport/DimensionOverlay';
 import { FeatureHighlight } from '@/components/viewport/FeatureHighlight';
 import { VolumetricStock } from '@/components/cam/VolumetricStock';
@@ -13,7 +14,28 @@ import type { StlGeometryInfo } from '@/components/viewport/StlMesh';
 type AnnotationEntry = {
 	p1: [number, number, number];
 	p2: [number, number, number];
+	text?: string;
+	type?: 'distance' | 'diameter' | 'radius' | 'angle';
 };
+
+function DynamicFloor({ targetRef, children }: { targetRef: React.RefObject<THREE.Group | null>, children: React.ReactNode }) {
+	const floorRef = useRef<THREE.Group>(null);
+	useFrame(() => {
+		if (targetRef.current && floorRef.current) {
+			const box = new THREE.Box3().setFromObject(targetRef.current);
+			if (!box.isEmpty() && isFinite(box.min.y) && box.min.y > -10000) {
+				const targetY = box.min.y - 0.05;
+				// instantly snap if very far, else lerp
+				if (Math.abs(floorRef.current.position.y - targetY) > 50) {
+					floorRef.current.position.y = targetY;
+				} else {
+					floorRef.current.position.y = THREE.MathUtils.lerp(floorRef.current.position.y, targetY, 0.1);
+				}
+			}
+		}
+	});
+	return <group ref={floorRef}>{children}</group>;
+}
 
 type RenderToolpathSegment = {
 	segmentId?: string;
@@ -66,6 +88,9 @@ type CadViewportProps = {
 	parameters?: Record<string, unknown>;
 	hasBlockedOperations?: boolean;
 	activeFeatureId?: string | null;
+	hoveredFeatureId?: string | null;
+	onHoverFeature?: (id: string | null) => void;
+	workpieceMaterial?: string;
 
 	simulationState?: any;
 	camTools?: any[];
@@ -132,6 +157,9 @@ export function CadViewport({
 	parameters = {},
 	hasBlockedOperations = false,
 	activeFeatureId = null,
+	hoveredFeatureId = null,
+	onHoverFeature,
+	workpieceMaterial,
 	simulationState,
 	camTools,
 	camSetup,
@@ -147,9 +175,12 @@ export function CadViewport({
 }: CadViewportProps) {
 	const groupRef = useRef<THREE.Group>(null);
 	const exportRef = useRef<HTMLDivElement>(null);
-	const orbitRef = useRef<any>(null);
 	const [exportOpen, setExportOpen] = useState(false);
 	const [viewMode, setViewMode] = useState<'both' | 'solid' | 'wireframe'>('both');
+
+	const dispatchViewportAction = (action: string) => {
+		window.dispatchEvent(new CustomEvent('viewport-action', { detail: action }));
+	};
 
 	useEffect(() => {
 		const handleClickOutside = (e: MouseEvent) => {
@@ -379,6 +410,7 @@ export function CadViewport({
 
 	const [hasSimulated, setHasSimulated] = useState(false);
 	const [featureDebug, setFeatureDebug] = useState<any>(null);
+	const [contextMenu, setContextMenu] = useState<{x: number, y: number} | null>(null);
 
 	useEffect(() => {
 		if (simulationState?.isPlaying || (simulationState?.progress ?? 0) > 0 || simulationState?.activeSegmentIndex !== undefined) {
@@ -446,15 +478,7 @@ export function CadViewport({
 
 				<div className="flex items-center gap-2">
 					{headerActions}
-					
-					<button
-						onClick={() => orbitRef.current?.reset()}
-						className="flex h-9 items-center gap-2 rounded-lg border border-transparent bg-background px-4 text-[11px] font-bold uppercase tracking-wider text-foreground hover:border-blue-500 hover:text-blue-500 transition-all"
-						title="Reset Camera View"
-					>
-						<Camera className="size-3" />
-						Reset
-					</button>
+
 
 					{onShare && (
 						<button
@@ -528,36 +552,69 @@ export function CadViewport({
 				</div>
 			</header>
 
-			<div className="relative flex-1">
-				{/* View Mode Controls */}
+			<div 
+				className="relative flex-1"
+				onContextMenu={(e) => {
+					e.preventDefault();
+					setContextMenu({ x: e.clientX, y: e.clientY });
+				}}
+				onClick={() => {
+					if (contextMenu) setContextMenu(null);
+				}}
+			>
+				{/* View Mode Controls - Floating Toolbar */}
 				{(hasStl || (toolpaths && toolpaths.length > 0)) && (
-					<div className="absolute top-6 left-1/2 -translate-x-1/2 z-20 flex gap-1 bg-background/80 backdrop-blur-md border border-transparent rounded-xl p-1.5 shadow-xl">
+					<div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-background/90 backdrop-blur-xl border border-border/60 rounded-full px-4 py-2 shadow-2xl ring-1 ring-white/5">
 						<button
 							onClick={() => setViewMode('both')}
-							className={`p-3 rounded-lg transition-colors ${viewMode === 'both' ? 'bg-blue-500/20 text-blue-500' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
-							title="Show Both"
+							className={`p-2.5 rounded-full transition-all ${viewMode === 'both' ? 'bg-blue-500/20 text-blue-400 shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+							title="Show Solid & Toolpaths"
 						>
-							<Layers className="size-5" />
+							<Layers className="size-4" />
 						</button>
+						<div className="w-px h-5 bg-border/60 mx-1" />
 						<button
 							onClick={() => setViewMode('solid')}
-							className={`p-3 rounded-lg transition-colors ${viewMode === 'solid' ? 'bg-blue-500/20 text-blue-500' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+							className={`p-2.5 rounded-full transition-all ${viewMode === 'solid' ? 'bg-blue-500/20 text-blue-400 shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
 							title="Solid Model Only"
 						>
-							<Box className="size-5" />
+							<Box className="size-4" />
 						</button>
 						{toolpaths && toolpaths.length > 0 && (
-							<button
-								onClick={() => setViewMode('wireframe')}
-								className={`p-3 rounded-lg transition-colors ${viewMode === 'wireframe' ? 'bg-cyan-500/20 text-cyan-400' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
-								title="Toolpaths/Wireframe Only"
-							>
-								<Activity className="size-5" />
-							</button>
+							<>
+								<div className="w-px h-5 bg-border/60 mx-1" />
+								<button
+									onClick={() => setViewMode('wireframe')}
+									className={`p-2.5 rounded-full transition-all ${viewMode === 'wireframe' ? 'bg-cyan-500/20 text-cyan-400 shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+									title="Toolpaths/Wireframe Only"
+								>
+									<Activity className="size-4" />
+								</button>
+							</>
 						)}
+						<div className="w-px h-5 bg-border/60 mx-1" />
+						<button onClick={() => dispatchViewportAction('fit')} className="p-2.5 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground transition-all" title="Fit to Screen"><Maximize className="size-4" /></button>
+						<button onClick={() => dispatchViewportAction('reset')} className="p-2.5 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground transition-all" title="Reset Camera"><RotateCcw className="size-4" /></button>
 					</div>
 				)}
 
+				{/* Right-Click Context Menu */}
+				{contextMenu && (
+					<div 
+						className="fixed z-[100] bg-background/95 backdrop-blur-xl border border-border/60 rounded-xl shadow-2xl py-1.5 w-48 flex flex-col overflow-hidden ring-1 ring-white/5"
+						style={{ top: contextMenu.y, left: contextMenu.x }}
+					>
+						<button onClick={() => { dispatchViewportAction('top'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Top View <span className="text-[10px] text-muted-foreground font-mono">T</span></button>
+						<button onClick={() => { dispatchViewportAction('front'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Front View <span className="text-[10px] text-muted-foreground font-mono">F</span></button>
+						<button onClick={() => { dispatchViewportAction('right'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Right View <span className="text-[10px] text-muted-foreground font-mono">R</span></button>
+						<button onClick={() => { dispatchViewportAction('left'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Left View <span className="text-[10px] text-muted-foreground font-mono">L</span></button>
+						<button onClick={() => { dispatchViewportAction('bottom'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Bottom View <span className="text-[10px] text-muted-foreground font-mono">B</span></button>
+						<div className="h-px bg-border/60 my-1.5 mx-3" />
+						<button onClick={() => { dispatchViewportAction('iso'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm font-bold text-blue-400 hover:bg-accent hover:text-blue-300 transition-colors flex items-center justify-between">Isometric <span className="text-[10px] opacity-70 font-mono font-normal">I</span></button>
+						<button onClick={() => { dispatchViewportAction('home'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Home View <span className="text-[10px] text-muted-foreground font-mono">H</span></button>
+						<button onClick={() => { dispatchViewportAction('fit'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors">Fit to Screen</button>
+					</div>
+				)}
 
 				{/* Ambient Background Effects */}
 				<div className="absolute inset-0 z-0 pointer-events-none">
@@ -577,15 +634,35 @@ export function CadViewport({
 				)}
 
 				<Canvas shadows dpr={[1, 2]} className="relative z-10" onPointerMissed={onClearSelection}>
-					<PerspectiveCamera makeDefault position={[5, 5, 5]} fov={40} />
-
+					<ViewportController 
+						modelGroupRef={groupRef}
+						geometryInfo={geometryInfo} 
+						activeFeatureId={activeFeatureId} 
+						camFeatures={camFeatures} 
+						hasStl={hasStl} 
+						workflowStage={workflowStage}
+					/>
+					
 					<Suspense fallback={null}>
 						<Environment files="/potsdamer_platz_1k.hdr" />
-						<Grid infiniteGrid fadeDistance={gridFade} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={gridCell} sectionSize={gridSection} position={[0, -0.01, 0]} />
-						<Stage intensity={0.8} adjustCamera={!hasSimulated} environment={null} shadows="contact">
-							<AnimatedSetupGroup setupToolAxis={setupToolAxis}>
-								<group>
-									{/* The CAD model MUST be transformed to setup space using modelToSetupTransform */}
+						
+						{/* Professional CAD Lighting */}
+						<hemisphereLight intensity={0.4} groundColor="#1e293b" color="#f8fafc" />
+						<directionalLight castShadow intensity={0.8} position={[10, 20, 10]} shadow-mapSize={[2048, 2048]}>
+							<orthographicCamera attach="shadow-camera" args={[-20, 20, 20, -20, 0.1, 100]} />
+						</directionalLight>
+						<directionalLight intensity={0.3} position={[-10, -10, -10]} color="#94a3b8" />
+						
+						<DynamicFloor targetRef={groupRef}>
+							{/* Contact Shadows at bounding box bottom */}
+							<ContactShadows resolution={1024} scale={50} blur={2} opacity={0.4} far={10} color="#000000" />
+							
+							<Grid infiniteGrid fadeDistance={gridFade} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={gridCell} sectionSize={gridSection} />
+						</DynamicFloor>
+						
+						<AnimatedSetupGroup setupToolAxis={setupToolAxis}>
+							<group ref={groupRef}>
+								{/* The CAD model MUST be transformed to setup space using modelToSetupTransform */}
 									{(() => {
 										const m = setupMetadata?.modelToSetupTransform 
 											? new THREE.Matrix4().fromArray(
@@ -601,7 +678,7 @@ export function CadViewport({
 										m.decompose(pos, quat, scale);
 
 										const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
-										const offsetAmount = (isCamStage && actualStock) ? actualStock.dimensions[0] * 0.7 : 0;
+										const offsetAmount = 0;
 										const cadOffset = new THREE.Vector3(-offsetAmount, 0, 0);
 										const simOffset = new THREE.Vector3(offsetAmount, 0, 0);
 										const combinedPos = new THREE.Vector3().copy(pos).add(cadOffset);
@@ -750,7 +827,7 @@ export function CadViewport({
 									const transformedCenter = new THREE.Vector3(...(actualStock.center as [number, number, number])).applyMatrix4(m);
 									const transformedCenterArr: [number, number, number] = [transformedCenter.x, transformedCenter.y, transformedCenter.z];
 
-									const offsetAmount = (isCamStage && actualStock) ? actualStock.dimensions[0] * 0.7 : 0;
+									const offsetAmount = 0;
 									const simOffset = new THREE.Vector3(offsetAmount, 0, 0);
 
 									return (
@@ -820,7 +897,7 @@ export function CadViewport({
 								{geometryInfo && (activeParameter || activeFeatureId) && (
 									<group position={(() => {
 										const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
-										const offsetAmount = (isCamStage && actualStock) ? actualStock.dimensions[0] * 0.7 : 0;
+										const offsetAmount = 0;
 										return new THREE.Vector3(-offsetAmount, 0, 0);
 									})()}>
 										<FeatureHighlight 
@@ -836,17 +913,21 @@ export function CadViewport({
 									</group>
 								)}
 								</group>
-							</AnimatedSetupGroup>
-						</Stage>
+						</AnimatedSetupGroup>
 
-						<GizmoHelper alignment="top-right" margin={[50, 50]}>
-							<GizmoViewport axisColors={['#ef4444', '#22c55e', '#3b82f6']} labelColor="black" />
+						<GizmoHelper alignment="top-right" margin={[60, 60]}>
+							<GizmoViewcube 
+								color="#1e293b" 
+								strokeColor="#475569" 
+								hoverColor="#3b82f6" 
+								textColor="#f8fafc"
+								opacity={0.75} 
+							/>
 						</GizmoHelper>
 					</Suspense>
 
 					{/* Dimension overlay was moved inside Stage */}
 
-					<OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.05} minPolarAngle={0} maxPolarAngle={Math.PI / 1.75} />
 				</Canvas>
 
 				{!stlUrl && !isRecompiling && (

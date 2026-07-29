@@ -373,7 +373,7 @@ Generate production-grade, mathematically robust, parametric CAD code using the 
 5. **Metadata Mapping**: You MUST generate a `PARAMETER_METADATA` dictionary matching the `PARAMETERS` exactly, providing a `"group"`, `"confidence"` (0.0 to 1.0), and `"description"` for every parameter.
 6. **Z=0 Top Surface Alignment**: The final part MUST be exactly aligned so its absolute top-most surface is at Z=0. HOWEVER, you may build the part in whatever coordinate system makes the math easiest (e.g. growing upwards from Z=0). At the end of your script, OUTSIDE the BuildPart block, you MUST shift the entire part down programmatically using: `part.part = part.part.locate(bd.Location((0, 0, -part.part.bounding_box().max.Z)))`. This eliminates the need for you to do complex floating-point calculations!
 7. **Complete Extraction Enforcement**: Do NOT omit or simplify any subtractive features (holes, grooves, chamfers) mapped in the `FEATURE_MAP`. If a feature is described, you MUST physically model it and subtract it from the part.
-8. **Mandatory Parametric CAM Naming Convention**: The CAD parameters are used directly by the downstream CAM engine to auto-generate CNC toolpaths! Therefore, you MUST name parameters for machinable features (holes, pockets, slots, bosses, steps) using these exact keywords: `hole`, `drill`, `bore`, `pocket`, `slot`, `cavity`, `boss`, `step`, or `pad`. For example, use `center_hole_dia` and `center_hole_depth` (not `center_d`). For pockets, use `mounting_pocket_width`, `mounting_pocket_length`, and `mounting_pocket_depth` (not `w` and `l`). General stock dimensions like `plate_width` should remain generic. This ensures the Parametric CAM Engine maps them correctly.
+8. **Mandatory Parametric CAM Naming Convention**: The CAD parameters are used directly by the downstream CAM engine to auto-generate CNC toolpaths! Therefore, you MUST name parameters for machinable features (holes, pockets, slots, bosses, steps) using these exact keywords: `hole`, `drill`, `bore`, `pocket`, `slot`, `cavity`, `boss`, `step`, or `pad`. For example, use `center_hole_dia` and `center_hole_depth` (not `center_d`). You MUST explicitly provide a `_depth` parameter for EVERY hole and pocket, even through-holes (set the depth to the material thickness or outer diameter). For off-axis features (such as cross-holes or radial features), you MUST include the axis direction in the parameter prefix (e.g., `x_axis_cross_hole_dia`, `y_axis_radial_pocket_width`) so the CAM engine knows the tool vector. General stock dimensions like `plate_width` should remain generic. This ensures the Parametric CAM Engine maps them correctly.
 
 ## 🧠 MANDATORY SPATIAL PLANNING & MENTAL WALKTHROUGH (CRITICAL FOR ACCURACY)
 Before writing the `with bd.BuildPart()` block, you MUST write a multi-line python comment block detailing the spatial coordinates for every single feature. Calculate exact X, Y, Z centers and alignments based on the `PARAMETERS`.
@@ -884,6 +884,7 @@ class LLMCodegenService:
         mime_type: str | None = None,
         feature_map: dict[str, Any] | str | None = None,
         base_code: str | None = None,
+        selection_context: str | None = None,
     ):
         """
         Stage 2 - Synthesise or refine a build123d Python script, yielding chunks.
@@ -896,6 +897,8 @@ class LLMCodegenService:
                 parts.append(f"BLUEPRINT_AUDIT_REPORT:\n{feature_map}")
         if base_code:
             parts.append(f"EXISTING_CODE_TO_REFINE:\n{base_code}")
+        if selection_context:
+            parts.append(f"TARGET_COORDINATE (User Clicked Location):\n{selection_context}")
 
         user_text = "\n\n".join(parts)
         sys_instr = EDIT_SYSTEM_INSTRUCTION if base_code else SYSTEM_INSTRUCTION

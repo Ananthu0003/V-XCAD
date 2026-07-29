@@ -133,10 +133,6 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Stock to Leave</label>
                             <input type="number" step="0.1" value={params.stockToLeave || 0} onChange={(e) => updateParams('stockToLeave', parseFloat(e.target.value) || 0)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" />
                         </div>
-                        <div className="flex flex-col gap-2">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Max Stepdown</label>
-                            <input type="number" step="0.1" value={params.maxStepdown || 0} onChange={(e) => updateParams('maxStepdown', parseFloat(e.target.value) || 0)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" />
-                        </div>
                     </div>
                 )}
 
@@ -152,10 +148,6 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Stock to Leave</label>
                             <input type="number" step="0.1" value={params.stockToLeave || 0} onChange={(e) => updateParams('stockToLeave', parseFloat(e.target.value) || 0)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" />
-                        </div>
-                        <div className="flex flex-col gap-2">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Max Stepdown</label>
-                            <input type="number" step="0.1" value={params.maxStepdown || 0} onChange={(e) => updateParams('maxStepdown', parseFloat(e.target.value) || 0)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" />
                         </div>
                         <div className="flex flex-col gap-2 col-span-2">
                             <label className="text-[10px] font-bold flex items-center gap-2"><input type="checkbox" checked={params.restMachining || false} onChange={e => updateParams('restMachining', e.target.checked)} className="rounded" /> Rest Machining</label>
@@ -186,6 +178,54 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Stepover %</label>
                             <input type="number" value={params.stepoverPercentage} onChange={(e) => updateParams('stepoverPercentage', parseFloat(e.target.value) || 40)} className="w-full bg-input border border-border rounded-lg px-3 py-3 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" />
                         </div>
+                    </div>
+                )}
+
+                {/* Depth Cuts Section */}
+                {['2d_contour', 'pocket', 'facing'].includes(operation.type) && (
+                    <div className="flex flex-col gap-3 mt-2 bg-black/20 p-3 rounded-lg border border-border/50">
+                        <div className="flex items-center gap-2">
+                            <input 
+                                type="checkbox" 
+                                checked={params.depthCutsEnabled ?? true} 
+                                onChange={e => updateParams('depthCutsEnabled', e.target.checked)} 
+                                className="rounded" 
+                                id={`depth-cuts-${operation.id}`}
+                            />
+                            <label htmlFor={`depth-cuts-${operation.id}`} className="text-[10px] font-bold uppercase tracking-wider text-foreground">Depth Cuts</label>
+                        </div>
+                        
+                        {(params.depthCutsEnabled ?? true) && (
+                            <div className="grid grid-cols-2 gap-3 pl-6">
+                                <div className="flex flex-col gap-2">
+                                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Max Rough Step</label>
+                                    <input 
+                                        type="number" step="0.1" 
+                                        value={params.maxStepdown || 0} 
+                                        onChange={(e) => updateParams('maxStepdown', parseFloat(e.target.value) || 0)} 
+                                        className="w-full bg-input border border-border rounded-lg px-3 py-2 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" 
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Finish Step</label>
+                                    <input 
+                                        type="number" step="0.1" 
+                                        value={params.finishStepdown || 0} 
+                                        onChange={(e) => updateParams('finishStepdown', parseFloat(e.target.value) || 0)} 
+                                        className="w-full bg-input border border-border rounded-lg px-3 py-2 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" 
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-2 col-span-2">
+                                    <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Finish Cuts (Count)</label>
+                                    <input 
+                                        type="number" step="1" 
+                                        value={params.finishCuts || 0} 
+                                        onChange={(e) => updateParams('finishCuts', parseInt(e.target.value) || 0)} 
+                                        className="w-full bg-input border border-border rounded-lg px-3 py-2 text-xs text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner" 
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 

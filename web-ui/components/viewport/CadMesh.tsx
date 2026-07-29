@@ -16,11 +16,26 @@ export type StlGeometryInfo = {
 
 type StlMeshProps = {
 	url: string;
+	workpieceMaterial?: string;
 	onGeometryReady?: (info: StlGeometryInfo) => void;
 	onMeshClick?: (point: [number, number, number]) => void;
+	onHover?: (isHovered: boolean) => void;
 };
 
-export function StlMesh({ url, onGeometryReady, onMeshClick }: StlMeshProps) {
+const MATERIAL_PRESETS: Record<string, any> = {
+	'aluminum': { color: '#a0a5aa', metalness: 0.8, roughness: 0.35, clearcoat: 0.1 },
+	'aluminum_6061': { color: '#a0a5aa', metalness: 0.85, roughness: 0.3, clearcoat: 0.2 },
+	'steel': { color: '#7a818c', metalness: 0.9, roughness: 0.4, clearcoat: 0.1 },
+	'steel_1018': { color: '#7a818c', metalness: 0.9, roughness: 0.45, clearcoat: 0.1 },
+	'titanium': { color: '#888c8d', metalness: 0.8, roughness: 0.5, clearcoat: 0.05 },
+	'brass': { color: '#b5a642', metalness: 0.9, roughness: 0.3, clearcoat: 0.4 },
+	'copper': { color: '#b87333', metalness: 0.95, roughness: 0.2, clearcoat: 0.3 },
+	'plastic': { color: '#f8fafc', metalness: 0.1, roughness: 0.4, clearcoat: 0.5 },
+	'delrin': { color: '#f8fafc', metalness: 0.05, roughness: 0.6, clearcoat: 0.1 },
+	'acrylic': { color: '#ffffff', metalness: 0.1, roughness: 0.1, clearcoat: 1.0, transmission: 0.9, transparent: true },
+};
+
+export function CadMesh({ url, workpieceMaterial, onGeometryReady, onMeshClick, onHover }: StlMeshProps) {
 	const geometry = useLoader(STLLoader, url);
 
 	const { centeredGeometry, scale, center } = useMemo(() => {
@@ -59,18 +74,22 @@ export function StlMesh({ url, onGeometryReady, onMeshClick }: StlMeshProps) {
 		};
 	}, [geometry]);
 
-	const material = useMemo(
-		() =>
-			new MeshPhysicalMaterial({
-				color: new Color('#a0a5aa'), // realistic machined steel/aluminum color
-				metalness: 0.8,
-				roughness: 0.25, // low roughness for shiny finish
-				clearcoat: 0.3,
-				clearcoatRoughness: 0.2,
-				flatShading: false,
-			}),
-		[]
-	);
+	const material = useMemo(() => {
+		const matKey = workpieceMaterial ? workpieceMaterial.toLowerCase().replace(/[^a-z0-9_]/g, '') : 'aluminum_6061';
+		let preset = MATERIAL_PRESETS['aluminum_6061'];
+		
+		for (const key of Object.keys(MATERIAL_PRESETS)) {
+			if (matKey.includes(key)) {
+				preset = MATERIAL_PRESETS[key];
+				break;
+			}
+		}
+
+		return new MeshPhysicalMaterial({
+			...preset,
+			flatShading: false,
+		});
+	}, [workpieceMaterial]);
 
 	return (
 		<mesh
@@ -80,9 +99,19 @@ export function StlMesh({ url, onGeometryReady, onMeshClick }: StlMeshProps) {
 			castShadow
 			receiveShadow
 			onPointerDown={(e) => {
+				if (!e.shiftKey) return;
 				e.stopPropagation();
 				const localPoint = e.object.worldToLocal(e.point.clone());
 				onMeshClick?.([localPoint.x, localPoint.y, localPoint.z]);
+			}}
+			onPointerOver={(e) => {
+				e.stopPropagation();
+				document.body.style.cursor = 'pointer';
+				onHover?.(true);
+			}}
+			onPointerOut={(e) => {
+				document.body.style.cursor = 'default';
+				onHover?.(false);
 			}}
 		/>
 	);

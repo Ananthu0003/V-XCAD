@@ -12,6 +12,7 @@ class BasePostProcessor:
         self.current_a = None
         self.current_b = None
         self.current_c = None
+        self.current_feed = None
         self.coolant_active = False
         self.converter = PostUnitConverter("mm")
         
@@ -27,6 +28,7 @@ class BasePostProcessor:
         self.current_a = None
         self.current_b = None
         self.current_c = None
+        self.current_feed = None
         self.coolant_active = False
         self.current_tool_num = None
         self.current_rpm = None

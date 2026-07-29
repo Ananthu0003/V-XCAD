@@ -102,15 +102,65 @@ class ParametricToolpathEngine:
                 })
                 cursor = new_pos
 
-        # Stepdown parameter
-        stepdown = operation.get("parameters", {}).get("maxStepdown")
-        if stepdown is None or float(stepdown) <= 0:
-            # Dynamically calculate stepdown based on tool diameter to avoid millions of 2mm passes
-            stepdown = min(10.0, max(tool_dia * 0.5, 2.0))
-            if feat_type in ("hole", "blind_hole", "through_hole", "bore") or op_type in ("drilling", "peck_drilling", "boring"):
-                stepdown = tool_dia * 1.5
+        # Stepover parameter
+        stepover_pct = operation.get("parameters", {}).get("stepoverPercentage", 40.0)
+        stepover_abs = operation.get("parameters", {}).get("stepover")
+        if stepover_abs is None or float(stepover_abs) <= 0:
+            stepover_val = tool_dia * (float(stepover_pct) / 100.0)
         else:
-            stepdown = float(stepdown)
+            stepover_val = float(stepover_abs)
+            
+        # Depth cuts parameters
+        depth_cuts_enabled = operation.get("parameters", {}).get("depthCutsEnabled", True)
+        rough_stepdown = operation.get("parameters", {}).get("maxStepdown")
+        finish_stepdown = operation.get("parameters", {}).get("finishStepdown")
+        finish_cuts = int(operation.get("parameters", {}).get("finishCuts", 0))
+
+        if not depth_cuts_enabled:
+            rough_stepdown = depth
+            finish_stepdown = depth
+            finish_cuts = 0
+        else:
+            if rough_stepdown is None or float(rough_stepdown) <= 0:
+                rough_stepdown = min(10.0, max(tool_dia * 0.5, 2.0))
+            else:
+                rough_stepdown = float(rough_stepdown)
+                
+            if finish_stepdown is None or float(finish_stepdown) <= 0:
+                finish_stepdown = rough_stepdown
+            else:
+                finish_stepdown = float(finish_stepdown)
+                
+        if feat_type in ("hole", "blind_hole", "through_hole", "bore") or op_type in ("drilling", "peck_drilling", "boring"):
+            rough_stepdown = tool_dia * 1.5
+            
+        stepdown = rough_stepdown # For helical drill fallback
+        
+        # Pre-calculate Z passes
+        z_passes = []
+        if depth_cuts_enabled:
+            target_rough_z = bottom_z
+            if finish_cuts > 0:
+                target_rough_z = bottom_z + (finish_cuts * finish_stepdown)
+                
+            if target_rough_z < top_z:
+                curr_z = top_z
+                while curr_z > target_rough_z + 0.001:
+                    curr_z -= rough_stepdown
+                    if curr_z < target_rough_z: curr_z = target_rough_z
+                    z_passes.append(curr_z)
+            
+            if finish_cuts > 0:
+                curr_z = target_rough_z
+                for _ in range(finish_cuts):
+                    curr_z -= finish_stepdown
+                    if curr_z < bottom_z: curr_z = bottom_z
+                    z_passes.append(curr_z)
+        else:
+            z_passes = [bottom_z]
+            
+        if not z_passes:
+            z_passes = [bottom_z]
 
         # Determine strategy
         src = "contour"
@@ -208,7 +258,7 @@ class ParametricToolpathEngine:
             )
             
             overhang = tool_dia * 0.6  # Extend tool outside stock by 60% tool dia
-            stepover = tool_dia * 0.7  # 70% tool engagement (Fix 2: this is the real stepover)
+            stepover = stepover_val
 
             add_move("rapid_clearance", z=clearance, source=src)
             
@@ -308,10 +358,7 @@ class ParametricToolpathEngine:
 
             add_move("rapid_clearance", z=clearance, source=src)
 
-            curr_z = top_z
-            while curr_z > bottom_z:
-                curr_z -= stepdown
-                if curr_z < bottom_z: curr_z = bottom_z
+            for curr_z in z_passes:
 
                 # Center entry at clearance
                 add_move("retract_clearance", z=clearance, source=src)
@@ -320,7 +367,7 @@ class ParametricToolpathEngine:
 
                 if is_circular:
                     max_r = max((width / 2.0) - tool_radius, 0.1)
-                    stepover = tool_dia * 0.65
+                    stepover = stepover_val
                     num_shells = max(1, math.ceil(max_r / stepover))
 
                     for s in range(1, num_shells + 1):
@@ -334,7 +381,7 @@ class ParametricToolpathEngine:
                 else:
                     max_offset_w = max((width - tool_dia) / 2.0, 0.1)
                     max_offset_l = max((length - tool_dia) / 2.0, 0.1)
-                    stepover = tool_dia * 0.65
+                    stepover = stepover_val
                     num_shells = max(1, math.ceil(max(max_offset_w, max_offset_l) / stepover))
 
                     # Expand concentrically from center outward to pocket wall
@@ -402,10 +449,7 @@ class ParametricToolpathEngine:
 
             add_move("rapid_clearance", z=clearance, source=src)
 
-            curr_z = top_z
-            while curr_z > bottom_z:
-                curr_z -= stepdown
-                if curr_z < bottom_z: curr_z = bottom_z
+            for curr_z in z_passes:
 
                 if is_circular:
                     feat_r = (float(feat_diameter or width) / 2.0)

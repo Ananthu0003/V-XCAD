@@ -62,17 +62,12 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 		if (isOpen) {
 			fetchTools();
 		}
-	}, [isOpen, materialFilter, coatingFilter, typeFilter]);
+	}, [isOpen]);
 
 	const fetchTools = async () => {
 		setLoading(true);
 		try {
-			const query = new URLSearchParams();
-			if (materialFilter) query.append('material', materialFilter);
-			if (coatingFilter) query.append('coating', coatingFilter);
-			if (typeFilter) query.append('type', typeFilter);
-
-			const res = await fetch(`/api/cam/tools?${query.toString()}`);
+			const res = await fetch(`/api/cam/tools`);
 			const data = await res.json();
 			if (data.tools) {
 				setDbTools(data.tools);
@@ -326,6 +321,8 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 				plungeRate: parseInt(tool.cuttingData?.plungeRate) || 300,
 				retractRate: parseInt(tool.cuttingData?.retractRate) || 300,
 				coolant: tool.cuttingData?.coolant !== '-' ? (tool.cuttingData?.coolant || 'flood') : 'flood',
+				stepdown: parseFloat(tool.cuttingData?.stepdown) || undefined,
+				stepover: parseFloat(tool.cuttingData?.stepover) || undefined,
 			}
 		};
 
@@ -345,8 +342,38 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 		setIsHolderFormOpen(true);
 	};
 
-	const filteredTools = dbTools.filter(t => t.name.toLowerCase().includes(search.toLowerCase()));
+	const filteredTools = dbTools.filter(t => {
+		let matchesSearch = true;
+		if (search) {
+			const searchLower = search.toLowerCase().trim();
+			const isNumericSearch = /^\d/.test(searchLower);
+			const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			const regex = isNumericSearch 
+				? new RegExp(`(^|[^0-9.])${escapeRegExp(searchLower)}`, 'i')
+				: new RegExp(escapeRegExp(searchLower), 'i');
+			
+			const diamStr = `${t.geometry?.diameter || t.diameter || ''}${t.unit || 'mm'}`.toLowerCase();
+			matchesSearch = regex.test(t.name.toLowerCase()) || regex.test(diamStr);
+		}
+		const matchesType = !typeFilter || typeFilter === 'All Types' || typeFilter === 'all' || 
+			(t.type || '').toLowerCase() === typeFilter.toLowerCase();
+		
+		const materialStr = (t.material || t.name || '').toLowerCase();
+		let matchesMaterial = true;
+		if (materialFilter && materialFilter !== 'All Materials' && materialFilter !== 'all') {
+			if (materialFilter === 'CARBIDE') matchesMaterial = materialStr.includes('carbide') || (!materialStr.includes('hss'));
+			else matchesMaterial = materialStr.includes(materialFilter.toLowerCase().replace('_', ''));
+		}
 
+		const coatingStr = (t.coating || t.name || t.description || '').toLowerCase();
+		let matchesCoating = true;
+		if (coatingFilter && coatingFilter !== 'All Coatings' && coatingFilter !== 'all') {
+			if (coatingFilter === 'UNCOATED') matchesCoating = !coatingStr.includes('tialn') && !coatingStr.includes('dlc') && !coatingStr.includes('tin');
+			else matchesCoating = coatingStr.includes(coatingFilter.toLowerCase());
+		}
+
+		return matchesSearch && matchesType && matchesMaterial && matchesCoating;
+	});
 	const materialOptimized = filteredTools.filter(t => {
 		const materials = t.compatibility?.compatibleMaterialsJson
 			? JSON.parse(t.compatibility.compatibleMaterialsJson)
@@ -483,12 +510,12 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 
 								<div className="flex flex-col gap-2">
 									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Tool Type</label>
-									<Select value={typeFilter} onValueChange={(val) => setTypeFilter(val || '')}>
+									<Select value={typeFilter} onValueChange={(val) => setTypeFilter(val === 'all' ? '' : val || '')}>
     <SelectTrigger className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none">
-        <SelectValue />
+        <SelectValue placeholder="All Types" />
     </SelectTrigger>
     <SelectContent>
-<SelectItem value="">All Types</SelectItem>
+<SelectItem value="all">All Types</SelectItem>
 										<SelectItem value="flat_end_mill">Flat End Mill</SelectItem>
 										<SelectItem value="ball_end_mill">Ball Nose</SelectItem>
 										<SelectItem value="drill">Drill</SelectItem>
@@ -500,12 +527,12 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 
 								<div className="flex flex-col gap-2">
 									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Tool Material</label>
-									<Select value={materialFilter} onValueChange={(val) => setMaterialFilter(val || '')}>
+									<Select value={materialFilter} onValueChange={(val) => setMaterialFilter(val === 'all' ? '' : val || '')}>
     <SelectTrigger className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none">
-        <SelectValue />
+        <SelectValue placeholder="All Materials" />
     </SelectTrigger>
     <SelectContent>
-<SelectItem value="">All Materials</SelectItem>
+<SelectItem value="all">All Materials</SelectItem>
 										<SelectItem value="CARBIDE">Solid Carbide</SelectItem>
 										<SelectItem value="HSS">HSS</SelectItem>
 										<SelectItem value="HSS_CO">Cobalt HSS</SelectItem>
@@ -515,12 +542,12 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 
 								<div className="flex flex-col gap-2">
 									<label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Coating</label>
-									<Select value={coatingFilter} onValueChange={(val) => setCoatingFilter(val || '')}>
+									<Select value={coatingFilter} onValueChange={(val) => setCoatingFilter(val === 'all' ? '' : val || '')}>
     <SelectTrigger className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs focus:outline-none">
-        <SelectValue />
+        <SelectValue placeholder="All Coatings" />
     </SelectTrigger>
     <SelectContent>
-<SelectItem value="">All Coatings</SelectItem>
+<SelectItem value="all">All Coatings</SelectItem>
 										<SelectItem value="UNCOATED">Uncoated</SelectItem>
 										<SelectItem value="TIALN">TiAlN</SelectItem>
 										<SelectItem value="DLC">DLC</SelectItem>
@@ -709,19 +736,19 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 											<CardContent className="space-y-2 text-sm">
 												<div className="flex justify-between border-b pb-2">
 													<span className="text-muted-foreground">Diameter</span>
-													<span className="font-medium">{viewingTool.geometry?.diameter} {viewingTool.unit}</span>
+													<span className="font-medium">{viewingTool.geometry?.diameter ?? viewingTool.diameter ?? 0} {viewingTool.unit}</span>
 												</div>
 												<div className="flex justify-between border-b pb-2">
 													<span className="text-muted-foreground">Flute Length</span>
-													<span className="font-medium">{viewingTool.geometry?.fluteLength} {viewingTool.unit}</span>
+													<span className="font-medium">{viewingTool.geometry?.fluteLength ?? viewingTool.fluteLength ?? viewingTool.length ?? 0} {viewingTool.unit}</span>
 												</div>
 												<div className="flex justify-between border-b pb-2">
 													<span className="text-muted-foreground">Overall Length</span>
-													<span className="font-medium">{viewingTool.geometry?.overallLength} {viewingTool.unit}</span>
+													<span className="font-medium">{viewingTool.geometry?.overallLength ?? viewingTool.overallLength ?? viewingTool.length ?? 0} {viewingTool.unit}</span>
 												</div>
 												<div className="flex justify-between border-b pb-2">
 													<span className="text-muted-foreground">Flutes</span>
-													<span className="font-medium">{viewingTool.geometry?.fluteCount || '-'}</span>
+													<span className="font-medium">{viewingTool.geometry?.fluteCount ?? viewingTool.fluteCount ?? viewingTool.flutes ?? '-'}</span>
 												</div>
 												<div className="flex justify-between border-b pb-2">
 													<span className="text-muted-foreground">Shank Dia.</span>
@@ -778,6 +805,18 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 												<div className="flex justify-between border-b pb-2">
 													<span className="text-muted-foreground">Plunge Feed</span>
 													<span className="font-medium">{viewingTool.cuttingData?.plungeRate || '-'} mm/min</span>
+												</div>
+												<div className="flex justify-between border-b pb-2">
+													<span className="text-muted-foreground">Optimal Stepdown (Ap)</span>
+													<span className="font-medium">{viewingTool.cuttingData?.stepdown ?? viewingTool.cuttingData?.optimalStepdown ?? '-'} mm</span>
+												</div>
+												<div className="flex justify-between border-b pb-2">
+													<span className="text-muted-foreground">Optimal Stepover (Ae)</span>
+													<span className="font-medium">
+														{viewingTool.cuttingData?.stepoverPercentage ?? viewingTool.cuttingData?.optimalStepoverPercentage 
+															? `${viewingTool.cuttingData?.stepoverPercentage ?? viewingTool.cuttingData?.optimalStepoverPercentage}%` 
+															: (viewingTool.cuttingData?.stepover ?? viewingTool.cuttingData?.optimalStepover ?? '-') + ' mm'}
+													</span>
 												</div>
 												<div className="flex justify-between pb-2">
 													<span className="text-muted-foreground">Coolant</span>

@@ -129,9 +129,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_3axis",
-      "timingProfileId": "haas_vf2_standard"
+      }
     },
     {
       "id": "haas_vf4ss",
@@ -148,9 +146,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_3axis",
-      "timingProfileId": "haas_vf2_standard"
+      }
     },
     {
       "id": "mazak_vcn530c",
@@ -167,9 +163,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_3axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "dmg_cmx1100v",
@@ -188,9 +182,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_3axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "okuma_genos_m560v",
@@ -207,9 +199,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_3axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "makino_ps95",
@@ -227,9 +217,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_3axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "doosan_dnm5700",
@@ -247,9 +235,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_3axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "hurco_vm10i",
@@ -266,9 +252,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_3axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "haas_vf2_hrt160",
@@ -285,9 +269,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_4axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "mazak_vcn530c_4x",
@@ -304,9 +286,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_4axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "haas_umc750",
@@ -323,9 +303,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_5axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "haas_umc500",
@@ -342,9 +320,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_5axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "dmg_dmu50",
@@ -363,9 +339,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_5axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "mazak_variaxis_i800",
@@ -382,9 +356,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_5axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "hermle_c400",
@@ -401,9 +373,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_5axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "makino_d500",
@@ -421,9 +391,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_5axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "okuma_mu4000v",
@@ -440,9 +408,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_5axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "matsuura_mx520",
@@ -459,9 +425,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "vmc_5axis",
-      "timingProfileId": "generic_vmc_3axis"
+      }
     },
     {
       "id": "makino_a61nx",
@@ -562,9 +526,9 @@
       "recommendedPost": "HAAS_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -579,9 +543,9 @@
       "recommendedPost": "MAZAK_SMOOTH_EIA_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -596,9 +560,9 @@
       "recommendedPost": "OKUMA_OSP_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -614,9 +578,9 @@
       "recommendedPost": "FANUC_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -632,9 +596,9 @@
       "recommendedPost": "SIEMENS_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -649,9 +613,9 @@
       "recommendedPost": "HAAS_2X_LATHE",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -666,9 +630,9 @@
       "recommendedPost": "MAZAK_SMOOTH_EIA_MILL_TURN",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -684,9 +648,9 @@
       "recommendedPost": "FANUC_MILL_TURN",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -754,9 +718,9 @@
       "recommendedPost": "FANUC_SWISS",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -771,9 +735,9 @@
       "recommendedPost": "FANUC_SWISS",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -788,9 +752,9 @@
       "recommendedPost": "FANUC_SWISS",
       "camSupport": {
         "setup": true,
-        "featureRecognition": false,
-        "toolpathGeneration": false,
-        "gcodeGeneration": false
+        "featureRecognition": true,
+        "toolpathGeneration": true,
+        "gcodeGeneration": true
       }
     },
     {
@@ -860,9 +824,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "cnc_router_manual",
-      "timingProfileId": "generic_router"
+      }
     },
     {
       "id": "biesse_rover_a",
@@ -881,9 +843,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "cnc_router_manual",
-      "timingProfileId": "generic_router"
+      }
     },
     {
       "id": "shopsabre_is4x8",
@@ -902,9 +862,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "cnc_router_manual",
-      "timingProfileId": "generic_router"
+      }
     },
     {
       "id": "thermwood_model67",
@@ -921,9 +879,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "cnc_router_manual",
-      "timingProfileId": "generic_router"
+      }
     },
     {
       "id": "shapeoko_5pro",
@@ -941,9 +897,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "cnc_router_manual",
-      "timingProfileId": "generic_router"
+      }
     },
     {
       "id": "avid_cnc_pro4896",
@@ -963,9 +917,7 @@
         "featureRecognition": true,
         "toolpathGeneration": true,
         "gcodeGeneration": true
-      },
-      "capabilityProfileId": "cnc_router_manual",
-      "timingProfileId": "generic_router"
+      }
     },
     {
       "id": "omax_55100",

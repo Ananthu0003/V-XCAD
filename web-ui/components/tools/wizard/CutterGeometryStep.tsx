@@ -22,6 +22,7 @@ export function CutterGeometryStep() {
           <Label>Diameter</Label>
           <Input 
             type="number" step="0.1" 
+            placeholder="e.g. 10.0"
             value={geo.diameter || ''} 
             onChange={(e) => updateGeo('diameter', parseFloat(e.target.value))}
           />
@@ -31,6 +32,7 @@ export function CutterGeometryStep() {
           <Label>Overall Length</Label>
           <Input 
             type="number" step="0.1" 
+            placeholder="e.g. 75.0"
             value={geo.overallLength || ''} 
             onChange={(e) => updateGeo('overallLength', parseFloat(e.target.value))}
           />
@@ -40,6 +42,7 @@ export function CutterGeometryStep() {
           <Label>Flute Length</Label>
           <Input 
             type="number" step="0.1" 
+            placeholder="e.g. 30.0"
             value={geo.fluteLength || ''} 
             onChange={(e) => updateGeo('fluteLength', parseFloat(e.target.value))}
           />
@@ -51,6 +54,7 @@ export function CutterGeometryStep() {
             <Label>Flutes</Label>
             <Input 
               type="number" 
+              placeholder="e.g. 4"
               value={geo.fluteCount || ''} 
               onChange={(e) => updateGeo('fluteCount', parseInt(e.target.value))}
             />
@@ -62,6 +66,7 @@ export function CutterGeometryStep() {
             <Label>Corner Radius</Label>
             <Input 
               type="number" step="0.1" 
+              placeholder="e.g. 0.5"
               value={geo.cornerRadius || ''} 
               onChange={(e) => updateGeo('cornerRadius', parseFloat(e.target.value))}
             />

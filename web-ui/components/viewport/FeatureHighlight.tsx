@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useRef } from 'react';
 import { Edges, Html } from '@react-three/drei';
-import { Vector3, Quaternion } from 'three';
+import { Vector3, Quaternion, MeshBasicMaterial, LineBasicMaterial, MathUtils } from 'three';
+import { useFrame } from '@react-three/fiber';
 
 type AnnotationEntry = {
 	p1: [number, number, number];
@@ -230,6 +231,24 @@ export function FeatureHighlight({
 	const { shape, args, position, quaternion } = highlightData;
 
 	return (
+		<AnimatedHighlight shape={shape} args={args} position={position} quaternion={quaternion} />
+	);
+}
+
+function AnimatedHighlight({ shape, args, position, quaternion }: { shape: string, args: any[], position: Vector3, quaternion: Quaternion }) {
+	const materialRef = useRef<MeshBasicMaterial>(null);
+	const edgesMaterialRef = useRef<LineBasicMaterial>(null);
+
+	useFrame((state, delta) => {
+		if (materialRef.current) {
+			materialRef.current.opacity = MathUtils.lerp(materialRef.current.opacity, 0.4, delta * 10);
+		}
+		if (edgesMaterialRef.current) {
+			edgesMaterialRef.current.opacity = MathUtils.lerp(edgesMaterialRef.current.opacity, 1.0, delta * 10);
+		}
+	});
+
+	return (
 		<group position={position} quaternion={quaternion}>
 			<mesh>
 				{shape === 'cylinder' ? (
@@ -238,9 +257,10 @@ export function FeatureHighlight({
 					<boxGeometry args={args as [number, number, number]} />
 				)}
 				<meshBasicMaterial 
+					ref={materialRef}
 					color="#3b82f6" 
 					transparent 
-					opacity={0.3} 
+					opacity={0} 
 					depthTest={false} 
 					side={2}
 				/>
@@ -249,7 +269,9 @@ export function FeatureHighlight({
 					threshold={15} 
 					color="#2563eb" 
 					renderOrder={1000} 
-				/>
+				>
+					<lineBasicMaterial ref={edgesMaterialRef} color="#2563eb" transparent opacity={0} depthTest={false} />
+				</Edges>
 			</mesh>
 		</group>
 	);

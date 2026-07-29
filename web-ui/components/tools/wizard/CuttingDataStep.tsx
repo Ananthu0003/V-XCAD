@@ -26,6 +26,7 @@ export function CuttingDataStep() {
           <Label>Spindle Speed (RPM)</Label>
           <Input 
             type="number" 
+            placeholder="e.g. 10000"
             value={data.spindleRpm || ''} 
             onChange={(e) => updateData('spindleRpm', parseInt(e.target.value))}
           />
@@ -35,6 +36,7 @@ export function CuttingDataStep() {
           <Label>Cutting Feed Rate</Label>
           <Input 
             type="number" 
+            placeholder="e.g. 1200"
             value={data.feedRate || ''} 
             onChange={(e) => updateData('feedRate', parseInt(e.target.value))}
           />
@@ -44,6 +46,7 @@ export function CuttingDataStep() {
           <Label>Plunge Feed Rate</Label>
           <Input 
             type="number" 
+            placeholder="e.g. 300"
             value={data.plungeRate || ''} 
             onChange={(e) => updateData('plungeRate', parseInt(e.target.value))}
           />
@@ -53,6 +56,7 @@ export function CuttingDataStep() {
           <Label>Retract Feed Rate</Label>
           <Input 
             type="number" 
+            placeholder="e.g. 500"
             value={data.retractRate || ''} 
             onChange={(e) => updateData('retractRate', parseInt(e.target.value))}
           />

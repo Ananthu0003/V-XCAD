@@ -238,7 +238,27 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                     const newOps = [...props.camOperations];
                     const idx = newOps.findIndex(o => o.id === opId);
                     if (idx >= 0) {
-                      newOps[idx] = { ...newOps[idx], ...updates };
+                      let opUpdates = { ...updates };
+                      
+                      // Auto-populate depth cut params on tool change
+                      if (opUpdates.toolId) {
+                          const tool = props.camTools.find(t => t.id === opUpdates.toolId || (t as any).dbId === opUpdates.toolId) || (opUpdates as any).tool;
+                          if (tool && tool.diameter) {
+                              const currentParams = newOps[idx].parameters || {} as any;
+                              const cd = tool.cuttingData || {};
+                              opUpdates.parameters = {
+                                  ...currentParams,
+                                  // Use exact manufacturer data if available, else fallback to safe baseline
+                                  maxStepdown: cd.optimalStepdown ?? (Math.round(tool.diameter * 0.5 * 100) / 100),
+                                  finishStepdown: cd.optimalStepdown ?? tool.diameter, 
+                                  finishCuts: 1,
+                                  stepoverPercentage: cd.optimalStepoverPercentage ?? 40,
+                                  ...(cd.optimalStepover ? { stepover: cd.optimalStepover } : {})
+                              };
+                          }
+                      }
+                      
+                      newOps[idx] = { ...newOps[idx], ...opUpdates };
                       props.setCamOperations(newOps);
                     }
                   }}

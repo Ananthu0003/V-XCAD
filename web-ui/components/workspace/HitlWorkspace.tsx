@@ -298,6 +298,7 @@ export default function HitlWorkspace() {
 	const [isDownloadingStep, setIsDownloadingStep] = useState(false);
 	const [isDownloadingDxf, setIsDownloadingDxf] = useState(false);
 	const [isDownloadingGcode, setIsDownloadingGcode] = useState(false);
+	const [hoveredFeatureId, setHoveredFeatureId] = useState<string | null>(null);
 
 	// CAM Parameters State
 	const [camSetup, setCamSetup] = useState<SetupSettings>(() => migrateLegacyCamSetup({
@@ -1337,6 +1338,9 @@ export default function HitlWorkspace() {
 												</div>
 											) : (
 												<CadViewport
+													hoveredFeatureId={hoveredFeatureId}
+													onHoverFeature={setHoveredFeatureId}
+													workpieceMaterial={camSetup.material}
 													stlUrl={stlUrl}
 													statusText={statusText}
 													workflowStage={workflowStage}
@@ -1439,16 +1443,24 @@ export default function HitlWorkspace() {
 														</div>
 													}
 												>
-													{stlUrl ? <StlMesh url={stlUrl} expectedSize={(() => {
+													{stlUrl ? <StlMesh url={stlUrl} workpieceMaterial={camSetup.material} expectedSize={(() => {
 														if (!parameters) return undefined;
 														const vals = Object.values(parameters).filter(v => typeof v === 'number') as number[];
 														return vals.length > 0 ? Math.max(...vals) : undefined;
 													})()} onGeometryReady={setGeometryInfo} onMeshClick={(p) => setSelectionContext(p)} /> : null}
 													{selectionContext && (
-														<mesh position={selectionContext}>
-															<sphereGeometry args={[1.5, 16, 16]} />
-															<meshBasicMaterial color="#ef4444" depthTest={false} transparent opacity={0.8} />
-														</mesh>
+														<group position={selectionContext}>
+															{/* Core dot */}
+															<mesh>
+																<sphereGeometry args={[0.05, 16, 16]} />
+																<meshBasicMaterial color="#ef4444" depthTest={false} transparent opacity={1} />
+															</mesh>
+															{/* Targeting ring */}
+															<mesh>
+																<ringGeometry args={[0.1, 0.12, 32]} />
+																<meshBasicMaterial color="#ef4444" depthTest={false} transparent opacity={0.6} side={2} />
+															</mesh>
+														</group>
 													)}
 												</CadViewport>
 											)}
@@ -1517,7 +1529,7 @@ export default function HitlWorkspace() {
 																	<span className="text-[11px] font-bold text-yellow-500 uppercase">
 																		{(() => {
 																			const opsTime = camOperations.reduce((acc, op) => acc + (op.estimated_time_s || op.statistics?.cycleTimeSeconds || 0), 0);
-																			const totalCycleTimeSeconds = opsTime > 0 ? opsTime : plannedCycleTimeSeconds;
+																			const totalCycleTimeSeconds = plannedCycleTimeSeconds > opsTime ? plannedCycleTimeSeconds : (opsTime || plannedCycleTimeSeconds);
 																			if (!totalCycleTimeSeconds) return '00:00';
 																			const m = Math.floor(totalCycleTimeSeconds / 60);
 																			const s = Math.floor(totalCycleTimeSeconds % 60);

@@ -1,36 +1,40 @@
 import math
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from app.models.schemas import ToolpathSegment, ToolpathSegmentType
-from app.models.manufacturing import MachineProfile
+from app.models.manufacturing import MachineProfile, ToolProfile
+from app.models.timing_profiles import (
+    OperationPenaltyProfile, MaterialMachiningProfile, ToolPerformanceProfile,
+    MachineTimingProfile, SetupHandlingProfile, CoolantTimingProfile, ProbeTimingProfile
+)
+from app.models.cycle_time import OperationTimeBreakdown
 
 class CycleTimeEstimator:
-    """Estimates machining time based on generated toolpath segments."""
+    """Estimates machining time based on generated toolpath segments and engineering profiles."""
     
     @staticmethod
-    def estimate_segment_time(segment: ToolpathSegment, machine_profile: MachineProfile) -> float:
-        """Calculate estimated time in seconds for a single toolpath segment."""
-        # Rapid moves use machine rapid rate (converted from mm/min to mm/s)
-        # Cut moves use the programmed feedrate
-        rapid_feedrate_mms = machine_profile.rapid_feedrate / 60.0
+    def get_operation_penalty(op_type: str) -> float:
+        """Fetch inefficiency penalty based on operation type."""
+        # Using a default OperationPenaltyProfile instance
+        profile = OperationPenaltyProfile()
+        modifiers = profile.modifiers
         
-        feedrate_mms = (segment.feedrate / 60.0) if (segment.feedrate and segment.feedrate > 0) else rapid_feedrate_mms
+        op_type_lower = op_type.lower()
+        if "face" in op_type_lower: return modifiers.get("facing", 1.10)
+        if "adaptive" in op_type_lower: return modifiers.get("adaptive_pocket", 1.05)
+        if "pocket" in op_type_lower: return modifiers.get("pocket", 1.25)
+        if "contour" in op_type_lower or "profile" in op_type_lower: return modifiers.get("contour", 1.15)
+        if "drill" in op_type_lower and "deep" in op_type_lower: return modifiers.get("deep_drilling", 1.30)
+        if "drill" in op_type_lower: return modifiers.get("drilling", 1.05)
+        if "helic" in op_type_lower: return modifiers.get("helical_milling", 1.10)
+        if "bore" in op_type_lower or "boring" in op_type_lower: return modifiers.get("boring", 1.05)
+        if "chamf" in op_type_lower: return modifiers.get("chamfering", 1.10)
+        if "thread" in op_type_lower: return modifiers.get("thread_milling", 1.20)
+        
+        return 1.15 # Fallback
 
-        # Check move type
-        if segment.moveType in [ToolpathSegmentType.RAPID_CLEARANCE, ToolpathSegmentType.RAPID_XY, ToolpathSegmentType.APPROACH_RETRACT]:
-            effective_feedrate = rapid_feedrate_mms
-        elif segment.moveType in [ToolpathSegmentType.CUT, ToolpathSegmentType.PLUNGE, ToolpathSegmentType.DRILL_CYCLE]:
-            effective_feedrate = feedrate_mms
-        elif segment.moveType in [ToolpathSegmentType.ARC_CW, ToolpathSegmentType.ARC_CCW]:
-            effective_feedrate = feedrate_mms
-        elif segment.moveType == ToolpathSegmentType.RETRACT_CLEARANCE:
-            effective_feedrate = rapid_feedrate_mms
-        else:
-            effective_feedrate = feedrate_mms # fallback
-
-        # Calculate distance
-        dist = 0.0
+    @staticmethod
+    def calculate_distance(segment: ToolpathSegment) -> float:
         if segment.moveType in [ToolpathSegmentType.ARC_CW, ToolpathSegmentType.ARC_CCW] and segment.center and segment.radius:
-            # Arc length calculation
             dx1 = segment.start.x - segment.center.x
             dy1 = segment.start.y - segment.center.y
             dx2 = segment.end.x - segment.center.x
@@ -47,58 +51,143 @@ class CycleTimeEstimator:
                 if angle_diff >= 0:
                     angle_diff -= 2 * math.pi
             
-            # Z movement in helix
             dz = segment.end.z - segment.start.z
             arc_length_xy = abs(angle_diff) * segment.radius
-            dist = math.sqrt(arc_length_xy**2 + dz**2)
+            return math.sqrt(arc_length_xy**2 + dz**2)
         else:
-            # Linear distance (3D)
             dx = segment.end.x - segment.start.x
             dy = segment.end.y - segment.start.y
             dz = segment.end.z - segment.start.z
-            dist = math.sqrt(dx**2 + dy**2 + dz**2)
+            return math.sqrt(dx**2 + dy**2 + dz**2)
 
+    @classmethod
+    def estimate_segment_time(cls, segment: ToolpathSegment, machine_profile: MachineProfile) -> Tuple[float, str]:
+        """
+        Calculate estimated time in seconds for a single toolpath segment.
+        Returns: (time_seconds, category)
+        Categories: "cut", "rapid", "air_cut"
+        """
+        rapid_feedrate_mms = machine_profile.rapid_feedrate / 60.0
+        feedrate_mms = (segment.feedrate / 60.0) if (segment.feedrate and segment.feedrate > 0) else rapid_feedrate_mms
+
+        # Check move type
+        category = "cut"
+        if segment.moveType in [ToolpathSegmentType.RAPID_CLEARANCE, ToolpathSegmentType.RAPID_XY]:
+            effective_feedrate = rapid_feedrate_mms
+            category = "rapid"
+        elif segment.moveType in [ToolpathSegmentType.APPROACH_RETRACT, ToolpathSegmentType.RETRACT_CLEARANCE]:
+            effective_feedrate = rapid_feedrate_mms
+            category = "air_cut"
+        elif segment.moveType in [ToolpathSegmentType.CUT, ToolpathSegmentType.PLUNGE, ToolpathSegmentType.DRILL_CYCLE, ToolpathSegmentType.ARC_CW, ToolpathSegmentType.ARC_CCW]:
+            effective_feedrate = feedrate_mms
+            # Additional logic for air cut classification based on segment role
+            if segment.segmentRole in ["lead_in", "lead_out", "retract"]:
+                category = "air_cut"
+        else:
+            effective_feedrate = feedrate_mms
+            
+        dist = cls.calculate_distance(segment)
         if effective_feedrate <= 0:
-            return 0.0
+            return (0.0, category)
 
-        return dist / effective_feedrate
+        return (dist / effective_feedrate, category)
 
     @classmethod
-    def estimate_operation_time(cls, segments: List[ToolpathSegment], machine_profile: MachineProfile) -> float:
-        """Calculate total estimated time in seconds for an operation."""
-        total_time = 0.0
+    def estimate_operation_time(cls, segments: List[ToolpathSegment], machine_profile: MachineProfile, op_id: str = "") -> OperationTimeBreakdown:
+        """Calculate total estimated time in seconds for an operation from its segments."""
+        breakdown = OperationTimeBreakdown(operation_id=op_id, operation_type="toolpath_execution")
+        
         for seg in segments:
-            total_time += cls.estimate_segment_time(seg, machine_profile)
-        return total_time
+            t, cat = cls.estimate_segment_time(seg, machine_profile)
+            if cat == "cut": breakdown.cutting_time_seconds += t
+            elif cat == "rapid": breakdown.rapid_time_seconds += t
+            elif cat == "air_cut": breakdown.air_cutting_time_seconds += t
+            breakdown.total_seconds += t
+            
+        return breakdown
 
     @classmethod
-    def estimate_operation_time_parametric(cls, operation: Dict[str, Any], feature: Dict[str, Any], setup: Dict[str, Any] = None) -> float:
+    def resolve_feeds_and_speeds(cls, params: Dict[str, Any], mat_profile: MaterialMachiningProfile, tool_diameter: float = 10.0, flutes: int = 4) -> Tuple[float, float, float]:
+        """Resolves (feed_rate, stepover, stepdown) based on requested values or material profiles."""
+        feed_rate_val = params.get("feedRate")
+        stepover_val = params.get("stepover")
+        stepdown_val = params.get("maxStepdown") or params.get("stepdown")
+        # Load Material Profile
+        # Handled externally now, passed as argument
+        
+        # Calculate ideal params
+        rpm = (mat_profile.surface_speed_m_min * 1000) / (math.pi * tool_diameter) if tool_diameter > 0 else 5000.0
+        ideal_feed = rpm * flutes * mat_profile.chip_load_mm
+        ideal_stepover = tool_diameter * (mat_profile.recommended_stepover_pct / 100.0)
+        ideal_stepdown = tool_diameter * (mat_profile.recommended_stepdown_pct / 100.0)
+        
+        feed = float(feed_rate_val) if feed_rate_val is not None and float(feed_rate_val) > 0 else ideal_feed
+        stepover = float(stepover_val) if stepover_val is not None and float(stepover_val) > 0 else max(ideal_stepover, 1.0)
+        stepdown = float(stepdown_val) if stepdown_val is not None and float(stepdown_val) > 0 else max(ideal_stepdown, 1.0)
+        
+        return feed, stepover, stepdown
+
+    @classmethod
+    def apply_mrr_limits(cls, requested_mrr: float, tool_mrr: float, machine_mrr: float) -> float:
+        """Calculates Actual MRR based on physical limits."""
+        return min(requested_mrr, tool_mrr, machine_mrr)
+
+    @classmethod
+    def estimate_operation_time_parametric(
+        cls, 
+        operation: Dict[str, Any], 
+        feature: Dict[str, Any], 
+        setup: Dict[str, Any],
+        machine_profile: MachineProfile
+    ) -> OperationTimeBreakdown:
         """
         Estimate operation time parametrically using Volume, Area, and MRR.
         Provides an approximate cycle time before toolpaths are generated.
-        Returns time in seconds.
+        Returns an OperationTimeBreakdown.
         """
-        if setup is None:
-            setup = {}
+        if setup is None: setup = {}
             
         op_type = operation.get("type", "").lower()
         feat_type = feature.get("type", "").lower()
         params = operation.get("parameters", {})
         
-        feed_rate_val = params.get("feedRate")
-        feed_rate = float(feed_rate_val) if feed_rate_val is not None else 1000.0
-        if feed_rate <= 0:
-            feed_rate = 1000.0
-            
+        op_id = operation.get("id", "param_op")
+        breakdown = OperationTimeBreakdown(operation_id=op_id, operation_type=op_type)
+        
         dims = feature.get("dimensions", {})
         depth = float(feature.get("depth") or dims.get("depth") or 10.0)
         width = float(feature.get("width") or dims.get("width") or 50.0)
         length = float(feature.get("length") or dims.get("length") or 50.0)
         diameter = float(feature.get("diameter") or dims.get("diameter") or 10.0)
         
-        # Default stepover/stepdown for rough calculations
-        stepover = 5.0 
-        stepdown = 5.0
+        tool_diameter = diameter # simplified mapping
+        flutes = operation.get("tool", {}).get("flute_count") or 4
+        
+        # Get Material and Feeds
+        material_cat = setup.get("material", "aluminum")
+        mat_profile = MaterialMachiningProfile(material_category=material_cat)
+        feed_rate, stepover, stepdown = cls.resolve_feeds_and_speeds(params, mat_profile, tool_diameter, flutes)
+        
+        # MRR calculation
+        requested_mrr = feed_rate * stepover * stepdown # mm^3/min
+        
+        # Determine Limits
+        tool_perf = ToolPerformanceProfile()
+        tool_mrr_limit = tool_perf.max_recommended_mrr_cm3_min * 1000.0 # to mm^3/min
+        
+        # Machine limit based on Spindle Power (approximation: MRR (cm3/min) = Power (kW) / Specific Cutting Force)
+        spfc = mat_profile.specific_cutting_force_n_mm2 / 1000.0 # Convert N/mm2 to kW/cm3/min approx
+        if spfc <= 0: spfc = 0.7
+        spindle_power = getattr(machine_profile, "spindle_power_kw", 15.0)
+        machine_mrr_limit = (spindle_power / spfc) * 1000.0 * 1000.0 # cm3/min to mm3/min approx conversion
+        
+        actual_mrr = cls.apply_mrr_limits(requested_mrr, tool_mrr_limit, machine_mrr_limit)
+        # Adjust feed rate backwards from MRR
+        actual_feed_rate = actual_mrr / (stepover * stepdown) if stepover > 0 and stepdown > 0 else feed_rate
+        
+        # Depth cuts parameters
+        depth_cuts_enabled = params.get("depthCutsEnabled", True)
+        finish_cuts = int(params.get("finishCuts") or 0)
         
         # Extract stock dimensions if available
         stock_z = 0.0
@@ -112,111 +201,147 @@ class CycleTimeEstimator:
         estimated_time = 0.0
         
         if "drill" in op_type or "hole" in feat_type:
-            # Drilling: (Depth + Clearance) / FeedRate
             clearance = 5.0
             total_z = depth + clearance + stock_allowance
-            # Add pecking multiplier if deep
-            if diameter > 0 and depth > diameter * 3:
-                peck_count = depth / diameter
-                total_z += peck_count * clearance * 2 # retract and plunge
-            estimated_time = (total_z / feed_rate) * 60.0 # to seconds
+            if tool_diameter > 0 and depth > tool_diameter * 3:
+                peck_count = depth / tool_diameter
+                total_z += peck_count * clearance * 2 
+            estimated_time = (total_z / actual_feed_rate) * 60.0 
             
         elif "face" in op_type or "face" in feat_type:
-            # Facing: Area / (FeedRate * Stepover) * Z-Passes
             area = length * width
-            if area <= 0 and diameter > 0:
-                import math
-                area = math.pi * (diameter / 2.0) ** 2
-            
+            if area <= 0 and tool_diameter > 0:
+                area = math.pi * (tool_diameter / 2.0) ** 2
             distance = area / stepover
-            base_time = (distance / feed_rate) * 60.0
+            base_time = (distance / actual_feed_rate) * 60.0
             
-            # Stock aware facing
-            # If stock Z is greater than feature Z, it needs multiple passes.
             material_to_remove = depth
             if stock_allowance > 0:
                 material_to_remove = stock_allowance + (0.5 if depth <= 0 else depth)
                 
-            import math
-            passes = max(1, math.ceil(material_to_remove / stepdown))
+            passes = 1
+            if depth_cuts_enabled:
+                target_rough_mat = material_to_remove
+                rough_passes = 0
+                if target_rough_mat > 0:
+                    rough_passes = max(1, math.ceil(target_rough_mat / stepdown))
+                passes = rough_passes + finish_cuts
             
             estimated_time = base_time * passes
             
         elif "pocket" in op_type or "pocket" in feat_type:
-            # Pocketing: Volume / MRR
-            # Stock-Aware logic: If the pocket is deep inside stock, we must remove more volume
-            # We add the stock allowance to the effective depth of the pocket to clear the material above it.
             effective_depth = depth + stock_allowance
-            
             volume = length * width * effective_depth
-            if volume <= 0 and diameter > 0:
-                import math
-                volume = math.pi * (diameter / 2.0) ** 2 * effective_depth
+            if volume <= 0 and tool_diameter > 0:
+                volume = math.pi * (tool_diameter / 2.0) ** 2 * effective_depth
             
-            mrr = feed_rate * stepover * stepdown
-            if mrr > 0:
-                estimated_time = (volume / mrr) * 60.0
+            if actual_mrr > 0:
+                estimated_time = (volume / actual_mrr) * 60.0
                 
         elif "contour" in op_type or "profile" in op_type:
-            # Contouring: Perimeter * Passes / FeedRate
             perimeter = 2 * (length + width)
-            if perimeter <= 0 and diameter > 0:
-                import math
-                perimeter = math.pi * diameter
+            if perimeter <= 0 and tool_diameter > 0:
+                perimeter = math.pi * tool_diameter
             
-            passes = max(1, int(depth / stepdown))
+            passes = 1
+            if depth_cuts_enabled:
+                target_rough = depth
+                rough_passes = 0
+                if target_rough > 0:
+                    rough_passes = max(1, math.ceil(target_rough / stepdown))
+                passes = rough_passes + finish_cuts
+                
             distance = perimeter * passes
-            estimated_time = (distance / feed_rate) * 60.0
+            estimated_time = (distance / actual_feed_rate) * 60.0
             
         else:
-            # Fallback for unknown operations
             distance = (length + width + depth) * 2
-            estimated_time = (distance / feed_rate) * 60.0
+            estimated_time = (distance / actual_feed_rate) * 60.0
             
-        # Add 20% inefficiency factor for cornering deceleration and rapid positioning moves
-        return estimated_time * 1.2
+        penalty = cls.get_operation_penalty(op_type)
+        total_time = estimated_time * penalty
+        
+        op_prof = OperationPenaltyProfile()
+        
+        # Break down total time for parametric
+        breakdown.cutting_time_seconds = total_time * op_prof.parametric_cutting_split
+        breakdown.air_cutting_time_seconds = total_time * op_prof.parametric_aircut_split
+        breakdown.rapid_time_seconds = total_time * op_prof.parametric_rapid_split
+        breakdown.total_seconds = total_time
+        
+        return breakdown
 
     @classmethod
-    def estimate_setup_time(cls, operations: List[Dict[str, Any]], machine_profile: MachineProfile, features_dict: Dict[str, Dict[str, Any]] = None, setup: Dict[str, Any] = None) -> Dict[str, Any]:
+    def estimate_setup_time(
+        cls, 
+        operations: List[Dict[str, Any]], 
+        machine_profile: MachineProfile, 
+        features_dict: Dict[str, Dict[str, Any]] = None, 
+        setup: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
         """
         Calculate total estimated time for a setup, including tool changes and handling.
-        Implements the formula:
-        T_cycle = T_cutting + T_rapid + T_toolchange + T_spindle + T_dwell + T_machine_actions + T_handling
+        Reads timing values from setup and handling profiles.
         """
-        if features_dict is None:
-            features_dict = {}
-        if setup is None:
-            setup = {}
-            
-        t_cutting_and_rapid = 0.0
+        if features_dict is None: features_dict = {}
+        if setup is None: setup = {}
+        
+        setup_prof = SetupHandlingProfile()
+        coolant_prof = CoolantTimingProfile()
+        probe_prof = ProbeTimingProfile()
+        
+        t_cutting = 0.0
+        t_rapid = 0.0
+        t_air_cut = 0.0
         t_spindle = 0.0
-        t_dwell = 0.0
+        t_coolant = 0.0
+        t_probe = 0.0
         t_machine_actions = 0.0
+        t_dwell = 0.0
         
         tool_changes = 0
         current_tool = None
         
         for op in operations:
-            # Operation time from toolpaths (T_cutting + T_rapid)
             op_time = op.get('estimated_time_s', 0.0)
             
-            # If toolpaths were not generated or time is 0, estimate parametrically!
+            # Parametric estimate if toolpaths absent
             if op_time <= 0.0:
                 feat_id = op.get("feature_id") or op.get("featureId")
                 feat = features_dict.get(feat_id, {})
-                
-                # Estimate model Z from features if not present
                 if "estimated_model_z" not in setup and features_dict:
                     max_z = max([float(f.get("depth") or 0.0) for f in features_dict.values()] + [0.1])
                     setup["estimated_model_z"] = max_z
                     
-                op_time = cls.estimate_operation_time_parametric(op, feat, setup)
-                op["estimated_time_s"] = op_time
+                breakdown = cls.estimate_operation_time_parametric(op, feat, setup, machine_profile)
                 
-            t_cutting_and_rapid += op_time
+                t_cutting += breakdown.cutting_time_seconds
+                t_rapid += breakdown.rapid_time_seconds
+                t_air_cut += breakdown.air_cutting_time_seconds
+                op_time = breakdown.total_seconds
+                op["estimated_time_s"] = op_time
+                op["breakdown"] = breakdown.model_dump()
+            else:
+                # If toolpaths exist, we'd sum up the actual parsed breakdown. 
+                # Assuming `breakdown` might be stored in `op` in a real scenario.
+                bkd = op.get("breakdown", {})
+        
+                op_prof = OperationPenaltyProfile()
+                t_cutting += bkd.get("cutting_time_seconds", op_time * op_prof.parametric_cutting_split)
+                t_rapid += bkd.get("rapid_time_seconds", op_time * op_prof.parametric_rapid_split)
+                t_air_cut += bkd.get("air_cutting_time_seconds", op_time * op_prof.parametric_aircut_split)
+
+            # Spindle Start/Stop Delay
+            t_spindle += getattr(machine_profile, "spindle_orient_time", 1.0) + getattr(machine_profile, "spindle_stop_time", 2.0)
             
-            # Spindle start/stop time per operation (approx 3 seconds)
-            t_spindle += 3.0
+            # Coolant
+            if op.get("parameters", {}).get("coolant") != "none":
+                t_coolant += coolant_prof.coolant_start_delay_seconds + coolant_prof.coolant_stop_delay_seconds
+                
+            # Probing (if probing op)
+            op_type = op.get("type", "").lower()
+            if "probe" in op_type:
+                t_probe += probe_prof.workpiece_probe_cycle_seconds
                 
             # Check for tool change
             op_tool = op.get('tool_id') or op.get('toolId')
@@ -225,27 +350,58 @@ class CycleTimeEstimator:
             if op_tool:
                 current_tool = op_tool
                 
-        t_toolchange = tool_changes * machine_profile.tool_change_time
+        tc_time = machine_profile.tool_change_time
+        # Refine Tool Change with ATC parameters if available
+        if hasattr(machine_profile, "atc_type"):
+            tc_time = (
+                getattr(machine_profile, "spindle_orient_time", 1.0) +
+                getattr(machine_profile, "magazine_indexing_time", 0.5) * 2 + 
+                getattr(machine_profile, "clamp_unclamp_time", 1.5)
+            )
+            
+        t_toolchange = tool_changes * tc_time
         
-        # handling_time = loading, reversing and unloading
-        handling_time = 30.0  # Approx 30s for part load/unload per setup
+        # Handling Time
+        load_t = setup_prof.load_time_seconds if setup_prof.load_time_seconds is not None else 15.0
+        unload_t = setup_prof.unload_time_seconds if setup_prof.unload_time_seconds is not None else 10.0
+        handling_time = load_t + unload_t
+        if setup.get("requires_flip", False):
+            handling_time += setup_prof.reorientation_time_seconds if setup_prof.reorientation_time_seconds is not None else 20.0
+            
+        setup_prep_time = setup_prof.initial_setup_time_seconds if setup_prof.initial_setup_time_seconds is not None else 180.0
         
-        # setup_time = one-time machine preparation (probing, fixture clamping, etc.)
-        setup_prep_time = 180.0  # Approx 3 mins initial setup prep (not per-part)
-        
-        # machine_cycle = automatic CNC program time
-        machine_cycle = t_cutting_and_rapid + t_toolchange + t_spindle + t_dwell + t_machine_actions
-        
-        # total production cycle time (for a single part)
+        machine_cycle = t_cutting + t_rapid + t_air_cut + t_toolchange + t_spindle + t_dwell + t_machine_actions + t_coolant + t_probe
         total_cycle = machine_cycle + handling_time
         
+        confidence = "medium"
+        if all("breakdown" in op for op in operations):
+            confidence = "high" if len(operations) > 0 else "medium"
+            
+        # Percents
+        total_non_zero = max(total_cycle, 0.001)
+        
         return {
-            "machining_time_s": t_cutting_and_rapid,
-            "tool_change_time_s": t_toolchange,
+            "cutting_time_seconds": t_cutting,
+            "rapid_time_seconds": t_rapid,
+            "air_cutting_time_seconds": t_air_cut,
+            "tool_change_time_seconds": t_toolchange,
+            "probe_time_seconds": t_probe,
+            "coolant_delay_seconds": t_coolant,
+            "spindle_time_seconds": t_spindle,
+            "handling_time_seconds": handling_time,
+            "setup_time_seconds": setup_prep_time,
+            "machine_cycle_seconds": machine_cycle,
+            "total_setup_time_seconds": total_cycle,
             "tool_change_count": tool_changes,
-            "spindle_time_s": t_spindle,
-            "handling_time_s": handling_time,
-            "setup_preparation_s": setup_prep_time,
-            "machine_cycle_s": machine_cycle,
-            "total_setup_time_s": total_cycle
+            "confidence": confidence,
+            "percentages": {
+                "cutting_percent": (t_cutting / total_non_zero) * 100,
+                "rapid_percent": (t_rapid / total_non_zero) * 100,
+                "air_cutting_percent": (t_air_cut / total_non_zero) * 100,
+                "tool_change_percent": (t_toolchange / total_non_zero) * 100,
+                "probe_percent": (t_probe / total_non_zero) * 100,
+                "coolant_delay_percent": (t_coolant / total_non_zero) * 100,
+                "handling_percent": (handling_time / total_non_zero) * 100,
+                "setup_percent": 0.0 # Setup is initial, not part of per-part cycle usually
+            }
         }

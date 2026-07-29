@@ -192,6 +192,23 @@ export type CamFeature = {
     blocked_reason?: string;
 };
 
+export type ToolCuttingData = {
+    optimalStepdown?: number; // Ap
+    optimalStepoverPercentage?: number; // Ae as %
+    optimalStepover?: number; // Ae absolute
+    surfaceSpeed?: number; // Vc
+    feedPerTooth?: number; // Fz
+    plungeFeedPerTooth?: number;
+    spindleRpm?: number;
+    feedRate?: number;
+    plungeRate?: number;
+    retractRate?: number;
+    coolant?: string;
+    stepdown?: number;
+    stepover?: number;
+    chipLoad?: number;
+};
+
 export type Tool = {
     id: string; // Internal ID
     dbId?: string; // Reference to the ToolDefinition in the DB
@@ -209,7 +226,7 @@ export type Tool = {
     gaugeLength?: number;
     toolLife?: number;
     toolWear?: number;
-    cuttingData?: any; // To store defaults from ToolDefinition
+    cuttingData?: ToolCuttingData; // Stores optimal defaults from ToolDefinition
 };
 
 export type OperationType = 'facing' | 'pocket' | '2d_contour' | 'drilling' | 'chamfer' | 'boss_clearing' | 'od_turning' | 'rotary_milling' | 'indexed_4axis_milling' | 'indexed_5axis_milling' | 'multi_axis_surface_milling' | 'external_cylinder_unsupported' | 'side_feature' | string;
@@ -237,9 +254,13 @@ export type CuttingParameters = {
     feedRate: number;
     plungeRate: number;
     maxStepdown: number;
+    finishStepdown?: number;
+    finishCuts?: number;
+    depthCutsEnabled?: boolean;
     totalDepth: number;
     spindleSpeed: number;
     stepoverPercentage: number;
+    stepover?: number;
     tolerance: number;
     coolant: CoolantType;
     
@@ -330,6 +351,8 @@ export type CamOperation = {
   blocked_reason?: string;
   collisionStatus?: CollisionStatus;
   enabled?: boolean;
+  estimated_time_s?: number;
+  estimated_breakdown?: any;
 
    toolpath?: any;
 

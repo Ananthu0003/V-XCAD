@@ -221,17 +221,32 @@ class CycleTimeEngine:
     def estimate_machine_event_time(self, block: MachineEventBlock) -> Tuple[float, str]:
         if block.event_type == "tool_change":
             tc = self._get_val(self.machine, 'tool_change')
-            if not tc:
-                return (15.0, "low")
             
-            base = tc.duration_seconds
-            if base is None: return (15.0, "low")
+            # Use ATC specs if available
+            atc_type = getattr(tc, "atc_type", "manual") if tc else "manual"
+            base_search = getattr(tc, "tool_search_time", 2.0) if tc else 2.0
+            index_time = getattr(tc, "magazine_indexing_time_per_pocket", 0.5) if tc else 0.5
+            clamp_time = getattr(tc, "clamp_unclamp_time", 1.5) if tc else 1.5
+            orient_time = getattr(tc, "spindle_orient_time", 1.0) if tc else 1.0
+            stop_time = getattr(tc, "spindle_stop_time", 2.0) if tc else 2.0
             
-            # Prevent double-counting based on semantics
-            total = base
-            if not tc.includes_spindle_stop:
-                total += self._get_val(self.machine, "spindle_decel_rpm_per_sec", 2000) / 2000 * 2.0
-            # Additional logic can be added here
+            # Simple ATC simulation (assume average 2 pockets away for chain/carousel)
+            avg_indexing = index_time * 2
+            if atc_type == "random_pocket":
+                avg_indexing = index_time * 1
+                
+            total = orient_time + stop_time + avg_indexing + clamp_time
+            if not tc or tc.duration_seconds is None:
+                # If no explicit duration, use ATC calc
+                pass
+            else:
+                # Fallback to duration_seconds if ATC details are missing but duration is present
+                total = tc.duration_seconds
+                if not tc.includes_spindle_stop:
+                    total += stop_time
+                if not tc.includes_spindle_orientation:
+                    total += orient_time
+
             return (total, "high")
             
         elif block.event_type == "spindle_start":

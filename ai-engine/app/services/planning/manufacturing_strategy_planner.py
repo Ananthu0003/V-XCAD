@@ -44,6 +44,11 @@ class ManufacturingStrategyPlanner:
             return "facing"
             
         elif feat_type == "boss":
+            if is_turning:
+                feature_axis = feature.get("axis", [0, 0, 1])
+                dot = sum(a*b for a, b in zip(feature_axis, setup_axis)) if setup_axis else 1.0
+                if abs(dot) > 0.98:
+                    return "od_turning"
             return "boss_clearing"
             
         elif feat_type == "slot":

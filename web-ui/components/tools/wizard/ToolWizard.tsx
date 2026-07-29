@@ -21,6 +21,8 @@ import { CuttingDataStep } from './CuttingDataStep';
 import { CompatibilityStep } from './CompatibilityStep';
 import { ReviewSaveStep } from './ReviewSaveStep';
 import { ToolPreview } from './ToolPreview';
+import { DepthCutsStep } from './DepthCutsStep';
+import { DepthCutsPreview } from './DepthCutsPreview';
 
 const steps = [
   { id: 1, title: 'Basic Info', component: BasicInfoStep },
@@ -28,8 +30,9 @@ const steps = [
   { id: 3, title: 'Offsets', component: OffsetsStep },
   { id: 4, title: 'Holder & Assembly', component: HolderAssemblyStep },
   { id: 5, title: 'Feeds & Speeds', component: CuttingDataStep },
-  { id: 6, title: 'Compatibility', component: CompatibilityStep },
-  { id: 7, title: 'Review & Save', component: ReviewSaveStep },
+  { id: 6, title: 'Depth Cuts', component: DepthCutsStep },
+  { id: 7, title: 'Compatibility', component: CompatibilityStep },
+  { id: 8, title: 'Review & Save', component: ReviewSaveStep },
 ];
 
 export function ToolWizard() {
@@ -132,7 +135,7 @@ export function ToolWizard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0 flex-1 relative min-h-0 overflow-hidden">
-              <ToolPreview />
+              {currentStep === 6 ? <DepthCutsPreview /> : <ToolPreview />}
             </CardContent>
           </Card>
         </div>

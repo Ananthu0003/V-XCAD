@@ -152,6 +152,17 @@ class ToolRecommendationEngine:
                     if stock_size > 0.0 and t.diameter > max_milling_dia:
                         rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) exceeds workpiece envelope scale ({round(max_milling_dia, 2)}mm) for stock size ({stock_size}mm)")
                         continue
+                        
+                    max_feature_tool_dia = _get_dim(feature, ["width", "diameter", "size", "length"])
+                    if operation_type in ("pocketing", "slot_milling", "cavity"):
+                        if max_feature_tool_dia > 0 and t.diameter > max_feature_tool_dia:
+                            rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) > pocket size ({max_feature_tool_dia}mm)")
+                            continue
+                    else:
+                        # For bosses and contours, tool can be larger than feature, but not absurdly so (e.g., max 3x)
+                        if max_feature_tool_dia > 0 and t.diameter > (max_feature_tool_dia * 3.0):
+                            rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) is excessively larger than feature size ({max_feature_tool_dia}mm)")
+                            continue
                     min_corner_r = _get_dim(feature, ["min_radius", "corner_radius"])
                     if min_corner_r > 0 and t.diameter > (min_corner_r * 2.0) + 0.01:
                         rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) exceeds internal corner diameter ({min_corner_r*2}mm)")
@@ -181,72 +192,9 @@ class ToolRecommendationEngine:
             
             best_tool = candidate_tools[0]
 
-        # Dynamic Synthesis if library has no geometrically fitting tool
+        # Strict Library Selection: if no tool fits geometrically, block the operation
         if not best_tool:
-            if req_type == "drill":
-                syn_dia = target_dia if target_dia > 0 else (min(stock_size * 0.5, 5.0) if stock_size > 0 else 5.0)
-                syn_dia = round(max(syn_dia, 0.2), 2)
-                syn_id = f"synth_drill_{syn_dia}"
-                syn_name = f"{syn_dia}mm Twist Drill"
-                best_tool = ToolProfile(
-                    tool_id=syn_id,
-                    name=syn_name,
-                    type="drill",
-                    diameter=syn_dia,
-                    flute_count=2,
-                    cutting_length=round(max(target_depth * 1.5, syn_dia * 3.0), 2),
-                    stickout=round(max(target_depth * 2.0, syn_dia * 4.0), 2),
-                    material="carbide"
-                )
-            elif req_type == "face_mill":
-                syn_dia = (stock_size * 0.8) if stock_size > 0 else 40.0
-                syn_dia = round(max(syn_dia, 1.0), 2)
-                syn_id = f"synth_facemill_{syn_dia}"
-                syn_name = f"{syn_dia}mm Face Mill"
-                best_tool = ToolProfile(
-                    tool_id=syn_id,
-                    name=syn_name,
-                    type="face_mill",
-                    diameter=syn_dia,
-                    flute_count=4 if syn_dia >= 25.0 else 2,
-                    cutting_length=round(max(target_depth * 1.2, 10.0), 2),
-                    stickout=round(max(target_depth * 1.8, 20.0), 2),
-                    material="carbide"
-                )
-            else:
-                feat_w = _get_dim(feature, ["width", "min_radius"])
-                feat_dia = _get_dim(feature, ["diameter"])
-                if feat_w > 0:
-                    syn_dia = feat_w * 0.8
-                elif feat_dia > 0:
-                    # For outer contouring, tool must be much smaller than the part diameter
-                    syn_dia = feat_dia * 0.4
-                elif stock_size > 0:
-                    syn_dia = stock_size * 0.3
-                else:
-                    syn_dia = 6.35
-                # Ensure tool is never larger than the workpiece envelope
-                if stock_size > 0:
-                    syn_dia = min(syn_dia, stock_size * 0.5)
-                if feat_dia > 0:
-                    syn_dia = min(syn_dia, feat_dia * 0.5)
-                syn_dia = round(max(syn_dia, 0.2), 2)
-                syn_id = f"synth_flatendmill_{syn_dia}"
-                syn_name = f"{syn_dia}mm Flat End Mill"
-                best_tool = ToolProfile(
-                    tool_id=syn_id,
-                    name=syn_name,
-                    type="flat_end_mill",
-                    diameter=syn_dia,
-                    flute_count=3,
-                    cutting_length=round(max(target_depth * 1.5, syn_dia * 3.0), 2),
-                    stickout=round(max(target_depth * 2.0, syn_dia * 4.0), 2),
-                    material="carbide"
-                )
-                
-            # Add to the library so subsequent operations can reuse it
-            if self.tools is not None:
-                self.tools.append(best_tool)
+            return None, "blocked", f"No tool found in library for operation '{operation_type}'. Target Dia: {target_dia}mm, Depth: {target_depth}mm", None
 
         reason = f"Chosen {best_tool.name} (Dia {best_tool.diameter}mm) as it supports material and feature dimensions."
         

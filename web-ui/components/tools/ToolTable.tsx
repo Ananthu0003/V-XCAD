@@ -67,10 +67,25 @@ export function ToolTable({
     return '';
   };
 
-  const filteredTools = initialTools.filter(tool =>
-    tool.name.toLowerCase().includes(search.toLowerCase()) ||
-    tool.type.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredTools = initialTools.filter(tool => {
+    const searchLower = search.toLowerCase().trim();
+    if (!searchLower) return true;
+    
+    const isNumericSearch = /^\d/.test(searchLower);
+    const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // For numeric searches, ensure the match isn't preceded by a decimal point or another digit.
+    // e.g. "5mm" won't match "1.5mm" or "25mm"
+    const regex = isNumericSearch 
+      ? new RegExp(`(^|[^0-9.])${escapeRegExp(searchLower)}`, 'i')
+      : new RegExp(escapeRegExp(searchLower), 'i');
+      
+    const diamStr = `${tool.geometry?.diameter || tool.diameter || ''}${tool.unit || 'mm'}`.toLowerCase();
+    
+    return regex.test(tool.name.toLowerCase()) ||
+           regex.test(tool.type.toLowerCase()) ||
+           regex.test(diamStr);
+  });
 
   const handleDelete = async () => {
     if (!toolToDelete) return;

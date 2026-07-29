@@ -19,6 +19,25 @@ class MachineProfile(BaseModel):
     available_tool_ids: List[str] = Field(default_factory=list)
     tool_change_time: float = 15.0  # seconds
     rapid_feedrate: float = 5000.0  # mm/min
+    
+    # ATC specifics
+    atc_type: Literal["carousel", "chain", "linear", "random_pocket", "manual"] = "carousel"
+    atc_capacity: int = 20
+    magazine_indexing_time: float = 0.5
+    tool_search_time: float = 2.0
+    spindle_orient_time: float = 1.0
+    spindle_stop_time: float = 2.0
+    clamp_unclamp_time: float = 1.5
+
+    # Controller / Kinematics
+    rapid_acceleration: float = 1000.0
+    cutting_acceleration: float = 500.0
+    controller_block_time: float = 0.002
+    max_simultaneous_axes: int = 3
+
+    # Spindle specs
+    spindle_power_kw: float = 15.0
+    spindle_torque_nm: float = 100.0
 
 class MaterialProfile(BaseModel):
     material_id: str

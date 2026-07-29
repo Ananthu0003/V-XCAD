@@ -74,6 +74,8 @@ vexcad/
 - Automated Feature Recognition (drilling, pocketing, turning, etc.)
 - 88 Industry-standard CNC Machine Profiles (Haas, DMG MORI, Okuma, Makino, Hermle, etc.) with real-world controllers (Fanuc, Siemens, Heidenhain)
 - Comprehensive Material Profiles with Feeds & Speeds calculation capabilities
+- Interactive Tool Wizard for defining custom cutting tools and holder assemblies
+- Built-in support for Micro-machining and advanced tooling profiles
 - Intelligent Setup Planning for 3-axis, indexed 4/5-axis, and mill-turn machines
 - Interactive Operation Tree for editing and managing generated toolpaths
 - 3D Viewport with dynamic setup rotation and real-time toolpath simulation

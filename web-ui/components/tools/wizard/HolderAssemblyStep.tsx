@@ -24,6 +24,7 @@ export function HolderAssemblyStep() {
           <Label>Stickout Length</Label>
           <Input 
             type="number" step="0.1"
+            placeholder="e.g. 45.0"
             value={assembly.stickoutLength || ''} 
             onChange={(e) => updateAssembly('stickoutLength', parseFloat(e.target.value))}
           />
@@ -36,6 +37,7 @@ export function HolderAssemblyStep() {
           <Label>Total Assembly Length</Label>
           <Input 
             type="number" step="0.1"
+            placeholder="e.g. 120.0"
             value={assembly.totalLength || ''} 
             onChange={(e) => updateAssembly('totalLength', parseFloat(e.target.value))}
           />
@@ -45,6 +47,7 @@ export function HolderAssemblyStep() {
           <Label>Safe Clearance Length</Label>
           <Input 
             type="number" step="0.1"
+            placeholder="e.g. 2.0"
             value={assembly.safeClearanceLength || ''} 
             onChange={(e) => updateAssembly('safeClearanceLength', parseFloat(e.target.value))}
           />

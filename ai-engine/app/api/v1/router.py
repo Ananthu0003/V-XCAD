@@ -301,6 +301,7 @@ async def generate(
     model_name: str = Form(_DEFAULT_MODEL, alias="model"),
     image: UploadFile = File(None),
     base_code: str | None = Form(None),
+    selection_context: str | None = Form(None),
 ) -> StreamingResponse:
     """
     Two-stage CAD generation pipeline:
@@ -353,6 +354,7 @@ async def generate(
                 mime_type=mime_type,
                 feature_map=feature_map,
                 base_code=base_code,
+                selection_context=selection_context,
             ):
                 full_script += chunk_text
                 # stream token
@@ -867,7 +869,9 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
                 feat = features_dict.get(feat_id, {})
                 
                 if op.get("estimated_time_s", 0) <= 0:
-                    op["estimated_time_s"] = CycleTimeEstimator.estimate_operation_time_parametric(op, feat, setup)
+                    breakdown = CycleTimeEstimator.estimate_operation_time_parametric(op, feat, setup)
+                    op["estimated_time_s"] = breakdown.total_seconds
+                    op["estimated_breakdown"] = breakdown.model_dump()
                     
             except Exception as e:
                 print(f"Error computing time for op {op.get('id')}: {e}")
@@ -997,8 +1001,9 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
                 # Add toolpaths to operation so it's fully populated
                 path_segs = [ToolpathSegment(**p) for p in paths]
                 op_time = CycleTimeEstimator.estimate_operation_time(path_segs, machine)
-                op["estimated_time_s"] = op_time
-                total_cycle_time += op_time
+                op["estimated_time_s"] = op_time.total_seconds
+                op["estimated_breakdown"] = op_time.model_dump()
+                total_cycle_time += op_time.total_seconds
             except Exception:
                 pass
                 
@@ -1054,6 +1059,22 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
         result["can_generate_gcode"] = readiness["can_generate_gcode"]
         result["operation_statuses"] = readiness["operation_statuses"]
         result["toolpath_schema_version"] = "semantic_v1"
+        
+        try:
+            from app.models.machine_profiles import get_machine_profile_by_id
+            machine = get_machine_profile_by_id(request.setup.get("machineProfileId")) if isinstance(request.setup, dict) else None
+            setup_time_details = CycleTimeEstimator.estimate_setup_time(
+                operations, 
+                machine, 
+                features_dict={}, 
+                setup=request.setup if isinstance(request.setup, dict) else {}
+            )
+            result["setup_time_details"] = setup_time_details
+            if setup_time_details.get("total_setup_time_seconds"):
+                total_cycle_time = setup_time_details["total_setup_time_seconds"]
+        except Exception as e:
+            print(f"Failed to calculate setup cycle time: {e}")
+            
         result["planned_cycle_time_seconds"] = total_cycle_time
         
         # Merge readiness errors into result errors if any

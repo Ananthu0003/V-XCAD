@@ -177,18 +177,6 @@ class CamPipelineManager:
         else:
             mat_id = machine_config.get("workpieceMaterialId") or machine_config.get("material") or setup_obj.get("workpieceMaterialId") or setup_obj.get("material") or (mat_config.get("material_id") if isinstance(mat_config, dict) else None)
             material = get_material_profile(mat_id)
-        # Create default tools if not provided
-        default_tools = [
-            ToolProfile(tool_id="t1", name="1/4 Flat End Mill", type="flat_end_mill", diameter=6.35, flute_count=3, cutting_length=20.0, stickout=30.0),
-            ToolProfile(tool_id="t2", name="1/2 Flat End Mill", type="flat_end_mill", diameter=12.7, flute_count=3, cutting_length=30.0, stickout=40.0),
-            ToolProfile(tool_id="t3", name="1/4 Drill", type="drill", diameter=6.35, flute_count=2, cutting_length=25.0, stickout=35.0),
-            ToolProfile(tool_id="t4", name="Turning Tool", type="turning_tool", diameter=0, flute_count=1, cutting_length=0, stickout=0),
-            ToolProfile(tool_id="t5", name="1/4 Reamer", type="reamer", diameter=6.35, flute_count=6, cutting_length=20.0, stickout=30.0),
-            ToolProfile(tool_id="t6", name="M6 Tap", type="tap", diameter=6, flute_count=3, cutting_length=20.0, stickout=30.0),
-            ToolProfile(tool_id="t7", name="10mm Boring Bar", type="boring_bar", diameter=10, flute_count=1, cutting_length=30.0, stickout=40.0),
-            ToolProfile(tool_id="t8", name="2in Face Mill", type="face_mill", diameter=50.8, flute_count=5, cutting_length=10.0, stickout=25.0),
-            ToolProfile(tool_id="t9", name="3mm Cut-off Tool", type="cut_off_tool", diameter=3, flute_count=1, cutting_length=20.0, stickout=30.0)
-        ]
         def _safe_tool(t):
             if "name" not in t: t["name"] = f"Tool {t.get('tool_id', 'unknown')}"
             if "flute_count" not in t: t["flute_count"] = 2
@@ -197,7 +185,9 @@ class CamPipelineManager:
             if "diameter" not in t: t["diameter"] = 10.0
             return ToolProfile(**t)
             
-        tool_library = [_safe_tool(t) for t in machine_config.get("tool_library", [])] if machine_config.get("tool_library") else default_tools
+        tool_library = [_safe_tool(t) for t in machine_config.get("tool_library", [])]
+        if not tool_library:
+            print("[CAM] WARNING: Auto-plan received empty tool library!")
         tool_engine = ToolRecommendationEngine(tool_library)
             
         # Synthesize Roughing Features based on Stock Dimensions
