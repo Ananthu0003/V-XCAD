@@ -1,4 +1,5 @@
-import { Settings2 } from 'lucide-react';
+import { Settings2, Copy, Check } from 'lucide-react';
+import { useState } from 'react';
 import { ParameterInput } from '@/components/workspace/ParameterInput';
 import type { SetupSettings } from '@/types/cam';
 
@@ -25,6 +26,25 @@ export function WorkspaceSettings({
   setCamSetup,
   pythonScript,
 }: WorkspaceSettingsProps) {
+  const [copied, setCopied] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
+
+  const handleCopyParameters = () => {
+    const textToCopy = Object.entries(parameters)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\n');
+    navigator.clipboard.writeText(textToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyScript = () => {
+    if (pythonScript) {
+      navigator.clipboard.writeText(pythonScript);
+      setCopiedScript(true);
+      setTimeout(() => setCopiedScript(false), 2000);
+    }
+  };
   
   return (
     <div className="flex flex-col font-sans h-full w-full bg-transparent">
@@ -37,6 +57,16 @@ export function WorkspaceSettings({
               EXTRACTED PARAMETERS
             </h4>
             <div className="flex-1 h-px bg-muted/50" />
+            {Object.keys(parameters).length > 0 && (
+              <button
+                onClick={handleCopyParameters}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/30 hover:bg-muted/50 border border-border/50 text-muted-foreground hover:text-foreground transition-all text-[9px] font-bold uppercase tracking-wider"
+                title="Copy all parameters"
+              >
+                {copied ? <Check className="size-3 text-green-500" /> : <Copy className="size-3" />}
+                {copied ? 'Copied' : 'Copy All'}
+              </button>
+            )}
           </div>
           {Object.keys(parameters).length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-muted/50 p-6 text-center text-xs text-muted-foreground font-mono">
@@ -66,6 +96,16 @@ export function WorkspaceSettings({
               CAD SCRIPT (BUILD123D)
             </h4>
             <div className="flex-1 h-px bg-muted/50" />
+            {pythonScript && (
+              <button
+                onClick={handleCopyScript}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/30 hover:bg-muted/50 border border-border/50 text-muted-foreground hover:text-foreground transition-all text-[9px] font-bold uppercase tracking-wider"
+                title="Copy script"
+              >
+                {copiedScript ? <Check className="size-3 text-green-500" /> : <Copy className="size-3" />}
+                {copiedScript ? 'Copied' : 'Copy'}
+              </button>
+            )}
           </div>
           {!pythonScript ? (
             <div className="rounded-xl border border-dashed border-border bg-muted/50 p-6 text-center text-xs text-muted-foreground font-mono">

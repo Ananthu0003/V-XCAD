@@ -14,6 +14,84 @@ class ParametricToolpathEngine:
         op_type = str(operation.get("type") or operation.get("operation_type") or "").lower()
         op_id = operation.get("id", "")
         feat_type = str(feature.get("type", "")).lower()
+
+        # -----------------------------------------------------------------
+        # Unified Stock Resolution
+        # The machine_config may arrive in different shapes depending on
+        # whether it was forwarded from camSetup (top-level keys) or from
+        # cam_pipeline_manager (nested resolvedStock / setup sub-object).
+        # We normalize everything into a single _stock dict once.
+        # -----------------------------------------------------------------
+        mc = machine_config if isinstance(machine_config, dict) else {}
+        _nested_setup = mc.get("setup", {}) if isinstance(mc.get("setup"), dict) else {}
+        _resolved = mc.get("resolvedStock") or _nested_setup.get("resolvedStock") or {}
+
+        # Stock type
+        _stock_type = str(
+            mc.get("stockType") or _nested_setup.get("stockType") or
+            _resolved.get("stockType") or _resolved.get("type") or ""
+        ).lower()
+        _stock_is_cyl = any(kw in _stock_type for kw in ("cylinder", "round", "bar", "rod"))
+
+        # Stock dimensions array — camSetup sends this at the top level
+        _stock_dims = mc.get("stockDimensions") or _nested_setup.get("stockDimensions")
+        if _stock_dims and not isinstance(_stock_dims, (list, tuple)):
+            _stock_dims = None
+
+        # Stock definition (for explicit diameter keys)
+        _stock_def = mc.get("stockDefinition", {}) if isinstance(mc.get("stockDefinition"), dict) else {}
+
+        # Resolve cylinder diameter from multiple sources
+        _cyl_dia = float(
+            mc.get("cylinderDiameter") or _nested_setup.get("cylinderDiameter") or
+            _resolved.get("diameter") or _stock_def.get("diameter") or
+            _stock_def.get("cylinderDiameter") or
+            (_stock_dims[0] if _stock_is_cyl and _stock_dims and len(_stock_dims) > 0 else 0.0) or
+            0.0
+        )
+
+        # Resolve width, length from resolvedStock → stockDimensions → 0
+        _stock_w = float(
+            _resolved.get("width") or
+            (_stock_dims[0] if _stock_dims and len(_stock_dims) > 0 else 0.0) or
+            0.0
+        )
+        _stock_l = float(
+            _resolved.get("length") or
+            (_stock_dims[1] if _stock_dims and len(_stock_dims) > 1 else 0.0) or
+            0.0
+        )
+        _stock_h = float(
+            _resolved.get("height") or
+            (_stock_dims[2] if _stock_dims and len(_stock_dims) > 2 else 0.0) or
+            0.0
+        )
+        
+        # Stock center
+        _stock_center = mc.get("stockCenter") or _nested_setup.get("stockCenter")
+        if not _stock_center and _resolved.get("bounds"):
+            bmin = _resolved["bounds"].get("min")
+            bmax = _resolved["bounds"].get("max")
+            if bmin and bmax and len(bmin) >= 3 and len(bmax) >= 3:
+                _stock_center = [
+                    (bmin[0] + bmax[0]) / 2.0,
+                    (bmin[1] + bmax[1]) / 2.0,
+                    (bmin[2] + bmax[2]) / 2.0
+                ]
+        if not _stock_center or not isinstance(_stock_center, (list, tuple)) or len(_stock_center) < 3:
+            _stock_center = [0.0, 0.0, 0.0]
+
+        # Build a canonical stock dict that every strategy can reference
+        _stock = {
+            "type": _stock_type,
+            "is_cylindrical": _stock_is_cyl,
+            "diameter": _cyl_dia,
+            "width": _stock_w,
+            "length": _stock_l,
+            "height": _stock_h,
+            "dims": _stock_dims,
+            "center": _stock_center,
+        }
         
         # Safe height parameters
         safe_h = operation.get("safe_heights", {})
@@ -61,6 +139,26 @@ class ParametricToolpathEngine:
         cy = float(center[1]) if len(center) >= 2 else 0.0
         cz = float(center[2]) if len(center) >= 3 else 0.0
 
+        # Determine strategy early so we can adjust center for facing if needed
+        src = "contour"
+        if feat_type in ("hole", "blind_hole", "through_hole", "bore") or op_type in ("drilling", "peck_drilling", "boring", "reaming", "tapping"):
+            src = "drill"
+        elif feat_type in ("pocket", "pocketing") or op_type in ("pocketing", "pocket_milling", "slot_milling"):
+            src = "pocket"
+        elif feat_type in ("face", "facing") or op_type in ("facing", "face_milling"):
+            src = "face"
+        elif feat_type in ("boss", "cylinder", "contour", "external_cylinder") or op_type in ("2d_contour", "2d_contour_outer", "contour", "boss_clearing", "chamfer_milling"):
+            src = "contour"
+
+        if src == "face":
+            feat_has_diameter = bool(feat_dims.get("diameter") or feature.get("diameter"))
+            feat_has_width = bool(feat_dims.get("width") or feature.get("width"))
+            # If the feature has no width/diameter, we are facing the entire stock.
+            # In this case, align the facing center to the stock center, not the CAD origin.
+            if not feat_has_diameter and not feat_has_width and _stock.get("center"):
+                cx = float(_stock["center"][0])
+                cy = float(_stock["center"][1])
+
         # Adjust top_z if cz is valid and safe_h wasn't explicitly set
         if "top" not in safe_h and len(center) >= 3 and abs(cz) > 0.001:
             top_z = cz
@@ -81,9 +179,11 @@ class ParametricToolpathEngine:
                 # Determine feedrate based on move type
                 feedrate = 0.0
                 if move_type in ("cut", "drill_cycle"):
-                    feedrate = float(operation.get("parameters", {}).get("feedRate", 1000))
+                    fs = operation.get("parameters", {}).get("feeds_and_speeds", {})
+                    feedrate = float(fs.get("feedrate_mm_min") or fs.get("feed_rate") or operation.get("parameters", {}).get("feedRate", 1000))
                 elif move_type == "plunge":
-                    feedrate = float(operation.get("parameters", {}).get("plungeRate", 300))
+                    fs = operation.get("parameters", {}).get("feeds_and_speeds", {})
+                    feedrate = float(fs.get("plunge_feedrate") or operation.get("parameters", {}).get("plungeRate", 300))
                     
                 toolpaths.append({
                     "type": move_type,
@@ -162,16 +262,7 @@ class ParametricToolpathEngine:
         if not z_passes:
             z_passes = [bottom_z]
 
-        # Determine strategy
-        src = "contour"
-        if feat_type in ("hole", "blind_hole", "through_hole", "bore") or op_type in ("drilling", "peck_drilling", "boring", "reaming", "tapping"):
-            src = "drill"
-        elif feat_type in ("pocket", "pocketing") or op_type in ("pocketing", "slot_milling"):
-            src = "pocket"
-        elif feat_type in ("face", "facing") or op_type in ("facing", "face_milling"):
-            src = "face"
-        elif feat_type in ("boss", "cylinder", "contour", "external_cylinder") or op_type in ("2d_contour", "contour", "boss_clearing"):
-            src = "contour"
+        # (Strategy determined earlier)
 
         # ----------------------------------------------------
         # 1. DRILLING & BORING STRATEGY
@@ -204,20 +295,24 @@ class ParametricToolpathEngine:
                 num_turns = max(1, math.ceil(depth / stepdown))
                 z_per_turn = depth / num_turns
                 curr_z = top_z
+                
+                num_pts = 32
 
                 for _ in range(num_turns):
+                    for i in range(1, num_pts + 1):
+                        angle = 2.0 * math.pi * (i / float(num_pts))
+                        px = cx + bore_radius * math.cos(angle)
+                        py = cy + bore_radius * math.sin(angle)
+                        pz = curr_z - z_per_turn * (i / float(num_pts))
+                        add_move("cut", x=px, y=py, z=pz, source=src)
                     curr_z -= z_per_turn
-                    # 4 quadrant arc moves approximating helical circle
-                    add_move("cut", x=cx, y=cy + bore_radius, z=curr_z + z_per_turn*0.75, source=src)
-                    add_move("cut", x=cx - bore_radius, y=cy, z=curr_z + z_per_turn*0.5, source=src)
-                    add_move("cut", x=cx, y=cy - bore_radius, z=curr_z + z_per_turn*0.25, source=src)
-                    add_move("cut", x=cx + bore_radius, y=cy, z=curr_z, source=src)
 
                 # Full 360-degree flat finish pass at bottom
-                add_move("cut", x=cx, y=cy + bore_radius, z=bottom_z, source=src)
-                add_move("cut", x=cx - bore_radius, y=cy, z=bottom_z, source=src)
-                add_move("cut", x=cx, y=cy - bore_radius, z=bottom_z, source=src)
-                add_move("cut", x=cx + bore_radius, y=cy, z=bottom_z, source=src)
+                for i in range(1, num_pts + 1):
+                    angle = 2.0 * math.pi * (i / float(num_pts))
+                    px = cx + bore_radius * math.cos(angle)
+                    py = cy + bore_radius * math.sin(angle)
+                    add_move("cut", x=px, y=py, z=bottom_z, source=src)
 
                 # Lead-out to center
                 add_move("cut", x=cx, y=cy, z=bottom_z, source=src)
@@ -227,34 +322,21 @@ class ParametricToolpathEngine:
         # 2. FACING STRATEGY (Multi-Pass Raster or Circular)
         # ----------------------------------------------------
         elif src == "face":
-            # Resolve stock dimensions dynamically from multiple sources
-            stock = machine_config.get("setup", {}).get("resolvedStock", {}) if isinstance(machine_config, dict) else {}
-            stock_dims = machine_config.get("stockDimensions") or machine_config.get("setup", {}).get("stockDimensions") if isinstance(machine_config, dict) else None
-            stock_def = machine_config.get("stockDefinition", {}) if isinstance(machine_config, dict) else {}
-            stock_type = str(machine_config.get("setup", {}).get("stockType", "") if isinstance(machine_config, dict) else "").lower()
-            
-            # Determine if the stock is cylindrical from stock type or feature
-            stock_is_cylindrical = any(kw in stock_type for kw in ("cylinder", "round", "bar", "rod"))
+            # Use centralized stock data, with feature overrides
             feat_has_diameter = bool(feat_dims.get("diameter") or feature.get("diameter"))
-            is_cylindrical_face = stock_is_cylindrical or feat_has_diameter
+            is_cylindrical_face = _stock["is_cylindrical"] or feat_has_diameter
             
-            # Read stock width/length from feature dimensions (set by Fix 9), then stock, then fallback
             stock_dia = float(
                 feat_dims.get("diameter") or feature.get("diameter") or
-                stock.get("diameter") or stock_def.get("diameter") or
-                stock_def.get("cylinderDiameter") or 0.0
+                _stock["diameter"] or 0.0
             )
             stock_w = float(
                 feat_dims.get("width") or feature.get("width") or
-                stock.get("width") or
-                (stock_dims[1] if stock_dims and len(stock_dims) > 1 else 0.0) or
-                stock_dia or tool_dia * 5.0
+                _stock["width"] or stock_dia or tool_dia * 5.0
             )
             stock_l = float(
                 feat_dims.get("length") or feature.get("length") or
-                stock.get("length") or
-                (stock_dims[0] if stock_dims and len(stock_dims) > 0 else 0.0) or
-                stock_dia or tool_dia * 5.0
+                _stock["length"] or stock_dia or tool_dia * 5.0
             )
             
             overhang = tool_dia * 0.6  # Extend tool outside stock by 60% tool dia
@@ -316,26 +398,51 @@ class ParametricToolpathEngine:
                 min_y = cy - half_l
                 max_y = cy + half_l
 
-                num_passes = max(1, math.ceil((max_y - min_y) / stepover))
-
-                curr_y = min_y + (stepover / 2.0)
-                add_move("rapid_xy", x=min_x, y=curr_y, z=clearance, source=src)
-                add_move("plunge", z=top_z, source=src)
-
-                direction = 1
-                for i in range(num_passes):
-                    if direction == 1:
-                        add_move("cut", x=max_x, y=curr_y, z=top_z, source=src)
-                    else:
-                        add_move("cut", x=min_x, y=curr_y, z=top_z, source=src)
+                # Smart Raster Direction: Raster along the longest dimension
+                if stock_w >= stock_l:
+                    # Raster along X
+                    num_passes = max(1, math.ceil((max_y - min_y) / stepover))
+                    curr_y = min_y + (stepover / 2.0)
                     
-                    if i < num_passes - 1:
-                        curr_y += stepover
-                        direction *= -1
+                    add_move("rapid_xy", x=min_x, y=curr_y, z=clearance, source=src)
+                    add_move("plunge", z=top_z, source=src)
+
+                    direction = 1
+                    for i in range(num_passes):
                         if direction == 1:
-                            add_move("cut", x=min_x, y=curr_y, z=top_z, source=src)
-                        else:
                             add_move("cut", x=max_x, y=curr_y, z=top_z, source=src)
+                        else:
+                            add_move("cut", x=min_x, y=curr_y, z=top_z, source=src)
+                        
+                        if i < num_passes - 1:
+                            curr_y += stepover
+                            direction *= -1
+                            if direction == 1:
+                                add_move("cut", x=min_x, y=curr_y, z=top_z, source=src)
+                            else:
+                                add_move("cut", x=max_x, y=curr_y, z=top_z, source=src)
+                else:
+                    # Raster along Y
+                    num_passes = max(1, math.ceil((max_x - min_x) / stepover))
+                    curr_x = min_x + (stepover / 2.0)
+                    
+                    add_move("rapid_xy", x=curr_x, y=min_y, z=clearance, source=src)
+                    add_move("plunge", z=top_z, source=src)
+                    
+                    direction = 1
+                    for i in range(num_passes):
+                        if direction == 1:
+                            add_move("cut", x=curr_x, y=max_y, z=top_z, source=src)
+                        else:
+                            add_move("cut", x=curr_x, y=min_y, z=top_z, source=src)
+                            
+                        if i < num_passes - 1:
+                            curr_x += stepover
+                            direction *= -1
+                            if direction == 1:
+                                add_move("cut", x=curr_x, y=min_y, z=top_z, source=src)
+                            else:
+                                add_move("cut", x=curr_x, y=max_y, z=top_z, source=src)
 
             add_move("retract_clearance", z=clearance, source=src)
 
@@ -343,10 +450,9 @@ class ParametricToolpathEngine:
         # 3. POCKET CLEARING STRATEGY (Concentric Outward Steps)
         # ----------------------------------------------------
         elif src == "pocket":
-            stock = machine_config.get("setup", {}).get("resolvedStock", {}) if isinstance(machine_config, dict) else {}
-            stock_dims = machine_config.get("stockDimensions") or machine_config.get("setup", {}).get("stockDimensions") if isinstance(machine_config, dict) else None
-            width = float(feature.get("width") or feature.get("diameter") or stock.get("width") or stock.get("diameter") or (stock_dims[1] if stock_dims else 20.0))
-            length = float(feature.get("length") or feature.get("diameter") or stock.get("length") or stock.get("diameter") or (stock_dims[0] if stock_dims else 20.0))
+            # Use centralized stock data for pocket fallbacks
+            width = float(feat_dims.get("width") or feature.get("width") or feature.get("diameter") or _stock["width"] or _stock["diameter"] or 20.0)
+            length = float(feat_dims.get("length") or feature.get("length") or feature.get("diameter") or _stock["length"] or _stock["diameter"] or 20.0)
             
             is_circular = (
                 feat_type in ("cylinder", "external_cylinder", "shaft", "boss", "circular_boss", "round_boss", "hole", "bore", "circle")
@@ -404,39 +510,35 @@ class ParametricToolpathEngine:
         # 4. 2D CONTOUR & BOSS CLEARING STRATEGY (Cutter Radius Compensated + Standoff)
         # ----------------------------------------------------
         elif src == "contour":
-            stock = machine_config.get("setup", {}).get("resolvedStock", {}) if isinstance(machine_config, dict) else {}
-            stock_def = machine_config.get("stockDefinition", {}) if isinstance(machine_config, dict) else {}
-            stock_dims = machine_config.get("stockDimensions") or machine_config.get("setup", {}).get("stockDimensions") if isinstance(machine_config, dict) else None
-            
-            # Resolve feature diameter from multiple sources dynamically
+            # Use centralized stock data for contour
             feat_diameter = float(
                 feature.get("diameter") or feat_dims.get("diameter") or
-                stock.get("diameter") or stock_def.get("diameter") or
-                stock_def.get("cylinderDiameter") or 0.0
+                _stock["diameter"] or 0.0
             )
-            width = float(
-                feature.get("width") or feat_diameter or
-                stock.get("width") or
-                (stock_dims[1] if stock_dims and len(stock_dims) > 1 else 0.0) or
-                tool_dia * 5.0
-            )
-            length = float(
-                feature.get("length") or feat_diameter or
-                stock.get("length") or
-                (stock_dims[0] if stock_dims and len(stock_dims) > 0 else 0.0) or
-                tool_dia * 5.0
-            )
-            
             op_str = (
                 str(operation.get("strategy", "")) + " " +
                 str(operation.get("description", "")) + " " +
                 str(operation.get("name", "")) + " " +
                 str(operation.get("type", ""))
             ).lower()
-
-            stock_type_str = str(machine_config.get("setup", {}).get("stockType", "")).lower() if isinstance(machine_config, dict) else ""
-            stock_is_cylindrical = any(kw in stock_type_str for kw in ("cylinder", "round", "bar", "rod"))
             
+            is_outer = ("outer" in op_str or "boundary" in op_str or 
+                       "outer" in str(feature.get("name", "")).lower() or 
+                       "boundary" in str(feature.get("name", "")).lower())
+
+            if is_outer and _stock["width"] > 0 and _stock["length"] > 0:
+                width = _stock["width"]
+                length = _stock["length"]
+            else:
+                width = float(
+                    feat_dims.get("width") or feature.get("width") or feat_diameter or
+                    _stock["width"] or tool_dia * 5.0
+                )
+                length = float(
+                    feat_dims.get("length") or feature.get("length") or feat_diameter or
+                    _stock["length"] or tool_dia * 5.0
+                )
+
             is_circular = (
                 feat_type in ("cylinder", "external_cylinder", "shaft", "boss", "circular_boss", "round_boss", "hole", "bore", "circle")
                 or "cylinder" in feat_type or "shaft" in feat_type or "circle" in feat_type
@@ -444,7 +546,7 @@ class ParametricToolpathEngine:
                 or ("shaft" in str(feature.get("name", "")).lower())
                 or ("cylinder" in op_str or "shaft" in op_str or "external_cylinder" in op_str)
                 or (feat_diameter > 0 and not feature.get("width"))
-                or (stock_is_cylindrical and "rough" in str(feature.get("name", "")).lower())
+                or (_stock["is_cylindrical"] and "rough" in str(feature.get("name", "")).lower())
             )
 
             add_move("rapid_clearance", z=clearance, source=src)
@@ -469,7 +571,7 @@ class ParametricToolpathEngine:
                     # Smooth 24-point circular arc loop around cylinder/shaft
                     num_pts = 24
                     for i in range(1, num_pts + 1):
-                        angle = -2.0 * math.pi * (i / float(num_pts))
+                        angle = math.pi - 2.0 * math.pi * (i / float(num_pts))
                         px = cx + r_cut * math.cos(angle)
                         py = cy + r_cut * math.sin(angle)
                         add_move("cut", x=px, y=py, z=curr_z, source=src)

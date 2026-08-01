@@ -44,7 +44,7 @@ VexCAD is a full-stack, AI-powered CAM system designed for production. The archi
 
 ### Business Rules & CAM Constraints
 - **Machine Limitations**: All toolpaths and operations MUST be validated against the active Machine Profile capabilities (e.g., blocking 5-axis operations on a 3-axis mill).
-- **Pipeline Integrity**: The CAM pipeline must flow sequentially: `STEP Import -> Feature Recognition -> Setup Planning -> Operation Planning -> Toolpath Generation -> G-Code Post-Processing`.
+- **Pipeline Integrity**: The CAM pipeline must flow sequentially: `STEP Import -> Blueprint & Projection Validation -> Geometry & Topology Reasoning -> B-Rep Feature Recognition -> Setup Planning -> Operation Planning -> Toolpath Generation -> G-Code Post-Processing`.
 - **Validation**: G-Code generation is strictly blocked if any operation violates coordinate safety, geometry mapping, or machine capability constraints.
 
 ### Coding Guidelines

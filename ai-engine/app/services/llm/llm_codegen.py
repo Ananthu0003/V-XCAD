@@ -18,7 +18,7 @@ _BLUEPRINT_CACHE_LOCK = threading.Lock()
 
 # Increment this whenever the audit schema or deterministic normalization rules change.
 # Including it in the cache key prevents older in-memory feature maps from being reused.
-_AUDIT_SCHEMA_VERSION = "thread-aware-v2"
+_AUDIT_SCHEMA_VERSION = "thread-aware-v3"
 
 # ISO 261/262-style preferred coarse pitches. This is standards data, not
 # blueprint-specific hardcoding. Values are used only when a metric callout
@@ -91,25 +91,30 @@ Before outputting any code, you must perform a deep visual audit of the blueprin
 # ROLE: Precision Mechanical CAD Auditor & Spatial Topologist
 Analyze the provided multi-view technical drawing with tolerance-aware manufacturing rigor. Output ONLY a valid JSON feature-map matching the exact schema below.
 
-## 1. COORDINATE SYSTEM CONSTRAINTS
+## 1. BLUEPRINT VIEW DETECTION
+- **View Scanning**: Scan the entire technical drawing and explicitly identify every view presented.
+- **Taxonomy**: Identify orthographic views (Front, Top, Right, Isometric), Section views (e.g., Section A-A), and Detail views (e.g., Detail B).
+- **Output**: You MUST list every identified view in the `views_detected` array in the JSON output, including its ID, type, and a brief description of what it shows.
+
+## 2. COORDINATE SYSTEM CONSTRAINTS
 - **Origin**: Place (0,0,0) at the absolute bottom-center of the primary datum body for symmetric stability.
 - **Z-Axis**: Points UPWARD (+Z). Face pockets, blind steps, and through-boring occur relative to this axis.
 - **Rationale**: State the exact placement logic in `origin_rationale`.
 
-## 2. FEATURE TAXONOMY
+## 3. FEATURE TAXONOMY
 - **ADDITIVE**: `base_prismoid`, `base_cylinder`, `mounting_ear`, `alignment_boss`, `reinforcement_rib`, `spherical_dome`, `revolved_profile`, `complex_shell`
 - **SUBTRACTIVE**: `pocket_interior`, `step_shoulder`, `counterbore`, `hole_through`, `hole_blind`, `thread_internal`, `oring_groove`, `revolved_cutout`
 - **SURFACE / MANUFACTURING**: `thread_external`
 - **EDGE_MODIFIER**: `fillet_interior`, `chamfer_exterior`
 
-## 3. MACHINING & DIMENSIONAL RULES
+## 4. MACHINING & DIMENSIONAL RULES
 - **Profile Decompositions**: For parts with asymmetric or multi-angular walls (e.g., specific draft angles like 33°, 40°, 22° shifts), capture the exact 2D coordinate paths outlining the perimeter.
 - **Z-Reference**: Every feature must declare an exact `z_reference`: `"bottom_of_feature"`, `"top_of_feature"`, or `"absolute_zero"`.
 - **Half-Section Views (ANTI-HALLUCINATION)**: NEVER interpret crosshatching on the top or bottom half of a symmetric part as a physical cutout or slot! Half-sections are drafting conventions used to expose internal geometry (like bores and internal threads). The physical part remains fully cylindrical/symmetric! However, you MUST explicitly extract the internal geometry (bores, internal threads) shown inside the half-section as `hole_blind` or `thread_internal` features! Do not ignore them.
 - **Keyways & Slots**: Look for discrete keyway slots (width and length) often shown on shafts or flanges. Ensure you capture them as distinct subtractive features (e.g. `pocket_interior`), NOT just generic holes. Do NOT miss them!
 - **Hidden & Internal Subtractions (CRITICAL)**: You MUST carefully scan all section views, detail views, and dashed hidden lines for ANY material removal. Every internal bore, countersink, counterbore, groove, chamfer, and intersecting hole MUST be explicitly listed as a subtractive feature. Do not skip smaller cutting portions or assume they are implied by a larger bore. Look closely at cross-sections to find hidden stepped cuts.
 
-## 4. THREAD CALLOUT EXTRACTION — CALLOUT FIRST
+## 5. THREAD CALLOUT EXTRACTION — CALLOUT FIRST
 When identifying threads from the blueprint, you MUST identify every thread callout (M, UNC, UNF, NPT) from the blueprint text, leader lines, or general notes. 
 Every identified thread must be modeled in the FEATURE_MAP as either `thread_internal` or `thread_external`.
 A thread is never identified from repeated graphic lines alone. Its written callout,
@@ -159,10 +164,22 @@ shown elsewhere in the drawing.
 Do not confuse drilled-hole depth with full-thread depth. Do not infer pitch from
 the spacing of simplified thread lines when a callout exists.
 
-## 5. STRICT JSON SCHEMA
+## 6. STRICT JSON SCHEMA
 ```json
 {
   "units": "mm",
+  "views_detected": [
+    {
+      "id": "view_front",
+      "type": "orthographic_front",
+      "description": "Primary front view showing main profile"
+    },
+    {
+      "id": "view_section_a_a",
+      "type": "section_a_a",
+      "description": "Cross-section A-A showing internal bores"
+    }
+  ],
   "origin_point": [0, 0, 0],
   "origin_rationale": "Symmetric center anchoring of primary geometric envelope.",
   "envelope": { "x_total": 116.50, "y_total": 78.61, "z_total": 14.00 },
@@ -219,7 +236,7 @@ the spacing of simplified thread lines when a callout exists.
 }
 ```
 
-## 6. SEVERE VALIDATION GATE
+## 7. SEVERE VALIDATION GATE
 
 * Do not output any markdown code fences, conversational prose, or warning summaries. Return pure, parsable JSON text only.
 """.strip()
@@ -234,6 +251,7 @@ You may ONLY use the following exact signatures. DO NOT INVENT kwargs.
 - `bd.ThreePointArc(p1: tuple[float, float], p2: tuple[float, float], p3: tuple[float, float])`
 - `bd.TangentArc(p1: tuple[float, float], p2: tuple[float, float], tangent: tuple[float, float])`
 - `bd.Polyline(pts: list[tuple[float, float]])`
+*(CRITICAL: Do NOT use hallucinated attributes like `p1.end_point` or `p1.start_point` to chain curves. They do not exist and will crash. To get the start/end coordinates of a line `p1`, you MUST use parameterization: `p1 @ 0` for the start point and `p1 @ 1` for the end point, or explicitly re-type the coordinate tuple!)*
 
 **2D Sketches (inside `with bd.BuildSketch():`)**
 - `bd.make_face()` (converts active BuildLine sequence into a face)
@@ -275,6 +293,7 @@ You may ONLY use the following exact signatures. DO NOT INVENT kwargs.
 - NEVER use `NearestToPoint`.
 - NEVER write CadQuery code (e.g., `cq.Workplane()`, `part.cut()`, `part.fuse()`). You are writing purely declarative `build123d`.
 - NEVER call context functions as methods. (e.g., WRONG: `part.extrude()`, `edge.chamfer()`, `edges[0].fillet()`. RIGHT: `bd.extrude()`, `bd.chamfer(edge, ...)`).
+- NEVER use the `*` operator to place objects (e.g. `bd.Location(...) * bd.Cylinder(...)`). This crashes with `TypeError: Multiplied(): incompatible function arguments`. ALWAYS use `with bd.Locations(...):`.
 - NEVER use `with bd.Rotation(...):`. Use `with bd.Locations(bd.Rotation(...)):`.
 - NEVER revolve a profile that crosses the axis of revolution. (e.g., If revolving around Z, the sketch must be entirely on `X >= 0`. Use `bd.Align.MIN` for X, NOT `bd.Align.CENTER`).
 - NEVER write multiple `with bd.BuildPart():` blocks or restart your approach mid-script. Think it through in the SPATIAL PLAN and write it once.
@@ -494,7 +513,15 @@ You are receiving a build123d Python script that failed to render due to an exce
 4. **Boolean Epsilon Rules**: If a `StdFail_NotDone` crash occurs, you likely have zero-thickness walls from overlapping subtractive boundaries. Ensure `eps=0.01` is applied to subtractive shapes so they pierce cleanly.
 5. **Thread Metadata Safety**: Do not remove, rename, or silently replace thread parameters while repairing topology. A bare M10 callout may infer 1.5 mm coarse pitch, but missing depth, length, tolerance, or tap-drill values must remain unresolved.
 6. **Output Format**: Return the ENTIRE valid Python file text block. Do not output snippets or incomplete reconstructions.
-""".strip()
+
+__API_CHEATSHEET_AND_RULES__
+
+__THREAD_CAD_RULES__
+""".replace(
+    "__API_CHEATSHEET_AND_RULES__", API_CHEATSHEET_AND_RULES
+).replace(
+    "__THREAD_CAD_RULES__", THREAD_CAD_RULES
+).strip()
 
 # -- Regex ---------------------------------------------------------------------
 
@@ -528,7 +555,7 @@ class LLMCodegenService:
     def _load_env() -> None:
         try:
             from dotenv import load_dotenv
-            load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+            load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=True)
         except Exception:
             pass
 
@@ -819,11 +846,34 @@ class LLMCodegenService:
             if file_hash in _BLUEPRINT_CACHE:
                 return _BLUEPRINT_CACHE[file_hash]
 
+        # --- NEW KNOWLEDGE RETRIEVAL STAGE ---
+        try:
+            from app.services.knowledge.retriever import KnowledgeRetriever
+            from app.services.knowledge.schemas import KnowledgeRetrievalQuery
+            
+            retriever = KnowledgeRetriever()
+            # Mock preliminary signals (in a real pipeline, a fast pass or OCR would generate these)
+            query = KnowledgeRetrievalQuery(
+                detected_symbols=["Ø", "M", "Ra", "±"], 
+                feature_candidates=["Hole", "Thread", "Dimension"],
+                query="General machining rules"
+            )
+            knowledge_res = retriever.retrieve(query)
+            
+            knowledge_context = "Engineering Rules Context:\\n"
+            for rule in knowledge_res.rules:
+                knowledge_context += f"- {rule.concept}: {rule.description}\\n"
+                
+            enhanced_instruction = f"{AUDIT_INSTRUCTION}\\n\\n{knowledge_context}"
+        except Exception as e:
+            print(f"[Knowledge] Retrieval failed or unavailable: {e}")
+            enhanced_instruction = AUDIT_INSTRUCTION
+
         async def _call(metadata) -> str:
             return await self.gateway.generate(
                 prompt="Extract technical drawing features map JSON matching the strict schema.",
                 metadata=metadata,
-                system_instruction=AUDIT_INSTRUCTION,
+                system_instruction=enhanced_instruction,
                 image_bytes=image_bytes,
                 mime_type=mime_type,
                 response_json=True

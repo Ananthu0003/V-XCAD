@@ -136,9 +136,10 @@ class OperationPlanner:
         if op_type == "drilling":
             op.tool_id = "tool_drill_1"
             
-            z_top = feature.get('dimensions', {}).get('z_top', 0.0)
+            machining_region = feature.get('machiningRegion', {})
+            z_top = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
             depth = feature.get('dimensions', {}).get('depth', 10.0)
-            z_bottom = z_top - abs(depth)
+            z_bottom = machining_region.get('bottomZ', z_top - abs(depth))
             
             op.safe_heights['top'] = z_top
             op.safe_heights['bottom'] = z_bottom
@@ -156,27 +157,31 @@ class OperationPlanner:
             
         elif op_type == "pocketing":
             op.tool_id = "tool_flat_end_mill_1"
-            op.safe_heights['top'] = feature.get('dimensions', {}).get('z_top', 0.0)
-            op.safe_heights['bottom'] = feature.get('dimensions', {}).get('z_bottom', -5.0)
+            machining_region = feature.get('machiningRegion', {})
+            op.safe_heights['top'] = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
+            op.safe_heights['bottom'] = machining_region.get('bottomZ', feature.get('dimensions', {}).get('z_bottom', -5.0))
             op.machining_strategy = 'adaptive_clearing'
             
         elif op_type == "facing":
             op.tool_id = "tool_face_mill_1"
-            z_level = feature.get('dimensions', {}).get('z_top', 0.0)
+            machining_region = feature.get('machiningRegion', {})
+            z_level = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
             op.safe_heights['top'] = z_level
-            op.safe_heights['bottom'] = z_level
+            op.safe_heights['bottom'] = machining_region.get('bottomZ', z_level)
             op.machining_strategy = 'zigzag'
             
         elif op_type == "2d_contour":
             op.tool_id = "tool_flat_end_mill_1"
-            op.safe_heights['top'] = feature.get('dimensions', {}).get('z_top', 0.0)
-            op.safe_heights['bottom'] = feature.get('dimensions', {}).get('z_bottom', -10.0)
+            machining_region = feature.get('machiningRegion', {})
+            op.safe_heights['top'] = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
+            op.safe_heights['bottom'] = machining_region.get('bottomZ', feature.get('dimensions', {}).get('z_bottom', -10.0))
             op.machining_strategy = 'outside_climb'
             
         elif op_type == "boss_clearing":
             op.tool_id = "tool_flat_end_mill_1"
-            op.safe_heights['top'] = feature.get('dimensions', {}).get('z_top', 0.0)
-            op.safe_heights['bottom'] = feature.get('dimensions', {}).get('z_bottom', -10.0)
+            machining_region = feature.get('machiningRegion', {})
+            op.safe_heights['top'] = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
+            op.safe_heights['bottom'] = machining_region.get('bottomZ', feature.get('dimensions', {}).get('z_bottom', -10.0))
             op.machining_strategy = 'outside_climb'
         
         if op:

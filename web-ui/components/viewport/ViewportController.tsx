@@ -24,6 +24,30 @@ export function ViewportController({
 	const controlsRef = useRef<any>(null);
 	const { camera, scene, size } = useThree();
 	const [hasFramed, setHasFramed] = useState(false);
+	const [isAutoRotating, setIsAutoRotating] = useState(false);
+
+	// Stop auto-rotation when user interacts
+	useEffect(() => {
+		const stopAutoRotate = (e: Event) => {
+			// Don't stop if the event originated from outside the canvas (like clicking UI buttons)
+			if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
+			setIsAutoRotating(false);
+		};
+		
+		window.addEventListener('pointerdown', stopAutoRotate);
+		window.addEventListener('wheel', stopAutoRotate, { passive: true });
+		
+		return () => {
+			window.removeEventListener('pointerdown', stopAutoRotate);
+			window.removeEventListener('wheel', stopAutoRotate);
+		};
+	}, []);
+
+	useFrame((state, delta) => {
+		if (isAutoRotating && controlsRef.current) {
+			controlsRef.current.azimuthAngle += 0.5 * delta;
+		}
+	});
 
 	// Adaptive clipping planes
 	useEffect(() => {
@@ -134,6 +158,8 @@ export function ViewportController({
 				controlsRef.current.rotateTo(-Math.PI / 2, Math.PI / 2, true);
 			} else if (action === 'right') {
 				controlsRef.current.rotateTo(Math.PI / 2, Math.PI / 2, true);
+			} else if (action === 'auto-rotate') {
+				setIsAutoRotating(prev => !prev);
 			} else if (action === 'reset' || action === 'home') {
 				let box: THREE.Box3 | null = null;
 				if (modelGroupRef?.current) {

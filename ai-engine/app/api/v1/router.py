@@ -25,7 +25,7 @@ from app.services.llm.parameter_render import ParameterRenderService
 router = APIRouter(tags=["cad"])
 
 _ALLOWED_MIME_PREFIXES = ()
-_ALLOWED_MIME_EXACT   = {"application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"}
+_ALLOWED_MIME_EXACT   = {"application/pdf", "image/jpeg", "image/png"}
 _DEFAULT_MODEL = os.getenv("GENAI_MODEL", "gemini-3.5-flash")
 
 
@@ -225,10 +225,6 @@ def _resolve_mime(content_type: str, filename: str) -> str | None:
         return "image/jpeg"
     if ext == "png":
         return "image/png"
-    if ext == "gif":
-        return "image/gif"
-    if ext == "webp":
-        return "image/webp"
     return None
 
 
@@ -318,7 +314,7 @@ async def generate(
         if mime_type is None:
             raise HTTPException(
                 status_code=400,
-                detail={"error": {"message": "File must be an image (PNG/JPEG/WEBP) or PDF."}},
+                detail={"error": {"message": "File must be a JPEG, PNG, or PDF."}},
             )
         image_bytes = await image.read()
 
@@ -551,6 +547,16 @@ async def render(
 
     svc = ParameterRenderService()
     try:
+        # 1. Strictly validate geometry to catch real B-Rep errors (e.g. self-intersections)
+        # without them being silently swallowed into 2D sketches.
+        is_valid, val_err = await svc.validate_script(
+            script=request.python_script,
+            parameters=request.parameters,
+        )
+        if not is_valid:
+            raise RuntimeError(val_err)
+            
+        # 2. Render and export files (where safe wrappers are allowed to swallow minor fillet errors)
         result = await svc.render_to_outputs(
             parameters=request.parameters,
             script=request.python_script,
@@ -572,6 +578,17 @@ async def render(
                 error_log=str(exc)
             )
             
+            with open(Path("outputs") / "debug_healed_script.py.txt", "w", encoding="utf-8") as f:
+                f.write(healed_script)
+            
+            # Strictly validate the healed script too
+            is_valid, val_err = await svc.validate_script(
+                script=healed_script,
+                parameters=request.parameters,
+            )
+            if not is_valid:
+                raise RuntimeError(val_err)
+                
             # Re-run render with the repaired script
             result = await svc.render_to_outputs(
                 parameters=request.parameters,
@@ -765,6 +782,7 @@ class CamAnalyzeRequest(BaseModel):
     job_id: str = "default_job"
     cam_run_id: str = ""
     parameters: Dict[str, Any] = {}
+    setup: Dict[str, Any] = {}
 
 @router.post("/cam/analyze")
 async def cam_analyze(request: CamAnalyzeRequest):
@@ -776,8 +794,15 @@ async def cam_analyze(request: CamAnalyzeRequest):
         
     try:
         from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
+        from app.services.cam.brep_feature_extractor import BRepFeatureExtractor
+        
+        brep_data = None
+        if step_path.exists():
+            brep_extractor = BRepFeatureExtractor(str(step_path))
+            brep_data = brep_extractor.analyze()
+            
         extractor = ParametricFeatureExtractor()
-        features = extractor.extract(request.parameters)
+        features = extractor.extract(request.parameters, setup=request.setup, brep_data=brep_data)
         
         return {
             "status": "ok",
@@ -808,14 +833,19 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
         if not setup.get("stockDimensions") and not setup.get("resolvedStock"):
             params = request.parameters
             is_lathe = "outer_diameter" in params or "od" in params
-            stock_w = float(params.get("width") or params.get("length") or params.get("outer_diameter") or 100.0)
+            stock_x = float(params.get("length") or params.get("width") or params.get("outer_diameter") or 100.0)
+            stock_y = float(params.get("width") or params.get("length") or params.get("outer_diameter") or 100.0)
             stock_h = float(params.get("height") or params.get("overall_length") or params.get("thickness") or 100.0)
-            setup["stockDimensions"] = [stock_w, stock_w, stock_h]
+            setup["stockDimensions"] = [stock_x, stock_y, stock_h]
             if is_lathe:
                 setup["stockType"] = "cylinder"
             request.machine_config["setup"] = setup
             
         from app.services.cam_pipeline_manager import CamPipelineManager
+        
+        # Inject session_id so the pipeline can locate the STEP file for B-Rep analysis
+        request.machine_config["session_id"] = request.session_id
+        
         cam_mgr = CamPipelineManager()
         result = await asyncio.to_thread(
             cam_mgr.auto_plan_cam,
@@ -854,7 +884,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             else:
                 fid = op.get("feature_id")
                 feat = next((f for f in features if f.get("id") == fid), {})
-                paths = engine.generate_toolpath(op, feat, setup)
+                paths = engine.generate_toolpath(op, feat, request.machine_config)
                 op["toolpaths"] = paths
                 
             try:
@@ -869,7 +899,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
                 feat = features_dict.get(feat_id, {})
                 
                 if op.get("estimated_time_s", 0) <= 0:
-                    breakdown = CycleTimeEstimator.estimate_operation_time_parametric(op, feat, setup)
+                    breakdown = CycleTimeEstimator.estimate_operation_time_parametric(op, feat, setup, machine_profile)
                     op["estimated_time_s"] = breakdown.total_seconds
                     op["estimated_breakdown"] = breakdown.model_dump()
                     
@@ -879,6 +909,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
                     op["estimated_time_s"] = 0.0
                 
             op["status"] = op.get("status") or "generated"
+            op["toolpath_schema_version"] = "semantic_v1"
             flat_paths.extend(paths)
             
         # Re-estimate total setup time
@@ -893,6 +924,21 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             json.dump({"toolpath_schema_version": "semantic_v1", "toolpaths": flat_paths}, f)
         with open(job_dir / "cam_operations.json", "w") as f:
             json.dump({"operations": operations}, f)
+        
+        # Store engine input so the /cam/gcode endpoint can resolve setup, controller, and tools
+        with open(job_dir / "cam_toolpath_engine_input.json", "w") as f:
+            json.dump({
+                "setup": request.machine_config,
+                "tools": tools,
+                "operations": operations
+            }, f)
+            
+        with open(job_dir / "cam_hashes.json", "w") as f:
+            json.dump({
+                "modelHash": "parametric",
+                "toolpath_schema_version": "semantic_v1",
+                "operations": {op["id"]: "parametric" for op in operations}
+            }, f)
             
         # Filter returned tools to ONLY tools assigned to operations
         assigned_tool_ids = {op.get("tool_id") or (op.get("tool") or {}).get("tool_id") or (op.get("tool") or {}).get("id") for op in operations}
@@ -922,7 +968,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             "setup_metadata": result.get("setup_metadata", {}),
             "tools": tools,
             "operations": operations,
-            "planned_cycle_time_seconds": result.get("setup_time_details", {}).get("total_setup_time_s", 0)
+            "planned_cycle_time_seconds": result.get("planned_cycle_time_seconds", 0)
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail={"error": {"message": f"CAM auto-plan failed: {exc}"}})
@@ -944,13 +990,13 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
     try:
         from app.services.toolpath.parametric_toolpath_engine import ParametricToolpathEngine
         from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
+        from app.services.cam.brep_feature_extractor import BRepFeatureExtractor
         
-        # We re-extract the features from parameters to get the context
-        extractor = ParametricFeatureExtractor()
-        features = extractor.extract(request.parameters)
-        feature_map = {f.get("id"): f for f in features if isinstance(f, dict) and f.get("id")}
+        # Build feature map — prioritize frontend-sent features (which already
+        # contain B-Rep-corrected centers from the /cam/analyze step).
+        feature_map = {}
         
-        # Also merge raw features directly from request parameters and request.features
+        # 1. Primary source: features sent by the frontend (already B-Rep corrected)
         raw_features = (
             request.features
             or request.parameters.get("camFeatures") 
@@ -961,8 +1007,21 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
         if isinstance(raw_features, list):
             for f in raw_features:
                 if isinstance(f, dict) and f.get("id"):
-                    # Use the provided feature, overriding any auto-extracted ones with the same ID
                     feature_map[f["id"]] = f
+        
+        # 2. Fallback: if no frontend features, re-extract with B-Rep data
+        if not feature_map:
+            outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
+            step_path = outputs_dir / f"cad_{request.session_id}.step"
+            
+            brep_data = None
+            if step_path.exists():
+                brep_extractor = BRepFeatureExtractor(str(step_path))
+                brep_data = brep_extractor.analyze()
+            
+            extractor = ParametricFeatureExtractor()
+            features = extractor.extract(request.parameters, setup=request.setup, brep_data=brep_data)
+            feature_map = {f.get("id"): f for f in features if isinstance(f, dict) and f.get("id")}
         
         from app.services.cam.cycle_time_estimator import CycleTimeEstimator
         from app.models.schemas import ToolpathSegment
@@ -972,9 +1031,17 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
         
         flat_paths = []
         total_cycle_time = 0.0
+        
+        # Wire tools to operations
+        tool_map = {t.get("id"): t for t in (request.tools or []) if isinstance(t, dict)}
+        
         for op in request.operations:
             fid = op.get("feature_id") or op.get("featureId")
             feature = feature_map.get(fid, {})
+            
+            tool_id = op.get("tool_id") or op.get("toolId")
+            if tool_id and tool_id in tool_map:
+                op["tool"] = tool_map[tool_id]
 
             # Ensure safe_heights are populated to pass G-code safety validation
             if not op.get("safe_heights") or not isinstance(op.get("safe_heights"), dict):
@@ -1021,6 +1088,7 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
                 "operations": request.operations
             }, f)
             
+        # Store enriched operations (with tool + toolpaths attached)
         with open(job_dir / "cam_operations.json", "w") as f:
             json.dump({"operations": request.operations}, f)
             

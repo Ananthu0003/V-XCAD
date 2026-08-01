@@ -44,7 +44,10 @@ class ExecutionTimelineBuilder:
                         time_category = "rapid"
                 else:
                     duration, confidence = self.engine.estimate_feed_time(block)
-                    time_category = "cutting"
+                    if getattr(block, "metadata", {}).get("is_air_cut"):
+                        time_category = "air_cutting"
+                    else:
+                        time_category = "cutting"
                     
             elif isinstance(block, CannedCycleBlock):
                 duration, confidence = self.engine.estimate_canned_cycle_time(block)
@@ -58,6 +61,10 @@ class ExecutionTimelineBuilder:
                     time_category = "spindle"
                 elif block.event_type == "dwell":
                     time_category = "dwell"
+                elif block.event_type == "probe":
+                    time_category = "probe"
+                elif block.event_type == "optional_stop":
+                    time_category = "optional_stop"
                 else:
                     time_category = "machine_action"
                     

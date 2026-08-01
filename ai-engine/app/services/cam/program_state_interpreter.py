@@ -34,6 +34,16 @@ class ProgramStateInterpreter:
             
         # 1. Tool Change
         if target_tool and target_tool != self.state.active_tool_id:
+            # Emitting Optional Stop (M01) before Tool Change
+            emitted_blocks.append(
+                MachineEventBlock(
+                    block_id=f"evt_m01_{target_tool}_{block.block_id}",
+                    event_type="optional_stop",
+                    operation_id=getattr(block, "operation_id", None),
+                    setup_id=getattr(block, "setup_id", None)
+                )
+            )
+            
             # Emitting Tool Change Event
             emitted_blocks.append(
                 MachineEventBlock(

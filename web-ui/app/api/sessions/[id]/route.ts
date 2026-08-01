@@ -42,7 +42,7 @@ export async function DELETE(request: Request, context: any) {
 			return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 		}
 
-		if (session.userId !== userId && !session.isShared) {
+		if (session.userId && session.userId !== userId) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
 

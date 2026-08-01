@@ -310,7 +310,7 @@ export function ChatPanel({
 												<input
 													ref={fileInputRef}
 													type="file"
-													accept="image/*,.pdf"
+													accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf"
 													className="hidden"
 													onChange={(e) => {
 														const file = e.target.files?.[0] || null;

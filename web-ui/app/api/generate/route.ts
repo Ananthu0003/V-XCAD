@@ -66,15 +66,12 @@ function extractErrorFromUnknown(input: unknown, fallback: string): { message: s
 
 function isSupportedUpload(upload: File): boolean {
 	const mimeType = upload.type.toLowerCase();
-	if (mimeType.startsWith('image/')) {
+	if (mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'application/pdf') {
 		return true;
 	}
 
-	if (mimeType === 'application/pdf') {
-		return true;
-	}
-
-	return upload.name.toLowerCase().endsWith('.pdf');
+	const name = upload.name.toLowerCase();
+	return name.endsWith('.pdf') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png');
 }
 
 function getFastApiUrl(): string {
@@ -98,11 +95,11 @@ export async function POST(request: Request): Promise<Response> {
 
 	const upload = formData.get('image');
 	if (upload && !(upload instanceof File)) {
-		return NextResponse.json(buildError('Uploaded file must be an image or PDF.'), { status: 400 });
+		return NextResponse.json(buildError('Uploaded file must be a JPEG, PNG, or PDF.'), { status: 400 });
 	}
 
 	if (upload && upload instanceof File && !isSupportedUpload(upload)) {
-		return NextResponse.json(buildError('Uploaded file must be an image or PDF.'), { status: 400 });
+		return NextResponse.json(buildError('Uploaded file must be a JPEG, PNG, or PDF.'), { status: 400 });
 	}
 
 	const modelRaw = formData.get('model_name');

@@ -22,6 +22,17 @@ MODEL_REGISTRY = [
         description='Ultra-fast, lightweight fallback model for quick edits.',
         badge='fast',
     ),
+    ModelMetadata(
+        id='gemini-3.1-pro',
+        name='Gemini 3.1 Pro (High)',
+        vendor='google',
+        tier='pro',
+        maxTokens=2000000,
+        supportsThinking=True,
+        fallbackModelId='gemini-3.5-flash',
+        description='Google flagship reasoning model optimized for complex spatial tasks.',
+        badge='thinking',
+    ),
 
     ModelMetadata(
         id='anthropic/claude-sonnet-5',

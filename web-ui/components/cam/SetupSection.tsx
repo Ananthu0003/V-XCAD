@@ -1,3 +1,4 @@
+import React, { useState, useEffect } from 'react';
 import type { SetupSettings, StockType, MaterialType, WorkCoordinateSystem, OriginPosition, PostProcessor } from '@/types/cam';
 import { MACHINE_MATRIX, MachineType, ControllerId, PostProcessorId, MachineProfile } from '@/lib/cam/machineProfiles';
 import { getProfilesForMachineType, getCompatibleControllers, getCompatiblePostProcessors } from '@/lib/cam/machineValidation';
@@ -43,6 +44,34 @@ type SetupSectionProps = {
     parameters?: Record<string, any>;
     setupMetadata?: any;
 };
+
+function NumberInput({ value, onChange, step, className }: { value: number | string, onChange: (v: string) => void, step?: string, className?: string }) {
+    const [localValue, setLocalValue] = useState(String(value));
+    
+    useEffect(() => {
+        setLocalValue(String(value));
+    }, [value]);
+
+    return (
+        <input
+            type="number"
+            step={step}
+            value={localValue}
+            onChange={(e) => setLocalValue(e.target.value)}
+            onBlur={(e) => {
+                if (e.target.value !== String(value)) {
+                    onChange(e.target.value);
+                }
+            }}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                    e.currentTarget.blur();
+                }
+            }}
+            className={className}
+        />
+    );
+}
 
 export function SetupSection({ setup, onChange, parameters, setupMetadata }: SetupSectionProps) {
     const update = (field: keyof SetupSettings, value: any) => {
@@ -501,12 +530,11 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                 <div className="flex flex-col gap-1 bg-background/50 rounded-lg p-2 border border-border/30">
                                                     <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Length (X)</span>
                                                     <div className="flex items-center justify-between gap-1">
-                                                        <input
-                                                            type="number"
+                                                        <NumberInput
                                                             step={isInch ? "0.01" : "0.1"}
                                                             value={toDisplay(autoX)}
-                                                            onChange={(e) => {
-                                                                const v = fromDisplay(parseFloat(e.target.value) || 0);
+                                                            onChange={(val) => {
+                                                                const v = fromDisplay(parseFloat(val) || 0);
                                                                 const newXY = (v - partX) / 2;
                                                                 updateRelativeBox(Math.max(0, newXY), top);
                                                             }}
@@ -518,12 +546,11 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                 <div className="flex flex-col gap-1 bg-background/50 rounded-lg p-2 border border-border/30">
                                                     <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Width (Y)</span>
                                                     <div className="flex items-center justify-between gap-1">
-                                                        <input
-                                                            type="number"
+                                                        <NumberInput
                                                             step={isInch ? "0.01" : "0.1"}
                                                             value={toDisplay(autoY)}
-                                                            onChange={(e) => {
-                                                                const v = fromDisplay(parseFloat(e.target.value) || 0);
+                                                            onChange={(val) => {
+                                                                const v = fromDisplay(parseFloat(val) || 0);
                                                                 const newXY = (v - partY) / 2;
                                                                 updateRelativeBox(Math.max(0, newXY), top);
                                                             }}
@@ -535,12 +562,11 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                 <div className="flex flex-col gap-1 bg-background/50 rounded-lg p-2 border border-border/30">
                                                     <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Height (Z)</span>
                                                     <div className="flex items-center justify-between gap-1">
-                                                        <input
-                                                            type="number"
+                                                        <NumberInput
                                                             step={isInch ? "0.01" : "0.1"}
                                                             value={toDisplay(autoZ)}
-                                                            onChange={(e) => {
-                                                                const v = fromDisplay(parseFloat(e.target.value) || 0);
+                                                            onChange={(val) => {
+                                                                const v = fromDisplay(parseFloat(val) || 0);
                                                                 const newTop = v - partZ - clampBot;
                                                                 updateRelativeBox(xy, Math.max(0, newTop));
                                                             }}
@@ -559,10 +585,9 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                             <div className="flex flex-col gap-1 bg-background/50 rounded-lg p-2 border border-border/30">
                                                 <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Length (X)</span>
                                                 <div className="flex items-center justify-between gap-1">
-                                                    <input
-                                                        type="number"
+                                                    <NumberInput
                                                         value={toDisplay(setup.stockDimensions?.[0])}
-                                                        onChange={(e) => updateDimension(0, parseFloat(e.target.value) || 0)}
+                                                        onChange={(val) => updateDimension(0, parseFloat(val) || 0)}
                                                         className="w-full bg-transparent border-none p-0 text-xs font-mono text-foreground outline-none font-bold"
                                                     />
                                                     <span className="text-[10px] font-mono text-muted-foreground/80 font-bold shrink-0">{isInch ? "in" : "mm"}</span>
@@ -571,10 +596,9 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                             <div className="flex flex-col gap-1 bg-background/50 rounded-lg p-2 border border-border/30">
                                                 <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Width (Y)</span>
                                                 <div className="flex items-center justify-between gap-1">
-                                                    <input
-                                                        type="number"
+                                                    <NumberInput
                                                         value={toDisplay(setup.stockDimensions?.[1])}
-                                                        onChange={(e) => updateDimension(1, parseFloat(e.target.value) || 0)}
+                                                        onChange={(val) => updateDimension(1, parseFloat(val) || 0)}
                                                         className="w-full bg-transparent border-none p-0 text-xs font-mono text-foreground outline-none font-bold"
                                                     />
                                                     <span className="text-[10px] font-mono text-muted-foreground/80 font-bold shrink-0">{isInch ? "in" : "mm"}</span>
@@ -583,10 +607,9 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                             <div className="flex flex-col gap-1 bg-background/50 rounded-lg p-2 border border-border/30">
                                                 <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Height (Z)</span>
                                                 <div className="flex items-center justify-between gap-1">
-                                                    <input
-                                                        type="number"
+                                                    <NumberInput
                                                         value={toDisplay(setup.stockDimensions?.[2])}
-                                                        onChange={(e) => updateDimension(2, parseFloat(e.target.value) || 0)}
+                                                        onChange={(val) => updateDimension(2, parseFloat(val) || 0)}
                                                         className="w-full bg-transparent border-none p-0 text-xs font-mono text-foreground outline-none font-bold"
                                                     />
                                                     <span className="text-[10px] font-mono text-muted-foreground/80 font-bold shrink-0">{isInch ? "in" : "mm"}</span>
@@ -606,12 +629,11 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                 <div className="flex flex-col gap-1 bg-background/50 rounded-lg p-2 border border-border/30">
                                                     <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Bar Diameter (D)</span>
                                                     <div className="flex items-center justify-between gap-1">
-                                                        <input
-                                                            type="number"
+                                                        <NumberInput
                                                             step={isInch ? "0.01" : "0.1"}
                                                             value={toDisplay(autoDia)}
-                                                            onChange={(e) => {
-                                                                const v = fromDisplay(parseFloat(e.target.value) || 0);
+                                                            onChange={(val) => {
+                                                                const v = fromDisplay(parseFloat(val) || 0);
                                                                 const newRad = (v - partDia) / 2;
                                                                 updateRelativeCyl(Math.max(0, newRad), top);
                                                             }}
@@ -623,12 +645,11 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                 <div className="flex flex-col gap-1 bg-background/50 rounded-lg p-2 border border-border/30">
                                                     <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Bar Length (L)</span>
                                                     <div className="flex items-center justify-between gap-1">
-                                                        <input
-                                                            type="number"
+                                                        <NumberInput
                                                             step={isInch ? "0.01" : "0.1"}
                                                             value={toDisplay(autoLen)}
-                                                            onChange={(e) => {
-                                                                const v = fromDisplay(parseFloat(e.target.value) || 0);
+                                                            onChange={(val) => {
+                                                                const v = fromDisplay(parseFloat(val) || 0);
                                                                 const newTop = v - partZ - clampBot;
                                                                 updateRelativeCyl(rad, Math.max(0, newTop));
                                                             }}
@@ -647,11 +668,10 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                             <div className="flex flex-col gap-1 bg-background/50 rounded-lg p-2 border border-border/30">
                                                 <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Bar Diameter (D)</span>
                                                 <div className="flex items-center justify-between gap-1">
-                                                    <input
-                                                        type="number"
+                                                    <NumberInput
                                                         value={toDisplay(setup.cylinderDiameter || setup.stockDimensions?.[0])}
-                                                        onChange={(e) => {
-                                                            const v = parseFloat(e.target.value) || 0;
+                                                        onChange={(val) => {
+                                                            const v = parseFloat(val) || 0;
                                                             const vMM = fromDisplay(v);
                                                             update('cylinderDiameter', vMM);
                                                             updateDimension(0, v);
@@ -665,11 +685,10 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                             <div className="flex flex-col gap-1 bg-background/50 rounded-lg p-2 border border-border/30">
                                                 <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Bar Length (L)</span>
                                                 <div className="flex items-center justify-between gap-1">
-                                                    <input
-                                                        type="number"
+                                                    <NumberInput
                                                         value={toDisplay(setup.cylinderLength || setup.stockDimensions?.[2])}
-                                                        onChange={(e) => {
-                                                            const v = parseFloat(e.target.value) || 0;
+                                                        onChange={(val) => {
+                                                            const v = parseFloat(val) || 0;
                                                             const vMM = fromDisplay(v);
                                                             update('cylinderLength', vMM);
                                                             updateDimension(2, v);

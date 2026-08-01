@@ -29,15 +29,15 @@ class GoogleGateway(BaseLLMGateway):
     def _build_config(self, metadata: ModelMetadata, system_instruction: str, response_json: bool) -> dict[str, Any]:
         config_params: dict[str, Any] = {
             "temperature": 0.0, 
-            "max_output_tokens": metadata.maxTokens if metadata.maxTokens else 1000000,
+            "max_output_tokens": min(metadata.maxTokens, 8192) if metadata.maxTokens else 8192,
         }
         if system_instruction:
             config_params["system_instruction"] = system_instruction
         if response_json:
             config_params["response_mime_type"] = "application/json"
             
-        if "3.5" in metadata.id and metadata.supportsThinking:
-            config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.HIGH)
+        if metadata.supportsThinking:
+            config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
             
         return config_params
 

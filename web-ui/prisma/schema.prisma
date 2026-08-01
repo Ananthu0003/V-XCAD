@@ -1,11 +1,13 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [vector]
 }
 
 model CadSession {
@@ -392,4 +394,55 @@ model ToolCompatibility {
   compatibleMachinesJson   String? // Stored as JSON array string
   compatibleMaterialsJson  String? // Stored as JSON array string
   unsupportedReason        String?
+}
+
+model KnowledgeDocument {
+  id           String   @id @default(cuid())
+  filename     String
+  version      String   @default("1.0")
+  pageCount    Int
+  status       String   @default("processing") // processing, active, failed
+  failedPages  Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  rules        EngineeringRule[]
+}
+
+model OntologyNode {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String?
+  parentId     String?
+  parent       OntologyNode? @relation("OntologyHierarchy", fields: [parentId], references: [id])
+  children     OntologyNode[] @relation("OntologyHierarchy")
+  
+  rules        EngineeringRule[]
+}
+
+model EngineeringRule {
+  id               String   @id @default(cuid())
+  rule_id          String   @unique
+  version          String   @default("1.0")
+  source_id        String
+  source_document  KnowledgeDocument @relation(fields: [source_id], references: [id])
+  topic            String?
+  confidence       Float    @default(1.0)
+  status           String   @default("active") // active, deprecated, experimental
+  reviewer         String?
+  
+  ontology_node_id String?
+  ontology_node    OntologyNode? @relation(fields: [ontology_node_id], references: [id])
+  
+  concept          String?
+  description      String
+  input_signals    Json?
+  required_context Json?
+  validation_rules Json?
+  
+  // Vector embedding of the description/rule content for fallback RAG
+  embedding        Unsupported("vector(1536)")?
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }

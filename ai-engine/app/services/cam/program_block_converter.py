@@ -7,7 +7,8 @@ from app.models.execution import (
     MotionBlock,
     CannedCycleBlock,
     Position,
-    SetupTransitionBlock
+    SetupTransitionBlock,
+    MachineEventBlock
 )
 from app.services.cam.program_state_interpreter import ProgramStateInterpreter
 
@@ -26,7 +27,22 @@ class ProgramBlockConverter:
         without needing actual toolpath segments.
         """
         interpreter = ProgramStateInterpreter()
-        all_blocks = []
+        
+        # Inject an initial setup transition block to account for stock handling
+        all_blocks = [
+            SetupTransitionBlock(
+                block_id=f"blk_setup_{uuid.uuid4().hex[:6]}",
+                transition_type="manual_reorientation",
+                setup_to=setup_id
+            ),
+            # Followed immediately by a work offset probe cycle
+            MachineEventBlock(
+                block_id=f"evt_probe_g54_{uuid.uuid4().hex[:6]}",
+                event_type="probe",
+                setup_id=setup_id,
+                metadata={"probe_type": "work_offset", "description": "G54 Z-axis probe"}
+            )
+        ]
         
         for op in operations:
             if op.get("status") in ("blocked", "error", "unsupported"):
@@ -37,8 +53,9 @@ class ProgramBlockConverter:
             
             # Simple fallback defaults for missing parameters
             params = op.get("parameters", {})
-            feed = params.get("feedRate", 1000.0)
-            rpm = params.get("spindleSpeed", 5000.0)
+            fs = params.get("feeds_and_speeds", {})
+            feed = fs.get("feedrate_mm_min") or fs.get("feed_rate") or params.get("feedRate", 1000.0)
+            rpm = fs.get("spindle_rpm") or fs.get("spindle_speed") or params.get("spindleSpeed", 5000.0)
             
             op_type = op.get("type", "")
             
@@ -62,13 +79,35 @@ class ProgramBlockConverter:
             )
             all_blocks.extend(interpreter.process_block(approach_block))
             
+            # Plunge in air from clearance to top of stock
+            z_top = op.get("safe_heights", {}).get("top", 0.0)
+            plunge_pos = Position(x=center[0], y=center[1], z=z_top)
+            if safe_z > z_top:
+                plunge_block = MotionBlock(
+                    block_id=f"blk_plunge_{uuid.uuid4().hex[:6]}",
+                    motion_type="linear",
+                    start_position=approach_pos,
+                    end_position=plunge_pos,
+                    feed_rate=feed,
+                    tool_id=tool_id,
+                    spindle_rpm=rpm,
+                    operation_id=op_id,
+                    setup_id=setup_id,
+                    metadata={"is_air_cut": True}
+                )
+                all_blocks.extend(interpreter.process_block(plunge_block))
+            
             # 2. Synthesize cutting blocks based on operation type
             geom = op.get("machiningRegion", {}) or op.get("geometry", {})
+            local_feat = params.get("setup_local_feature", {})
+            feat_width = float(local_feat.get("width") or 50.0)
+            feat_length = float(local_feat.get("length") or 50.0)
+            feat_depth = float(local_feat.get("depth") or 10.0)
             
             if op_type == "drilling":
                 # Single hole for simplicity at planning level, or loop through pattern
                 z_top = op.get("safe_heights", {}).get("top", 0.0)
-                z_bottom = op.get("safe_heights", {}).get("bottom", -10.0)
+                z_bottom = op.get("safe_heights", {}).get("bottom", z_top - feat_depth)
                 
                 cycle_type = params.get("cycle_type", "G81")
                 peck_depth = params.get("peckDepth", 5.0)
@@ -90,29 +129,30 @@ class ProgramBlockConverter:
 
             else:
                 # 2D/3D Milling Operations
-                area = geom.get("area", 2500.0)  # Default 50x50mm
+                area = geom.get("area") or (feat_width * feat_length)
                 if area <= 0: area = 2500.0
                 
                 z_top = op.get("safe_heights", {}).get("top", 0.0)
-                z_bottom = op.get("safe_heights", {}).get("bottom", -10.0)
+                z_bottom = op.get("safe_heights", {}).get("bottom", z_top - feat_depth)
                 depth = abs(z_top - z_bottom)
                 
-                stepdown = params.get("stepdown", 5.0)
+                stepdown = fs.get("stepdown") or params.get("stepdown", 5.0)
                 if stepdown <= 0: stepdown = 5.0
                 passes = max(1, math.ceil(depth / stepdown))
                 
                 tool_dia = params.get("tool_diameter", 10.0)
-                stepover_frac = params.get("stepover", 0.5)
+                stepover = fs.get("stepover") or params.get("stepover_mm")
+                stepover_frac = params.get("stepover", 0.5) if stepover is None else (stepover / tool_dia if tool_dia > 0 else 0.5)
                 
-                if op_type in ("facing", "pocketing", "boss_clearing"):
+                if op_type in ("facing", "pocketing", "boss_clearing", "pocket_milling"):
                     # Area clearing
                     # Distance per pass ≈ Area / Stepover_width
                     effective_width = tool_dia * stepover_frac
-                    distance_per_pass = area / effective_width
+                    distance_per_pass = area / effective_width if effective_width > 0 else 100.0
                     total_distance = distance_per_pass * passes
                 elif op_type in ("2d_contour", "2d_contour_outer"):
                     # Perimeter only
-                    perimeter = geom.get("perimeter", math.sqrt(area) * 4) # Approximation
+                    perimeter = geom.get("perimeter") or (2 * (feat_width + feat_length))
                     total_distance = perimeter * passes
                 else:
                     # Fallback

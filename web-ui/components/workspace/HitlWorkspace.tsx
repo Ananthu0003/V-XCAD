@@ -781,6 +781,36 @@ export default function HitlWorkspace() {
 				? camOperations.filter(op => selectedOperationIds.has(op.id))
 				: camOperations;
 
+			// Scale parametric features and operations to match the internal mm units
+			// Since AI extracts parameters in inches typically, and StlMesh auto-scales to mm.
+			const geometryScale = geometryInfo?.scale || 1.0;
+			let featuresToSend = camFeatures;
+			let scaledOpsToSend = opsToSend;
+			
+			if (geometryScale !== 1.0) {
+				featuresToSend = camFeatures.map(f => {
+					if (!f || !f.dimensions) return f;
+					const newDims = { ...f.dimensions };
+					['width', 'length', 'depth', 'diameter', 'height', 'radius', 'dia'].forEach(key => {
+						if (typeof newDims[key] === 'number') {
+							newDims[key] = newDims[key] * geometryScale;
+						}
+					});
+					return { ...f, dimensions: newDims };
+				});
+				
+				scaledOpsToSend = opsToSend.map(op => {
+					if (!op) return op;
+					const newOp = { ...op };
+					['stepdown', 'stepover', 'clearance_height', 'retract_height', 'stock_to_leave'].forEach(key => {
+						if (typeof (newOp as any)[key] === 'number') {
+							(newOp as any)[key] = (newOp as any)[key] * geometryScale;
+						}
+					});
+					return newOp as any;
+				});
+			}
+
 			const res = await fetch(`${backendUrl}/api/v1/cam/toolpaths`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -791,8 +821,8 @@ export default function HitlWorkspace() {
 					setup: camSetup,
 					setups: camSetups,
 					tools: camTools,
-					operations: opsToSend,
-					features: camFeatures,
+					operations: scaledOpsToSend,
+					features: featuresToSend,
 					modelHash: cadModelHash || "",
 					parameters: parameters
 				})
@@ -926,6 +956,19 @@ export default function HitlWorkspace() {
 			material: camSetup.material || camSetup.workpieceMaterialId || 'aluminum_6061',
 			workpieceMaterialId: camSetup.workpieceMaterialId || camSetup.material || 'aluminum_6061',
 		};
+
+		// If user hasn't explicitly set stock dimensions, inject the true CAD bounds so the backend generates perfectly sized toolpaths
+		if (!camSetup.stockDimensions || (camSetup.stockDimensions as any).length === 0) {
+			if (geometryInfo?.bounding_box) {
+				const min = geometryInfo.bounding_box.min;
+				const max = geometryInfo.bounding_box.max;
+				effectiveSetup.stockDimensions = [
+					max[0] - min[0],
+					max[1] - min[1],
+					max[2] - min[2]
+				];
+			}
+		}
 
 		setIsGenerating(true);
 		setStatusText('Auto Planning CAM...');
@@ -1183,7 +1226,12 @@ export default function HitlWorkspace() {
 
 		setMessages((prev) => [
 			...prev,
-			{ id: makeId('system'), role: 'system', content: `Restoring session: ${session.prompt}` }
+			{ 
+				id: makeId('assistant'), 
+				role: 'assistant', 
+				content: `Restored session: **${session.prompt || 'Untitled project'}**`,
+				fileName: session.fileName || undefined
+			}
 		]);
 
 		setIsHistoryOpen(false);

@@ -74,6 +74,9 @@ class SetupHandlingProfile(BaseModel):
     unload_time_seconds: Optional[float] = 10.0
     reorientation_time_seconds: Optional[float] = 20.0
     inspection_time_seconds: Optional[float] = 30.0
+    bar_feed_time_seconds: Optional[float] = 0.0
+    chip_evacuation_time_seconds: Optional[float] = 0.0
+    optional_stop_time_seconds: Optional[float] = 0.0
 
 class OperationPenaltyProfile(BaseModel):
     modifiers: Dict[str, float] = Field(

@@ -148,13 +148,13 @@ class ToolRecommendationEngine:
                         rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) exceeds facing scale threshold ({round(max_facing_dia, 2)}mm) for stock size ({stock_size}mm)")
                         continue
                 
-                if operation_type in ("pocketing", "boss_clearing", "2d_contour", "2d_contour_outer"):
+                if operation_type in ("pocketing", "pocket_milling", "slot_milling", "cavity", "boss_clearing", "2d_contour", "2d_contour_outer"):
                     if stock_size > 0.0 and t.diameter > max_milling_dia:
                         rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) exceeds workpiece envelope scale ({round(max_milling_dia, 2)}mm) for stock size ({stock_size}mm)")
                         continue
                         
                     max_feature_tool_dia = _get_dim(feature, ["width", "diameter", "size", "length"])
-                    if operation_type in ("pocketing", "slot_milling", "cavity"):
+                    if operation_type in ("pocketing", "pocket_milling", "slot_milling", "cavity"):
                         if max_feature_tool_dia > 0 and t.diameter > max_feature_tool_dia:
                             rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) > pocket size ({max_feature_tool_dia}mm)")
                             continue

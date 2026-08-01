@@ -35,10 +35,45 @@ class CamPipelineManager:
         self.operation_planner = OperationPlanner()
         self.coord_validator = CoordinateValidator()
         
+        # New Deterministic Graph Pipeline (V2)
+        try:
+            from app.services.geometry.view_detector import ViewDetector
+            from app.services.geometry.projection_reasoner import ProjectionReasoner
+            from app.services.geometry.constraint_solver import ConstraintSolver
+            from app.services.geometry.topology_builder import TopologyBuilder
+            from app.services.knowledge.retriever import KnowledgeRetriever
+            from app.services.validation.projection_validator import ProjectionValidator
+            
+            self.view_detector = ViewDetector()
+            self.projection_reasoner = ProjectionReasoner()
+            self.constraint_solver = ConstraintSolver()
+            self.topology_builder = TopologyBuilder()
+            self.knowledge_retriever = KnowledgeRetriever()
+            self.projection_validator = ProjectionValidator()
+        except ImportError:
+            pass
+        
+        
     def analyze_features(self, parameters: Dict[str, Any], job_id: str, cam_run_id: str, setup: Dict[str, Any] = None) -> Dict[str, Any]:
         from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
+        from app.services.validation.blueprint_validator import BlueprintValidator
+        from app.models.evidence import EvidenceGraph
+        
         extractor = ParametricFeatureExtractor()
-        features = extractor.extract(parameters)
+        features = extractor.extract(parameters, setup=setup)
+        
+        # Validation Gate
+        evidences_raw = parameters.get("evidences", [])
+        evidences = [EvidenceGraph(**e) for e in evidences_raw] if evidences_raw else []
+        
+        validator = BlueprintValidator()
+        feature_map_mock = {"features": features}
+        val_result = validator.validate_features(feature_map_mock, evidences)
+        
+        features = val_result["features"]
+        validation_status = "valid" if val_result["is_valid"] else "blocked"
+        if not val_result["is_valid"]:
+            print(f"[Validation Engine] CAD Generation blocked. Errors: {val_result['errors']}")
         
         caps = MachineCapability()
         base_wcs = setup.get("wcs") if setup else "G54"
@@ -120,7 +155,23 @@ class CamPipelineManager:
         # 1. Feature Recognition (Moved up to detect machine type)
         if parameters:
             from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
-            features = ParametricFeatureExtractor().extract(parameters)
+            from app.services.cam.brep_feature_extractor import BRepFeatureExtractor
+            
+            # Try to find the STEP file for B-Rep analysis
+            brep_data = None
+            session_id = machine_config.get("session_id") or job_id
+            outputs_dir = Path(__file__).resolve().parents[2] / "outputs"
+            step_path = outputs_dir / f"cad_{session_id}.step"
+            if step_path.exists():
+                try:
+                    brep_extractor = BRepFeatureExtractor(str(step_path))
+                    brep_data = brep_extractor.analyze()
+                except Exception as e:
+                    print(f"[CAM] B-Rep extraction warning: {e}")
+            
+            features = ParametricFeatureExtractor().extract(
+                parameters, setup=machine_config.get("setup", {}), brep_data=brep_data
+            )
         else:
             features = []
 
@@ -235,7 +286,7 @@ class CamPipelineManager:
 
         base_wcs = machine_config.get("setup", {}).get("wcs") or "G54"
         sd = machine_config.get("setup", {}).get("stockDimensions") or machine_config.get("stockDimensions")
-        topo = {"bounds": [0, 0, 0, sd[0], sd[1], sd[2]]} if (sd and len(sd) >= 3) else {}
+        topo = {"bounds": [-sd[0]/2, -sd[1]/2, -sd[2]/2, sd[0]/2, sd[1]/2, sd[2]/2]} if (sd and len(sd) >= 3) else {}
         setup_plans = self.setup_planner.plan_setups(
             features, caps, topology_info=topo, base_wcs=base_wcs
         )
@@ -1219,7 +1270,7 @@ class CamPipelineManager:
         setup_obj = machine_config.get("setup", {})
         setup_time_details = CycleTimeEstimator.estimate_setup_time(operations, machine_profile, features_dict=features_dict, setup=setup_obj)
         if setup:
-            setup["estimated_time_s"] = setup_time_details["total_setup_time_s"]
+            setup["estimated_time_s"] = setup_time_details.get("total_setup_time_seconds", 0)
             setup["tool_change_count"] = setup_time_details["tool_change_count"]
             
         # Calculate hashes to verify uniqueness per model
