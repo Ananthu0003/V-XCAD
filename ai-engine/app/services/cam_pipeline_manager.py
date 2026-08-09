@@ -87,10 +87,13 @@ class CamPipelineManager:
 
         try:
             from app.services.cam.cost_estimation import CostEstimationEngine
+            from app.services.cam.material_validation import get_material_profile
             cost_engine = CostEstimationEngine()
             
-            material_profile = setup.get("material", {}) if setup else {}
-            machine_profile = setup if setup else {}
+            mat_id = setup.get("workpieceMaterialId") or setup.get("material") if isinstance(setup, dict) else None
+            material_obj = get_material_profile(mat_id)
+            material_profile = material_obj.model_dump() if hasattr(material_obj, 'model_dump') else {}
+            machine_profile = setup if isinstance(setup, dict) else {}
             
             cost_estimate_result = cost_engine.estimate(
                 context=None,
@@ -1344,9 +1347,12 @@ class CamPipelineManager:
         # Cost Estimation Integration
         try:
             from app.services.cam.cost_estimation import CostEstimationEngine
+            from app.services.cam.material_validation import get_material_profile
             cost_engine = CostEstimationEngine()
             
-            material_profile = material.model_dump() if hasattr(material, 'model_dump') else (material if isinstance(material, dict) else {})
+            mat_id = setup.get("workpieceMaterialId") or setup.get("material") if isinstance(setup, dict) else None
+            material_obj = get_material_profile(mat_id)
+            material_profile = material_obj.model_dump() if hasattr(material_obj, 'model_dump') else {}
             total_machining_time_s = sum(op.get("estimated_time_s", 0) for op in operations)
             setup_time_s = setup.get("estimated_time_s", 0) if setup else 0
             
