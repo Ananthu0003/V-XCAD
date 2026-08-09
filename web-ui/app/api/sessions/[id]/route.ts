@@ -17,7 +17,8 @@ export async function GET(request: Request, context: any) {
 			return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 		}
 
-		if (session.userId && session.userId !== authSession?.userId && !session.isShared) {
+		const userId = authSession?.userId || null;
+		if (session.userId !== userId && !session.isShared && session.userId !== null) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
 
@@ -42,7 +43,7 @@ export async function DELETE(request: Request, context: any) {
 			return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 		}
 
-		if (session.userId !== userId && !session.isShared) {
+		if (session.userId !== userId && !session.isShared && session.userId !== null) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
 

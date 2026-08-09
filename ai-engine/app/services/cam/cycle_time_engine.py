@@ -288,16 +288,35 @@ class CycleTimeEngine:
             # timeline simulation handles blocking
             return (0.0, "high")
             
+        elif block.event_type == "optional_stop":
+            # Optional stops (M01) pause execution. Default assumption: operator check ~5s
+            return (5.0, "low")
+            
+        elif block.event_type == "probe":
+            # Probing cycle (e.g. Renishaw cycle)
+            probe_type = block.metadata.get("probe_type")
+            if probe_type == "work_offset":
+                return (15.0, "medium")
+            return (10.0, "low")
+            
         return (0.0, "high")
 
     def estimate_setup_transition(self, block: SetupTransitionBlock) -> Tuple[float, str]:
         if block.duration_seconds:
             return (block.duration_seconds, "high")
             
-        if block.transition_type == "manual_reorientation":
-            t = self._get_val(self.handling, "reorientation_time_seconds")
-            if t is not None:
-                return (t, "medium")
-            return (60.0, "low")
+        load_t = self._get_val(self.handling, "load_time_seconds") or 15.0
+        unload_t = self._get_val(self.handling, "unload_time_seconds") or 10.0
             
-        return (0.0, "low")
+        if block.transition_type == "manual_reorientation":
+            reorient = self._get_val(self.handling, "reorientation_time_seconds") or 20.0
+            total_handling = load_t + unload_t + reorient
+            return (total_handling, "medium" if self.handling else "low")
+            
+        if block.transition_type == "fixture_change":
+            return (180.0, "low")  # Arbitrary generic fallback for fixture swaps
+            
+        if block.transition_type == "pallet_change":
+            return (15.0, "high")
+            
+        return (load_t + unload_t, "medium")

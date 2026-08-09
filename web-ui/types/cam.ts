@@ -318,6 +318,44 @@ export type ToolpathStatistics = {
     estimatedCost?: number;
 };
 
+export type MaterialCostDetail = {
+    stock_volume_mm3: number;
+    part_volume_mm3?: number;
+    removed_volume_mm3?: number;
+    density_g_cm3: number;
+    mass_kg: number;
+    cost_per_kg: number;
+    cost: number;
+};
+
+export type MachiningCostDetail = {
+    total_time_s: number;
+    hourly_rate: number;
+    cost: number;
+};
+
+export type SetupCostDetail = {
+    setup_time_s: number;
+    setup_rate: number;
+    cost: number;
+};
+
+export type CostEstimateResult = {
+    status: string;
+    currency: string;
+    material?: MaterialCostDetail;
+    machining?: MachiningCostDetail;
+    setup?: SetupCostDetail;
+    total?: {
+        material_cost: number;
+        machining_cost: number;
+        setup_cost: number;
+        total_cost: number;
+    };
+    errors?: Array<{code: string; message: string}>;
+    warnings?: Array<{code: string; message: string}>;
+};
+
 export type CollisionStatus = 'safe' | 'warning' | 'critical';
 
 export type CamOperation = {

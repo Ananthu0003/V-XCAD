@@ -49,29 +49,20 @@ export function FeatureOverviewSection({
         return (
             <div className="rounded-xl border border-border/50 p-8 text-center bg-muted/10 text-[12px] text-muted-foreground flex flex-col items-center justify-center min-h-[150px] gap-4 relative overflow-hidden shadow-sm">
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent pointer-events-none" />
-                {workflowStage === 'cad' ? (
-                    <>
-                        <div className="flex flex-col gap-1 z-10">
-                            <span className="text-foreground font-bold tracking-wider uppercase text-[11px]">Feature Analysis Required</span>
-                            <span className="opacity-70 text-[11px]">Proceed to the CAM workspace to analyze 3D geometry and extract machinable features.</span>
-                        </div>
-                        <button 
-                            onClick={() => {
-                                if (setWorkflowStage) setWorkflowStage('cam');
-                                if (onRunFeatureRecognition) onRunFeatureRecognition();
-                            }}
-                            className="z-10 mt-2 flex items-center gap-2 px-6 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-widest text-[10px] shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:shadow-[0_0_25px_rgba(59,130,246,0.5)] transition-all"
-                        >
-                            <Wand2 className="size-3.5" />
-                            Run Feature Recognition
-                        </button>
-                    </>
-                ) : (
-                    <div className="flex flex-col items-center gap-2 z-10">
-                        <Target className="size-6 opacity-20" />
-                        <span>No features detected yet.</span>
-                    </div>
-                )}
+                <div className="flex flex-col gap-1 z-10">
+                    <span className="text-foreground font-bold tracking-wider uppercase text-[11px]">Feature Analysis Required</span>
+                    <span className="opacity-70 text-[11px]">Analyze 3D geometry to extract machinable features.</span>
+                </div>
+                <button 
+                    onClick={() => {
+                        if (setWorkflowStage) setWorkflowStage('cam');
+                        if (onRunFeatureRecognition) onRunFeatureRecognition();
+                    }}
+                    className="z-10 mt-2 flex items-center gap-2 px-6 py-2.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-widest text-[10px] shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:shadow-[0_0_25px_rgba(59,130,246,0.5)] transition-all"
+                >
+                    <Wand2 className="size-3.5" />
+                    Run Feature Recognition
+                </button>
             </div>
         );
     }

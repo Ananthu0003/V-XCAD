@@ -19,8 +19,7 @@ export async function GET() {
             },
             orderBy: {
                 createdAt: 'desc'
-            },
-            take: 20 // Limit to last 20 sessions for now
+            }
         });
 
         return NextResponse.json(sessions);

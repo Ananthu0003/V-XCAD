@@ -37,8 +37,24 @@ class CamPipelineManager:
         
     def analyze_features(self, parameters: Dict[str, Any], job_id: str, cam_run_id: str, setup: Dict[str, Any] = None) -> Dict[str, Any]:
         from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
+        from app.services.validation.blueprint_validator import BlueprintValidator
+        from app.models.evidence import EvidenceGraph
+        
         extractor = ParametricFeatureExtractor()
-        features = extractor.extract(parameters)
+        features = extractor.extract(parameters, setup=setup)
+        
+        # Validation Gate
+        evidences_raw = parameters.get("evidences", [])
+        evidences = [EvidenceGraph(**e) for e in evidences_raw] if evidences_raw else []
+        
+        validator = BlueprintValidator()
+        feature_map_mock = {"features": features}
+        val_result = validator.validate_features(feature_map_mock, evidences)
+        
+        features = val_result["features"]
+        validation_status = "valid" if val_result["is_valid"] else "blocked"
+        if not val_result["is_valid"]:
+            print(f"[Validation Engine] CAD Generation blocked. Errors: {val_result['errors']}")
         
         caps = MachineCapability()
         base_wcs = setup.get("wcs") if setup else "G54"
@@ -69,6 +85,24 @@ class CamPipelineManager:
         model_hash = "parametric"
         setup_metadata = {}
 
+        try:
+            from app.services.cam.cost_estimation import CostEstimationEngine
+            cost_engine = CostEstimationEngine()
+            
+            material_profile = setup.get("material", {}) if setup else {}
+            machine_profile = setup if setup else {}
+            
+            cost_estimate_result = cost_engine.estimate(
+                context=None,
+                total_time_s=0,
+                setup_time_s=0,
+                material_profile=material_profile,
+                machine_profile=machine_profile
+            )
+            stats = {"costEstimate": cost_estimate_result.model_dump()}
+        except Exception as e:
+            stats = {"costEstimate": {"status": "error", "currency": "USD", "errors": [{"code": "ESTIMATION_FAILED", "message": str(e)}]}}
+
         return {
             "status": "success",
             "topology": topology_info,
@@ -79,48 +113,36 @@ class CamPipelineManager:
             "geometry_mapping_summary": geometry_mapping_summary,
             "stock_suggestions": stock_suggestions,
             "camModelHash": model_hash,
-            "setup_metadata": setup_metadata
+            "setup_metadata": setup_metadata,
+            "stats": stats
         }
-        
-    def _generate_stock_boundary(self, setup_metadata: Dict[str, Any], is_cylindrical: bool = False) -> list:
-        stock = setup_metadata.get("resolvedStock", {})
-        bounds = stock.get("bounds", {"min": [0,0,0], "max": [0,0,0]})
-        s_min_x, s_min_y, _ = bounds["min"]
-        s_max_x, s_max_y, _ = bounds["max"]
-        
-        stock_type_str = str(stock.get("stockType", "")).lower()
-        if not is_cylindrical:
-            is_cylindrical = any(kw in stock_type_str for kw in ("cylinder", "round", "bar", "rod"))
-        
-        if is_cylindrical:
-            # Generate a circular polygon for cylindrical stock
-            import math
-            cx = (s_min_x + s_max_x) / 2.0
-            cy = (s_min_y + s_max_y) / 2.0
-            radius = min(s_max_x - s_min_x, s_max_y - s_min_y) / 2.0
-            points = []
-            num_points = 64
-            for i in range(num_points):
-                angle = 2 * math.pi * i / num_points
-                points.append([cx + radius * math.cos(angle), cy + radius * math.sin(angle)])
-            return points
-            
-        # Default box boundary
-        return [
-            [s_min_x, s_min_y],
-            [s_max_x, s_min_y],
-            [s_max_x, s_max_y],
-            [s_min_x, s_max_y]
-        ]
 
     def auto_plan_cam(self, machine_config: Dict[str, Any], job_id: str = "default_job", parameters: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Production-Grade Auto Generate Operations Pipeline.
         """
         # 1. Feature Recognition (Moved up to detect machine type)
-        if parameters:
+        if machine_config.get("features"):
+            features = machine_config["features"]
+        elif parameters:
             from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
-            features = ParametricFeatureExtractor().extract(parameters)
+            from app.services.cam.brep_feature_extractor import BRepFeatureExtractor
+            
+            # Try to find the STEP file for B-Rep analysis
+            brep_data = None
+            session_id = machine_config.get("session_id") or job_id
+            outputs_dir = Path(__file__).resolve().parents[2] / "outputs"
+            step_path = outputs_dir / f"cad_{session_id}.step"
+            if step_path.exists():
+                try:
+                    brep_extractor = BRepFeatureExtractor(str(step_path))
+                    brep_data = brep_extractor.analyze()
+                except Exception as e:
+                    print(f"[CAM] B-Rep extraction warning: {e}")
+            
+            features = ParametricFeatureExtractor().extract(
+                parameters, setup=machine_config.get("setup", {}), brep_data=brep_data
+            )
         else:
             features = []
 
@@ -178,11 +200,15 @@ class CamPipelineManager:
             mat_id = machine_config.get("workpieceMaterialId") or machine_config.get("material") or setup_obj.get("workpieceMaterialId") or setup_obj.get("material") or (mat_config.get("material_id") if isinstance(mat_config, dict) else None)
             material = get_material_profile(mat_id)
         def _safe_tool(t):
-            if "name" not in t: t["name"] = f"Tool {t.get('tool_id', 'unknown')}"
+            tool_id_val = t.get("tool_id") or t.get("id", "")
+            if "name" not in t: t["name"] = f"Tool {tool_id_val or 'unknown'}"
             if "flute_count" not in t: t["flute_count"] = 2
             if "cutting_length" not in t: t["cutting_length"] = 20.0
             if "stickout" not in t: t["stickout"] = 30.0
             if "diameter" not in t: t["diameter"] = 10.0
+            
+            # Ensure tool_id is correctly set in the dictionary before creating ToolProfile
+            t["tool_id"] = tool_id_val
             return ToolProfile(**t)
             
         tool_library = [_safe_tool(t) for t in machine_config.get("tool_library", [])]
@@ -193,22 +219,63 @@ class CamPipelineManager:
         # Synthesize Roughing Features based on Stock Dimensions
         setup_metadata = {}
         has_existing_face = any(f.get("type") == "face" or "face" in str(f.get("name", "")).lower() for f in features)
-        if "setup" in machine_config and "stockDimensions" in machine_config["setup"] and not has_existing_face:
-            sd = machine_config["setup"]["stockDimensions"]
+        
+        from app.services.planning.stock_geometry import create_stock_geometry
+        resolved_stock = setup_obj.get("resolvedStock", {})
+        stock_geom = create_stock_geometry(resolved_stock)
+        env = stock_geom.get_machining_envelope()
+        
+        # Calculate Model Top Z (defaults to 0.0 if not explicitly bound)
+        model_top_z = 0.0
+        if "modelBounds" in setup_obj:
+            model_top_z = float(setup_obj["modelBounds"].get("max", [0,0,0])[2])
+        elif features:
+            feature_tops = []
+            for f in features:
+                z = f.get("dimensions", {}).get("z_top")
+                if z is not None:
+                    feature_tops.append(float(z))
+            if feature_tops:
+                model_top_z = max(feature_tops)
+                
+        stock_top_z = float(env["max_z"])
+        facing_allowance = float(setup_obj.get("facingAllowance", 0.0))
+        facing_depth = stock_top_z - model_top_z
+        
+        # Only generate facing if there's stock above the model or user explicitly requested an allowance
+        if not has_existing_face and (facing_depth > 0.01 or facing_allowance > 0):
             import uuid
+            w = env["max_y"] - env["min_y"]
+            l = env["max_x"] - env["min_x"]
+            actual_depth = facing_depth if facing_depth > 0.01 else facing_allowance
+            
             features.insert(0, {
                 "id": f"feat_synthetic_face_{uuid.uuid4().hex[:6]}",
                 "type": "face",
                 "name": "Face Top of Stock",
                 "geometry": {"status": "synthetic"},
-                "width": sd[1],
-                "length": sd[0],
-                "depth": 2.0,
+                "width": w,
+                "length": l,
+                "depth": actual_depth,
+                "machining_strategy": setup_obj.get("facingStrategy", "zigzag"),
                 "machiningRegion": {
-                    "topZ": 0.0,
-                    "bottomZ": -2.0,
-                    "area": float(sd[0] * sd[1]),
+                    "topZ": stock_top_z,
+                    "bottomZ": stock_top_z - actual_depth,
+                    "area": env.get("area", w * l),
                     "valid": True
+                },
+                "traceability": {
+                    "stock_top_z": stock_top_z,
+                    "model_top_z": model_top_z,
+                    "facing_allowance": facing_allowance,
+                    "computed_facing_depth": actual_depth,
+                    "strategy": setup_obj.get("facingStrategy", "zigzag"),
+                    "stock_type": resolved_stock.get("type", "box"),
+                    "stock_dimensions": {
+                        "width": w,
+                        "length": l,
+                        "diameter": resolved_stock.get("diameter", 0.0)
+                    }
                 }
             })
             
@@ -235,7 +302,12 @@ class CamPipelineManager:
 
         base_wcs = machine_config.get("setup", {}).get("wcs") or "G54"
         sd = machine_config.get("setup", {}).get("stockDimensions") or machine_config.get("stockDimensions")
-        topo = {"bounds": [0, 0, 0, sd[0], sd[1], sd[2]]} if (sd and len(sd) >= 3) else {}
+        
+        # Ensure setup_obj has stockDimensions for cost estimation
+        if sd and "stockDimensions" not in setup_obj:
+            setup_obj["stockDimensions"] = sd
+            
+        topo = {"bounds": [-sd[0]/2, -sd[1]/2, -sd[2]/2, sd[0]/2, sd[1]/2, sd[2]/2]} if (sd and len(sd) >= 3) else {}
         setup_plans = self.setup_planner.plan_setups(
             features, caps, topology_info=topo, base_wcs=base_wcs
         )
@@ -250,6 +322,21 @@ class CamPipelineManager:
                     flat_matrix[8:12],
                     flat_matrix[12:16]
                 ]
+
+        from app.services.planning.planning_context import PlanningContext
+        planning_context = PlanningContext(
+            setup=setup_obj,
+            machine_profile=machine.model_dump(),
+            material=material,
+            features=features
+        )
+        val_result = planning_context.validate()
+        if not val_result["valid"]:
+            return {
+                "status": "error",
+                "errors": val_result["errors"],
+                "message": "CAM Pipeline blocked: Invalid manufacturing context."
+            }
 
         
         all_operations = []
@@ -292,7 +379,8 @@ class CamPipelineManager:
                     continue
                 
                 # 3c. Tool Selection & Feeds/Speeds (ONLY if capable)
-                tool, t_status, t_reason, feeds = tool_engine.recommend_tool(strategy, feature, machine, material, setup=setup_metadata)
+                pref_tool_id = feature.get("toolId") or feature.get("tool_id")
+                tool, t_status, t_reason, feeds = tool_engine.recommend_tool(strategy, feature, machine, material, setup=setup_metadata, preferred_tool_id=pref_tool_id)
                 if not tool:
                     decision.status = "blocked"
                     decision.reason = t_reason
@@ -321,6 +409,13 @@ class CamPipelineManager:
                 local_feat_dict = next((d.parameters.get("setup_local_feature") for d in setup_decisions if d.feature_id == op.feature_id), None)
                 if local_feat_dict:
                     op.parameters["setup_local_feature"] = local_feat_dict
+                    
+                # Attach exact geometric provenance from PlanningContext
+                if not hasattr(op, "traceability"):
+                    op.traceability = {}
+                op.traceability["stock_provenance"] = planning_context.get_stock_geometry().get("provenance")
+                op.traceability["setup_id"] = setup_id
+                
                 all_operations.append(op.to_dict())
                 
         # 4. Feature Coverage Validation & Fallback Planning
@@ -606,6 +701,26 @@ class CamPipelineManager:
                     if op_id in op_durations:
                         op["estimated_time_s"] = op_durations[op_id]
 
+        # --- Cost Estimation ---
+        stats = {}
+        try:
+            from app.services.cam.cost_estimation import CostEstimationEngine
+            cost_engine = CostEstimationEngine()
+            material_profile = material.model_dump() if hasattr(material, 'model_dump') else (material if isinstance(material, dict) else {})
+            print(f"DEBUG: auto_plan_cam material={material}, material_profile={material_profile}")
+            cost_estimate_result = cost_engine.estimate(
+                context=setup_obj,
+                total_time_s=planned_cycle_time_seconds,
+                setup_time_s=0, # setup time is handled within the engine if not provided
+                material_profile=material_profile,
+                machine_profile=machine.model_dump() if hasattr(machine, "model_dump") else machine
+            )
+            stats = {"costEstimate": cost_estimate_result.model_dump()}
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            stats = {"costEstimate": {"status": "error", "currency": "USD", "errors": [{"code": "ESTIMATION_FAILED", "message": str(e)}]}}
+
         return {
             "status": "success",
             "features": features,
@@ -619,7 +734,8 @@ class CamPipelineManager:
             "tools": [t.model_dump() for t in tool_library],
             "operations": all_operations,
             "cam_validation": cam_validation,
-            "planned_cycle_time_seconds": planned_cycle_time_seconds
+            "planned_cycle_time_seconds": planned_cycle_time_seconds,
+            "stats": stats
         }
         
 
@@ -1217,10 +1333,40 @@ class CamPipelineManager:
         features_dict = {f.get("id"): f for f in features} if features else {}
         # Get the setup from machine_config
         setup_obj = machine_config.get("setup", {})
-        setup_time_details = CycleTimeEstimator.estimate_setup_time(operations, machine_profile, features_dict=features_dict, setup=setup_obj)
+        
+        machine_profile_dict = machine.model_dump() if hasattr(machine, "model_dump") else (machine if isinstance(machine, dict) else {})
+        
+        setup_time_details = CycleTimeEstimator.estimate_setup_time(operations, machine_profile_dict, features_dict=features_dict, setup=setup_obj)
         if setup:
-            setup["estimated_time_s"] = setup_time_details["total_setup_time_s"]
+            setup["estimated_time_s"] = setup_time_details.get("total_setup_time_seconds", 0)
             setup["tool_change_count"] = setup_time_details["tool_change_count"]
+            
+        # Cost Estimation Integration
+        try:
+            from app.services.cam.cost_estimation import CostEstimationEngine
+            cost_engine = CostEstimationEngine()
+            
+            material_profile = material.model_dump() if hasattr(material, 'model_dump') else (material if isinstance(material, dict) else {})
+            total_machining_time_s = sum(op.get("estimated_time_s", 0) for op in operations)
+            setup_time_s = setup.get("estimated_time_s", 0) if setup else 0
+            
+            cost_estimate_result = cost_engine.estimate(
+                context=planning_context,
+                total_time_s=total_machining_time_s,
+                setup_time_s=setup_time_s,
+                material_profile=material_profile,
+                machine_profile=machine_profile_dict
+            )
+            
+            cost_estimate_data = cost_estimate_result.model_dump()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            cost_estimate_data = {
+                "status": "error",
+                "currency": "USD",
+                "errors": [{"code": "ESTIMATION_FAILED", "message": str(e)}]
+            }
             
         # Calculate hashes to verify uniqueness per model
         def obj_hash(obj):
@@ -1473,7 +1619,8 @@ class CamPipelineManager:
             "gcode_block_reason": "One or more operations failed geometry mapping or coordinate validation" if has_errors else None,
             "camModelHash": model_hash,
             "setup_metadata": setup_metadata,
-            "setup_time_details": setup_time_details
+            "setup_time_details": setup_time_details,
+            "stats": {"costEstimate": cost_estimate_data}
         }
 
     def _transform_feature_to_setup_local(self, feature: Dict[str, Any], setup_plan) -> Any:

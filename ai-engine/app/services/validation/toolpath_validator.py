@@ -72,6 +72,9 @@ class ToolpathValidator:
                 # 4. Compensation Validation
                 self._validate_compensation(op, toolpaths, f_name, f_id, result)
                 
+                # 4.5. Segment Safety & Logic
+                self._validate_segment_safety(op, toolpaths, f_name, result)
+                
                 # 5. Phase 8 Stage 2: Tool Reach & Holder Collision
                 if tool_assemblies and tool in tool_assemblies:
                     self._validate_tool_reach_and_holder(op, toolpaths, tool_assemblies[tool], f_name, result, setup_metadata)
@@ -118,10 +121,28 @@ class ToolpathValidator:
                             result["status"] = "error"
                             return
 
-        # Connectivity check
+        # Connectivity & Zero-length check
+        has_cut = False
         for i in range(len(toolpaths) - 1):
-            curr_end = toolpaths[i].get("end", {})
-            next_start = toolpaths[i+1].get("start", {})
+            curr_seg = toolpaths[i]
+            next_seg = toolpaths[i+1]
+            
+            curr_start = curr_seg.get("start", {})
+            curr_end = curr_seg.get("end", {})
+            next_start = next_seg.get("start", {})
+            
+            # Zero-length check
+            dx_seg = curr_end.get("x", 0) - curr_start.get("x", 0)
+            dy_seg = curr_end.get("y", 0) - curr_start.get("y", 0)
+            dz_seg = curr_end.get("z", 0) - curr_start.get("z", 0)
+            dist_seg = math.sqrt(dx_seg**2 + dy_seg**2 + dz_seg**2)
+            if dist_seg < 0.001 and curr_seg.get("moveType") not in ["dwell", "delay"]:
+                result["errors"].append(f"Geometry validation failed: {f_name} contains zero-length segment ({curr_seg.get('moveType')}).")
+                result["status"] = "error"
+                return
+                
+            if curr_seg.get("moveType") == "cut":
+                has_cut = True
             
             dx = curr_end.get("x", 0) - next_start.get("x", 0)
             dy = curr_end.get("y", 0) - next_start.get("y", 0)
@@ -132,6 +153,15 @@ class ToolpathValidator:
                 result["errors"].append(f"Geometry validation failed: {f_name} toolpath segments are disconnected by {dist:.3f}mm.")
                 result["status"] = "error"
                 return
+                
+        # Check last segment for cut
+        if toolpaths and toolpaths[-1].get("moveType") == "cut":
+            has_cut = True
+            
+        if not has_cut and op_type != "blocked" and op_type != "unknown":
+            result["errors"].append(f"Geometry validation failed: {f_name} toolpath does not contain any cutting moves.")
+            result["status"] = "error"
+            return
 
         # --- Stock Limits Validation ---
         if setup_metadata and "resolvedStock" in setup_metadata:
@@ -163,6 +193,73 @@ class ToolpathValidator:
                                 result["errors"].append(f"Stock validation failed: {f_name} toolpath is excessively outside stock boundaries.")
                                 result["status"] = "error"
                                 return
+
+        # --- Keepout / Boss Geometry Validation ---
+        if op_type == "boss_clearing":
+            geometry = op.get("geometry", {})
+            machining_region = geometry.get("machiningRegion") or op.get("machiningRegion")
+            if machining_region and "islands" in machining_region and machining_region["islands"]:
+                boss_pts = machining_region["islands"][0]
+                if boss_pts and len(boss_pts) >= 3:
+                    try:
+                        from shapely.geometry import Polygon, LineString
+                        boss_poly = Polygon(boss_pts)
+                        if not boss_poly.is_valid:
+                            boss_poly = boss_poly.buffer(0)
+                        
+                        tool_radius = (op.get("tool", {}).get("diameter", 6.35) or 6.35) / 2.0
+                        # Validate that the cutter center never goes inside (boss_poly + tool_radius)
+                        # We use 0.99 multiplier to allow for tiny floating point errors on the exact boundary
+                        keepout_poly = boss_poly.buffer(tool_radius * 0.99, join_style=2)
+                        
+                        for seg in toolpaths:
+                            mtype = seg.get("moveType", "")
+                            if mtype in ("cut", "plunge", "lead_in", "lead_out"):
+                                s = seg.get("start", {})
+                                e = seg.get("end", {})
+                                if "x" in s and "x" in e:
+                                    line = LineString([(s["x"], s["y"]), (e["x"], e["y"])])
+                                    if line.intersects(keepout_poly) and not line.touches(keepout_poly):
+                                        intersection = line.intersection(keepout_poly)
+                                        # Only error if it actually cuts INTO the keepout, not just touches the border
+                                        if intersection.length > 0.001:
+                                            result["errors"].append(f"Geometry validation failed: {f_name} toolpath gouges the boss keepout zone.")
+                                            result["status"] = "error"
+                                            return
+                    except ImportError:
+                        pass # Ignore if shapely is not available
+
+    def _validate_segment_safety(self, op: Dict[str, Any], toolpaths: List[Dict[str, Any]], f_name: str, result: Dict[str, Any]) -> None:
+        """Validates speeds, feeds, and safe heights at the segment level."""
+        safe_heights = op.get("safe_heights", {})
+        retract = safe_heights.get("retract", 5.0)
+        
+        for i, seg in enumerate(toolpaths):
+            mtype = seg.get("moveType", "")
+            s = seg.get("start", {})
+            e = seg.get("end", {})
+            
+            z1 = s.get("z", 0)
+            z2 = e.get("z", 0)
+            
+            if mtype in ["rapid_clearance", "rapid_xy"]:
+                if z1 < retract - 0.1 or z2 < retract - 0.1:
+                    result["errors"].append(f"Safety validation failed: {f_name} performs rapid move below retract height.")
+                    result["status"] = "error"
+                    return
+                    
+            if mtype == "plunge":
+                if z1 < z2 - 0.001:
+                    result["errors"].append(f"Safety validation failed: {f_name} contains impossible upward plunge (Z{z1:.3f} to Z{z2:.3f}).")
+                    result["status"] = "error"
+                    return
+                    
+            if mtype == "cut":
+                feed = seg.get("feedrate", 0)
+                if feed <= 0:
+                    result["errors"].append(f"Safety validation failed: {f_name} contains cut move with invalid feedrate ({feed}).")
+                    result["status"] = "error"
+                    return
 
     def _validate_compensation(self, op: Dict[str, Any], toolpaths: List[Dict[str, Any]], f_name: str, f_id: str, result: Dict[str, Any]) -> None:
         op_type = op.get("type")

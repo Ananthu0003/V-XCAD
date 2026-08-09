@@ -48,7 +48,7 @@ class ToolRecommendationEngine:
     def __init__(self, tool_library: List[ToolProfile]):
         self.tools = tool_library
 
-    def recommend_tool(self, operation_type: str, feature: Dict[str, Any], machine: MachineProfile, material: MaterialProfile, setup: Optional[Dict[str, Any]] = None) -> Tuple[Optional[ToolProfile], str, str, Dict[str, float]]:
+    def recommend_tool(self, operation_type: str, feature: Dict[str, Any], machine: MachineProfile, material: MaterialProfile, setup: Optional[Dict[str, Any]] = None, preferred_tool_id: Optional[str] = None) -> Tuple[Optional[ToolProfile], str, str, Dict[str, float]]:
         """
         Returns: (selected_tool, status, reason, feeds_and_speeds)
         """
@@ -148,13 +148,13 @@ class ToolRecommendationEngine:
                         rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) exceeds facing scale threshold ({round(max_facing_dia, 2)}mm) for stock size ({stock_size}mm)")
                         continue
                 
-                if operation_type in ("pocketing", "boss_clearing", "2d_contour", "2d_contour_outer"):
+                if operation_type in ("pocketing", "pocket_milling", "slot_milling", "cavity", "boss_clearing", "2d_contour", "2d_contour_outer"):
                     if stock_size > 0.0 and t.diameter > max_milling_dia:
                         rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) exceeds workpiece envelope scale ({round(max_milling_dia, 2)}mm) for stock size ({stock_size}mm)")
                         continue
                         
                     max_feature_tool_dia = _get_dim(feature, ["width", "diameter", "size", "length"])
-                    if operation_type in ("pocketing", "slot_milling", "cavity"):
+                    if operation_type in ("pocketing", "pocket_milling", "slot_milling", "cavity"):
                         if max_feature_tool_dia > 0 and t.diameter > max_feature_tool_dia:
                             rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) > pocket size ({max_feature_tool_dia}mm)")
                             continue
@@ -174,29 +174,42 @@ class ToolRecommendationEngine:
 
                 candidate_tools.append(t)
 
-        # Sort candidate tools based on physics/geometry
+        # Rank candidate tools based on physics/geometry
         best_tool = None
         if candidate_tools:
-            if operation_type in ("drilling", "peck_drilling"):
-                if target_dia > 0:
-                    # Select tool closest to target diameter without exceeding it
-                    candidate_tools.sort(key=lambda t: abs(target_dia - t.diameter))
+            if preferred_tool_id:
+                matched = [t for t in candidate_tools if t.tool_id == preferred_tool_id]
+                if matched:
+                    best_tool = matched[0]
                 else:
-                    candidate_tools.sort(key=lambda t: t.diameter)
-            elif operation_type == "facing":
-                # Prefer tools proportional to feature/stock dimensions (around 0.7x stock size)
-                target_f_dia = stock_size * 0.7 if stock_size > 0 else 40.0
-                candidate_tools.sort(key=lambda t: abs(t.diameter - target_f_dia))
+                    return None, "blocked", f"Preferred tool '{preferred_tool_id}' is physically incompatible or invalid for this operation.", {}
             else:
-                candidate_tools.sort(key=lambda t: t.diameter, reverse=True)
-            
-            best_tool = candidate_tools[0]
+                def _score_tool(t: ToolProfile) -> float:
+                    score = 0.0
+                    # Feature accessibility:
+                    if operation_type in ("drilling", "peck_drilling"):
+                        score -= abs(target_dia - t.diameter) * 10
+                    elif operation_type == "facing":
+                        # For facing, we want the largest valid tool up to the machine/stock scale limit
+                        score += t.diameter * 2.0
+                    else:
+                        score += t.diameter
+                        
+                    # Rigidity constraints (shorter stickout, more flutes are better)
+                    score -= getattr(t, 'stickout', 30.0) * 0.1
+                    score += getattr(t, 'flute_count', 2) * 1.0
+                    return score
+
+                candidate_tools.sort(key=_score_tool, reverse=True)
+                best_tool = candidate_tools[0]
 
         # Strict Library Selection: if no tool fits geometrically, block the operation
         if not best_tool:
             return None, "blocked", f"No tool found in library for operation '{operation_type}'. Target Dia: {target_dia}mm, Depth: {target_depth}mm", None
 
         reason = f"Chosen {best_tool.name} (Dia {best_tool.diameter}mm) as it supports material and feature dimensions."
+        if preferred_tool_id:
+            reason = "User-preferred tool validated."
         
         # Calculate Feeds & Speeds based on material & tool physics
         vc = material.cutting_speed or 120.0
@@ -206,19 +219,35 @@ class ToolRecommendationEngine:
             ideal_rpm = 1000.0
             
         fz = material.feed_per_tooth or 0.05
-        ideal_feed = ideal_rpm * max(best_tool.flute_count, 1) * fz
+        ideal_feed = ideal_rpm * max(getattr(best_tool, 'flute_count', 2), 1) * fz
         
         status = "ready"
-        max_rpm = machine.spindle_limits.get("max_rpm", 10000)
-        max_feed = machine.feed_limits.get("max_feed", 5000)
+        max_rpm = getattr(machine, 'spindle_limits', {}).get("max_rpm", 10000) if hasattr(machine, 'spindle_limits') else 10000
+        max_feed = getattr(machine, 'feed_limits', {}).get("max_feed", 5000) if hasattr(machine, 'feed_limits') else 5000
         
         rpm = min(ideal_rpm, max_rpm)
         feed = min(ideal_feed, max_feed)
         
+        # Derive granular feeds from material config instead of hardcoded scalars
+        # Fallbacks dynamically calculate safe offsets if schema properties are missing
+        plunge_fz = getattr(material, "plunge_feed_per_tooth", None)
+        if plunge_fz is None:
+            plunge_fz = fz * 0.5
+        ideal_plunge_feed = ideal_rpm * max(getattr(best_tool, 'flute_count', 2), 1) * plunge_fz
+        
+        entry_factor = getattr(material, "entry_feed_factor", None) or 0.8
+        lead_in_factor = getattr(material, "lead_in_feed_factor", None) or 0.5
+        lead_out_factor = getattr(material, "lead_out_feed_factor", None) or 0.8
+        
+        plunge_feed = min(ideal_plunge_feed, max_feed)
+        
         feeds_and_speeds = {
             "spindle_rpm": round(rpm, 0),
             "feedrate_mm_min": round(feed, 0),
-            "plunge_feedrate": round(feed * 0.5, 0)
+            "approach_feedrate": round(feed * entry_factor, 0),
+            "plunge_feedrate": round(plunge_feed, 0),
+            "lead_in_feedrate": round(feed * lead_in_factor, 0),
+            "lead_out_feedrate": round(feed * lead_out_factor, 0)
         }
         
         return best_tool, status, reason, feeds_and_speeds

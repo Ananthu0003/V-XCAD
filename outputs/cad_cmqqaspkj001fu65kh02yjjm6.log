@@ -1,0 +1,5 @@
+WARNING, exporting non-planar shape to 2D format.
+  This is probably not what you want.
+  52 points found outside the XY plane.
+RENDER_SUCCESS: Exported cad_cmqqaspkj001fu65kh02yjjm6.step, cad_cmqqaspkj001fu65kh02yjjm6.stl, cad_cmqqaspkj001fu65kh02yjjm6.dxf, and cad_cmqqaspkj001fu65kh02yjjm6.gcode
+

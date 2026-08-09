@@ -1,5 +1,5 @@
-import { SetupSettings, Tool, CamOperation, CamFeature, CamSetupPlan } from '@/types/cam';
-import { Target, Layers, Settings2, Scissors, Activity, FileCode } from 'lucide-react';
+import { SetupSettings, Tool, CamOperation, CamFeature, CamSetupPlan, CostEstimateResult } from '@/types/cam';
+import { Target, Layers, Settings2, Scissors, Activity, FileCode, CircleDollarSign, AlertTriangle } from 'lucide-react';
 import { MACHINE_MATRIX } from '@/lib/cam/machineProfiles';
 import { getMaterialLabel } from '@/lib/cam/materialProfiles';
 
@@ -10,10 +10,11 @@ type CamSummaryPanelProps = {
     operations: CamOperation[];
     features?: CamFeature[];
     coordValidation?: any;
+    costEstimate?: CostEstimateResult;
     onClickSection: (sectionId: string) => void;
 };
 
-export function CamSummaryPanel({ setup, setups = [], tools, operations, features = [], coordValidation, onClickSection }: CamSummaryPanelProps) {
+export function CamSummaryPanel({ setup, setups = [], tools, operations, features = [], coordValidation, costEstimate, onClickSection }: CamSummaryPanelProps) {
     const totalCycleTime = operations.reduce((acc, op) => acc + (op.estimated_time_s || op.statistics?.cycleTimeSeconds || 0), 0);
     const formatTime = (seconds: number) => {
         if (!seconds) return 'N/A';
@@ -27,6 +28,45 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
             <h3 className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground flex items-center gap-2 mb-2">
                 <Activity className="size-4" /> CAM Setup Summary
             </h3>
+            
+            {/* Cost Estimation Panel */}
+            {costEstimate && (
+                <div className="p-4 rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-500/20 flex flex-col gap-2 dark:shadow-[inset_0_1px_0_0_rgba(34,197,94,0.1)] mb-2">
+                    <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-bold text-[11px] uppercase tracking-widest">
+                        <CircleDollarSign className="size-3.5" /> Estimated Manufacturing Cost
+                    </div>
+                    {costEstimate.status === 'incomplete' ? (
+                        <div className="text-[11px] text-red-500 flex items-start gap-2 mt-1">
+                            <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+                            <div className="flex flex-col gap-1">
+                                {costEstimate.errors?.map((err, i) => (
+                                    <span key={i}>{err.message}</span>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col gap-2 mt-1">
+                            <div className="text-2xl font-bold text-foreground">
+                                {new Intl.NumberFormat('en-US', { style: 'currency', currency: costEstimate.currency }).format(costEstimate.total?.total_cost || 0)}
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-green-200/50 dark:border-green-500/10 text-[10px]">
+                                <div className="flex flex-col">
+                                    <span className="text-muted-foreground">Material</span>
+                                    <span className="font-medium text-foreground">{new Intl.NumberFormat('en-US', { style: 'currency', currency: costEstimate.currency }).format(costEstimate.material?.cost || 0)}</span>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-muted-foreground">Machining</span>
+                                    <span className="font-medium text-foreground">{new Intl.NumberFormat('en-US', { style: 'currency', currency: costEstimate.currency }).format(costEstimate.machining?.cost || 0)}</span>
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-muted-foreground">Setup</span>
+                                    <span className="font-medium text-foreground">{new Intl.NumberFormat('en-US', { style: 'currency', currency: costEstimate.currency }).format(costEstimate.setup?.cost || 0)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
             
             <div className="grid grid-cols-1 gap-2">
                 {/* Setups Section - Maps over multiple setups if available */}

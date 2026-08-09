@@ -1,4 +1,5 @@
-import { prisma } from '../lib/prisma';
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
 
 async function run() {
   console.log("Adding Micro Tools to Tool Library...");
@@ -61,6 +62,47 @@ async function run() {
       assembly: {
         create: {
           stickoutLength: 10
+        }
+      }
+    },
+    {
+      name: "0.30mm Micro Twist Drill",
+      category: "drilling",
+      type: "drill",
+      description: "Micro drill for precision cross holes (e.g. cross_hole 0.3mm)",
+      unit: "mm",
+      isActive: true,
+      geometry: {
+        create: {
+          diameter: 0.30,
+          fluteLength: 10,
+          overallLength: 38,
+          shankDiameter: 3.175,
+          fluteCount: 2,
+          pointAngle: 118
+        }
+      },
+      offsets: {
+        create: {
+          lengthOffset: 105,
+          diameterOffset: 105,
+          compensationType: "off"
+        }
+      },
+      assembly: {
+        create: {
+          stickoutLength: 15
+        }
+      },
+      cuttingData: {
+        create: {
+          spindleRpm: 12000,
+          feedRate: 100,
+          plungeRate: 30,
+          retractRate: 500,
+          coolant: "flood",
+          stepdown: 0.1,
+          stepover: 0.0
         }
       }
     },

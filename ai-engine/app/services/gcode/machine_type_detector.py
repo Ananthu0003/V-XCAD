@@ -23,8 +23,10 @@ class MachineTypeDetector:
         
         # Check if features have any cylindrical turning features
         if not is_rotational and features:
+            turning_keywords = ('cylinder', 'shaft', 'turned', 'dia', 'bore', 'groove', 'turn')
             for f in features:
-                if f.get('type') in ('external_cylinder', 'shaft', 'turned_od'):
+                feat_type = f.get('type', '').lower()
+                if any(kw in feat_type for kw in turning_keywords):
                     is_rotational = True
                     break
         

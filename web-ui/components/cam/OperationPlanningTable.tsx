@@ -236,7 +236,7 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                                     }}
                                                                     disabled={!onChange}
                                                                 >
-                                                                    <SelectTrigger className="w-full md:w-40 bg-background border-border/50 text-xs text-foreground focus:ring-1 focus:ring-primary/30 h-9">
+                                                                    <SelectTrigger className="w-full md:w-36 bg-background border-border/50 text-xs text-foreground focus:ring-1 focus:ring-primary/30 h-8">
                                                                         <SelectValue />
                                                                     </SelectTrigger>
                                                                     <SelectContent>
@@ -256,7 +256,7 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                                 </Select>
                                                             </div>
                                                         </td>
-                                                        <td className="py-3 px-4 align-top min-w-[250px] whitespace-normal">
+                                                        <td className="py-3 px-4 align-top min-w-[200px] whitespace-normal">
                                                             {(() => {
                                                                 const activeToolId = op.toolId || (op as any).tool_id || (op as any).tool?.id || (op as any).tool?.tool_id;
                                                                 const activeToolObj = tools?.find(t => t.id === activeToolId || t.tool_id === activeToolId || t.dbId === activeToolId) || (op as any).tool;
@@ -277,8 +277,16 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                                                 }}
                                                                                 disabled={!onChange}
                                                                             >
-                                                                                <SelectTrigger className="w-full bg-background border-border/50 text-xs text-foreground focus:ring-1 focus:ring-primary/30 h-9">
-                                                                                    <SelectValue placeholder="Select Tool..." />
+                                                                                <SelectTrigger className="w-full max-w-[180px] bg-background border-border/50 text-[10px] text-foreground focus:ring-1 focus:ring-primary/30 h-7 px-2">
+                                                                                    <SelectValue placeholder="Select Tool...">
+                                                                                        {activeToolObj ? (
+                                                                                            <div className="flex items-center gap-1.5 truncate max-w-[160px]">
+                                                                                                <span className="font-medium truncate">{activeToolObj.name || activeToolObj.number || `T${activeToolId}`}</span>
+                                                                                                {(activeToolObj.diameter || activeToolObj.geometry?.diameter) && <span className="opacity-70">Ø{activeToolObj.diameter || activeToolObj.geometry?.diameter}</span>}
+                                                                                                {activeToolObj.type && <span className="uppercase opacity-50 truncate">{String(activeToolObj.type).replace(/_/g, ' ')}</span>}
+                                                                                            </div>
+                                                                                        ) : "Select Tool..."}
+                                                                                    </SelectValue>
                                                                                 </SelectTrigger>
                                                                                 <SelectContent>
                                                                                     {tools.map(t => {

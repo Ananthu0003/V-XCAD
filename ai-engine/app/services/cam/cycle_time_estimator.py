@@ -109,9 +109,10 @@ class CycleTimeEstimator:
     @classmethod
     def resolve_feeds_and_speeds(cls, params: Dict[str, Any], mat_profile: MaterialMachiningProfile, tool_diameter: float = 10.0, flutes: int = 4) -> Tuple[float, float, float]:
         """Resolves (feed_rate, stepover, stepdown) based on requested values or material profiles."""
-        feed_rate_val = params.get("feedRate")
-        stepover_val = params.get("stepover")
-        stepdown_val = params.get("maxStepdown") or params.get("stepdown")
+        fs = params.get("feeds_and_speeds", {})
+        feed_rate_val = fs.get("feedrate_mm_min") or fs.get("feed_rate") or params.get("feedRate")
+        stepover_val = fs.get("stepover") or params.get("stepover")
+        stepdown_val = fs.get("stepdown") or params.get("maxStepdown") or params.get("stepdown")
         # Load Material Profile
         # Handled externally now, passed as argument
         
@@ -370,8 +371,15 @@ class CycleTimeEstimator:
             
         setup_prep_time = setup_prof.initial_setup_time_seconds if setup_prof.initial_setup_time_seconds is not None else 180.0
         
-        machine_cycle = t_cutting + t_rapid + t_air_cut + t_toolchange + t_spindle + t_dwell + t_machine_actions + t_coolant + t_probe
-        total_cycle = machine_cycle + handling_time
+        t_bar_feed = setup_prof.bar_feed_time_seconds if getattr(setup_prof, "bar_feed_time_seconds", None) else 0.0
+        if machine_profile.machine_type in ["lathe", "turning_center", "mill_turn"]:
+            t_bar_feed = setup_prof.bar_feed_time_seconds if getattr(setup_prof, "bar_feed_time_seconds", None) else 5.0
+            
+        t_chip_evac = setup_prof.chip_evacuation_time_seconds if getattr(setup_prof, "chip_evacuation_time_seconds", None) else (3.0 * len(operations))
+        t_opt_stop = setup_prof.optional_stop_time_seconds if getattr(setup_prof, "optional_stop_time_seconds", None) else (2.0 * len(operations))
+        
+        machine_cycle = t_cutting + t_rapid + t_air_cut + t_toolchange + t_spindle + t_dwell + t_machine_actions + t_coolant + t_probe + t_bar_feed + t_chip_evac + t_opt_stop
+        total_cycle = machine_cycle + handling_time + setup_prep_time
         
         confidence = "medium"
         if all("breakdown" in op for op in operations):
@@ -390,6 +398,9 @@ class CycleTimeEstimator:
             "spindle_time_seconds": t_spindle,
             "handling_time_seconds": handling_time,
             "setup_time_seconds": setup_prep_time,
+            "bar_feed_time_seconds": t_bar_feed,
+            "chip_evacuation_time_seconds": t_chip_evac,
+            "optional_stop_time_seconds": t_opt_stop,
             "machine_cycle_seconds": machine_cycle,
             "total_setup_time_seconds": total_cycle,
             "tool_change_count": tool_changes,

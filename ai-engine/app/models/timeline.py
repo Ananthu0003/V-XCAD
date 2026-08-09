@@ -39,7 +39,8 @@ class TimelineEntry(BaseModel):
     state_after: MachineStateSnapshot
     time_category: Literal[
         "cutting", "rapid", "tool_change", "spindle",
-        "dwell", "machine_action", "handling"
+        "dwell", "machine_action", "handling",
+        "probe", "optional_stop", "air_cutting"
     ]
     overlaps_with: Optional[str] = None
     timing_source: Optional[str] = None

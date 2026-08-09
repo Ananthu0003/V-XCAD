@@ -23,6 +23,17 @@ export const MODEL_REGISTRY: ModelMetadata[] = [
         badge: 'thinking',
     },
     {
+        id: 'gemini-3.6-flash',
+        name: 'Gemini 3.6 Flash',
+        vendor: 'google',
+        tier: 'flash',
+        maxTokens: 1000000,
+        supportsThinking: true,
+        fallbackModelId: 'gemini-3.1-flash-lite',
+        description: 'Google next-gen model from OpenRouter.',
+        badge: 'thinking',
+    },
+    {
         id: 'gemini-3.1-flash-lite',
         name: 'Gemini 3.1 Flash Lite',
         vendor: 'google',
@@ -74,5 +85,5 @@ export function getModelById(id: string): ModelMetadata | undefined {
 
 export function getFallbackModelId(id: string): string {
     const model = getModelById(id);
-    return model?.fallbackModelId || 'gemini-3.1-flash-lite';
+    return model?.fallbackModelId || 'gemini-3.5-flash';
 }

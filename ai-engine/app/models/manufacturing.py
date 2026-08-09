@@ -38,6 +38,9 @@ class MachineProfile(BaseModel):
     # Spindle specs
     spindle_power_kw: float = 15.0
     spindle_torque_nm: float = 100.0
+    hourly_rate: float = 8400.0
+    setup_rate: float = 6720.0
+    currency: str = "INR"
 
 class MaterialProfile(BaseModel):
     material_id: str
@@ -54,6 +57,8 @@ class MaterialProfile(BaseModel):
     density_gcm3: float = 2.70
     hardness: str = "95 HB"
     description: str = ""
+    cost_per_kg: float = 420.0
+    currency: str = "INR"
 
 class ToolProfile(BaseModel):
     tool_id: str

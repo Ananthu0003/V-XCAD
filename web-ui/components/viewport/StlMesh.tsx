@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { useLoader } from '@react-three/fiber';
 import { STLLoader, mergeVertices } from 'three-stdlib';
-import { Box3, BufferGeometry, Color, MeshPhysicalMaterial, Vector3 } from 'three';
+import { Box3, BufferGeometry, Color, DoubleSide, FrontSide, MeshPhysicalMaterial, Vector3 } from 'three';
 
 export type StlGeometryInfo = {
 	scale: number;
@@ -18,6 +18,7 @@ type StlMeshProps = {
 	url: string;
 	expectedSize?: number;
 	workpieceMaterial?: string;
+	xRayMode?: boolean;
 	onGeometryReady?: (info: StlGeometryInfo) => void;
 	onMeshClick?: (point: [number, number, number]) => void;
 	onHover?: (isHovered: boolean) => void;
@@ -36,7 +37,7 @@ const MATERIAL_PRESETS: Record<string, any> = {
 	'acrylic': { color: '#ffffff', metalness: 0.1, roughness: 0.1, clearcoat: 1.0, transmission: 0.9, transparent: true },
 };
 
-export function StlMesh({ url, expectedSize, workpieceMaterial, onGeometryReady, onMeshClick, onHover }: StlMeshProps) {
+export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false, onGeometryReady, onMeshClick, onHover }: StlMeshProps) {
 	const geometry = useLoader(STLLoader, url);
 
 	const { centeredGeometry, scale, center } = useMemo(() => {
@@ -106,19 +107,35 @@ export function StlMesh({ url, expectedSize, workpieceMaterial, onGeometryReady,
 			}
 		}
 
+		if (xRayMode) {
+			return new MeshPhysicalMaterial({
+				color: preset.color || '#a0a5aa',
+				metalness: 0.1,
+				roughness: 0.2,
+				transparent: true,
+				opacity: 0.25,
+				side: DoubleSide,
+				depthWrite: false,
+				flatShading: false,
+				clearcoat: 0.0,
+			});
+		}
+
 		return new MeshPhysicalMaterial({
 			...preset,
 			flatShading: false,
+			side: FrontSide,
 		});
-	}, [workpieceMaterial]);
+	}, [workpieceMaterial, xRayMode]);
 
 	return (
 		<mesh
 			geometry={centeredGeometry}
 			material={material}
 			scale={scale}
-			castShadow
-			receiveShadow
+			castShadow={!xRayMode}
+			receiveShadow={!xRayMode}
+			renderOrder={xRayMode ? 1 : 0}
 			onPointerDown={(e) => {
 				if (!e.shiftKey) return;
 				e.stopPropagation();

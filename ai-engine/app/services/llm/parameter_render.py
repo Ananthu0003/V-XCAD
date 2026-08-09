@@ -517,8 +517,19 @@ def run():
         if hasattr(Builder, "_add_to_context"):
             _orig_add_to_context = Builder._add_to_context
             def safe_add_to_context(self, *objs, **kwargs):
+                mode = kwargs.get("mode")
+                if mode is None and len(objs) > 3:
+                    mode = objs[3]
+                
+                solids_before = 0
+                if getattr(self, "_obj", None) is not None:
+                    try:
+                        solids_before = len(self._obj.solids())
+                    except Exception:
+                        pass
+                        
                 try:
-                    return _orig_add_to_context(self, *objs, **kwargs)
+                    res = _orig_add_to_context(self, *objs, **kwargs)
                 except Exception as exc:
                     msg = str(exc).lower()
                     if "nothing to subtract from" in msg:
@@ -527,6 +538,22 @@ def run():
                         print(f"Ignored topological error in context: {exc}")
                         return None
                     raise
+                    
+                solids_after = 0
+                if getattr(self, "_obj", None) is not None:
+                    try:
+                        solids_after = len(self._obj.solids())
+                    except Exception:
+                        pass
+
+                if _VALIDATION_MODE and mode == build123d.Mode.SUBTRACT and solids_before > 0 and solids_after == 0:
+                    raise RuntimeError(
+                        "VALIDATION_GEOMETRY_ERROR: Boolean SUBTRACT operation resulted in an empty part (0 solids remaining). "
+                        "This usually means the subtracted shape (cutter) completely consumed the part, "
+                        "or an OpenCASCADE boolean error occurred due to coincident faces or zero-thickness walls. "
+                        "Ensure your cutter dimensions are correct (e.g., an internal thread on a shaft must have a shaft diameter larger than the thread major diameter) and use 'eps' for coincident faces."
+                    )
+                return res
             Builder._add_to_context = safe_add_to_context
     except Exception:
         pass
@@ -702,6 +729,8 @@ def run():
         def safe_polarlocations(self, *args, **kwargs):
             if "angular_span" in kwargs:
                 kwargs["angular_range"] = kwargs.pop("angular_span")
+            if "angle_0" in kwargs:
+                kwargs["start_angle"] = kwargs.pop("angle_0")
             plane = kwargs.pop("plane", None)
             _orig_polarlocations(self, *args, **kwargs)
             if plane is not None and hasattr(self, "local_locations"):
@@ -849,6 +878,18 @@ def run():
         shape = shape.sketch
     elif hasattr(shape, "line") and getattr(shape, "line") is not None:
         shape = shape.line
+
+    # Apply manual rotation if requested
+    try:
+        rx = float(params.get("_model_rotation_x", 0))
+        ry = float(params.get("_model_rotation_y", 0))
+        rz = float(params.get("_model_rotation_z", 0))
+        if rx or ry or rz:
+            from build123d import Rotation
+            shape = Rotation(rx, ry, rz) * shape
+    except Exception as e:
+        print(f"Failed to apply model rotation: {e}")
+
 
     # ── VALIDATION MODE: strictly check geometry and exit early (no file export) ──
     if _VALIDATION_MODE:

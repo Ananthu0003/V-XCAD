@@ -105,8 +105,14 @@ class OpenRouterGateway(BaseLLMGateway):
             response.raise_for_status()
             async for line in response.aiter_lines():
                 if line.startswith("data: ") and line != "data: [DONE]":
-                    data = json.loads(line[6:])
-                    if "choices" in data and len(data["choices"]) > 0:
-                        delta = data["choices"][0].get("delta", {})
-                        if "content" in delta and delta["content"]:
-                            yield delta["content"]
+                    raw_json = line[6:].strip()
+                    if not raw_json:
+                        continue
+                    try:
+                        data = json.loads(raw_json)
+                        if "choices" in data and len(data["choices"]) > 0:
+                            delta = data["choices"][0].get("delta", {})
+                            if "content" in delta and delta["content"]:
+                                yield delta["content"]
+                    except json.JSONDecodeError:
+                        print(f"Warning: Failed to parse OpenRouter chunk: {raw_json}")

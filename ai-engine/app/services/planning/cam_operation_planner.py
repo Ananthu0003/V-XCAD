@@ -100,10 +100,14 @@ class CamOperationPlanner:
             
         elif feat_type == 'face':
             op = CamOperation("facing", feat_id)
-            z_level = feature.get('z_level', 0.0)
-            op.safe_heights['top'] = z_level
-            op.safe_heights['bottom'] = z_level # Facing usually cuts exactly at the Z plane
-            op.machining_strategy = 'zigzag'
+            machining_region = feature.get('machiningRegion', {})
+            z_top = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', feature.get('z_level', 0.0)))
+            z_bottom = machining_region.get('bottomZ', z_top)
+            op.safe_heights['top'] = z_top
+            op.safe_heights['bottom'] = z_bottom
+            op.machining_strategy = feature.get('machining_strategy', 'zigzag')
+            if 'traceability' in feature:
+                op.traceability = feature['traceability']
             
         elif feat_type == 'contour':
             op = CamOperation("2d_contour", feat_id)
@@ -115,7 +119,11 @@ class CamOperationPlanner:
             op = CamOperation("boss_clearing", feat_id)
             op.safe_heights['top'] = feature.get('z_top', 0.0)
             op.safe_heights['bottom'] = feature.get('z_bottom', -abs(feature.get('height', 10.0)))
-            op.machining_strategy = 'adaptive_clearing'
+            
+            # Select strategy dynamically:
+            # Complex bosses or default could use 'offset_clearing'.
+            # A future optimization might use 'adaptive_clearing'.
+            op.machining_strategy = feature.get('preferred_strategy', 'offset_clearing')
             
         elif feat_type in ['external_cylinder', 'shaft', 'turned_od', 'od_diameter', 'shoulder', 'turned_profile']:
             # If it got here and is valid, it implies we are in a turning setup (since milling_3axis blocks it)

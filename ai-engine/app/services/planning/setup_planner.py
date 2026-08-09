@@ -204,9 +204,10 @@ class SetupPlanner:
                 info.preferredToolAxis = self._normalize_axis(feat_axis)
             else:
                 info.preferredToolAxis = base_tool_axis
-        elif feat_type in ("side_shaft", "external_cylinder"):
-            info.requiresTurning = True
         else:
+            feat_lower = feat_type.lower() if feat_type else ""
+            if any(kw in feat_lower for kw in ("dia", "od", "shaft", "cylinder", "turn", "bore", "id", "groove")):
+                info.requiresTurning = True
             info.preferredToolAxis = base_tool_axis
 
         # 2. Check capabilities

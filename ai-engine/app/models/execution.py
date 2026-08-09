@@ -70,7 +70,8 @@ class MachineEventBlock(BaseModel):
         "chuck_open",
         "chuck_close",
         "bar_feed",
-        "sync_wait"
+        "sync_wait",
+        "optional_stop"
     ]
     operation_id: Optional[str] = None
     setup_id: Optional[str] = None

@@ -255,6 +255,16 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                                   stepoverPercentage: cd.optimalStepoverPercentage ?? 40,
                                   ...(cd.optimalStepover ? { stepover: cd.optimalStepover } : {})
                               };
+                              
+                              // Clear blocked status if it was blocked due to missing tool
+                              if (newOps[idx].status === 'blocked') {
+                                  opUpdates.status = 'generated';
+                                  opUpdates.errorReason = '';
+                                  if (opUpdates.parameters) {
+                                      opUpdates.parameters.error = '';
+                                      opUpdates.parameters.errorReason = '';
+                                  }
+                              }
                           }
                       }
                       

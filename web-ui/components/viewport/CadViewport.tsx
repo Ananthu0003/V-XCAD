@@ -5,7 +5,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewcube, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { ViewportController } from '@/components/viewport/ViewportController';
-import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home } from 'lucide-react';
+import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye } from 'lucide-react';
 import { DimensionOverlay } from '@/components/viewport/DimensionOverlay';
 import { FeatureHighlight } from '@/components/viewport/FeatureHighlight';
 import { VolumetricStock } from '@/components/cam/VolumetricStock';
@@ -105,6 +105,8 @@ type CadViewportProps = {
 	setupToolAxis?: [number, number, number];
 	onMeshClick?: (point: [number, number, number]) => void;
 	onClearSelection?: () => void;
+	xRayMode?: boolean;
+	onToggleXRay?: () => void;
 };
 
 function AnimatedSetupGroup({ setupToolAxis, children }: { setupToolAxis?: [number, number, number], children: React.ReactNode }) {
@@ -172,6 +174,8 @@ export function CadViewport({
 	headerActions,
 	onMeshClick,
 	onClearSelection,
+	xRayMode = false,
+	onToggleXRay,
 }: CadViewportProps) {
 	const groupRef = useRef<THREE.Group>(null);
 	const exportRef = useRef<HTMLDivElement>(null);
@@ -183,6 +187,35 @@ export function CadViewport({
 	};
 
 	useEffect(() => {
+		const handleKeyUp = (e: KeyboardEvent) => {
+			// Don't trigger shortcuts when typing in inputs
+			if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target as HTMLElement).isContentEditable) return;
+			
+			const key = e.key.toLowerCase();
+			switch (key) {
+				case 't': dispatchViewportAction('top'); break;
+				case 'f': dispatchViewportAction('front'); break;
+				case 'r': dispatchViewportAction('right'); break;
+				case 'l': dispatchViewportAction('left'); break;
+				case 'b': dispatchViewportAction('bottom'); break;
+				case 'i': dispatchViewportAction('iso'); break;
+				case 'h': dispatchViewportAction('home'); break;
+				case 'a': 
+					e.preventDefault();
+					e.stopPropagation();
+					dispatchViewportAction('auto-rotate'); 
+					break;
+				case 'x':
+					e.preventDefault();
+					onToggleXRay?.();
+					break;
+			}
+		};
+		window.addEventListener('keyup', handleKeyUp, { capture: true });
+		return () => window.removeEventListener('keyup', handleKeyUp, { capture: true });
+	}, []);
+
+	useEffect(() => {
 		const handleClickOutside = (e: MouseEvent) => {
 			if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
 				setExportOpen(false);
@@ -192,12 +225,14 @@ export function CadViewport({
 		return () => document.removeEventListener('mousedown', handleClickOutside);
 	}, []);
 
-	const { actualStock } = useMemo(() => {
+	const { actualStock, isStockCenterInSetupSpace } = useMemo(() => {
 		let center: [number, number, number] = [0, 0, 0];
 		let defaultBoxSize: [number, number, number] = [10, 10, 10];
+		let inSetupSpace = false;
 
 		if (setupMetadata?.resolvedStock?.center) {
 			center = setupMetadata.resolvedStock.center as [number, number, number];
+			inSetupSpace = true;
 		} else if (geometryInfo?.bounding_box) {
 			const min = geometryInfo.bounding_box.min;
 			const max = geometryInfo.bounding_box.max;
@@ -208,7 +243,7 @@ export function CadViewport({
 			defaultBoxSize = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
 		}
 
-		const currentStockType = String(camSetup?.stockType || setupMetadata?.stockType || 'box').toLowerCase();
+		const currentStockType = String(camSetup?.stockType || setupMetadata?.stockType || setupMetadata?.resolvedStock?.type || 'box').toLowerCase();
 		const isCyl = currentStockType.includes('cylin') || currentStockType.includes('bar');
 
 		if (isCyl) {
@@ -230,7 +265,8 @@ export function CadViewport({
 					center,
 					dimensions: [dia, dia, len],
 					stockType: currentStockType
-				}
+				},
+				isStockCenterInSetupSpace: inSetupSpace
 			};
 		} else {
 			let dims: [number, number, number] = [10, 10, 10];
@@ -252,7 +288,8 @@ export function CadViewport({
 					center,
 					dimensions: dims,
 					stockType: currentStockType
-				}
+				},
+				isStockCenterInSetupSpace: inSetupSpace
 			};
 		}
 	}, [geometryInfo, setupMetadata, camSetup]);
@@ -564,7 +601,7 @@ export function CadViewport({
 			>
 				{/* View Mode Controls - Floating Toolbar */}
 				{(hasStl || (toolpaths && toolpaths.length > 0)) && (
-					<div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-background/90 backdrop-blur-xl border border-border/60 rounded-full px-4 py-2 shadow-2xl ring-1 ring-white/5">
+					<div className={`absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-background/90 backdrop-blur-xl border border-border/60 rounded-full px-4 py-2 shadow-2xl ring-1 ring-white/5 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-32' : 'bottom-24'}`}>
 						<button
 							onClick={() => setViewMode('both')}
 							className={`p-2.5 rounded-full transition-all ${viewMode === 'both' ? 'bg-blue-500/20 text-blue-400 shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
@@ -593,6 +630,14 @@ export function CadViewport({
 							</>
 						)}
 						<div className="w-px h-5 bg-border/60 mx-1" />
+						<button
+							onClick={onToggleXRay}
+							className={`p-2.5 rounded-full transition-all ${xRayMode ? 'bg-cyan-500/20 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.3)]' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+							title="X-Ray / Transparency Mode (X)"
+						>
+							<Eye className="size-4" />
+						</button>
+						<div className="w-px h-5 bg-border/60 mx-1" />
 						<button onClick={() => dispatchViewportAction('fit')} className="p-2.5 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground transition-all" title="Fit to Screen"><Maximize className="size-4" /></button>
 						<button onClick={() => dispatchViewportAction('reset')} className="p-2.5 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground transition-all" title="Reset Camera"><RotateCcw className="size-4" /></button>
 					</div>
@@ -610,8 +655,13 @@ export function CadViewport({
 						<button onClick={() => { dispatchViewportAction('left'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Left View <span className="text-[10px] text-muted-foreground font-mono">L</span></button>
 						<button onClick={() => { dispatchViewportAction('bottom'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Bottom View <span className="text-[10px] text-muted-foreground font-mono">B</span></button>
 						<div className="h-px bg-border/60 my-1.5 mx-3" />
+						<button onClick={() => { window.dispatchEvent(new CustomEvent('model-rotate', { detail: { axis: 'x', degrees: 90 } })); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Rotate X +90° <RotateCcw className="size-3 text-muted-foreground" /></button>
+						<button onClick={() => { window.dispatchEvent(new CustomEvent('model-rotate', { detail: { axis: 'y', degrees: 90 } })); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Rotate Y +90° <RotateCcw className="size-3 text-muted-foreground" /></button>
+						<button onClick={() => { window.dispatchEvent(new CustomEvent('model-rotate', { detail: { axis: 'z', degrees: 90 } })); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Rotate Z +90° <RotateCcw className="size-3 text-muted-foreground" /></button>
+						<div className="h-px bg-border/60 my-1.5 mx-3" />
 						<button onClick={() => { dispatchViewportAction('iso'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm font-bold text-blue-400 hover:bg-accent hover:text-blue-300 transition-colors flex items-center justify-between">Isometric <span className="text-[10px] opacity-70 font-mono font-normal">I</span></button>
 						<button onClick={() => { dispatchViewportAction('home'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Home View <span className="text-[10px] text-muted-foreground font-mono">H</span></button>
+						<button onClick={() => { dispatchViewportAction('auto-rotate'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Auto Rotate <span className="text-[10px] text-muted-foreground font-mono">A</span></button>
 						<button onClick={() => { dispatchViewportAction('fit'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors">Fit to Screen</button>
 					</div>
 				)}
@@ -678,9 +728,19 @@ export function CadViewport({
 										m.decompose(pos, quat, scale);
 
 										const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
-										const offsetAmount = 0;
-										const cadOffset = new THREE.Vector3(-offsetAmount, 0, 0);
-										const simOffset = new THREE.Vector3(offsetAmount, 0, 0);
+										
+										// Toolpaths for parametric features are generated at [0,0] in X/Y in NATIVE space.
+										// Z is generated at stock_top_z in NATIVE space.
+										// By placing them inside the setup transform group, Z is automatically aligned.
+										// We just need to shift them by the native CAD center in X/Y.
+										let simOffsetX = 0;
+										let simOffsetY = 0;
+										
+										// The backend now generates toolpaths in true CAD coordinates (thanks to the B-Rep feature extractor).
+										// We no longer need to shift them by the part center.
+										
+										const simOffset = new THREE.Vector3(simOffsetX, simOffsetY, 0);
+										const cadOffset = new THREE.Vector3(0, 0, 0);
 										const combinedPos = new THREE.Vector3().copy(pos).add(cadOffset);
 										
 										return (
@@ -701,7 +761,6 @@ export function CadViewport({
 															)}
 														</>
 													)}
-												</group>
 
 												{isWireframeVisible && (
 													<group
@@ -788,7 +847,7 @@ export function CadViewport({
 																		{/* CNC Spindle / Tool Holder (scaled dynamically) */}
 																		<mesh position={[0, stickout + holderHeight / 2, 0]}>
 																			<cylinderGeometry
-																				args={[holderTopRad, holderBotRad, holderHeight, 32]}
+																				args={[holderBotRad, holderTopRad, holderHeight, 32]}
 																				ref={(geom) => {
 																					if (geom) {
 																						geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
@@ -796,16 +855,15 @@ export function CadViewport({
 																					}
 																				}}
 																			/>
-																			<meshStandardMaterial color="#334155" metalness={0.5} roughness={0.6} />
+																			<meshStandardMaterial color="#334155" metalness={0.9} roughness={0.3} />
 																		</mesh>
-
-
 																	</group>
 																);
 															})()
 														)}
 													</group>
 												)}
+												</group>
 											</>
 										);
 									})()
@@ -824,7 +882,9 @@ export function CadViewport({
 										).transpose() 
 										: new THREE.Matrix4();
 									
-									const transformedCenter = new THREE.Vector3(...(actualStock.center as [number, number, number])).applyMatrix4(m);
+									const transformedCenter = isStockCenterInSetupSpace 
+										? new THREE.Vector3(...(actualStock.center as [number, number, number]))
+										: new THREE.Vector3(...(actualStock.center as [number, number, number])).applyMatrix4(m);
 									const transformedCenterArr: [number, number, number] = [transformedCenter.x, transformedCenter.y, transformedCenter.z];
 
 									const offsetAmount = 0;
@@ -836,7 +896,7 @@ export function CadViewport({
 
 											{isCamStage && simulationState?.showStock !== false && simulationState && camTools && (
 												<VolumetricStock 
-													stockType={(camSetup?.stockType as any) || setupMetadata?.stockType || 'box'}
+													stockType={(camSetup?.stockType as any) || setupMetadata?.stockType || setupMetadata?.resolvedStock?.type || 'box'}
 													stockCenter={transformedCenterArr}
 													stockDimensions={actualStock.dimensions as [number, number, number]}
 													simulationState={simulationState}
@@ -1005,7 +1065,7 @@ export function CadViewport({
 
 
 				{/* Global Safety Note */}
-				<div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2">
+				<div className={`absolute left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-24' : 'bottom-6'}`}>
 					{toolpaths && toolpaths.length > 0 && !hasValidToolpaths && (
 						<div className="flex items-center gap-2 rounded-full border border-orange-500/30 bg-background/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
 							<svg className="size-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">

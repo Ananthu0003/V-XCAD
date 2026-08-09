@@ -67,7 +67,9 @@ def get_material_profile(material_id: Optional[str]) -> MaterialProfile:
         coolant_requirement=mat_data.get("coolantRequirement", "flood"),
         density_gcm3=float(mat_data.get("densityGcm3", 2.70)),
         hardness=f"{mat_data.get('hardnessHb', 95)} HB",
-        description=mat_data.get("description", "")
+        description=mat_data.get("description", ""),
+        cost_per_kg=float(mat_data.get("costPerKg", 420.0)),
+        currency=mat_data.get("currency", "INR")
     )
 
 def list_all_materials() -> List[Dict[str, Any]]:

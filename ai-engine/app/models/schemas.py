@@ -356,6 +356,7 @@ class RenderArtifacts(BaseModel):
     feature_validation_status: Optional[str] = None
     geometry_mapping_summary: Optional[dict[str, Any]] = None
     operations: Optional[list[CamOperationSchema]] = None
+    stats: Optional[dict[str, Any]] = None
 
 
 class RenderResponse(BaseModel):

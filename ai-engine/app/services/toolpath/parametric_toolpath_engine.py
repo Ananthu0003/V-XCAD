@@ -9,8 +9,9 @@ class ParametricToolpathEngine:
     - 2D contour & boss clearing with cutter radius compensation, standoff lead-in/lead-out, and multi-depth stepdown passes.
     - Drilling cycles with peck-drilling (G83) for deep holes and helical interpolation for larger bores.
     """
-    def generate_toolpath(self, operation: Dict[str, Any], feature: Dict[str, Any], machine_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def generate_toolpath(self, operation: Dict[str, Any], feature: Dict[str, Any], machine_config: Dict[str, Any], planning_context: Any = None) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
         toolpaths = []
+        validation_result = {"valid": True, "errors": [], "warnings": []}
         op_type = str(operation.get("type") or operation.get("operation_type") or "").lower()
         op_id = operation.get("id", "")
         feat_type = str(feature.get("type", "")).lower()
@@ -23,7 +24,7 @@ class ParametricToolpathEngine:
         
         # Tool parameters
         tool = operation.get("tool", {})
-        tool_dia = float(tool.get("diameter") or tool.get("diameter_mm") or 6.35)
+        tool_dia = float(tool.get("diameter") or tool.get("geometry", {}).get("diameter") or tool.get("diameter_mm") or 6.35)
         if tool_dia <= 0: tool_dia = 6.35
         tool_radius = tool_dia / 2.0
         
@@ -70,7 +71,7 @@ class ParametricToolpathEngine:
 
         cursor = {"x": cx, "y": cy, "z": clearance}
         
-        def add_move(move_type, x=None, y=None, z=None, source="contour"):
+        def add_move(move_type, x=None, y=None, z=None, source="contour", segmentRole=None):
             nonlocal cursor
             new_pos = {
                 "x": round(x if x is not None else cursor["x"], 4),
@@ -80,14 +81,24 @@ class ParametricToolpathEngine:
             if len(toolpaths) == 0 or (new_pos["x"] != cursor["x"] or new_pos["y"] != cursor["y"] or new_pos["z"] != cursor["z"]):
                 # Determine feedrate based on move type
                 feedrate = 0.0
+                fs = operation.get("parameters", {}).get("feeds_and_speeds") or operation.get("feeds_and_speeds") or {}
+                
                 if move_type in ("cut", "drill_cycle"):
-                    feedrate = float(operation.get("parameters", {}).get("feedRate", 1000))
+                    if segmentRole == "lead_in":
+                        feedrate = float(fs.get("lead_in_feedrate") or fs.get("feedrate_mm_min") or 1000)
+                    elif segmentRole == "lead_out":
+                        feedrate = float(fs.get("lead_out_feedrate") or fs.get("feedrate_mm_min") or 1000)
+                    elif segmentRole == "approach":
+                        feedrate = float(fs.get("approach_feedrate") or fs.get("feedrate_mm_min") or 1000)
+                    else:
+                        feedrate = float(fs.get("feedrate_mm_min") or fs.get("feed_rate") or operation.get("parameters", {}).get("feedRate", 1000))
                 elif move_type == "plunge":
-                    feedrate = float(operation.get("parameters", {}).get("plungeRate", 300))
+                    feedrate = float(fs.get("plunge_feedrate") or operation.get("parameters", {}).get("plungeRate", 300))
                     
                 toolpaths.append({
                     "type": move_type,
                     "moveType": move_type,
+                    "segmentRole": segmentRole,
                     "operationId": op_id,
                     "featureId": feature.get("id", ""),
                     "toolId": operation.get("tool_id") or operation.get("toolId") or "t1",
@@ -170,7 +181,9 @@ class ParametricToolpathEngine:
             src = "pocket"
         elif feat_type in ("face", "facing") or op_type in ("facing", "face_milling"):
             src = "face"
-        elif feat_type in ("boss", "cylinder", "contour", "external_cylinder") or op_type in ("2d_contour", "contour", "boss_clearing"):
+        elif feat_type in ("boss", "cylinder", "external_cylinder") or op_type == "boss_clearing":
+            src = "boss"
+        elif feat_type == "contour" or op_type in ("2d_contour", "contour", "step"):
             src = "contour"
 
         # ----------------------------------------------------
@@ -227,38 +240,43 @@ class ParametricToolpathEngine:
         # 2. FACING STRATEGY (Multi-Pass Raster or Circular)
         # ----------------------------------------------------
         elif src == "face":
-            # Resolve stock dimensions dynamically from multiple sources
-            stock = machine_config.get("setup", {}).get("resolvedStock", {}) if isinstance(machine_config, dict) else {}
-            stock_dims = machine_config.get("stockDimensions") or machine_config.get("setup", {}).get("stockDimensions") if isinstance(machine_config, dict) else None
-            stock_def = machine_config.get("stockDefinition", {}) if isinstance(machine_config, dict) else {}
-            stock_type = str(machine_config.get("setup", {}).get("stockType", "") if isinstance(machine_config, dict) else "").lower()
+            if not planning_context:
+                validation_result["valid"] = False
+                validation_result["errors"].append("Facing Planning Error: PlanningContext is required.")
+                return [], validation_result
+
+            stock_geom = planning_context.get_stock_geometry()
+            bounds = stock_geom["bounds"]
+            if not bounds or len(bounds) < 4:
+                validation_result["valid"] = False
+                validation_result["errors"].append("Facing Planning Error: Stock bounds are empty.")
+                return [], validation_result
+
+            min_x, min_y, max_x, max_y = bounds[0], bounds[1], bounds[2], bounds[3]
+            stock_w = max_x - min_x
+            stock_l = max_y - min_y
+            cx = min_x + (stock_w / 2.0)
+            cy = min_y + (stock_l / 2.0)
             
-            # Determine if the stock is cylindrical from stock type or feature
-            stock_is_cylindrical = any(kw in stock_type for kw in ("cylinder", "round", "bar", "rod"))
-            feat_has_diameter = bool(feat_dims.get("diameter") or feature.get("diameter"))
-            is_cylindrical_face = stock_is_cylindrical or feat_has_diameter
-            
-            # Read stock width/length from feature dimensions (set by Fix 9), then stock, then fallback
-            stock_dia = float(
-                feat_dims.get("diameter") or feature.get("diameter") or
-                stock.get("diameter") or stock_def.get("diameter") or
-                stock_def.get("cylinderDiameter") or 0.0
-            )
-            stock_w = float(
-                feat_dims.get("width") or feature.get("width") or
-                stock.get("width") or
-                (stock_dims[1] if stock_dims and len(stock_dims) > 1 else 0.0) or
-                stock_dia or tool_dia * 5.0
-            )
-            stock_l = float(
-                feat_dims.get("length") or feature.get("length") or
-                stock.get("length") or
-                (stock_dims[0] if stock_dims and len(stock_dims) > 0 else 0.0) or
-                stock_dia or tool_dia * 5.0
-            )
+            # Identify if we need circular facing
+            is_cylindrical_face = stock_geom.get("provenance", {}).get("derived_from", "") in ("cylinder", "relative_cylinder", "fixed_cylinder")
+            stock_dia = max(stock_w, stock_l) if is_cylindrical_face else 0.0
             
             overhang = tool_dia * 0.6  # Extend tool outside stock by 60% tool dia
             stepover = stepover_val
+
+            # Inject traceability for facing
+            operation["traceability"] = feature.get("traceability", {}).copy()
+            tool_info = operation.get("tool", {})
+            operation["traceability"].update({
+                "selected_tool_id": tool_info.get("tool_id") or operation.get("tool_id") or operation.get("toolId", ""),
+                "tool_selection_reason": operation.get("parameters", {}).get("errorReason", "Automatic selection"),
+                "facing_strategy": operation.get("machining_strategy", "zigzag"),
+                "feeds_and_speeds": operation.get("parameters", {}).get("feeds_and_speeds") or operation.get("feeds_and_speeds", {}),
+                "stepover": round(stepover_val, 3),
+                "stepdown": round(rough_stepdown, 3), # Facing typically does it in one pass for now or uses max_stepdown
+                "validation_result": "pending"
+            })
 
             add_move("rapid_clearance", z=clearance, source=src)
             
@@ -272,8 +290,9 @@ class ParametricToolpathEngine:
                 
                 # Start at first Y position
                 curr_y = min_y + (stepover / 2.0)
-                add_move("rapid_xy", x=cx - face_radius, y=curr_y, z=clearance, source=src)
+                add_move("approach_retract", x=cx - face_radius - overhang, y=curr_y, z=clearance, source=src)
                 add_move("plunge", z=top_z, source=src)
+                add_move("cut", x=cx - face_radius, y=curr_y, z=top_z, source=src, segmentRole="lead_in")
                 
                 direction = 1
                 for i in range(num_passes):
@@ -306,6 +325,14 @@ class ParametricToolpathEngine:
                                 add_move("cut", x=cx - x_extent, y=curr_y, z=top_z, source=src)
                             else:
                                 add_move("cut", x=cx + x_extent, y=curr_y, z=top_z, source=src)
+                    
+                    if i == num_passes - 1:
+                        last_x_extent = x_extent if x_extent > 0 else face_radius
+                        if direction == 1:
+                            add_move("cut", x=cx + last_x_extent + overhang, y=curr_y, z=top_z, source=src, segmentRole="lead_out")
+                        else:
+                            add_move("cut", x=cx - last_x_extent - overhang, y=curr_y, z=top_z, source=src, segmentRole="lead_out")
+                            
             else:
                 # Rectangular facing: standard zigzag raster
                 half_w = (stock_w / 2.0) + overhang
@@ -319,8 +346,9 @@ class ParametricToolpathEngine:
                 num_passes = max(1, math.ceil((max_y - min_y) / stepover))
 
                 curr_y = min_y + (stepover / 2.0)
-                add_move("rapid_xy", x=min_x, y=curr_y, z=clearance, source=src)
+                add_move("approach_retract", x=min_x - overhang, y=curr_y, z=clearance, source=src)
                 add_move("plunge", z=top_z, source=src)
+                add_move("cut", x=min_x, y=curr_y, z=top_z, source=src, segmentRole="lead_in")
 
                 direction = 1
                 for i in range(num_passes):
@@ -336,6 +364,9 @@ class ParametricToolpathEngine:
                             add_move("cut", x=min_x, y=curr_y, z=top_z, source=src)
                         else:
                             add_move("cut", x=max_x, y=curr_y, z=top_z, source=src)
+                            
+                last_x = max_x if direction == 1 else min_x
+                add_move("cut", x=last_x + (overhang * direction), y=curr_y, z=top_z, source=src, segmentRole="lead_out")
 
             add_move("retract_clearance", z=clearance, source=src)
 
@@ -401,7 +432,141 @@ class ParametricToolpathEngine:
             add_move("retract_clearance", z=clearance, source=src)
 
         # ----------------------------------------------------
-        # 4. 2D CONTOUR & BOSS CLEARING STRATEGY (Cutter Radius Compensated + Standoff)
+        # 4. BOSS CLEARING STRATEGY (Offset Area Clearance)
+        # ----------------------------------------------------
+        elif src == "boss":
+            stock = machine_config.get("setup", {}).get("resolvedStock", {}) if isinstance(machine_config, dict) else {}
+            stock_dims = machine_config.get("stockDimensions") or machine_config.get("setup", {}).get("stockDimensions") if isinstance(machine_config, dict) else None
+            
+            machining_region = feature.get("machiningRegion", {})
+            if not planning_context:
+                validation_result["valid"] = False
+                validation_result["errors"].append("Boss Clearing Planning Error: PlanningContext is required for Boss Clearing.")
+                return [], validation_result
+
+            region = planning_context.get_machining_region(feature.get("id", ""), tool_radius, "boss_clearing")
+            if not region.get("is_valid", False):
+                if "warnings" not in validation_result:
+                    validation_result["warnings"] = []
+                validation_result["warnings"].append("Boss Clearing Planning Warning: Generated keepout geometry or machining region is invalid or empty. Skipping operation.")
+                return [], validation_result
+
+            safe_area = region["polygon"]
+            keepout_poly = region.get("keepout_polygon")
+            machining_area = region.get("extended_machining_area")
+            stock_poly = planning_context.get_stock_geometry()["polygon"]
+            finish_allowance = operation.get("parameters", {}).get("finishAllowance", 0.5)
+
+            # Stage Validation 2: Manufacturing Strategy
+            strategy = operation.get("machining_strategy", "offset_clearing")
+            if strategy == "boss_clearing":
+                strategy = "offset_clearing"
+            
+            if strategy not in ("offset_clearing", "adaptive_clearing", "indexed_4axis_milling"):
+                validation_result["valid"] = False
+                validation_result["errors"].append(f"Boss Clearing Planning Error: Unsupported machining strategy '{strategy}'.")
+                return [], validation_result
+
+            if not safe_area.is_empty:
+                strategy = operation.get("machining_strategy", "offset_clearing")
+                
+                # Traceability injection
+                operation["traceability"] = feature.get("traceability", {}).copy()
+                tool_info = operation.get("tool", {})
+                operation["traceability"].update({
+                    "selected_tool_id": tool_info.get("tool_id") or operation.get("tool_id") or operation.get("toolId", ""),
+                    "tool_selection_reason": operation.get("parameters", {}).get("errorReason", "Automatic selection"),
+                    "machining_strategy": strategy,
+                    "feeds_and_speeds": operation.get("parameters", {}).get("feeds_and_speeds") or operation.get("feeds_and_speeds", {}),
+                    "stepover": round(stepover_val, 3),
+                    "stepdown": round(rough_stepdown, 3),
+                    "finish_allowance": finish_allowance,
+                    "machining_region_area": round(safe_area.area, 3),
+                    "keepout_area": round(keepout_poly.area, 3),
+                    "validation_result": "pending"
+                })
+
+                add_move("rapid_clearance", z=clearance, source=src)
+
+                # Generate outward offsets from keepout
+                rings = []
+                current_offset = stepover_val
+                max_iterations = 200
+                while max_iterations > 0:
+                    max_iterations -= 1
+                    poly = keepout_poly.buffer(current_offset, join_style=2)
+                    if poly.contains(stock_poly):
+                        break
+                    
+                    # Robust Intersection: Use machining_area instead of safe_area to avoid precision dropping at boundary
+                    boundary = poly.exterior.intersection(machining_area)
+                    if boundary.is_empty:
+                        pass
+                    elif boundary.geom_type == "LineString":
+                        rings.append([list(boundary.coords)])
+                    elif boundary.geom_type == "MultiLineString":
+                        rings.append([list(ls.coords) for ls in boundary.geoms])
+                    else:
+                        if hasattr(boundary, "coords"):
+                            rings.append([list(boundary.coords)])
+                            
+                    current_offset += stepover_val
+
+                # Reverse so we cut outside-in (from open air toward boss)
+                rings.reverse()
+                
+                # Add the final profile pass along the keepout zone
+                final_boundary = keepout_poly.exterior.intersection(machining_area)
+                if final_boundary.geom_type == "LineString":
+                    rings.append([list(final_boundary.coords)])
+                elif final_boundary.geom_type == "MultiLineString":
+                    rings.append([list(ls.coords) for ls in final_boundary.geoms])
+                elif hasattr(final_boundary, "coords"):
+                    rings.append([list(final_boundary.coords)])
+
+                for curr_z in z_passes:
+                    for ring_group in rings:
+                        for seg in ring_group:
+                            if len(seg) < 2: continue
+                            
+                            start_x, start_y = seg[0]
+                            # Entry Strategy: Plunge outside stock safely (approach)
+                            add_move("retract_clearance", z=clearance, source=src)
+                            add_move("approach_retract", x=start_x, y=start_y, z=clearance, source=src, segmentRole="approach")
+                            add_move("plunge", z=curr_z, source=src, segmentRole="plunge")
+                            
+                            for i, (px, py) in enumerate(seg[1:]):
+                                role = "lead_in" if i == 0 else "cut"
+                                if i == len(seg) - 2: role = "lead_out"
+                                add_move("cut", x=px, y=py, z=curr_z, source=src, segmentRole=role)
+
+                    add_move("retract_clearance", z=clearance, source=src)
+
+                # Stage Validation 4: Toolpath Integrity
+                cutting_segments = [seg for seg in toolpaths if seg.get("source") == "boss" and seg.get("segmentRole") in ("cut", "lead_in", "lead_out")]
+                cut_dist = 0.0
+                for seg in cutting_segments:
+                    s = seg.get("start", {})
+                    e = seg.get("end", {})
+                    dx = e.get("x", 0) - s.get("x", 0)
+                    dy = e.get("y", 0) - s.get("y", 0)
+                    cut_dist += math.sqrt(dx*dx + dy*dy)
+                        
+                if not cutting_segments:
+                    if "warnings" not in validation_result:
+                        validation_result["warnings"] = []
+                    validation_result["warnings"].append(f"Boss Clearing Planning Warning: Generated toolpath contains no cutting segments. Removed volume is 0.")
+                    return [], validation_result
+                
+                # Update traceability with final stats
+                operation["traceability"].update({
+                    "num_offset_regions": len(rings),
+                    "num_cutting_segments": len(cutting_segments),
+                    "total_cutting_length": round(cut_dist, 3)
+                })
+
+        # ----------------------------------------------------
+        # 5. 2D CONTOUR STRATEGY (Cutter Radius Compensated + Standoff)
         # ----------------------------------------------------
         elif src == "contour":
             stock = machine_config.get("setup", {}).get("resolvedStock", {}) if isinstance(machine_config, dict) else {}
@@ -514,4 +679,4 @@ class ParametricToolpathEngine:
             add_move("plunge", z=bottom_z, source="contour")
             add_move("retract_clearance", z=clearance, source="contour")
 
-        return toolpaths
+        return toolpaths, validation_result

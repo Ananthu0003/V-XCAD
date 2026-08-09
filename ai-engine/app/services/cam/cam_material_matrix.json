@@ -51,10 +51,16 @@
       "cuttingSpeedMMin": 300,
       "feedPerToothMm": 0.08,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss", "hss_co", "pcd"],
-      "densityGcm3": 2.70,
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss",
+        "hss_co",
+        "pcd"
+      ],
+      "densityGcm3": 2.7,
       "hardnessHb": 95,
-      "description": "Standard aerospace & structural aluminum, excellent machinability."
+      "description": "Standard aerospace & structural aluminum, excellent machinability.",
+      "costPerKg": 420.0
     },
     {
       "id": "aluminum_7075",
@@ -65,10 +71,15 @@
       "cuttingSpeedMMin": 250,
       "feedPerToothMm": 0.07,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss_co", "pcd"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss_co",
+        "pcd"
+      ],
       "densityGcm3": 2.81,
       "hardnessHb": 150,
-      "description": "High strength aircraft aluminum alloy with zinc."
+      "description": "High strength aircraft aluminum alloy with zinc.",
+      "costPerKg": 420.0
     },
     {
       "id": "aluminum_2024",
@@ -79,10 +90,15 @@
       "cuttingSpeedMMin": 240,
       "feedPerToothMm": 0.07,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss_co", "pcd"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss_co",
+        "pcd"
+      ],
       "densityGcm3": 2.78,
       "hardnessHb": 120,
-      "description": "High fatigue resistance copper-aluminum aircraft alloy."
+      "description": "High fatigue resistance copper-aluminum aircraft alloy.",
+      "costPerKg": 420.0
     },
     {
       "id": "aluminum_5052",
@@ -93,10 +109,15 @@
       "cuttingSpeedMMin": 280,
       "feedPerToothMm": 0.08,
       "coolantRequirement": "mist",
-      "compatibleToolMaterials": ["carbide", "hss", "pcd"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss",
+        "pcd"
+      ],
       "densityGcm3": 2.68,
       "hardnessHb": 60,
-      "description": "Corrosion resistant marine & sheet metal aluminum."
+      "description": "Corrosion resistant marine & sheet metal aluminum.",
+      "costPerKg": 420.0
     },
     {
       "id": "aluminum_7050",
@@ -107,10 +128,14 @@
       "cuttingSpeedMMin": 230,
       "feedPerToothMm": 0.07,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "pcd"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "pcd"
+      ],
       "densityGcm3": 2.83,
       "hardnessHb": 140,
-      "description": "Aerospace thick plate aluminum with high stress corrosion resistance."
+      "description": "Aerospace thick plate aluminum with high stress corrosion resistance.",
+      "costPerKg": 420.0
     },
     {
       "id": "aluminum_cast",
@@ -121,10 +146,14 @@
       "cuttingSpeedMMin": 200,
       "feedPerToothMm": 0.06,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "pcd"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "pcd"
+      ],
       "densityGcm3": 2.68,
       "hardnessHb": 80,
-      "description": "High silicon foundry casting aluminum, abrasive to cutting tools."
+      "description": "High silicon foundry casting aluminum, abrasive to cutting tools.",
+      "costPerKg": 420.0
     },
     {
       "id": "mild_steel",
@@ -135,10 +164,16 @@
       "cuttingSpeedMMin": 120,
       "feedPerToothMm": 0.05,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss", "hss_co", "carbide_insert"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss",
+        "hss_co",
+        "carbide_insert"
+      ],
       "densityGcm3": 7.87,
       "hardnessHb": 126,
-      "description": "Low carbon general machinery and structural steel."
+      "description": "Low carbon general machinery and structural steel.",
+      "costPerKg": 250.0
     },
     {
       "id": "steel_1045",
@@ -149,10 +184,15 @@
       "cuttingSpeedMMin": 100,
       "feedPerToothMm": 0.05,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss_co", "carbide_insert"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss_co",
+        "carbide_insert"
+      ],
       "densityGcm3": 7.85,
       "hardnessHb": 163,
-      "description": "Medium carbon steel for shafts, gears, and high strength pins."
+      "description": "Medium carbon steel for shafts, gears, and high strength pins.",
+      "costPerKg": 250.0
     },
     {
       "id": "alloy_steel_4140",
@@ -163,10 +203,14 @@
       "cuttingSpeedMMin": 90,
       "feedPerToothMm": 0.045,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "carbide_insert"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "carbide_insert"
+      ],
       "densityGcm3": 7.85,
       "hardnessHb": 220,
-      "description": "Chromium-molybdenum alloy steel with high toughness."
+      "description": "Chromium-molybdenum alloy steel with high toughness.",
+      "costPerKg": 250.0
     },
     {
       "id": "alloy_steel_4340",
@@ -177,10 +221,14 @@
       "cuttingSpeedMMin": 80,
       "feedPerToothMm": 0.04,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "carbide_insert"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "carbide_insert"
+      ],
       "densityGcm3": 7.85,
       "hardnessHb": 250,
-      "description": "Ultra-high strength nickel-chromium-moly heavy duty alloy steel."
+      "description": "Ultra-high strength nickel-chromium-moly heavy duty alloy steel.",
+      "costPerKg": 250.0
     },
     {
       "id": "steel_8620",
@@ -191,10 +239,14 @@
       "cuttingSpeedMMin": 110,
       "feedPerToothMm": 0.05,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "carbide_insert"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "carbide_insert"
+      ],
       "densityGcm3": 7.85,
       "hardnessHb": 150,
-      "description": "Case-hardening alloy steel common in automotive gears and cams."
+      "description": "Case-hardening alloy steel common in automotive gears and cams.",
+      "costPerKg": 250.0
     },
     {
       "id": "tool_steel_d2",
@@ -205,10 +257,14 @@
       "cuttingSpeedMMin": 45,
       "feedPerToothMm": 0.03,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "cbn"],
-      "densityGcm3": 7.70,
+      "compatibleToolMaterials": [
+        "carbide",
+        "cbn"
+      ],
+      "densityGcm3": 7.7,
       "hardnessHb": 255,
-      "description": "High-carbon high-chromium cold work steel for cutting dies."
+      "description": "High-carbon high-chromium cold work steel for cutting dies.",
+      "costPerKg": 250.0
     },
     {
       "id": "tool_steel_a2",
@@ -219,10 +275,14 @@
       "cuttingSpeedMMin": 55,
       "feedPerToothMm": 0.035,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "cbn"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "cbn"
+      ],
       "densityGcm3": 7.86,
       "hardnessHb": 225,
-      "description": "Versatile air-hardening cold work tool steel with minimal distortion."
+      "description": "Versatile air-hardening cold work tool steel with minimal distortion.",
+      "costPerKg": 250.0
     },
     {
       "id": "tool_steel_o1",
@@ -233,10 +293,14 @@
       "cuttingSpeedMMin": 65,
       "feedPerToothMm": 0.04,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss_co"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss_co"
+      ],
       "densityGcm3": 7.83,
       "hardnessHb": 210,
-      "description": "General purpose non-deforming oil-hardening tool steel."
+      "description": "General purpose non-deforming oil-hardening tool steel.",
+      "costPerKg": 250.0
     },
     {
       "id": "tool_steel_h13",
@@ -247,10 +311,14 @@
       "cuttingSpeedMMin": 60,
       "feedPerToothMm": 0.035,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "cbn"],
-      "densityGcm3": 7.80,
+      "compatibleToolMaterials": [
+        "carbide",
+        "cbn"
+      ],
+      "densityGcm3": 7.8,
       "hardnessHb": 230,
-      "description": "Chromium hot-work tool steel widely used in injection molds & dies."
+      "description": "Chromium hot-work tool steel widely used in injection molds & dies.",
+      "costPerKg": 250.0
     },
     {
       "id": "tool_steel_s7",
@@ -261,10 +329,14 @@
       "cuttingSpeedMMin": 60,
       "feedPerToothMm": 0.035,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "cbn"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "cbn"
+      ],
       "densityGcm3": 7.83,
       "hardnessHb": 215,
-      "description": "High impact shock-resisting tool steel for punches and chisels."
+      "description": "High impact shock-resisting tool steel for punches and chisels.",
+      "costPerKg": 250.0
     },
     {
       "id": "hardened_steel",
@@ -275,10 +347,15 @@
       "cuttingSpeedMMin": 35,
       "feedPerToothMm": 0.02,
       "coolantRequirement": "dry",
-      "compatibleToolMaterials": ["carbide", "cbn", "ceramic"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "cbn",
+        "ceramic"
+      ],
       "densityGcm3": 7.85,
       "hardnessHb": 550,
-      "description": "Pre-hardened tool steel requiring hard milling strategies and CBN tools."
+      "description": "Pre-hardened tool steel requiring hard milling strategies and CBN tools.",
+      "costPerKg": 250.0
     },
     {
       "id": "stainless_steel",
@@ -289,10 +366,15 @@
       "cuttingSpeedMMin": 70,
       "feedPerToothMm": 0.04,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss_co", "carbide_insert"],
-      "densityGcm3": 8.00,
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss_co",
+        "carbide_insert"
+      ],
+      "densityGcm3": 8.0,
       "hardnessHb": 175,
-      "description": "Austenitic stainless steel, work hardens rapidly under heavy feeds."
+      "description": "Austenitic stainless steel, work hardens rapidly under heavy feeds.",
+      "costPerKg": 250.0
     },
     {
       "id": "stainless_316",
@@ -303,10 +385,14 @@
       "cuttingSpeedMMin": 60,
       "feedPerToothMm": 0.038,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "carbide_insert"],
-      "densityGcm3": 8.00,
+      "compatibleToolMaterials": [
+        "carbide",
+        "carbide_insert"
+      ],
+      "densityGcm3": 8.0,
       "hardnessHb": 185,
-      "description": "Marine & medical grade molybdenum stainless steel with high corrosion resistance."
+      "description": "Marine & medical grade molybdenum stainless steel with high corrosion resistance.",
+      "costPerKg": 250.0
     },
     {
       "id": "stainless_17_4ph",
@@ -317,10 +403,14 @@
       "cuttingSpeedMMin": 75,
       "feedPerToothMm": 0.04,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "carbide_insert"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "carbide_insert"
+      ],
       "densityGcm3": 7.75,
       "hardnessHb": 230,
-      "description": "Precipitation-hardened martensitic stainless steel with high strength."
+      "description": "Precipitation-hardened martensitic stainless steel with high strength.",
+      "costPerKg": 250.0
     },
     {
       "id": "stainless_303",
@@ -331,10 +421,15 @@
       "cuttingSpeedMMin": 110,
       "feedPerToothMm": 0.05,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss", "hss_co"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss",
+        "hss_co"
+      ],
       "densityGcm3": 8.03,
       "hardnessHb": 160,
-      "description": "Sulfur-added free-machining austenitic stainless steel."
+      "description": "Sulfur-added free-machining austenitic stainless steel.",
+      "costPerKg": 250.0
     },
     {
       "id": "stainless_416",
@@ -345,10 +440,14 @@
       "cuttingSpeedMMin": 120,
       "feedPerToothMm": 0.05,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
       "densityGcm3": 7.75,
       "hardnessHb": 195,
-      "description": "Highest machinability martensitic stainless steel grade."
+      "description": "Highest machinability martensitic stainless steel grade.",
+      "costPerKg": 250.0
     },
     {
       "id": "stainless_440c",
@@ -359,10 +458,14 @@
       "cuttingSpeedMMin": 50,
       "feedPerToothMm": 0.03,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "cbn"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "cbn"
+      ],
       "densityGcm3": 7.65,
       "hardnessHb": 269,
-      "description": "High carbon martensitic stainless steel used for bearings and valve components."
+      "description": "High carbon martensitic stainless steel used for bearings and valve components.",
+      "costPerKg": 250.0
     },
     {
       "id": "titanium_gr5",
@@ -373,10 +476,13 @@
       "cuttingSpeedMMin": 40,
       "feedPerToothMm": 0.03,
       "coolantRequirement": "high_pressure",
-      "compatibleToolMaterials": ["carbide"],
+      "compatibleToolMaterials": [
+        "carbide"
+      ],
       "densityGcm3": 4.43,
       "hardnessHb": 330,
-      "description": "Workhorse aerospace titanium alloy, poor thermal conductivity."
+      "description": "Workhorse aerospace titanium alloy, poor thermal conductivity.",
+      "costPerKg": 2500.0
     },
     {
       "id": "titanium_gr2",
@@ -387,10 +493,13 @@
       "cuttingSpeedMMin": 55,
       "feedPerToothMm": 0.035,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide"],
+      "compatibleToolMaterials": [
+        "carbide"
+      ],
       "densityGcm3": 4.51,
       "hardnessHb": 200,
-      "description": "Commercially pure titanium with high corrosion resistance."
+      "description": "Commercially pure titanium with high corrosion resistance.",
+      "costPerKg": 2500.0
     },
     {
       "id": "inconel_718",
@@ -401,10 +510,14 @@
       "cuttingSpeedMMin": 25,
       "feedPerToothMm": 0.025,
       "coolantRequirement": "high_pressure",
-      "compatibleToolMaterials": ["carbide", "ceramic"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "ceramic"
+      ],
       "densityGcm3": 8.19,
       "hardnessHb": 360,
-      "description": "High temperature nickel superalloy used in jet turbine engine disks."
+      "description": "High temperature nickel superalloy used in jet turbine engine disks.",
+      "costPerKg": 2500.0
     },
     {
       "id": "inconel_625",
@@ -415,10 +528,14 @@
       "cuttingSpeedMMin": 28,
       "feedPerToothMm": 0.025,
       "coolantRequirement": "high_pressure",
-      "compatibleToolMaterials": ["carbide", "ceramic"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "ceramic"
+      ],
       "densityGcm3": 8.44,
       "hardnessHb": 290,
-      "description": "Extreme chemical and marine corrosion-resistant nickel alloy."
+      "description": "Extreme chemical and marine corrosion-resistant nickel alloy.",
+      "costPerKg": 2500.0
     },
     {
       "id": "hastelloy_c276",
@@ -429,10 +546,13 @@
       "cuttingSpeedMMin": 25,
       "feedPerToothMm": 0.025,
       "coolantRequirement": "high_pressure",
-      "compatibleToolMaterials": ["carbide"],
+      "compatibleToolMaterials": [
+        "carbide"
+      ],
       "densityGcm3": 8.89,
       "hardnessHb": 210,
-      "description": "Severe chemical service nickel-molybdenum-chromium superalloy."
+      "description": "Severe chemical service nickel-molybdenum-chromium superalloy.",
+      "costPerKg": 2500.0
     },
     {
       "id": "monel_400",
@@ -443,10 +563,13 @@
       "cuttingSpeedMMin": 40,
       "feedPerToothMm": 0.03,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide"],
-      "densityGcm3": 8.80,
+      "compatibleToolMaterials": [
+        "carbide"
+      ],
+      "densityGcm3": 8.8,
       "hardnessHb": 160,
-      "description": "Nickel-copper alloy with exceptional seawater corrosion resistance."
+      "description": "Nickel-copper alloy with exceptional seawater corrosion resistance.",
+      "costPerKg": 2500.0
     },
     {
       "id": "brass",
@@ -457,10 +580,14 @@
       "cuttingSpeedMMin": 220,
       "feedPerToothMm": 0.07,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "hss"],
-      "densityGcm3": 8.50,
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
+      "densityGcm3": 8.5,
       "hardnessHb": 130,
-      "description": "Standard free-machining brass for precision turned fittings."
+      "description": "Standard free-machining brass for precision turned fittings.",
+      "costPerKg": 800.0
     },
     {
       "id": "brass_c260",
@@ -471,10 +598,14 @@
       "cuttingSpeedMMin": 160,
       "feedPerToothMm": 0.06,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
       "densityGcm3": 8.53,
       "hardnessHb": 115,
-      "description": "Ductile cold-working yellow brass alloy."
+      "description": "Ductile cold-working yellow brass alloy.",
+      "costPerKg": 800.0
     },
     {
       "id": "copper_c110",
@@ -485,10 +616,14 @@
       "cuttingSpeedMMin": 120,
       "feedPerToothMm": 0.04,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
       "densityGcm3": 8.91,
       "hardnessHb": 85,
-      "description": "High electrical conductivity copper, gummy during machining."
+      "description": "High electrical conductivity copper, gummy during machining.",
+      "costPerKg": 800.0
     },
     {
       "id": "bronze_c932",
@@ -499,10 +634,14 @@
       "cuttingSpeedMMin": 150,
       "feedPerToothMm": 0.05,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss"],
-      "densityGcm3": 8.90,
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
+      "densityGcm3": 8.9,
       "hardnessHb": 65,
-      "description": "Standard sleeve bearing bronze with lead for friction reduction."
+      "description": "Standard sleeve bearing bronze with lead for friction reduction.",
+      "costPerKg": 800.0
     },
     {
       "id": "aluminum_bronze",
@@ -513,10 +652,13 @@
       "cuttingSpeedMMin": 90,
       "feedPerToothMm": 0.04,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide"],
+      "compatibleToolMaterials": [
+        "carbide"
+      ],
       "densityGcm3": 7.45,
       "hardnessHb": 170,
-      "description": "High strength wear-resistant aluminum bronze for heavy duty bushings."
+      "description": "High strength wear-resistant aluminum bronze for heavy duty bushings.",
+      "costPerKg": 800.0
     },
     {
       "id": "beryllium_copper",
@@ -527,10 +669,15 @@
       "cuttingSpeedMMin": 110,
       "feedPerToothMm": 0.045,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss_co", "carbide_insert"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss_co",
+        "carbide_insert"
+      ],
       "densityGcm3": 8.25,
       "hardnessHb": 200,
-      "description": "High-strength non-magnetic Beryllium Copper alloy (BeCu C17200/C17300) commonly specified for precision electronic connectors, terminal barrels, and aerospace contacts."
+      "description": "High-strength non-magnetic Beryllium Copper alloy (BeCu C17200/C17300) commonly specified for precision electronic connectors, terminal barrels, and aerospace contacts.",
+      "costPerKg": 800.0
     },
     {
       "id": "tellurium_copper",
@@ -541,10 +688,14 @@
       "cuttingSpeedMMin": 180,
       "feedPerToothMm": 0.06,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
       "densityGcm3": 8.94,
       "hardnessHb": 90,
-      "description": "Free-machining high electrical conductivity tellurium copper alloy for turned electrical pins and welding nozzles."
+      "description": "Free-machining high electrical conductivity tellurium copper alloy for turned electrical pins and welding nozzles.",
+      "costPerKg": 800.0
     },
     {
       "id": "phosphor_bronze",
@@ -555,10 +706,14 @@
       "cuttingSpeedMMin": 140,
       "feedPerToothMm": 0.05,
       "coolantRequirement": "flood",
-      "compatibleToolMaterials": ["carbide", "hss"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
       "densityGcm3": 8.86,
       "hardnessHb": 140,
-      "description": "High fatigue resistance copper-tin-phosphorus alloy used in electrical spring contacts, terminal sockets, and bushings."
+      "description": "High fatigue resistance copper-tin-phosphorus alloy used in electrical spring contacts, terminal sockets, and bushings.",
+      "costPerKg": 800.0
     },
     {
       "id": "cast_iron_gray",
@@ -569,10 +724,15 @@
       "cuttingSpeedMMin": 130,
       "feedPerToothMm": 0.06,
       "coolantRequirement": "dry",
-      "compatibleToolMaterials": ["carbide", "ceramic", "carbide_insert"],
-      "densityGcm3": 7.20,
+      "compatibleToolMaterials": [
+        "carbide",
+        "ceramic",
+        "carbide_insert"
+      ],
+      "densityGcm3": 7.2,
       "hardnessHb": 210,
-      "description": "Excellent vibration damping cast iron for engine blocks & machine beds."
+      "description": "Excellent vibration damping cast iron for engine blocks & machine beds.",
+      "costPerKg": 250.0
     },
     {
       "id": "cast_iron_ductile",
@@ -583,10 +743,14 @@
       "cuttingSpeedMMin": 110,
       "feedPerToothMm": 0.055,
       "coolantRequirement": "dry",
-      "compatibleToolMaterials": ["carbide", "carbide_insert"],
-      "densityGcm3": 7.10,
+      "compatibleToolMaterials": [
+        "carbide",
+        "carbide_insert"
+      ],
+      "densityGcm3": 7.1,
       "hardnessHb": 180,
-      "description": "High tensile strength nodular cast iron for gears and hydraulic valves."
+      "description": "High tensile strength nodular cast iron for gears and hydraulic valves.",
+      "costPerKg": 250.0
     },
     {
       "id": "plastic",
@@ -595,12 +759,16 @@
       "categoryLabel": "Engineering Plastics & Polymers",
       "machinabilityRating": 100,
       "cuttingSpeedMMin": 400,
-      "feedPerToothMm": 0.10,
+      "feedPerToothMm": 0.1,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "hss"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
       "densityGcm3": 1.41,
       "hardnessHb": 85,
-      "description": "Best machining thermoplastic, stiff with dimensional stability."
+      "description": "Best machining thermoplastic, stiff with dimensional stability.",
+      "costPerKg": 300.0
     },
     {
       "id": "nylon_66",
@@ -611,10 +779,14 @@
       "cuttingSpeedMMin": 350,
       "feedPerToothMm": 0.09,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "hss"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
       "densityGcm3": 1.14,
       "hardnessHb": 80,
-      "description": "Tough engineering plastic with excellent wear resistance."
+      "description": "Tough engineering plastic with excellent wear resistance.",
+      "costPerKg": 300.0
     },
     {
       "id": "peek",
@@ -625,10 +797,14 @@
       "cuttingSpeedMMin": 200,
       "feedPerToothMm": 0.06,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "pcd"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "pcd"
+      ],
       "densityGcm3": 1.32,
       "hardnessHb": 100,
-      "description": "Ultra-high performance medical and aerospace engineering polymer."
+      "description": "Ultra-high performance medical and aerospace engineering polymer.",
+      "costPerKg": 300.0
     },
     {
       "id": "abs_plastic",
@@ -639,10 +815,14 @@
       "cuttingSpeedMMin": 380,
       "feedPerToothMm": 0.09,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "hss"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
       "densityGcm3": 1.05,
       "hardnessHb": 70,
-      "description": "Impact resistant thermoplastic for enclosures and prototypes."
+      "description": "Impact resistant thermoplastic for enclosures and prototypes.",
+      "costPerKg": 300.0
     },
     {
       "id": "polycarbonate",
@@ -653,10 +833,13 @@
       "cuttingSpeedMMin": 300,
       "feedPerToothMm": 0.07,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide"],
-      "densityGcm3": 1.20,
+      "compatibleToolMaterials": [
+        "carbide"
+      ],
+      "densityGcm3": 1.2,
       "hardnessHb": 75,
-      "description": "Transparent impact-resistant engineering plastic."
+      "description": "Transparent impact-resistant engineering plastic.",
+      "costPerKg": 300.0
     },
     {
       "id": "ptfe_teflon",
@@ -667,10 +850,14 @@
       "cuttingSpeedMMin": 320,
       "feedPerToothMm": 0.08,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "hss"],
-      "densityGcm3": 2.20,
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
+      "densityGcm3": 2.2,
       "hardnessHb": 30,
-      "description": "Ultra-low friction chemically inert fluoropolymer."
+      "description": "Ultra-low friction chemically inert fluoropolymer.",
+      "costPerKg": 300.0
     },
     {
       "id": "uhmw_pe",
@@ -681,10 +868,14 @@
       "cuttingSpeedMMin": 350,
       "feedPerToothMm": 0.09,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "hss"],
+      "compatibleToolMaterials": [
+        "carbide",
+        "hss"
+      ],
       "densityGcm3": 0.93,
       "hardnessHb": 60,
-      "description": "High abrasion resistant plastic for wear strips and guides."
+      "description": "High abrasion resistant plastic for wear strips and guides.",
+      "costPerKg": 300.0
     },
     {
       "id": "garolite_g10",
@@ -695,10 +886,15 @@
       "cuttingSpeedMMin": 150,
       "feedPerToothMm": 0.04,
       "coolantRequirement": "air_blast",
-      "compatibleToolMaterials": ["carbide", "diamond"],
-      "densityGcm3": 1.80,
+      "compatibleToolMaterials": [
+        "carbide",
+        "diamond"
+      ],
+      "densityGcm3": 1.8,
       "hardnessHb": 110,
-      "description": "Glass-woven epoxy laminate, highly abrasive to cutting tools."
+      "description": "Glass-woven epoxy laminate, highly abrasive to cutting tools.",
+      "costPerKg": 300.0
     }
-  ]
+  ],
+  "currency": "INR"
 }
