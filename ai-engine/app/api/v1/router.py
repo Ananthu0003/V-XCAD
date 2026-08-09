@@ -973,10 +973,16 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
         # Calculate cost estimation
         try:
             from app.services.cam.cost_estimation import CostEstimationEngine
+            from app.services.cam.material_validation import get_material_profile
             cost_engine = CostEstimationEngine()
             total_machining_time_s = sum(op.get("estimated_time_s", 0) for op in operations)
             setup_time_s = setup_time_details.get("total_setup_time_seconds", 0)
-            material_profile = request.machine_config.get("material", {})
+            
+            # machine_config from frontend typically has { setup: { material: "..." } }
+            mat_id = setup.get("workpieceMaterialId") or setup.get("material") if isinstance(setup, dict) else None
+            material_obj = get_material_profile(mat_id)
+            material_profile = material_obj.model_dump() if hasattr(material_obj, 'model_dump') else {}
+            
             cost_estimate_result = cost_engine.estimate(
                 context=planning_context,
                 total_time_s=total_machining_time_s,
