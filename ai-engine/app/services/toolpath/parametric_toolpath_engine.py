@@ -142,7 +142,7 @@ class ParametricToolpathEngine:
             else:
                 finish_stepdown = float(finish_stepdown)
                 
-        if feat_type in ("hole", "blind_hole", "through_hole", "bore") or op_type in ("drilling", "peck_drilling", "boring"):
+        if feat_type in ("hole", "blind_hole", "through_hole", "bore") or op_type in ("drilling", "peck_drilling", "boring", "helical_bore_milling"):
             rough_stepdown = tool_dia * 1.5
             
         stepdown = rough_stepdown # For helical drill fallback
@@ -175,7 +175,7 @@ class ParametricToolpathEngine:
 
         # Determine strategy
         src = "contour"
-        if feat_type in ("hole", "blind_hole", "through_hole", "bore") or op_type in ("drilling", "peck_drilling", "boring", "reaming", "tapping"):
+        if feat_type in ("hole", "blind_hole", "through_hole", "bore") or op_type in ("drilling", "peck_drilling", "boring", "reaming", "tapping", "helical_bore_milling"):
             src = "drill"
         elif feat_type in ("pocket", "pocketing") or op_type in ("pocketing", "slot_milling"):
             src = "pocket"

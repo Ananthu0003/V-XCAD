@@ -10,7 +10,7 @@ class SiemensPostProcessor(BasePostProcessor):
             "; O0001 (SIEMENS CNC PROGRAM)",
             f"; (MATERIAL: {self.setup.get('material', 'UNKNOWN')})",
             f"; (DATE: {datetime.datetime.now().strftime('%Y-%m-%d')})",
-            "; --- CAD Copilot CAM Generated G-code ---",
+            "; --- VEXCAD CAM Generated G-code ---",
             "G17 G71 G90 G94",
         ]
 

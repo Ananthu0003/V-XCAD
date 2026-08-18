@@ -1,4 +1,4 @@
-"""CAD Copilot V2 - /api/v1 router."""
+"""VEXCAD V2 - /api/v1 router."""
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +16,7 @@ from app.services.validation.toolpath_schema_validator import ToolpathSchemaVali
 from app.services.validation.cam_readiness_evaluator import CamReadinessEvaluator
 from app.services.cam_pipeline_manager import CamPipelineManager
 from app.services.cam_input_router import CamInputRouter
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from app.models.schemas import GenerateResponse, EditRequest, StepRequest, RenderRequest, RenderResponse, RenderArtifacts, GCodeResponse, CAMJobRequest
 from app.services.geometry.csg_parser import CSGParser, export_to_step
 from app.services.llm.llm_codegen import LLMCodegenService
@@ -295,6 +295,17 @@ async def process_step(file: UploadFile = File(...), controller: str = Form("fan
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+BLUEPRINTS_DIR = Path(__file__).resolve().parents[3] / "outputs" / "blueprints"
+BLUEPRINTS_DIR.mkdir(parents=True, exist_ok=True)
+
+@router.get("/blueprint/{session_id}")
+async def get_session_blueprint(session_id: str):
+    """Return the cached blueprint PNG image for a given session."""
+    bp_file = BLUEPRINTS_DIR / f"{session_id}.png"
+    if not bp_file.exists():
+        raise HTTPException(status_code=404, detail="Blueprint not found for this session")
+    return Response(content=bp_file.read_bytes(), media_type="image/png")
+
 @router.post("/generate")
 async def generate(
     prompt: str = Form(...),
@@ -302,14 +313,15 @@ async def generate(
     image: UploadFile = File(None),
     base_code: str | None = Form(None),
     selection_context: str | None = Form(None),
+    session_id: str | None = Form(None),
+    target_portion: str | None = Form(None),
 ) -> StreamingResponse:
     """
-    Two-stage CAD generation pipeline:
-      1. Audit blueprint image/PDF  →  structured feature-map JSON
-      2. Synthesise/refine OpenSCAD script via BOSL2 codegen (Streamed)
-    `image` is optional for text-only refinement sessions.
+    Two-stage CAD generation & multi-iteration refinement pipeline:
+      - Initial Turn: Full Blueprint Audit (Stage 1) -> build123d Codegen (Stage 2)
+      - Iteration Turn: Targeted Blueprint Feature Inspection -> Surgical Script Refinement
     """
-    # ── Validate & read uploaded file ────────────────────────────────────────
+    # ── Validate & read uploaded file or retrieve cached session blueprint ───
     image_bytes: bytes | None = None
     mime_type: str | None = None
 
@@ -321,6 +333,37 @@ async def generate(
                 detail={"error": {"message": "File must be an image (PNG/JPEG/WEBP) or PDF."}},
             )
         image_bytes = await image.read()
+        
+        # OpenRouter and some vision models don't accept PDF via image payload
+        if mime_type == "application/pdf":
+            try:
+                import fitz
+                doc = fitz.open(stream=image_bytes, filetype="pdf")
+                if len(doc) > 0:
+                    page = doc.load_page(0)
+                    pix = page.get_pixmap(dpi=150)
+                    image_bytes = pix.tobytes("png")
+                    mime_type = "image/png"
+                doc.close()
+            except Exception as e:
+                print(f"Failed to rasterize PDF: {e}")
+
+        # Persist blueprint for subsequent multi-iteration turns in this session
+        if session_id and image_bytes:
+            try:
+                bp_file = BLUEPRINTS_DIR / f"{session_id}.png"
+                bp_file.write_bytes(image_bytes)
+            except Exception as e:
+                print(f"Failed to cache session blueprint: {e}")
+    elif session_id:
+        # Check if we have a persisted blueprint from a previous turn
+        bp_file = BLUEPRINTS_DIR / f"{session_id}.png"
+        if bp_file.exists():
+            try:
+                image_bytes = bp_file.read_bytes()
+                mime_type = "image/png"
+            except Exception as e:
+                print(f"Failed to read cached session blueprint: {e}")
 
     # ── Initialise service ────────────────────────────────────────────────────
     try:
@@ -328,45 +371,60 @@ async def generate(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail={"error": {"message": str(exc)}})
 
-    # ── Stage 1: Blueprint Audit (RESTORED) ──────────────────────────
-    # To maximize accuracy for industrial projects, we use a 2-stage pipeline.
-    # Stage 1 extracts a structured feature map to guide the code generation.
     feature_map: str | dict[str, Any] = ""
+    targeted_feature: dict[str, Any] | None = None
 
     async def stream_generator():
-        nonlocal feature_map
-        if image_bytes and mime_type and not base_code:
-            yield f'data: {json.dumps({"status": "auditing blueprint (stage 1 of 2)"})}\n\n'
-            try:
-                feature_map = await svc.audit_blueprint(image_bytes, mime_type)
-            except Exception as e:
-                print(f"Audit failed: {e}")
-
-        # Send starting code generation status
-        yield f'data: {json.dumps({"status": "generating code (stage 2 of 2)"})}\n\n'
+        nonlocal feature_map, targeted_feature
+        
+        if not base_code:
+            # ── Initial Generation (Stage 1: Full Blueprint Audit) ────────────
+            if image_bytes and mime_type:
+                yield f'data: {json.dumps({"status": "auditing blueprint (stage 1 of 2)"})}\n\n'
+                try:
+                    feature_map = await svc.audit_blueprint(image_bytes, mime_type)
+                except Exception as e:
+                    print(f"Audit failed: {e}")
+            yield f'data: {json.dumps({"status": "generating code (stage 2 of 2)"})}\n\n'
+        else:
+            # ── Iteration Turn (Targeted Inspection & Surgical Refinement) ────
+            if image_bytes and mime_type and (target_portion or prompt):
+                portion_label = target_portion or "target feature"
+                yield f'data: {json.dumps({"status": f"inspecting blueprint for {portion_label} (targeted vision)..."})}\n\n'
+                try:
+                    targeted_feature = await svc.audit_target_feature(
+                        image_bytes=image_bytes,
+                        mime_type=mime_type,
+                        target_portion=target_portion or "feature",
+                        user_prompt=prompt,
+                        base_code=base_code,
+                    )
+                except Exception as e:
+                    print(f"Targeted feature audit failed: {e}")
+            yield f'data: {json.dumps({"status": "surgically refining CAD script..."})}\n\n'
 
         full_script = ""
         try:
-            # ── Stage 2: Script Generation / Refinement ───────────────────────────────
+            # ── Stage 2: Script Generation / Refinement ───────────────────────
             async for chunk_text in svc.generate_script_stream(
                 prompt=prompt,
                 image_bytes=image_bytes,
                 mime_type=mime_type,
                 feature_map=feature_map,
+                targeted_feature=targeted_feature,
                 base_code=base_code,
                 selection_context=selection_context,
             ):
                 full_script += chunk_text
-                # stream token
                 yield f'data: {json.dumps({"chunk": chunk_text})}\n\n'
 
-            # ── Server-side safety net ────────────────────────────────────────────────
+            # ── Server-side safety net ────────────────────────────────────────
             clean_script = LLMCodegenService._normalize_script(full_script)
             clean_script = _sanitize_script(clean_script)
             params = _extract_parameters(clean_script)
             metadata = _extract_metadata(clean_script)
             
-            # send final script and parameters
+            # Send final script and parameters
             yield f'data: {json.dumps({"script": clean_script, "parameters": params, "metadata": metadata})}\n\n'
             
         except Exception as exc:
@@ -916,6 +974,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
         features = result.get("features", [])
         setups = result.get("setups", [])
         tools = result.get("tools", [])
+        features_dict = {f.get("id"): f for f in features} if features else {}
         
         from app.services.planning.planning_context import PlanningContext
         planning_context = PlanningContext(
@@ -966,7 +1025,6 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             flat_paths.extend(paths)
             
         # Re-estimate total setup time
-        features_dict = {f.get("id"): f for f in features} if features else {}
         setup_time_details = CycleTimeEstimator.estimate_setup_time(operations, machine_profile, features_dict=features_dict, setup=setup)
         result["setup_time_details"] = setup_time_details
         

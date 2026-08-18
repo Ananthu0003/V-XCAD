@@ -37,7 +37,11 @@ class GoogleGateway(BaseLLMGateway):
             config_params["response_mime_type"] = "application/json"
             
         if metadata.supportsThinking:
-            config_params["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
+            try:
+                # Dynamic thinking budget
+                config_params["thinking_config"] = types.ThinkingConfig(thinking_budget=1024)
+            except Exception:
+                pass
             
         return config_params
 
@@ -58,12 +62,25 @@ class GoogleGateway(BaseLLMGateway):
 
         import asyncio
         def _call() -> str:
-            response = self.client.models.generate_content(
-                model=metadata.id,
-                contents=contents,
-                config=types.GenerateContentConfig(**config_params),
-            )
-            return response.text or ""
+            try:
+                response = self.client.models.generate_content(
+                    model=metadata.id,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**config_params),
+                )
+                return response.text or ""
+            except Exception as e:
+                if "thinking" in str(e).lower() and "thinking_config" in config_params:
+                    # Retry without thinking_config if the model rejected thinking level/budget
+                    fallback_params = dict(config_params)
+                    fallback_params.pop("thinking_config", None)
+                    response = self.client.models.generate_content(
+                        model=metadata.id,
+                        contents=contents,
+                        config=types.GenerateContentConfig(**fallback_params),
+                    )
+                    return response.text or ""
+                raise
 
         return await asyncio.to_thread(_call)
 
@@ -83,11 +100,22 @@ class GoogleGateway(BaseLLMGateway):
 
         import asyncio
         def _call_stream():
-            return self.client.models.generate_content_stream(
-                model=metadata.id,
-                contents=contents,
-                config=types.GenerateContentConfig(**config_params),
-            )
+            try:
+                return self.client.models.generate_content_stream(
+                    model=metadata.id,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**config_params),
+                )
+            except Exception as e:
+                if "thinking" in str(e).lower() and "thinking_config" in config_params:
+                    fallback_params = dict(config_params)
+                    fallback_params.pop("thinking_config", None)
+                    return self.client.models.generate_content_stream(
+                        model=metadata.id,
+                        contents=contents,
+                        config=types.GenerateContentConfig(**fallback_params),
+                    )
+                raise
 
         response_stream = await asyncio.to_thread(_call_stream)
         for chunk in response_stream:

@@ -1,7 +1,7 @@
 'use client';
 
 import JSON5 from 'json5';
-import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { toast } from 'sonner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -15,7 +15,7 @@ import { WorkspaceSettings } from '@/components/workspace/WorkspaceSettings';
 import { migrateLegacyCamSetup, validateMachineControllerPost } from '@/lib/cam/machineValidation';
 import { MACHINE_MATRIX, ControllerId } from '@/lib/cam/machineProfiles';
 import { EngineeringConsole } from '@/components/workspace/EngineeringConsole';
-import { ChatPanel } from '@/components/chat/ChatPanel';
+import { ChatPanel, type TargetPortion } from '@/components/chat/ChatPanel';
 import { SessionBrowserModal } from '@/components/workspace/SessionBrowserModal';
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { History, Cuboid, RotateCcw, IndianRupee } from 'lucide-react';
@@ -324,6 +324,7 @@ export default function HitlWorkspace() {
 	const [defaultSetupMetadata, setDefaultSetupMetadata] = useState<any>(undefined);
 	const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
 	const [activeParameter, setActiveParameter] = useState<string | null>(null);
+	const [hoveredParameter, setHoveredParameter] = useState<string | null>(null);
 	const [coordValidation, setCoordValidation] = useState<any>(null);
 	const [camSimulation, setCamSimulation] = useState<SimulationState>({ isPlaying: false, progress: 0, speed: 1 });
 	const [camViewport, setCamViewport] = useState<ViewportSettings>({ showStock: false, showTool: true, showToolpath: true, showOrigin: true, showAxes: true });
@@ -374,6 +375,22 @@ export default function HitlWorkspace() {
 	const [geometryInfo, setGeometryInfo] = useState<StlGeometryInfo | null>(null);
 	const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 	const [selectionContext, setSelectionContext] = useState<[number, number, number] | null>(null);
+	const [targetPortion, setTargetPortion] = useState<TargetPortion | null>(null);
+	const [showBlueprintPIP, setShowBlueprintPIP] = useState(false);
+
+	const blueprintUrl = useMemo(() => {
+		if (selectedFile) {
+			try {
+				return URL.createObjectURL(selectedFile);
+			} catch {
+				return null;
+			}
+		}
+		if (sessionId) {
+			return `/api/blueprint/${sessionId}`;
+		}
+		return null;
+	}, [selectedFile, sessionId]);
 
 	useEffect(() => {
 		if (workflowStage === 'cam' || workflowStage === 'gcode') {
@@ -485,6 +502,23 @@ export default function HitlWorkspace() {
 		}
 		if (selectionContext) {
 			formData.append('selection_context', JSON.stringify(selectionContext));
+		}
+		if (pythonScript) {
+			formData.append('base_code', pythonScript);
+		}
+		if (sessionId) {
+			formData.append('session_id', sessionId);
+		}
+		if (targetPortion) {
+			formData.append('target_portion', targetPortion.name);
+			if (!selectionContext) {
+				formData.append('selection_context', JSON.stringify({
+					portion_id: targetPortion.id,
+					portion_name: targetPortion.name,
+					category: targetPortion.category,
+					description: targetPortion.description,
+				}));
+			}
 		}
 		formData.append('model_name', selectedModel);
 
@@ -1260,7 +1294,6 @@ export default function HitlWorkspace() {
 	const hasStep = Boolean(stepUrl);
 	const hasDxf = Boolean(dxfUrl);
 
-
 	const handleClear = async () => {
 		if (sessionId) {
 			try {
@@ -1283,6 +1316,7 @@ export default function HitlWorkspace() {
 		setAnnotations({});
 		setParameterMetadata({});
 		setActiveParameter(null);
+		setHoveredParameter(null);
 		setStatusText('Ready');
 		setWorkflowStage('blueprint');
 		toast.info('Session cleared');
@@ -1335,6 +1369,11 @@ export default function HitlWorkspace() {
 										onOpenAuthModal={() => setIsAuthModalOpen(true)}
 										selectionContext={selectionContext}
 										onClearSelectionContext={() => setSelectionContext(null)}
+										hasActiveModel={Boolean(pythonScript)}
+										parameterEntries={parameterEntries}
+										targetPortion={targetPortion}
+										setTargetPortion={setTargetPortion}
+										blueprintUrl={blueprintUrl}
 									/>
 								</div>
 							</div>
@@ -1421,9 +1460,9 @@ export default function HitlWorkspace() {
 													statusText={statusText}
 													workflowStage={workflowStage}
 													isRecompiling={isGenerating}
-													hasStl={Boolean(stlUrl)}
-													hasStep={Boolean(stepUrl)}
-													hasDxf={Boolean(dxfUrl)}
+													hasStl={hasStl}
+													hasStep={hasStep}
+													hasDxf={hasDxf}
 													isDeveloper={false}
 													isDownloadingStl={isDownloadingStl}
 													isDownloadingStep={isDownloadingStep}
@@ -1433,6 +1472,9 @@ export default function HitlWorkspace() {
 													onDownloadDxf={() => handleDownloadArtifact(dxfUrl, 'dxf')}
 													annotations={annotations}
 													activeParameter={activeParameter}
+													hoveredParameter={hoveredParameter}
+													onSelectParameter={setActiveParameter}
+													onHoverParameter={setHoveredParameter}
 													parameters={parameters}
 													geometryInfo={geometryInfo}
 													hasGcode={Boolean(false)}
@@ -1454,6 +1496,11 @@ export default function HitlWorkspace() {
 													setupMetadata={{ ...(defaultSetupMetadata || {}), ...(camSetups.find(s => s.setupId === (activeSetupId || camSetups[0]?.setupId)) || {}) }}
 													xRayMode={xRayMode}
 													onToggleXRay={() => setXRayMode(prev => !prev)}
+													blueprintUrl={blueprintUrl}
+													targetPortion={targetPortion}
+													onSelectPortion={setTargetPortion}
+													showBlueprintPIP={showBlueprintPIP}
+													onToggleBlueprintPIP={() => setShowBlueprintPIP(prev => !prev)}
 													headerActions={
 														<div className="flex items-center gap-2">
 
@@ -1543,7 +1590,7 @@ export default function HitlWorkspace() {
 												</CadViewport>
 											)}
 											{/* Bottom Overlay with CAM Metrics */}
-											<div className="absolute bottom-4 left-0 right-0 pointer-events-none z-30 flex flex-col p-4 gap-4">
+											<div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none z-30 flex flex-col items-center">
 												{/* CAM Metrics Pill */}
 												{(workflowStage === 'cam' || workflowStage === 'gcode') && (
 													<div className="flex items-center justify-center pointer-events-auto mt-2">

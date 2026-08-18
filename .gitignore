@@ -42,3 +42,19 @@ Thumbs.db
 *.db
 *.db-journal
 tmp_*.txt
+
+# Scratch scripts & temporary test artifacts
+scratch.py
+ai-engine/*.step
+ai-engine/debug_*.txt
+ai-engine/diff_analysis.txt
+ai-engine/last_resp.txt
+ai-engine/log_payload.py
+ai-engine/scratch_*.py
+ai-engine/test.py
+ai-engine/test[0-9].py
+ai-engine/test_*.py
+web-ui/check_*.js
+web-ui/count_sessions.js
+web-ui/test-db.*
+web-ui/test_db_schema.js

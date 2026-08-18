@@ -16,6 +16,7 @@ model CadSession {
   pythonScript String?
   parameters   Json?
   featureMap   Json?
+  annotations  Json?
   stlUrl       String?
   stepUrl      String?
   isShared     Boolean         @default(false)

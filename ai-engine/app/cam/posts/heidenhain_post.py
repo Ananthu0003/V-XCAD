@@ -10,7 +10,7 @@ class HeidenhainPostProcessor(BasePostProcessor):
             "BEGIN PGM O0001 MM",
             f"; (MATERIAL: {self.setup.get('material', 'UNKNOWN')})",
             f"; (DATE: {datetime.datetime.now().strftime('%Y-%m-%d')})",
-            "; --- CAD Copilot CAM Generated G-code ---",
+            "; --- VEXCAD CAM Generated G-code ---",
         ]
 
     def format_program_footer(self) -> List[str]:

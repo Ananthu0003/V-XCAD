@@ -138,6 +138,12 @@ class CamPipelineManager:
             step_path = outputs_dir / f"cad_{session_id}.step"
             if step_path.exists():
                 try:
+                    from app.services.validation.cam_compatibility_gate import CamCompatibilityGate
+                    gate = CamCompatibilityGate()
+                    is_compatible, msg = gate.verify(str(step_path))
+                    if not is_compatible:
+                        raise ValueError(f"CAM Compatibility Gate failed: {msg}")
+                        
                     brep_extractor = BRepFeatureExtractor(str(step_path))
                     brep_data = brep_extractor.analyze()
                 except Exception as e:

@@ -200,6 +200,7 @@ export async function POST(request: Request): Promise<Response> {
 		data: {
 			pythonScript: mappedPayload.python_script,
 			parameters: parametersJson,
+			annotations: artifacts && artifacts.annotations ? (artifacts.annotations as Prisma.InputJsonValue) : Prisma.DbNull,
 			stlUrl,
 			stepUrl,
 		},
@@ -212,6 +213,7 @@ export async function POST(request: Request): Promise<Response> {
 				prompt: 'Scripted CAD Design',
 				pythonScript: mappedPayload.python_script,
 				parameters: parametersJson,
+				annotations: artifacts && artifacts.annotations ? (artifacts.annotations as Prisma.InputJsonValue) : Prisma.DbNull,
 				stlUrl,
 				stepUrl,
 			},

@@ -31,6 +31,39 @@ class UniversalHTTPXGateway(BaseLLMGateway):
             "ollama": OllamaGateway(self.ollama_host),
         }
 
+    def _log_trace(self, prompt: str, system_instruction: str, response: str, metadata: ModelMetadata):
+        try:
+            from pathlib import Path
+            import json
+            import uuid
+            from datetime import datetime
+            
+            ai_engine_dir = Path(__file__).resolve().parents[4]
+            trace_dir = ai_engine_dir / "storage" / "traces"
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            
+            trace_data = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "model": metadata.id,
+                "system_instruction": system_instruction,
+                "prompt": prompt,
+                "response": response
+            }
+            
+            # Save historical trace
+            trace_file = trace_dir / f"trace_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.json"
+            with open(trace_file, "w", encoding="utf-8") as f:
+                json.dump(trace_data, f, indent=2)
+                
+            # Save latest interaction for easy access
+            latest_file = ai_engine_dir / "outputs" / "latest_llm_interaction.json"
+            latest_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(latest_file, "w", encoding="utf-8") as f:
+                json.dump(trace_data, f, indent=2)
+                
+        except Exception as e:
+            logger.error(f"Failed to write LLM trace: {e}")
+
     async def generate(
         self,
         prompt: str,
@@ -46,7 +79,7 @@ class UniversalHTTPXGateway(BaseLLMGateway):
             logger.error(f"Unsupported vendor '{vendor}' requested.")
             raise ValueError(f"Unsupported vendor: {vendor}")
         
-        return await gateway.generate(
+        response = await gateway.generate(
             prompt=prompt,
             metadata=metadata,
             system_instruction=system_instruction,
@@ -54,6 +87,8 @@ class UniversalHTTPXGateway(BaseLLMGateway):
             mime_type=mime_type,
             response_json=response_json,
         )
+        self._log_trace(prompt, system_instruction, response, metadata)
+        return response
 
     async def generate_stream(
         self,
@@ -69,11 +104,17 @@ class UniversalHTTPXGateway(BaseLLMGateway):
             logger.error(f"Unsupported vendor '{vendor}' requested.")
             raise ValueError(f"Unsupported vendor: {vendor}")
             
-        async for chunk in gateway.generate_stream(
-            prompt=prompt,
-            metadata=metadata,
-            system_instruction=system_instruction,
-            image_bytes=image_bytes,
-            mime_type=mime_type,
-        ):
-            yield chunk
+        full_response = ""
+        try:
+            async for chunk in gateway.generate_stream(
+                prompt=prompt,
+                metadata=metadata,
+                system_instruction=system_instruction,
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+            ):
+                if chunk:
+                    full_response += chunk
+                yield chunk
+        finally:
+            self._log_trace(prompt, system_instruction, full_response, metadata)

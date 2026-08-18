@@ -18,9 +18,10 @@ if not llm_logger.handlers:
 logger = llm_logger
 
 http_client = httpx.AsyncClient(
-    timeout=httpx.Timeout(90.0, connect=10.0),
+    timeout=httpx.Timeout(180.0, connect=20.0),
     limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
 )
+
 
 class BaseLLMGateway:
     def __init__(self) -> None:

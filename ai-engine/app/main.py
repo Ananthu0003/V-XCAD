@@ -1,4 +1,4 @@
-"""CAD Copilot V2 — FastAPI entry point."""
+"""VEXCAD AI Engine — FastAPI entry point."""
 from pathlib import Path
 
 # Load .env before importing anything that needs it
@@ -21,7 +21,7 @@ OUTPUTS_DIR = Path(__file__).resolve().parents[1] / "outputs"
 OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
-    title="CAD Copilot V2",
+    title="VEXCAD AI Engine",
     version="2.0.0",
     docs_url="/docs",
     redoc_url=None,

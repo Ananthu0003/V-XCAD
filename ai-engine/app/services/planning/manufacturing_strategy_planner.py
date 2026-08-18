@@ -57,6 +57,21 @@ class ManufacturingStrategyPlanner:
         elif feat_type in ("hole", "blind_hole", "through_hole"):
             if feat_subtype == "threaded_hole":
                 return "tapping"  # or thread_milling
+            
+            # Determine strategy based on hole geometry
+            dims = feature.get("dimensions", {})
+            hole_dia = dims.get("diameter", feature.get("diameter", 0))
+            hole_depth = dims.get("depth", feature.get("depth", 0))
+            
+            # For large bores (dia > 6mm), use helical bore milling with a smaller end mill
+            # instead of requiring an exact-diameter drill bit
+            if hole_dia > 6.0:
+                return "helical_bore_milling"
+            
+            # For deep holes (depth:diameter > 5), use peck drilling
+            if hole_dia > 0 and hole_depth > 0 and (hole_depth / hole_dia) > 5.0:
+                return "peck_drilling"
+            
             return "drilling"
             
         elif feat_type == "chamfer":

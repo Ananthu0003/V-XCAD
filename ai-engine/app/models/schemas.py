@@ -1,4 +1,4 @@
-"""Pydantic schemas for the CAD Copilot API."""
+"""Pydantic schemas for the VEXCAD API."""
 from __future__ import annotations
 from typing import Any, Optional, Literal
 from pydantic import BaseModel, ConfigDict, Field
@@ -196,6 +196,11 @@ class CamFeatureSchema(BaseModel):
     requires_reorientation: bool = False
     requires_4axis_or_secondary_setup: bool = False
     blocked_reason: Optional[str] = None
+    
+    # Provenance and Confidence (Hybrid 2D->3D)
+    source: str = "OBSERVED"
+    evidence_refs: list[str] = Field(default_factory=list)
+    validation_status: str = "VALIDATED"
     
     # New metadata fields
     featureGroupId: Optional[str] = None

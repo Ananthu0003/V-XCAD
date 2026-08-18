@@ -39,6 +39,7 @@ services:
       GENAI_MAX_RETRIES: ${GENAI_MAX_RETRIES:-5}
       GENAI_RETRY_BASE_DELAY: ${GENAI_RETRY_BASE_DELAY:-1.5}
       GENAI_MAX_RETRY_DELAY: ${GENAI_MAX_RETRY_DELAY:-75}
+      DATABASE_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
     volumes:
       # Persist generated CAD outputs (STL, STEP, G-code, etc.)
       - cad_outputs:/app/outputs
@@ -63,6 +64,7 @@ services:
     environment:
       # Point to the ai-engine service by its container name
       FASTAPI_URL: http://ai-engine:8000/api/v1
+      NEXT_PUBLIC_FASTAPI_URL: http://localhost:8005/api/v1
       # PostgreSQL connection (Prisma)
       DATABASE_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
       DIRECT_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db

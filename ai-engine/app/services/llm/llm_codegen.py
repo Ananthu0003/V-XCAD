@@ -18,7 +18,7 @@ _BLUEPRINT_CACHE_LOCK = threading.Lock()
 
 # Increment this whenever the audit schema or deterministic normalization rules change.
 # Including it in the cache key prevents older in-memory feature maps from being reused.
-_AUDIT_SCHEMA_VERSION = "revolve-aware-v2"
+_AUDIT_SCHEMA_VERSION = "revolve-aware-v7"
 
 # ISO 261/262-style preferred coarse pitches. This is standards data, not
 # blueprint-specific hardcoding. Values are used only when a metric callout
@@ -87,10 +87,9 @@ The generated output must match the engineering drawing exactly. No dimension gu
 --------------------------------------------------
 NEW EXTRACTION STRATEGY (CHAIN OF THOUGHT)
 --------------------------------------------------
-Before outputting any code, you must perform a deep visual audit of the blueprint.
+Before outputting any JSON, you MUST perform a deep visual audit of the blueprint using a `<scratchpad>` block. Inside the scratchpad, you MUST explicitly trace the Z-dimensions and calculate the Wall Thickness at every Z-step to prove your topology is physically possible. Only after this analysis, output a valid JSON feature-map matching the exact schema below, wrapped in ```json ... ``` tags.
 # ROLE: Precision Mechanical CAD Auditor & Spatial Topologist
-Analyze the provided multi-view technical drawing with tolerance-aware manufacturing rigor. Output ONLY a valid JSON feature-map matching the exact schema below.
-
+Analyze the provided multi-view technical drawing with tolerance-aware manufacturing rigor.
 ## 1. COORDINATE SYSTEM CONSTRAINTS
 - **Origin**: Place (0,0,0) at the absolute bottom-center of the primary datum body for symmetric stability.
 - **Z-Axis**: Points UPWARD (+Z). Face pockets, blind steps, and through-boring occur relative to this axis.
@@ -100,21 +99,35 @@ Analyze the provided multi-view technical drawing with tolerance-aware manufactu
 - **ADDITIVE**: `base_prismoid`, `base_cylinder`, `mounting_ear`, `alignment_boss`, `reinforcement_rib`, `spherical_dome`, `revolved_profile`, `complex_shell`
 - **SUBTRACTIVE**: `pocket_interior`, `step_shoulder`, `counterbore`, `hole_through`, `hole_blind`, `thread_internal`, `oring_groove`, `revolved_cutout`
 - **SURFACE / MANUFACTURING**: `thread_external`
-- **EDGE_MODIFIER**: `fillet_interior`, `chamfer_exterior`
+- **EDGE_MODIFIER**: `fillet_interior`, `chamfer_exterior`, `edge_treatment`
 - **MANUFACTURING_METADATA**: Ensure you capture any specific `material`, `surface_treatments`, `general_tolerances`, and `gdt_callouts`.
 - **COMPLEX GEOMETRY (Gears/Serrations)**: For features like gears, splines, or taper serrations, DO NOT attempt to trace every tooth in the 2D profile. Model the nominal blank geometry (e.g., the major/minor cylindrical boundary) and attach the specific callout (e.g., "Taper Serrations INT 2 5/32x48 STD") as a `manufacturing_metadata` or `surface_treatment` field so the CAM system can handle the tooling path.
 
 ## 3. MACHINING & DIMENSIONAL RULES
 - **Profile Decompositions**: For parts with asymmetric or multi-angular walls (e.g., specific draft angles like 33°, 40°, 22° shifts), capture the exact 2D coordinate paths outlining the perimeter.
 - **Z-Reference & Coordinate Independence (CRITICAL)**: Every feature must declare an exact `z_reference`: `"bottom_of_feature"`, `"top_of_feature"`, or `"absolute_zero"`. You MUST measure the Z-depth of internal bores and external profiles explicitly from the SAME global datum (e.g., Z=0 at one end). DO NOT assume internal bore steps align with external profile steps! For example, a large internal counterbore might extend deep into the small external shaft. If you wrongly assume the internal bore stops where the external profile steps down, you will ruin the part's wall thickness and topology. Map every single Z-height strictly to the dimension lines provided, completely independent of other features.
-- **Revolved / Lathe Parts**: If a part has a prominent centerline (CL, or ⌀ callouts on cross-sections like shafts, pistons, or bushings), it MUST be modeled as a `revolved_profile`. Do NOT just capture the largest bounding box as a cylinder. You MUST capture the full outer stepped profile as an array of `[radius, z_height]` points in a `profile_points` field in `dims`. DO NOT simplify the profile! You MUST explicitly capture every single flange, fin, groove, and stepped diameter exactly as dimensioned. If there are massive flanges in the middle of a shaft, you MUST include them in the `profile_points` array by stepping the radius up and down! CRITICAL: NEVER simplify an internal stepped bore into a single straight hole! If the section view shows an internal bore with multiple steps, chamfers, or internal grooves, you MUST capture it as a `revolved_cutout` with a full array of `profile_points` representing the exact internal profile. WARNING: DO NOT confuse inner bores with outer diameters! Look at the section views carefully. The outermost visible lines are the `revolved_profile`. The inner dashed lines or sectioned cavities are the `revolved_cutout`. EXTREME WARNING: For parts like pistons with O-ring grooves and multiple steps, you MUST use `profile_points` to trace the entire outer contour. DO NOT invent generic properties like `groove_depth` or `body_outer_radius` if the part has more than one step. Let the `profile_points` array capture the exact geometry!
-- **Half-Section Views (ANTI-HALLUCINATION)**: NEVER interpret crosshatching on the top or bottom half of a symmetric part as a physical cutout or slot! Half-sections are drafting conventions used to expose internal geometry (like bores and internal threads). The physical part remains fully cylindrical/symmetric! However, you MUST explicitly extract the internal geometry (bores, internal threads) shown inside the half-section as `hole_blind` or `thread_internal` features! Do not ignore them.
+- **Revolved / Lathe Parts (CONTOUR TRACING IS MANDATORY)**: You MUST trace the full outer contour sequentially from Z=0 to the end. Capture every diameter change as an array of `[radius, z_height]` points in `profile_points`. CRITICAL TRACING RULES: 1. **Follow the Arrowhead EXACTLY**: In section views, dimensions below the centerline can point to BOTH inner and outer profiles! If the arrowhead touches the FIRST solid line near the centerline, it is the INNER bore. If the arrowhead crosses the hatched material and touches the FARTHEST solid line, it is the OUTER profile! 2. **Angles vs Diameters**: NEVER mistake an angle (e.g., `10°` or `45°`) for a diameter! Angles define chamfers/tapers. 3. **Topological Sanity Check (MANDATORY)**: Before you output the JSON, you MUST mentally calculate the wall thickness at every Z-height: `Wall Thickness = Outer_Radius - Inner_Radius`. If this value is negative (e.g., you assigned an outer `Ø20.5` to the inner bore, and an outer profile of `16.975`), you have created a physical impossibility! A solid part CANNOT have an inner bore larger than its outer boundary! If you detect a negative wall thickness, YOU HAVE SWAPPED THE DIMENSIONS. You MUST re-evaluate your assignments and fix the overlap before generating the JSON! 4. **Gasket/Working Areas**: Text like `38 GASKET WORKING AREA` pointing to the outer surface means the outer profile maintains the specified diameter for that Z-length. Do not skip these major cylindrical sections!
+- **Half-Section Views (ANTI-HALLUCINATION)**: NEVER interpret crosshatching on the top or bottom half of a symmetric part as a physical cutout or slot! Half-sections are drafting conventions used to expose internal geometry (like bores and internal threads). The physical part remains fully cylindrical/symmetric! However, you MUST explicitly extract the internal geometry (bores, internal threads) shown inside the half-section as `revolved_cutout` or `hole_blind` features. Do not ignore them.
+- **INTERNAL VS EXTERNAL DIMENSIONING (CRITICAL)**: In Half-Section views (like Section AA), you MUST carefully distinguish which lines a dimension points to! Dimensions whose leader lines point to the OUTER solid boundaries (above the center line or outside the hatching) define the OUTER profile (e.g., Flanges, Shafts). Dimensions whose leader lines point to the INNER empty channel (the white space in the middle) define the INTERNAL bores. NEVER classify an outer dimension (like a 20.5 shaft diameter) as an internal bore! If you subtract an outer diameter from the inside, you will completely cut the part in half!
+- **Solid vs Cavity (Hatching Rule)**: Leader lines ending on hatched regions ALWAYS indicate solid material boundaries (Outer profile). 
+- **Piston Exterior Features (CRITICAL)**: "GASKET WORKING AREA" and "O-RING GROOVES" are strictly exterior features on pistons and shafts. If you see "38 GASKET WORKING AREA", it refers to the OUTER shaft surface. DO NOT hallucinate this as an internal chamber depth!
+- **Z-Axis Chaining (WARNING)**: Pay extreme attention to the difference between a position (e.g., "6.0 from the left face") and a width (e.g., "6.3 groove width"). Do not swap them when calculating Z-coordinates!
+- **Right-Datum & Dimension Origin Alignment (CRITICAL)**: When a dimension is given from the opposite/right end face of a part (e.g. `57.2 from right face`), its absolute global Z-coordinate starting from the left origin (Z=0) MUST be calculated directly as: `z_pos = total_length - right_dim`. Never subtract internal middle section lengths or compound deductions from it! Keep datum conversions clean and direct.
+- **End Face Steps & Recesses (MANDATORY 2D PROFILES)**: When detail views show an end-face step or recess (e.g., a `2.0mm deep` recess with `R2.0` blend radius on a shaft face), you MUST include the axial step directly in the 2D `profile_points` array (or as a subtractive `counterbore`). Never leave an end face flat if a detail view explicitly dimensions a face recess!
+- **Conical Internal Bores & Angle Tracing**: In Section views, when bore entries or internal diameter transitions specify an angle (e.g. `60°` entry cone or `120°` transition cone), trace the angled coordinate vertices directly in `profile_points`. Do NOT approximate complex angled internal tapers with generic 45° 3D chamfers.
+- **Missing Outer Steps (CRITICAL)**: You MUST carefully trace every single diameter change on the outer profile. Do not jump straight from a large collar (e.g., Dia 25.0) to a small shaft (e.g., Dia 16.975) if there is an intermediate step (e.g., Dia 20.5) and a taper (e.g., 20 degrees) in between! Missing these intermediate steps ruins the geometric constraints.
+- **NO MAGIC NUMBERS IN PROFILES**: Never hardcode a distance like `total_length - 25.0` in your `bd.Polygon` points unless `25.0` was explicitly extracted to the `PARAMETERS` dictionary as a named variable. Use mathematically derived positions based on your extracted parameters (like subtracting the `gasket_working_area` length from the total length).
+
+- **Complex Stepped Bores (MANDATORY)**: If an internal bore has multiple steps, tapers, or complex transitions (like stepping from Dia 17.4 to 14 to 13.5 to 10), do NOT attempt to extract it as multiple overlapping `hole_blind` or `cylinder` subtractions. You MUST extract the ENTIRE internal channel as a single `revolved_cutout` feature with a complete `profile_points` array, mapping the X (radius) and Y (Z-length) coordinates of the inner bore exactly as you would for the outer profile. This guarantees a clean, continuous inner channel without boolean errors.
 - **Implicit Heights & Deduced Dimensions**: If a block or boss doesn't have an explicit total height, deduce it from its subtractive features or alignments. For example, if a U-slot has a depth of 25 to the center of an R9.5 arc, its total cut depth is 34.5. If the bottom of this slot aligns with an adjacent 28mm thick base, the block's total height must be 28 + 34.5 = 62.5. NEVER assume a block is flush with an adjacent base if the orthographic views show it protruding higher!
-- **Keyways & Slots**: Look for discrete keyway slots (width and length) often shown on shafts or flanges. Ensure you capture them as distinct subtractive features (e.g. `pocket_interior`), NOT just generic holes. Do NOT miss them!
+- **Keyways & Slots**: Look for discrete keyway slots (width and length) often shown on shafts or flanges. Ensure you capture them as distinct subtractive features (e.g. `pocket_interior`), NOT just generic holes. Do NOT miss them! CRITICAL: If a keyway is dimensioned from the opposite side of a bore (e.g., dimension `41` across a `Ø38` bore), calculate the depth from center accurately (`41 - (38/2) = 22`). Do not invent standard keyway depths.
 - **Edge Cutouts & U-Slots**: Carefully examine the ends of arms, flanges, and blocks. If you see a U-shaped cutout (e.g. an open slot with a full radius bottom like R9.5 and width 19), you MUST extract it as a subtractive `pocket_interior` or `slot_through`. Do not ignore these! Measure their depth and width from the specific orthographic views (like the front or section views).
 - **Hidden & Internal Subtractions (CRITICAL)**: You MUST carefully scan all section views, detail views, and dashed hidden lines for ANY material removal. Every internal bore, countersink, counterbore, groove, chamfer, and intersecting hole MUST be explicitly listed as a subtractive feature. Do not skip smaller cutting portions or assume they are implied by a larger bore. Look closely at cross-sections to find hidden stepped cuts.
-- **Radial / Cross-Holes**: Look for holes drilled into the side of a cylindrical part (perpendicular to the main axis). These are often shown in separate detail views or side projections (e.g. `Ø0.125" x 0.220" Deep`). You MUST capture these as `hole_blind` or `hole_through` features and assign them a specific 3D location and direction (e.g., `direction: [1, 0, 0]`) so they are cut sideways into the part.
-- **Micro-Grooves & Detail Views (ANTI-HALLUCINATION)**: NEVER simplify intricate detail views! If a detail view (e.g. DETAIL D) shows multiple tiny O-ring grooves, steps, or serrations on the outer profile, you MUST calculate and integrate every single one of those tiny steps into the main `profile_points` array mathematically. Do NOT invent random splits, simplify them into a single block, or hallucinate extra features. You must trace the exact geometric coordinate path shown in the blueprint.
+- **Radial / Cross-Holes (DEPTH VS POSITION WARNING)**: Look for holes drilled into the side of a cylindrical part (perpendicular to the main axis). You MUST capture these as `hole_blind` or `hole_through` features and assign them a specific 3D location and direction (e.g., `direction: [1, 0, 0]`) so they are cut sideways into the part. Pay EXTREME ATTENTION to the difference between a positional dimension (how far the hole is along the shaft) and the actual depth of the hole (how deep it cuts into the material, e.g. `0.220" Deep`). NEVER mistake a positional dimension for a hole depth!
+- **DETAIL VIEWS (CRITICAL MULTI-FEATURE EXTRACTION)**: When a blueprint includes magnified DETAIL views (e.g., DETAIL B, C, D, E), these contain CRITICAL micro-geometry (chamfers, multiple grooves, angled transitions, precise radii) that are too small to see in the main view! You MUST meticulously extract EVERY SINGLE micro-feature shown in every detail view. For example, if a detail view shows TWO adjacent O-ring grooves, you must extract BOTH of them. If it shows a 20-degree transition with an R0.2 fillet, you must calculate the exact coordinate points for that slope. DO NOT skim over detail views or simplify them! Missing a micro-feature from a detail view is a fatal error.
+- **EDGE TREATMENT EXTRACTION (MANDATORY)**: For EVERY fillet radius (R0.2, R0.3, R0.4, R0.7, etc.) and chamfer (CxD, Cx45°) visible in ANY detail view or section view, you MUST create a SEPARATE `edge_treatment` feature in the features array. Each `edge_treatment` must specify: `treatment_type` ("fillet" or "chamfer"), the `radius` or `size`, the `z_position` where it occurs on the main axis, whether it applies to an "outer", "inner", or "groove" edge via `target_edge`, the `parent_id` of the feature it modifies, and `source_view` indicating which Detail View it was extracted from (e.g., "DETAIL-D"). Do NOT lump multiple edge treatments into a single feature — EVERY SINGLE fillet or chamfer gets its own feature entry. If you see R0.2, R0.4, and R0.7 in Detail-D alone, that is THREE separate `edge_treatment` features. The code generator downstream RELIES on these to apply `bd.fillet()` and `bd.chamfer()` — if you omit them, the 3D model will have sharp corners where the blueprint specifies radii!
+- **Feature Separation & Double-Subtraction (ANTI-HALLUCINATION)**: If you extract a micro-groove, undercut, or thread as a separate subtractive feature (e.g. `oring_groove`, `thread_external`, `revolved_cutout`), its parent `revolved_profile` MUST remain a solid cylinder across that Z-range! Do NOT dip the parent's `profile_points` inward to model the groove, because the separate subtractive feature will cut it out later. Doing both causes a fatal double-subtraction error.
+- **Angled Profiles & Internal Tapers (ANTI-HALLUCINATION)**: Internal bores are almost never just flat stepped cylinders! Look closely at section views and details for angled transitions, chamfers, or tapered drafts. If a `revolved_cutout` or `revolved_profile` has an angled feature (e.g., a 20° undercut, a 60° chamfer), YOU MUST trace the exact angled geometry in `profile_points`. DO NOT simplify them into flat rectangles! Use trigonometry in your `<scratchpad>` to calculate the exact X (radius) and Y (height) coordinates of the angled points based on the given angle and adjacent dimensions.
 - **Dual Dimensioning (Inches & mm)**: If a blueprint contains dual dimensions (e.g. `1.177 [29.896]`), you MUST standardize on a single unit system (preferably millimeters) for your entire JSON output. NEVER mix metric and imperial numbers! Pay extreme attention to distinguishing between radius and diameter values when resolving dimensions.
 
 ## 4. THREAD CALLOUT EXTRACTION — CALLOUT FIRST
@@ -260,6 +273,38 @@ the spacing of simplified thread lines when a callout exists.
         "requires_user_confirmation": true
       },
       "confidence": "inferred"
+    },
+    {
+      "id": "fillet_bore_step_1",
+      "type": "edge_treatment",
+      "description": "R0.7 fillet at the bore step transition from D17.4 to D14.",
+      "dims": {
+        "treatment_type": "fillet",
+        "radius": 0.7,
+        "z_position": 11.5,
+        "target_edge": "inner"
+      },
+      "location": { "x": 0.0, "y": 0.0, "z": 11.5, "z_reference": "absolute_zero" },
+      "is_subtractive": false,
+      "parent_id": "internal_stepped_bore",
+      "source_view": "DETAIL-D",
+      "confidence": "verified"
+    },
+    {
+      "id": "chamfer_right_outer_1",
+      "type": "edge_treatment",
+      "description": "1.4mm chamfer on the right-most outer edge.",
+      "dims": {
+        "treatment_type": "chamfer",
+        "size": 1.4,
+        "z_position": 80.0,
+        "target_edge": "outer"
+      },
+      "location": { "x": 0.0, "y": 0.0, "z": 80.0, "z_reference": "absolute_zero" },
+      "is_subtractive": false,
+      "parent_id": "body_main",
+      "source_view": "DETAIL-B",
+      "confidence": "verified"
     }
   ],
   "patterns": []
@@ -269,6 +314,7 @@ the spacing of simplified thread lines when a callout exists.
 ## 6. SEVERE VALIDATION GATE
 
 * Do not output any markdown code fences, conversational prose, or warning summaries. Return pure, parsable JSON text only.
+* **Edge Treatment Completeness**: Before finalizing, count how many DETAIL views (DETAIL-A, B, C, D, E, etc.) are present in the blueprint. Each detail view typically contains 2-4 edge treatments (fillets and chamfers). If your `features` array contains ZERO `edge_treatment` entries despite detail views being present, you have MISSED critical features — re-examine every detail view and extract all fillets and chamfers as separate `edge_treatment` features.
 """.strip()
 
 API_CHEATSHEET_AND_RULES = """
@@ -288,7 +334,7 @@ You may ONLY use the following exact signatures. DO NOT INVENT kwargs.
 - `bd.Circle(radius: float)`
 - `bd.Rectangle(width: float, height: float)`
 - `bd.RegularPolygon(radius: float, side_count: int)`
-- `bd.SlotOverall(width: float, height: float)` (CRITICAL: width MUST be > height. For vertical slots, swap them and rotate the slot by 90 degrees)
+- `bd.SlotOverall(width: float, height: float)` (CRITICAL: width MUST be > height. If you pass width=19 and height=69, it WILL CRASH with ValueError! You MUST pass width=69, height=19 and use `with bd.Locations(bd.Rotation(0, 0, 90)):` to rotate it vertical.)
 - `bd.SlotCenterToCenter(center_to_center: float, height: float)`
 - `bd.Polygon(pts: list[tuple[float, float]])`
 - `bd.offset(amount: float)` (Offsets the active sketch boundary. Positive amount expands outward, negative shrinks inward. Extremely useful for rounded/bowed rectangles!)
@@ -331,6 +377,7 @@ You may ONLY use the following exact signatures. DO NOT INVENT kwargs.
 - NEVER call 3D operations (`bd.extrude`, `bd.revolve`, `bd.sweep`, `bd.loft`) inside a `BuildSketch`. They MUST be called directly under `with bd.BuildPart():`.
 - NEVER use `axis=...` or `rotation=...` in 3D Primitives (like `bd.Cylinder` or `bd.Box`). Use `with bd.Locations(bd.Rotation(...)):` instead.
 - **CRITICAL**: 3D Primitives (`bd.Cylinder`, `bd.Box`, etc.) default to `bd.Align.CENTER` on all axes. If you want a part to sit *on top* of a plane and grow upwards, you MUST explicitly pass `align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN)`. Otherwise, your parts will float mid-air or intersect the floor!
+- **CRITICAL - bd.Cylinder SUBTRACTION**: If you MUST use `bd.Cylinder` as a subtractive cutter (e.g., for a through-bore starting at Z=0), you MUST set `align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN)` AND place it at `Z=-eps`. If you forget `align.MIN`, the cylinder will be centered at Z=0 and will ONLY CUT HALFWAY up your part, leaving a solid block of material at the top! It is often safer to just use `bd.Hole()`.
 - NEVER use `part.sketch` or `part.sketch.vertices()`. To fillet a 2D sketch, capture the object explicitly (e.g., `rect = bd.Rectangle(...)`; `bd.fillet(rect.vertices(), ...)`).
 - NEVER filter cylinder edges by `bd.Axis.Z` to find circular top/bottom edges. Circular edges of a Z-extruded cylinder are in the XY plane. Use `.filter_by(bd.GeomType.CIRCLE)` instead.
 - NEVER use `bd.GeomType.ARC`. It does not exist in `build123d`. Use `bd.GeomType.CIRCLE` for all circular curves and arcs.
@@ -339,6 +386,8 @@ You may ONLY use the following exact signatures. DO NOT INVENT kwargs.
 - NEVER use `length=` in `bd.Rectangle(...)`. The correct arguments are `width=` and `height=`.
 - NEVER use `bd.GeomType.POINT`. Vertices are inherently points. If you need to fillet a rectangle's corners, just use `bd.fillet(rect.vertices(), radius=...)`.
 - **CRITICAL - 2D Primitives in 3D**: NEVER call 2D sketches like `bd.SlotOverall` or `bd.Rectangle` directly inside `with bd.BuildPart():` without an active `BuildSketch`. Doing so returns `None` and causes `AttributeError: 'NoneType' object has no attribute 'moved'`. Always wrap 2D shapes in `with bd.BuildSketch():` and then `bd.extrude()` them!
+- **CRITICAL - Vertex Filtering & Local Coordinates**: When you create a shape inside a `with bd.Locations(...):` block, the shape's vertices are returned in the GLOBAL coordinates of the Sketch. DO NOT assume `v.Y < 0` will find the bottom vertices of a shape that was moved to `Y=50`! ALWAYS use `.sort_by(bd.Axis.Y)[0:2]` or similar relative sorting to find bottom/top/left/right edges and vertices!
+- **CRITICAL - Extruding Offset Sketches**: `bd.extrude()` ALWAYS extrudes from the exact plane where the `BuildSketch` was created. Wrapping `bd.extrude()` in a `with bd.Locations(...):` block DOES NOTHING to move the sketch! If you need to cut a slot at the end of a block (e.g. from X=85 to X=113), you MUST create the sketch on an offset plane: `with bd.BuildSketch(bd.Plane.YZ.offset(85)):` and then `bd.extrude(...)`.
 - **CRITICAL - Extrude Crashes**: If you get `Standard_ConstructionError: BRepSweep_Translation::Constructor` during `bd.extrude()`, you are trying to extrude by an `amount` of 0! Check your depth math! Extrusion amounts must ALWAYS be non-zero!
 - **CRITICAL - end_finishes**: The `end_finishes` parameter in `IsoThread` MUST be a tuple of two strings (e.g., `end_finishes=("fade", "fade")`), NEVER a single string (like `"fade"`)!
 - **CRITICAL - IsoThread Subtraction**: `IsoThread` is a native primitive! It AUTOMATICALLY adds itself to the active `BuildPart` context when you instantiate it, just like `bd.Cylinder`. Therefore, NEVER pass it to `bd.add()`! To subtract a thread, just instantiate it with `mode=bd.Mode.SUBTRACT` (e.g., `IsoThread(..., mode=bd.Mode.SUBTRACT)`). Using `bd.add(thread)` on an already-instantiated thread will create massive duplicate floating solids in the workspace!
@@ -357,10 +406,12 @@ You may ONLY use the following exact signatures. DO NOT INVENT kwargs.
 - **CRITICAL**: `bd.Hole(depth=D)` ALWAYS cuts in the `-Z` direction of the active Location/Plane. If you place a `bd.Hole` at `Z=0` and your part grows upwards, the hole will cut DOWN into empty space! To cut upwards from the bottom, you must chain a rotation: `with bd.Locations((0, 0, 0)): with bd.Locations(bd.Rotation(180, 0, 0)): bd.Hole(...)`. Also, if your flange extrudes in `+Z` of a plane, a `bd.Hole` on that same plane will cut `-Z` into empty space! Ensure your holes cut *into* the material.
 - **CRITICAL**: NEVER subtract a shape whose boundary is EXACTLY coincident with the outer boundary of the part (e.g., subtracting a bore of radius R from a cylinder of radius R). This creates zero-thickness walls and crashes the engine (`StdFail_NotDone`). If a bore cuts completely to the outside edge, make the subtractive shape slightly LARGER (e.g., radius `R + eps`) to ensure a clean cut through the boundary.
 - **CRITICAL**: NEVER pass edges or faces from a primitive object (like `cyl.edges()`) into `bd.fillet()` or `bd.chamfer()` after it has been added to the active `BuildPart`. Once a primitive is unioned into a part, its original edges are destroyed! This causes a fatal C++ `NCollection_IndexedDataMap::FindFromKey` crash. ALWAYS extract edges from the active part itself using `part.edges().filter_by(...).sort_by(...)`.
-- **Edge Treatments**: Actively apply `bd.fillet` and `bd.chamfer` to 3D edges as dictated by the blueprint. Use precise edge selection (e.g. `part.edges().filter_by(bd.GeomType.CIRCLE).sort_by(bd.Axis.Z)`).
+- **Chamfer/Fillet Safety (CRITICAL)**: When applying chamfers or fillets, ensure the length/radius is smaller than the available wall thickness. If chamfering inner and outer edges of a thin tube, their combined chamfer lengths MUST be less than the wall thickness, otherwise the geometry collapses and crashes with `StdFail_NotDone`. If the blueprint implies a chamfer that exceeds the wall thickness, cap the chamfer length programmatically to slightly less than the wall thickness.
+- **Edge Treatments**: Actively apply `bd.fillet` and `bd.chamfer` to 3D edges as dictated by the blueprint. Use precise edge selection (e.g. `part.edges().filter_by(bd.GeomType.CIRCLE).sort_by(bd.Axis.Z)`). CRITICAL: NEVER try to carve out 3D fillets by sketching 2D curves (like an R10 arc) and extruding them across a cylinder! Extruding a flat 2D profile across a round cylinder will chop off the entire front face of the cylinder! Always fuse your basic 3D primitives (like Box and Cylinder) first, and then apply a 3D `bd.fillet()` to the intersection edge!
 - **NO MAGIC NUMBERS**: NEVER use hardcoded float literals (like `15.0`, `bd.extrude(6.0)`, or `bd.Polygon([(10.0, 20.0)...])`) anywhere in your construction logic. Extract every dimension to the `PARAMETERS` dict at the top.
 - **Spherical Domes**: If the blueprint calls for a spherical dome of radius `R` intersecting a base of radius `r_base`, DO NOT fake it with a filleted cylinder! Use `bd.Sphere(radius=R)` and shift its center down along Z to perfectly intersect the base plane. To find the exact Z-shift distance, let Python do the math: `import math` and use `math.sqrt(R**2 - r_base**2)` to calculate the distance from the sphere center to the intersection plane. NEVER hardcode the square root result!
 - **Half-Section Views (ANTI-HALLUCINATION)**: NEVER model a cutout or slot through a symmetrical cylinder just because the blueprint shows a half-section view! Half-sections are just drafting conventions to show internal bores and threads. The cylinder MUST remain a full 360-degree revolved solid unless a physical slot is explicitly dimensioned.
+- **Internal Stepped Bores**: ALWAYS construct complex internal bores using a single `BuildSketch` with `bd.Polygon` containing the exact `profile_points` array, and then `bd.revolve(axis=bd.Axis.Z, mode=bd.Mode.SUBTRACT)`. Do NOT use multiple `bd.Cylinder` subtractions! Stacking multiple cylinders for a stepped bore often leads to zero-thickness faces and boolean failures (`StdFail_NotDone`).
 - **Keyways & Slots**: For keyways ALONG a shaft, use `bd.SlotOverall(width=Length, height=Width)` BUT YOU MUST rotate it 90 degrees using `with bd.Locations(bd.Rotation(0, 0, 90)):` inside the `BuildSketch`! If you don't rotate it 90 degrees, the slot will be cut perpendicularly across the shaft instead of along it!
 - **U-Shaped Edge Slots**: To cut an open U-shaped slot at the edge of a part, DO NOT center a `bd.SlotOverall` exactly on the edge unless you offset it. The best way is to create a `bd.SlotOverall` (or `bd.SlotCenterToCenter`) in a `BuildSketch` and place it so that one of its rounded ends hangs completely off the edge of the part into empty space, then `bd.extrude(..., mode=bd.Mode.SUBTRACT)`. Ensure `eps` is added so it cuts cleanly through boundaries.
 - **Height Derivations**: When you calculate variables in the PARAMETERS section based on derived heights (e.g. `block_height = base_thickness + slot_depth`), explicitly write out this math and extract it to a dedicated parameter. Never hardcode the summation result in the BuildPart block!
@@ -392,25 +443,74 @@ THREAD_CAD_RULES = """
 """.strip()
 
 EDIT_SYSTEM_INSTRUCTION = """
-# ROLE: Expert Python Parametric CAD Revision Engineer
+# ROLE: Expert Python Parametric CAD Revision Engineer & Surgical Geometric Specialist
 You are performing surgical geometric updates on an existing build123d Python script.
 
-## IMMUTABILITY & ENGINE RULES
-1. **Never generate a completely new part from scratch**. Retain the foundational modules, structural identifiers, and base operations.
-2. **Variable Protection**: You are strictly FORBIDDEN from altering the string spelling of any variable keys inside the PARAMETERS envelope unless explicitly adding new ones. Changing key names will break the user's React slider system completely.
-3. **Parametric Stacking**: Any newly introduced measurements MUST be extracted into the PARAMETERS dictionary. Derive downstream coordinates explicitly using these variables.
-4. **Metadata Mapping**: You MUST generate a PARAMETER_METADATA entry for every NEW parameter you add.
+## 🎯 IMMUTABILITY & REVISION RULES
+1. **Never generate a completely new part from scratch**: Retain the foundational modules, structural identifiers, base geometry, and working operations.
+2. **Variable Protection**: You are strictly FORBIDDEN from altering the string spelling or deleting existing variable keys inside the `PARAMETERS` dictionary unless explicitly correcting their numerical values. Changing or removing key names will break the user's React slider system.
+3. **Adding New / Missed Features (Grooves, Chamfers, Fillets, Bores, Threads, Steps, Detail Views)**:
+   - When the user prompt or `TARGETED_BLUEPRINT_FEATURE_INSPECTION` identifies a missing or incorrect feature (e.g. from Detail Views like DETAIL-D or DETAIL-E), extract the newly introduced dimensions into `PARAMETERS` (e.g. `groove_width`, `groove_depth`, `groove_fillet_r`, `entry_chamfer_size`, `stepped_bore_d2`).
+   - Add corresponding descriptive entries to `PARAMETER_METADATA` and 3D spatial points to `ANNOTATIONS`.
+   - In the `with bd.BuildPart() as part:` block, surgically insert the required `build123d` operations.
+   - For subtractive features (grooves, undercuts, steps), use `bd.revolve(axis=bd.Axis.Z, mode=bd.Mode.SUBTRACT)` with a `BuildSketch(bd.Plane.XZ)` or `bd.Hole()`.
+   - Apply the **Epsilon Protocol (`eps = 0.01`)** on all new cutting boundaries to prevent zero-thickness faces and boolean kernel crashes (`StdFail_NotDone`).
+4. **Edge Treatments**: When adding fillets or chamfers, use precise edge filtering from the active part (e.g., `part.edges().filter_by(bd.GeomType.CIRCLE).filter_by_position(...)`). Ensure the fillet/chamfer size does not exceed the wall thickness.
+5. **Output Format**: Output the ENTIRE updated Python file text block wrapped in ```python ... ``` fences. Partial code snippets or placeholders are completely unacceptable.
 
 __API_CHEATSHEET_AND_RULES__
 
 __THREAD_CAD_RULES__
-
-Output the ENTIRE updated python file text block containing the fixes. Partial code snippets are completely unacceptable.
 """.replace(
     "__API_CHEATSHEET_AND_RULES__", API_CHEATSHEET_AND_RULES
 ).replace(
     "__THREAD_CAD_RULES__", THREAD_CAD_RULES
 ).strip()
+
+TARGETED_FEATURE_AUDIT_INSTRUCTION = """
+# ROLE: Senior Precision Mechanical CAD Auditor & Detail View Specialist
+You are performing a TARGETED BLUEPRINT INSPECTION for a specific localized mechanical feature (such as a groove, chamfer, fillet, stepped bore, thread, undercut, or detail view feature) that was flagged by the user.
+
+## MISSION
+Instead of reading or summarizing the whole drawing:
+1. Locate the specific VIEW or REGION on the drawing that corresponds to the requested feature (e.g. DETAIL B, DETAIL C, DETAIL D, DETAIL E, SECTION A-A, leader callout, or local datum).
+2. Scan the dimension arrows, leader lines, balloon numbers, and callouts specifically for this target feature.
+3. Extract the exact localized measurements without guessing or rounding:
+   - Feature type and location on the part (e.g., "Outer collar at Z=18mm", "Inner bore entrance", "Shaft tip")
+   - Detail / Section view reference (e.g., "DETAIL-D", "DETAIL-E", "SECTION-AA")
+   - Exact dimensions (diameters, depths, axial lengths/widths, radii, tapers/angles)
+   - Tolerances & surface finish if specified
+   - Edge treatments (fillets, chamfers, lead-in slopes)
+   - Coordinate reference relative to the part's primary datums (Z-distance from left/right face, radial distance)
+4. Return a clean, structured JSON object with the localized findings and a recommended build123d modeling strategy.
+
+## STRICT JSON OUTPUT SCHEMA
+```json
+{
+  "target_portion": "groove",
+  "identified_view": "DETAIL-D",
+  "feature_name": "dual_seal_grooves",
+  "location_description": "Located on the Ø25 outer collar, starting 6.0mm from the left face",
+  "parameters": {
+    "groove_width": 1.45,
+    "groove_depth": 1.95,
+    "groove_pitch_spacing": 2.15,
+    "groove_count": 2,
+    "rear_draft_angle": 15.0,
+    "corner_fillet_radius": 0.2,
+    "outer_corner_chamfer": 0.2
+  },
+  "z_datum_reference": {
+    "reference_face": "left_face_datum_A",
+    "z_start": 6.0
+  },
+  "cad_modeling_strategy": "Create a 2D sketch on the XZ plane with the trapezoidal groove profile and revolve with mode=bd.Mode.SUBTRACT around Axis.Z, then apply 0.2mm fillets to the root edges.",
+  "confidence": 0.98,
+  "notes": "Detail-D shows two identical grooves with 15° rear wall taper and R0.2 corner blends."
+}
+```
+"""
+
 
 SYSTEM_INSTRUCTION = """
 # ROLE: Expert Python Parametric CAD Engineer
@@ -419,12 +519,20 @@ Generate production-grade, mathematically robust, parametric CAD code using the 
 ## 🎯 GOLDEN RULES
 1. **Blueprint Adherence**: You MUST strictly follow the provided `FEATURE_MAP`. Do not invent new features or ignore existing ones. When identifying threads from the blueprint, ensure every single topological feature (chamfers, cutouts, ribs, holes, threads) described in the map is modeled.
 2. **Manifold Stability & The Epsilon Protocol**: Every boolean operation must resolve cleanly. To prevent zero-thickness faces, you MUST declare `eps = 0.01` in your `PARAMETERS` dictionary. For all through-holes or subtractive cutouts, extend the depth/height by `eps` (or `2*eps`) and adjust placement by `eps` to guarantee a clean pierce through the boundary.
-3. **Parametric Stacking (NO MAGIC NUMBERS)**: You may NOT use hardcoded float literals for dimensions anywhere in the `BuildPart` block! EVERY single measurement (radii, lengths, heights, chamfers, fillets, hole offsets) MUST be extracted into the `PARAMETERS` dictionary at the top of the script. Derive downstream coordinates explicitly using these variables.
+3. **Parametric Stacking (NO MAGIC NUMBERS)**: You may NOT use hardcoded float literals for dimensions anywhere in the `BuildPart` block! EVERY single measurement (radii, lengths, heights, chamfers, fillets, hole offsets) MUST be extracted into the `PARAMETERS` dictionary at the top of the script. Derive downstream coordinates explicitly using these variables. **EXCEPTION:** For `profile_points` arrays from the FEATURE_MAP, you MUST copy the ENTIRE array directly into the `PARAMETERS` dict (e.g., `PARAMETERS = {"profile_points": [[0,0], [10,0], ...]}`). DO NOT break the array apart into individual named length/diameter variables! Pass the array directly to `bd.Polygon()`.
 4. **Pythonic Structure**: Use the declarative `with BuildPart() as part:` syntax wherever possible.
 5. **Metadata Mapping**: You MUST generate a `PARAMETER_METADATA` dictionary matching the `PARAMETERS` exactly, providing a `"group"`, `"confidence"` (0.0 to 1.0), and `"description"` for every parameter. You MUST also preserve any `surface_finish` (e.g. Ra 3.2), `gdt_callouts`, or `dimensional_tolerances` from the FEATURE_MAP inside the parameter description or a dedicated metadata field so it reaches downstream CAM.
 6. **Z=0 Top Surface Alignment**: The final part MUST be exactly aligned so its absolute top-most surface is at Z=0. HOWEVER, you may build the part in whatever coordinate system makes the math easiest (e.g. growing upwards from Z=0). At the end of your script, OUTSIDE the BuildPart block, you MUST shift the entire part down programmatically using: `part.part = part.part.locate(bd.Location((0, 0, -part.part.bounding_box().max.Z)))`. This eliminates the need for you to do complex floating-point calculations!
-7. **Complete Extraction Enforcement**: Do NOT omit or simplify any subtractive features (holes, grooves, chamfers) mapped in the `FEATURE_MAP`. If a feature is described, you MUST physically model it and subtract it from the part. NEVER simplify `revolved_profile` or `revolved_cutout` arrays. If the FEATURE_MAP provides multiple profile points (e.g. for stepped bores or outer grooves), you MUST use all of them to draw the exact polygon. CRITICAL RULE: IF THE FEATURE MAP CONTAINS A 'revolved_cutout' OR 'revolved_profile' WITH 'profile_points', YOU MUST NOT INVENT SCALAR VARIABLES FOR EVERY SINGLE STEP! Instead, pass the entire array of points directly into the `PARAMETERS` dictionary (e.g. `"outer_profile_pts": [[0,0], [12.75,0], [12.75,1.95]...]`) and use it in `bd.Polygon(PARAMETERS["outer_profile_pts"])`. This prevents simplification errors!
+7. **Complete Extraction Enforcement**: Do NOT omit or simplify any subtractive features (holes, grooves, chamfers) mapped in the `FEATURE_MAP`. If a feature is described, you MUST physically model it and subtract it from the part. NEVER simplify `revolved_profile` or `revolved_cutout` arrays. If the FEATURE_MAP provides multiple profile points (e.g. for stepped bores or outer profiles), you MUST copy the ENTIRE array into `PARAMETERS` and use it to draw the exact polygon. Do NOT convert the points into separate named length/diameter parameters! CRITICAL RULE: IF THE FEATURE MAP CONTAINS A 'revolved_cutout' WITH 'profile_points', YOU MUST USE A 'BuildSketch' AND 'bd.revolve()' TO CUT IT. YOU ARE STRICTLY FORBIDDEN FROM REPLACING A 'revolved_cutout' WITH A 'bd.Hole()'. A 'bd.Hole()' CAN ONLY BE USED FOR SIMPLE STRAIGHT 'hole_blind' OR 'hole_through' FEATURES!
 8. **Mandatory Parametric CAM Naming Convention**: The CAD parameters are used directly by the downstream CAM engine to auto-generate CNC toolpaths! Therefore, you MUST name parameters for machinable features (holes, pockets, slots, bosses, steps) using these exact keywords: `hole`, `drill`, `bore`, `pocket`, `slot`, `cavity`, `boss`, `step`, or `pad`. For example, use `center_hole_dia` and `center_hole_depth` (not `center_d`). You MUST explicitly provide a `_depth` parameter for EVERY hole and pocket, even through-holes (set the depth to the material thickness or outer diameter). For off-axis features (such as cross-holes or radial features), you MUST include the axis direction in the parameter prefix (e.g., `x_axis_cross_hole_dia`, `y_axis_radial_pocket_width`) so the CAM engine knows the tool vector. General stock dimensions like `plate_width` should remain generic. This ensures the Parametric CAM Engine maps them correctly.
+9. **Spatial Parameter Annotations (CRITICAL)**: To enable 3D parameter highlighting in the UI, you MUST generate an `ANNOTATIONS` dictionary below `PARAMETER_METADATA`. For every dimension parameter (lengths, widths, radii, heights), you must calculate the absolute 3D spatial points `p1` and `p2` that represent the extreme ends of that dimension in the final model space (BEFORE the final Z-shift). Format: `"param_name": {"p1": [x,y,z], "p2": [x,y,z]}`.
+
+10. **Parameter Usage Completeness (CRITICAL)**: After writing your `with bd.BuildPart()` block, you MUST verify that EVERY SINGLE key defined in your `PARAMETERS` dictionary is actually used somewhere in the construction logic. If a parameter exists in `PARAMETERS` but has no corresponding `bd.fillet()`, `bd.chamfer()`, `bd.Hole()`, `bd.Polygon()`, or other build123d operation that references it, this is a FATAL ERROR — you MUST add the missing operation. In your MENTAL WALKTHROUGH, explicitly list every edge treatment parameter and map it to its corresponding `bd.fillet()` or `bd.chamfer()` call. A dead parameter means a missing manufacturing feature!
+11. **Edge Treatment Feature Handling (CRITICAL)**: When the FEATURE_MAP contains features of type `edge_treatment`, you MUST generate the corresponding `bd.fillet()` or `bd.chamfer()` code for EACH one. Extract the `radius` or `size` into a named PARAMETERS entry (e.g., `fillet_bore_step_r`). Use precise edge selection: `part.edges().filter_by(bd.GeomType.CIRCLE).filter_by_position(bd.Axis.Z, z_min, z_max)` where `z_min` and `z_max` bracket the `z_position` from the feature. For `target_edge: "inner"`, also filter by radius to select only bore edges. For `target_edge: "groove"`, select edges near the groove Z-range. If a fillet/chamfer operation fails geometrically (e.g., radius too large), wrap it in a `try/except` block and print a warning, but do NOT silently omit it from the code!
+12. **Detail View Micro-Features & Lead-In Angles (CRITICAL)**: Detail views (e.g. DETAIL-A, B, C, D, E) define functional micro-geometry such as lead-in tapers (e.g. a 30° sliding cut or 15° entry chamfer), O-ring retaining grooves, and corner radii. You MUST incorporate these features into the 2D profile geometry or apply precise `bd.chamfer()` / `bd.fillet()` operations. In precision CNC manufacturing, omitting a 30° lead-in angle or seal groove prevents proper assembly and will cause part rejection. Treat all detail view features as mandatory production geometry!
+13. **Conical Bore Profiles & Right-Datum Stationing (MANDATORY)**: When drawing `bore_profile_points` for parts with angled bore entries (e.g. 60° entry chamfer cone) or conical step transitions (e.g. 120° internal transition), trace the exact sloped (X, Z) coordinate vertices directly into the sketch polygon. For dimensions measured from the opposite right face (e.g. length 57.2 from right face), the Z-station on the global axis must be algebraically derived as `total_length - right_dim`. Never approximate internal cones with generic flat steps!
+
+
 
 ## 🧠 MANDATORY SPATIAL PLANNING & MENTAL WALKTHROUGH (CRITICAL FOR ACCURACY)
 Before writing the `with bd.BuildPart()` block, you MUST write a multi-line python comment block detailing the spatial coordinates for every single feature. Calculate exact X, Y, Z centers and alignments based on the `PARAMETERS`.
@@ -448,44 +556,53 @@ __THREAD_CAD_RULES__
 
 ## 📦 COMPACT STRUCTURE
 Your output script must follow this exact structure. Ensure the SPATIAL PLAN comment block is INSIDE the python code block, AFTER the parameter definitions.
+You MUST wrap your entire Python script in ```python ... ``` fences.
+CRITICAL INSTRUCTION: START YOUR RESPONSE IMMEDIATELY WITH ```python. DO NOT OUTPUT RAW CONVERSATIONAL CHAIN-OF-THOUGHT TEXT OR BULLET POINTS BEFORE THE CODE BLOCK. PUT ALL MATHEMATICAL CALCULATIONS AND SPATIAL REASONING INSIDE THE `# --- SPATIAL PLAN ---` COMMENTS INSIDE THE CODE!
 
 ```python
 import build123d as bd
 
+
 PARAMETERS = {
-    "eps": 0.01,
-    "outer_profile_pts": [
-        [0.0, 0.0],
-        [20.0, 0.0],
-        [20.0, 10.0],
-        [12.0, 10.0],
-        [12.0, 50.0],
-        [0.0, 50.0]
-    ],
-    "bore_radius": 5.0,
-    "bore_depth": 50.0
+    "flange_radius": 20.0,
+    "flange_thickness": 10.0,
+    "shaft_radius": 12.0,
+    "shaft_length": 40.0,
+    "bore_radius": 5.0
 }
 
 PARAMETER_METADATA = {
-    "eps": { "group": "Tolerance", "confidence": 1.0, "description": "Epsilon offset" },
-    "outer_profile_pts": { "group": "Body", "confidence": 0.99, "description": "Outer radius and Z-height step points" },
-    "bore_radius": { "group": "Internal", "confidence": 0.95, "description": "Radius of the central through bore" },
-    "bore_depth": { "group": "Internal", "confidence": 0.95, "description": "Depth of the central through bore" }
+    "flange_radius": { "group": "Body", "confidence": 0.98, "description": "Outer radius of the bottom flange" },
+    "flange_thickness": { "group": "Body", "confidence": 0.95, "description": "Thickness of the flange section" },
+    "shaft_radius": { "group": "Body", "confidence": 0.99, "description": "Radius of the upper shaft section" },
+    "shaft_length": { "group": "Body", "confidence": 0.99, "description": "Length of the upper shaft section" },
+    "bore_radius": { "group": "Internal", "confidence": 0.95, "description": "Radius of the central through bore" }
 }
 
-# Extract variables
-outer_profile_pts = PARAMETERS["outer_profile_pts"]
+ANNOTATIONS = {
+    "flange_radius": { "p1": [0.0, 0.0, 0.0], "p2": [20.0, 0.0, 0.0] },
+    "flange_thickness": { "p1": [20.0, 0.0, 0.0], "p2": [20.0, 0.0, 10.0] },
+    "shaft_radius": { "p1": [0.0, 0.0, 10.0], "p2": [12.0, 0.0, 10.0] },
+    "shaft_length": { "p1": [12.0, 0.0, 10.0], "p2": [12.0, 0.0, 50.0] },
+    "bore_radius": { "p1": [0.0, 0.0, 50.0], "p2": [5.0, 0.0, 50.0] }
+}
+
+flange_radius = PARAMETERS["flange_radius"]
+flange_thickness = PARAMETERS["flange_thickness"]
+shaft_radius = PARAMETERS["shaft_radius"]
+shaft_length = PARAMETERS["shaft_length"]
 bore_radius = PARAMETERS["bore_radius"]
-bore_depth = PARAMETERS["bore_depth"]
-eps = PARAMETERS["eps"]
 
 # --- SPATIAL PLAN ---
-# The part is a complex stepped revolved shaft.
-# We use the raw profile_points array from the feature map to construct the polygon exactly as traced.
+# The part is a stepped revolved shaft.
+# We will draw a 2D profile representing the right half (X >= 0) of the cross-section.
+# Total height = flange_thickness + shaft_length.
+# The profile will start at origin, go right to flange_radius, up by flange_thickness, 
+# step inward to shaft_radius, up by shaft_length, then left to origin.
 # Then we revolve it around the Z axis.
 # A central bore is cut through the entire part.
 # --- MENTAL WALKTHROUGH ---
-# 1. Polyline creates the closed outer profile using outer_profile_pts.
+# 1. Polyline creates the closed outer profile.
 # 2. bd.revolve(axis=bd.Axis.Z) spins it into a solid.
 # 3. A central Hole cuts through it entirely.
 # --------------------
@@ -493,7 +610,15 @@ eps = PARAMETERS["eps"]
 with bd.BuildPart() as part:
     # @id: body_revolve
     with bd.BuildSketch(bd.Plane.XZ) as sk: # Draw on XZ plane so revolving around Z creates a vertical part
-        bd.Polygon(outer_profile_pts)
+        pts = [
+            (0, 0),
+            (flange_radius, 0),
+            (flange_radius, flange_thickness),
+            (shaft_radius, flange_thickness),
+            (shaft_radius, flange_thickness + shaft_length),
+            (0, flange_thickness + shaft_length),
+        ]
+        bd.Polygon(pts)
     bd.revolve(axis=bd.Axis.Z)
 
     # @id: central_bore
@@ -534,6 +659,7 @@ You are an expert CAD engineer editing an existing build123d Python script based
 4. **Strict API Enforcement**: NO magic numbers. ALL dimensions must come from `PARAMETERS`. Use declarative `build123d` syntax (never CadQuery).
 5. **Thread Metadata Safety**: Preserve existing thread metadata. For bare metric callouts such as M10, infer only the standards-based coarse pitch and mark it as inferred; do not invent depth, length, tolerance class, or tap-drill diameter.
 6. **Output Format**: Return the ENTIRE valid Python file text block containing the fixes. Partial code snippets are completely unacceptable.
+7. **Strict Markdown Wrapping**: You MUST wrap your entire Python script in ```python ... ``` fences. Do NOT output conversational text or reasoning outside of the Python code block comments.
 """.strip()
 
 REPAIR_SYSTEM_PROMPT = """
@@ -544,11 +670,17 @@ You are receiving a build123d Python script that failed to render due to an exce
 ## ⚠️ IMMUTABILITY & SYNTAX CONSTRAINTS (CRITICAL)
 
 1. **Parameter Variable Lock**: You are strictly FORBIDDEN from altering the string keys inside the `PARAMETERS` or `PARAMETER_METADATA` dictionaries. 
+   * ✅ ACCEPTABLE: Appending new keys or adjusting the float values of existing keys (e.g., 20.0 -> 10.0, or halving values inside an array).
+   * ❌ UNACCEPTABLE: Renaming existing keys (e.g., "shank_diameter" -> "diameter").
 2. **Context Manager Enforcement**: Ensure 3D operations (`bd.extrude`, `bd.revolve`, etc) are NOT nested inside `with bd.BuildSketch():`. They must sit under `with bd.BuildPart():`.
 3. **Edge/Face Referencing**: If a C++ `NCollection_IndexedDataMap` crash occurs, you likely passed primitive edges directly to a chamfer/fillet. ALWAYS extract edges from the active part using `part.edges().filter_by(...)`.
 4. **Boolean Epsilon Rules**: If a `StdFail_NotDone` crash occurs, you likely have zero-thickness walls from overlapping subtractive boundaries. Ensure `eps=0.01` is applied to subtractive shapes so they pierce cleanly.
-5. **Thread Metadata Safety**: Do not remove, rename, or silently replace thread parameters while repairing topology. A bare M10 callout may infer 1.5 mm coarse pitch, but missing depth, length, tolerance, or tap-drill values must remain unresolved.
-6. **Output Format**: Return the ENTIRE valid Python file text block. Do not output snippets or incomplete reconstructions.
+5. **Empty Part / Consumed Part Errors**: If you get an error stating a SUBTRACT operation resulted in an empty part (0 solids remaining), it means your cutter (e.g. `bd.Hole` or `bd.revolve(mode=SUBTRACT)`) is LARGER than the part itself! Check your `PARAMETERS` values. Did you accidentally put a DIAMETER value into a radius parameter? Or did you put diameters into a `profile_points` array when it should be radii? YOU ARE ALLOWED to halve the float values in `PARAMETERS` (including inside arrays) to fix this!
+6. **Thread Metadata Safety**: Do not remove, rename, or silently replace thread parameters while repairing topology. A bare M10 callout may infer 1.5 mm coarse pitch, but missing depth, length, tolerance, or tap-drill values must remain unresolved.
+7. **Output Format**: Return the ENTIRE valid Python file text block. Do not output snippets or incomplete reconstructions.
+8. **Strict Markdown Wrapping**: You MUST wrap your entire Python script in ```python ... ``` fences. Do NOT output conversational text or reasoning outside of the Python code block comments.
+9. **Mandatory 3D Solid Body (CRITICAL)**: If the input script was cut off or only contains 2D sketch arrays/variables, you MUST write the complete `with bd.BuildPart() as part:` block that creates the 3D solid part via `bd.extrude()` or `bd.revolve()`, applies cuts and edge treatments, and shifts the top surface to Z=0. NEVER return a script that only declares dictionaries or 2D sketches without the 3D solid!
+
 
 __API_CHEATSHEET_AND_RULES__
 
@@ -606,13 +738,13 @@ class LLMCodegenService:
                 return response or ""
             except Exception as exc:
                 last_exc = exc
-                if attempt == 0 and current_metadata.fallbackModelId:
+                if current_metadata.fallbackModelId and current_metadata.fallbackModelId != current_metadata.id:
                     fallback_id = current_metadata.fallbackModelId
                     fallback_metadata = get_model_by_id(fallback_id)
                     if fallback_metadata:
-                        print(f"[{label}] Attempt {attempt} failed. Auto-falling back to {fallback_id}.")
+                        print(f"[{label}] Attempt {attempt} failed ({exc}). Auto-falling back to {fallback_id}.")
                         current_metadata = fallback_metadata
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(min(4, 2 ** attempt))
 
         raise RuntimeError(
             f"[{label}] failed after {self.MAX_RETRIES} attempts: {last_exc}"
@@ -624,23 +756,44 @@ class LLMCodegenService:
         if not raw:
             return ""
 
-        fences = _CODE_FENCE_RE.findall(raw)
+        parts = raw.split("```")
+        candidates = []
         
-        text = raw
-        if fences:
-            cad_fences = [f for f in fences if "import build123d" in f or "from build123d" in f or "PARAMETERS" in f]
-            if cad_fences:
-                text = max(cad_fences, key=len)
-            else:
-                text = max(fences, key=len)
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            for lang in ['python', 'scad', 'openscad', 'text']:
+                if part.lower().startswith(lang):
+                    part = part[len(lang):].strip()
+                    break
+            if part:
+                candidates.append(part)
+                
+        cad_fences = []
+        for c in candidates:
+            m = _CODE_START_RE.search(c)
+            if m:
+                cad_fences.append(c[m.start():].strip())
+        
+        if cad_fences:
+            return max(cad_fences, key=len)
+        
+        # Fallback: search for code start in raw text directly (handles missing/unclosed code fences)
+        m_raw = _CODE_START_RE.search(raw)
+        if m_raw:
+            candidate = raw[m_raw.start():].strip()
+            # If there's an unclosed fence or trailing prose after if __name__, clean it
+            if "if __name__" in candidate:
+                idx = candidate.find("if __name__")
+                end_idx = candidate.find("\n\n", idx + 50)
+                if end_idx != -1:
+                    candidate = candidate[:end_idx].strip()
+            return candidate
 
-        cleaned = text.strip().strip("`").strip()
+        # If no valid code block was found, raise an error
+        raise ValueError(f"LLM failed to generate a valid Python code block. Response was: {raw[:100]}...")
 
-        m = _CODE_START_RE.search(cleaned)
-        if m:
-            cleaned = cleaned[m.start():].strip()
-
-        return cleaned
 
     @staticmethod
     def _extract_json_payload(raw: str) -> dict[str, Any]:
@@ -649,8 +802,9 @@ class LLMCodegenService:
             raise ValueError("The audit model returned an empty response.")
 
         text = raw.strip()
-        fences = _CODE_FENCE_RE.findall(text)
-        candidates = [text, *fences]
+        parts = text.split("```")
+        
+        candidates = [text] + parts
 
         decoder = json.JSONDecoder()
         for candidate in candidates:
@@ -867,6 +1021,50 @@ class LLMCodegenService:
         feature_map.setdefault("audit_schema_version", _AUDIT_SCHEMA_VERSION)
         return feature_map
 
+    @staticmethod
+    def _validate_parameter_usage(script: str) -> list[str]:
+        """Check that fillet/chamfer parameters are actually applied in the BuildPart block.
+
+        Returns a list of warning strings for unused edge-treatment parameters.
+        Non-blocking: only logs warnings, never raises or alters the script.
+        """
+        audit_warnings: list[str] = []
+        try:
+            param_match = re.search(
+                r'PARAMETERS\s*=\s*\{(.*?)\n\}',
+                script,
+                re.DOTALL,
+            )
+            if not param_match:
+                return audit_warnings
+
+            keys = re.findall(r'"(\w+)"\s*:', param_match.group(1))
+
+            # Focus on edge treatment parameters that are commonly forgotten
+            edge_keys = [
+                k for k in keys
+                if any(kw in k.lower() for kw in ("fillet", "chamfer"))
+            ]
+
+            # Find the BuildPart block
+            build_match = re.search(
+                r'(with\s+bd\.BuildPart\(\).*?)(?=\npart\.part|\nif __name__)',
+                script,
+                re.DOTALL,
+            )
+            build_block = build_match.group(1) if build_match else ""
+
+            for key in edge_keys:
+                if key not in build_block:
+                    audit_warnings.append(
+                        f"[param-audit] Edge treatment '{key}' is defined in "
+                        f"PARAMETERS but never used in the BuildPart block — "
+                        f"a bd.fillet() or bd.chamfer() call is likely missing."
+                    )
+        except Exception:
+            pass
+        return audit_warnings
+
     # -- Public API ------------------------------------------------------------
 
     async def audit_blueprint(
@@ -926,12 +1124,50 @@ class LLMCodegenService:
             print(f"[audit] Failed to parse or normalize feature-map JSON: {exc}")
             return {}
 
+    async def audit_target_feature(
+        self,
+        image_bytes: bytes,
+        mime_type: str,
+        target_portion: str,
+        user_prompt: str,
+        base_code: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Targeted Inspection - Focus exclusively on a specific localized feature or detail view on the blueprint.
+        """
+        query_text = (
+            f"TARGET FEATURE / PORTION TO INSPECT: {target_portion}\n"
+            f"USER FEEDBACK & CONTEXT: {user_prompt}\n"
+        )
+        if base_code:
+            param_match = re.search(r'PARAMETERS\s*=\s*\{(.*?)\n\}', base_code, re.DOTALL)
+            if param_match:
+                query_text += f"\nEXISTING_MODEL_PARAMETERS:\n{param_match.group(0)}"
+
+        async def _call(metadata) -> str:
+            return await self.gateway.generate(
+                prompt=query_text,
+                metadata=metadata,
+                system_instruction=TARGETED_FEATURE_AUDIT_INSTRUCTION,
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                response_json=True,
+            )
+
+        raw = await self._call_with_retry(_call, "targeted_audit")
+        try:
+            return self._extract_json_payload(raw)
+        except Exception as exc:
+            print(f"[targeted_audit] Failed to parse targeted feature JSON: {exc}")
+            return {"raw_report": raw}
+
     async def generate_script(
         self,
         prompt: str,
         image_bytes: bytes | None = None,
         mime_type: str | None = None,
         feature_map: dict[str, Any] | str | None = None,
+        targeted_feature: dict[str, Any] | str | None = None,
         base_code: str | None = None,
     ) -> str:
         """
@@ -944,6 +1180,12 @@ class LLMCodegenService:
                 parts.append(f"FEATURE_MAP:\n{json.dumps(feature_map, indent=2)}")
             else:
                 parts.append(f"BLUEPRINT_AUDIT_REPORT:\n{feature_map}")
+
+        if targeted_feature:
+            if isinstance(targeted_feature, dict):
+                parts.append(f"TARGETED_BLUEPRINT_FEATURE_INSPECTION:\n{json.dumps(targeted_feature, indent=2)}")
+            else:
+                parts.append(f"TARGETED_BLUEPRINT_FEATURE_INSPECTION:\n{targeted_feature}")
 
         if base_code:
             parts.append(f"EXISTING_CODE_TO_REFINE:\n{base_code}")
@@ -969,6 +1211,7 @@ class LLMCodegenService:
         image_bytes: bytes | None = None,
         mime_type: str | None = None,
         feature_map: dict[str, Any] | str | None = None,
+        targeted_feature: dict[str, Any] | str | None = None,
         base_code: str | None = None,
         selection_context: str | None = None,
     ):
@@ -981,17 +1224,22 @@ class LLMCodegenService:
                 parts.append(f"FEATURE_MAP:\n{json.dumps(feature_map, indent=2)}")
             else:
                 parts.append(f"BLUEPRINT_AUDIT_REPORT:\n{feature_map}")
+        if targeted_feature:
+            if isinstance(targeted_feature, dict):
+                parts.append(f"TARGETED_BLUEPRINT_FEATURE_INSPECTION:\n{json.dumps(targeted_feature, indent=2)}")
+            else:
+                parts.append(f"TARGETED_BLUEPRINT_FEATURE_INSPECTION:\n{targeted_feature}")
         if base_code:
             parts.append(f"EXISTING_CODE_TO_REFINE:\n{base_code}")
         if selection_context:
-            parts.append(f"TARGET_COORDINATE (User Clicked Location):\n{selection_context}")
+            parts.append(f"TARGET_PORTION_OR_COORDINATE:\n{selection_context}")
 
         user_text = "\n\n".join(parts)
         sys_instr = EDIT_SYSTEM_INSTRUCTION if base_code else SYSTEM_INSTRUCTION
 
         current_metadata = self.primary_metadata
-        response_stream = None
         last_exc: Exception | None = None
+        complete_text = ""
 
         for attempt in range(self.MAX_RETRIES):
             try:
@@ -1002,25 +1250,34 @@ class LLMCodegenService:
                     image_bytes=image_bytes,
                     mime_type=mime_type,
                 )
+                
+                async for chunk in response_stream:
+                    if chunk:
+                        complete_text += chunk
+                        yield chunk
+                        
+                # If we complete the stream successfully, break out of retry loop
                 break
+                
             except Exception as exc:
                 last_exc = exc
-                if attempt == 0 and current_metadata.fallbackModelId:
+                
+                if complete_text:
+                    # We already yielded partial stream to the client. A transparent retry 
+                    # is impossible here because the client would receive duplicate/broken text.
+                    raise
+                    
+                if current_metadata.fallbackModelId and current_metadata.fallbackModelId != current_metadata.id:
                     fallback_id = current_metadata.fallbackModelId
                     fallback_metadata = get_model_by_id(fallback_id)
                     if fallback_metadata:
-                        print(f"[codegen stream] Attempt {attempt} failed. Auto-falling back to {fallback_id}.")
+                        print(f"[codegen stream] Attempt {attempt} failed ({exc}). Auto-falling back to {fallback_id}.")
                         current_metadata = fallback_metadata
-                await asyncio.sleep(2 ** attempt)
-        
-        if not response_stream:
+                        
+                print(f"[codegen stream] Attempt {attempt} failed with {exc}. Retrying...")
+                await asyncio.sleep(min(4, 2 ** attempt))
+        else:
             raise RuntimeError(f"[codegen_stream] failed after {self.MAX_RETRIES} attempts: {last_exc}")
-
-        complete_text = ""
-        async for chunk in response_stream:
-            if chunk:
-                complete_text += chunk
-                yield chunk
 
         try:
             outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
@@ -1029,6 +1286,15 @@ class LLMCodegenService:
                 f.write(complete_text)
         except Exception as e:
             print(f"Failed to write debug script: {e}")
+
+        # Non-blocking parameter usage audit
+        try:
+            normalized = self._normalize_script(complete_text)
+            unused_warnings = self._validate_parameter_usage(normalized)
+            for w in unused_warnings:
+                print(w)
+        except Exception:
+            pass
 
     async def edit_script(
         self,

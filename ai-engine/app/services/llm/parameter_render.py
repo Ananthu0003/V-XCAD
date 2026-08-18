@@ -207,43 +207,273 @@ def _coerce_params(value):
 
 def _shape_faces_count(obj):
     try:
-        faces = obj.faces() if callable(getattr(obj, "faces", None)) else obj.faces
+        faces = obj.faces() if callable(getattr(obj, "faces", None)) else getattr(obj, "faces", [])
         return len(faces)
     except Exception:
         return 0
 
 def _validate_shape(obj):
     try:
-        if hasattr(obj, "is_valid") and callable(getattr(obj, "is_valid")):
-            if not obj.is_valid():
-                raise RuntimeError("Invalid shape geometry (is_valid=False).")
+        is_val = getattr(obj, "is_valid", True)
+        if callable(is_val):
+            is_val = is_val()
+        if not is_val:
+            raise RuntimeError("Invalid shape geometry (is_valid=False). The shape might be self-intersecting or have open boundaries.")
     except RuntimeError:
         raise
     except Exception:
         pass
 
     try:
-        if hasattr(obj, "solids") and callable(getattr(obj, "solids")):
-            if len(obj.solids()) == 0:
-                raise RuntimeError("No solid bodies found in result. You returned a 2D sketch/face instead of a 3D solid. Ensure you have extruded or revolved your geometry.")
+        solids = obj.solids() if callable(getattr(obj, "solids", None)) else getattr(obj, "solids", [])
+        if len(solids) == 0:
+            raise RuntimeError("No solid bodies found in result. You returned a 2D sketch/face instead of a 3D solid. Ensure you have extruded or revolved your geometry.")
     except RuntimeError:
         raise
-    except Exception:
-        pass
+    except Exception as e:
+        if "invalid" in str(e).lower() or "null" in str(e).lower() or "stdfail" in str(e).lower():
+            raise RuntimeError(f"Invalid shape geometry. Topological evaluation failed: {e}")
 
-    if _shape_faces_count(obj) == 0:
+    try:
+        faces = obj.faces() if callable(getattr(obj, "faces", None)) else getattr(obj, "faces", [])
+        face_count = len(faces)
+    except Exception as e:
+        if "invalid" in str(e).lower() or "null" in str(e).lower() or "stdfail" in str(e).lower():
+            raise RuntimeError(f"Invalid shape geometry. Topological evaluation failed: {e}")
+        face_count = 0
+
+    if face_count == 0:
         raise RuntimeError("No faces found in result. Ensure you have generated solid geometry.")
 
     try:
         bbox = obj.bounding_box() if callable(getattr(obj, "bounding_box", None)) else getattr(obj, "bounding_box", None)
         if bbox and hasattr(bbox, "size"):
             max_dim = max(bbox.size.X, bbox.size.Y, bbox.size.Z)
-            if max_dim > 5000:
+            if max_dim > 5000: 
                 raise ValueError(f"Shape exceeds maximum bounding box limits (max dimension {max_dim:.1f} > 5000).")
     except ValueError:
         raise
     except Exception:
         pass
+
+def _compute_parametric_annotations(shape, params):
+    # Derive deterministic 3D dimension annotations from the built geometry.
+    # The LLM is instructed to emit an ANNOTATIONS dict, but it frequently omits
+    # it or computes wrong points.  This function fills the gaps directly from
+    # the actual B-Rep so the 3D parameter highlighting in the UI always works.
+    #
+    # Returns a dict keyed by parameter name with entries:
+    #   {"p1": [x,y,z], "p2": [x,y,z], "type": ..., "value": float,
+    #    "center": [x,y,z], "axis": [x,y,z]}
+    import math as _math
+
+    annotations = {}
+
+    try:
+        bb = shape.bounding_box()
+        bmin = (bb.min.X, bb.min.Y, bb.min.Z)
+        bmax = (bb.max.X, bb.max.Y, bb.max.Z)
+    except Exception:
+        return annotations
+
+    bsize = (bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2])
+
+    # ── Collect cylindrical faces (bosses + holes) with true axis/radius ──
+    # NOTE: face.center()/face.vertices() are unreliable for full cylinders
+    # (they return parameter-space values), so we derive everything from the
+    # underlying surface axis + the face's bounding box.
+    cylinders = []  # dict: diameter, center, axis, axial_extent
+    try:
+        for face in shape.faces().filter_by(_bd123.GeomType.CYLINDER):
+            try:
+                radius = float(face.radius)
+                if not radius or radius <= 0:
+                    continue
+                gcs = face.geom_adaptor().Cylinder()
+                ax = gcs.Axis().Direction()
+                axis_vec = (ax.X(), ax.Y(), ax.Z())
+                axis_len = _math.sqrt(sum(c * c for c in axis_vec))
+                if axis_len < 1e-9:
+                    continue
+                axis_unit = tuple(c / axis_len for c in axis_vec)
+
+                # axial extent from the AABB corners projected onto the axis
+                fbb = face.bounding_box()
+                corners = (
+                    (fbb.min.X, fbb.min.Y, fbb.min.Z),
+                    (fbb.min.X, fbb.min.Y, fbb.max.Z),
+                    (fbb.min.X, fbb.max.Y, fbb.min.Z),
+                    (fbb.min.X, fbb.max.Y, fbb.max.Z),
+                    (fbb.max.X, fbb.min.Y, fbb.min.Z),
+                    (fbb.max.X, fbb.min.Y, fbb.max.Z),
+                    (fbb.max.X, fbb.max.Y, fbb.min.Z),
+                    (fbb.max.X, fbb.max.Y, fbb.max.Z),
+                )
+                projs = [
+                    c[0] * axis_unit[0] + c[1] * axis_unit[1] + c[2] * axis_unit[2]
+                    for c in corners
+                ]
+                axial_min = min(projs)
+                axial_max = max(projs)
+                axial_extent = axial_max - axial_min
+
+                # face center = bbox center (on-axis for axis-aligned cylinders)
+                center = (
+                    (fbb.min.X + fbb.max.X) / 2,
+                    (fbb.min.Y + fbb.max.Y) / 2,
+                    (fbb.min.Z + fbb.max.Z) / 2,
+                )
+
+                cylinders.append({
+                    "diameter": radius * 2,
+                    "center": center,
+                    "axis": axis_unit,
+                    "axial_min": axial_min,
+                    "axial_max": axial_max,
+                    "axial_extent": axial_extent,
+                })
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    def _entry(p1, p2, typ, value, center=None, axis=None):
+        entry = {
+            "p1": [float(p1[0]), float(p1[1]), float(p1[2])],
+            "p2": [float(p2[0]), float(p2[1]), float(p2[2])],
+            "type": typ,
+            "value": float(value),
+        }
+        if center is not None:
+            entry["center"] = [float(center[0]), float(center[1]), float(center[2])]
+        if axis is not None:
+            entry["axis"] = [float(axis[0]), float(axis[1]), float(axis[2])]
+        return entry
+
+    def _match_tol(v):
+        return max(0.02, abs(v) * 0.005 + 0.05)
+
+    def _perp_dir(axis_unit):
+        # any unit direction perpendicular to the cylinder axis
+        x, y, z = axis_unit
+        if abs(z) < 0.9:
+            norm = _math.sqrt(x * x + y * y)
+            return (-y / norm, x / norm, 0.0)
+        return (1.0, 0.0, 0.0)
+
+    LINEAR_TOKENS = ("depth", "height", "length", "len", "thick", "width")
+    DIA_TOKENS = ("diameter", "diam", "dia", "bore", "shaft", "cylinder", "cyl", "hole")
+
+    for key, value in params.items():
+        if key.startswith("_"):
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        v = float(value)
+        if v <= 0 or not _math.isfinite(v):
+            continue
+
+        name = key.lower()
+        is_linear = any(tok in name for tok in LINEAR_TOKENS)
+        is_dia = any(tok in name for tok in DIA_TOKENS) or "radius" in name
+
+        if is_linear:
+            tol = _match_tol(v)
+            # prefer the axis that matches the dimension name
+            if "width" in name:
+                axis_order = (0, 1, 2)
+            elif "length" in name or "len" in name:
+                axis_order = (1, 2, 0)
+            elif "height" in name or "depth" in name or "thick" in name:
+                axis_order = (2, 0, 1)
+            else:
+                axis_order = (0, 1, 2)
+            
+            matched = False
+            # 1) match a cylinder's axial extent or stepped section along the cylinder axis
+            best = None
+            best_diff = None
+            for c in cylinders:
+                d = abs(c["axial_extent"] - v)
+                if d <= tol and (best_diff is None or d < best_diff):
+                    best_diff = d
+                    best = c
+            
+            if best is not None:
+                ax = best["axis"]
+                cx, cy, cz = best["center"]
+                half = v / 2.0
+                end1 = (cx + ax[0] * half, cy + ax[1] * half, cz + ax[2] * half)
+                end2 = (cx - ax[0] * half, cy - ax[1] * half, cz - ax[2] * half)
+                u = _perp_dir(ax)
+                r = best["diameter"] / 2.0
+                p1 = (end1[0] + u[0] * r, end1[1] + u[1] * r, end1[2] + u[2] * r)
+                p2 = (end2[0] + u[0] * r, end2[1] + u[1] * r, end2[2] + u[2] * r)
+                annotations[key] = _entry(p1, p2, "height", v)
+                matched = True
+            
+            # 2) match groove depth (radial step)
+            if not matched and "depth" in name and len(cylinders) >= 2:
+                # Check if v matches the difference in radii between any two cylinders
+                for i in range(len(cylinders)):
+                    for j in range(i + 1, len(cylinders)):
+                        rad_diff = abs(cylinders[i]["diameter"] - cylinders[j]["diameter"]) / 2.0
+                        if abs(rad_diff - v) <= tol:
+                            c_outer = cylinders[i] if cylinders[i]["diameter"] > cylinders[j]["diameter"] else cylinders[j]
+                            c_inner = cylinders[j] if cylinders[i]["diameter"] > cylinders[j]["diameter"] else cylinders[i]
+                            ax = c_outer["axis"]
+                            u = _perp_dir(ax)
+                            cx, cy, cz = c_inner["center"]
+                            r_in = c_inner["diameter"] / 2.0
+                            r_out = c_outer["diameter"] / 2.0
+                            p1 = (cx + u[0] * r_in, cy + u[1] * r_in, cz + u[2] * r_in)
+                            p2 = (cx + u[0] * r_out, cy + u[1] * r_out, cz + u[2] * r_out)
+                            annotations[key] = _entry(p1, p2, "height", v)
+                            matched = True
+                            break
+                    if matched:
+                        break
+
+            # 3) match overall bbox extent along the best axis
+            if not matched:
+                for axis_idx in axis_order:
+                    ext = bsize[axis_idx]
+                    if abs(ext - v) <= tol:
+                        p1 = list(bmin)
+                        p2 = list(bmax)
+                        for o in (i for i in range(3) if i != axis_idx):
+                            mid = (bmin[o] + bmax[o]) / 2
+                            p1[o] = mid
+                            p2[o] = mid
+                        annotations[key] = _entry(p1, p2, "height", v)
+                        matched = True
+                        break
+
+        elif is_dia:
+            tol = _match_tol(v)
+            best_cyl = None
+            best_diff = None
+            best_dia = None
+            for expected_dia in (v, v * 2.0, v / 2.0):
+                for c in cylinders:
+                    d = abs(c["diameter"] - expected_dia)
+                    if d <= tol and (best_diff is None or d < best_diff):
+                        best_diff = d
+                        best_cyl = c
+                        best_dia = c["diameter"]
+            if best_cyl is not None:
+                u = _perp_dir(best_cyl["axis"])
+                cx, cy, cz = best_cyl["center"]
+                r = best_cyl["diameter"] / 2.0
+                p1 = (cx - u[0] * r, cy - u[1] * r, cz - u[2] * r)
+                p2 = (cx + u[0] * r, cy + u[1] * r, cz + u[2] * r)
+                if "radius" in name:
+                    annotations[key] = _entry(p1, p2, "height", best_dia / 2.0)
+                else:
+                    annotations[key] = _entry(p1, p2, "diameter", best_dia, center=best_cyl["center"], axis=best_cyl["axis"])
+
+    return annotations
+
 
 def run():
     raw_json = os.getenv("CAD_PARAMETERS_JSON", "{}")
@@ -711,6 +941,15 @@ def run():
         _orig_polygon = build123d.Polygon
         def safe_polygon(*args, **kwargs):
             kwargs.pop("close", None)
+            if args and isinstance(args[0], (list, tuple)):
+                pts = args[0]
+                new_pts = []
+                for p in pts:
+                    if isinstance(p, list) and len(p) >= 2:
+                        new_pts.append(tuple(p))
+                    else:
+                        new_pts.append(p)
+                args = (new_pts,) + args[1:]
             return _orig_polygon(*args, **kwargs)
         build123d.Polygon = safe_polygon
         ns["Polygon"] = safe_polygon
@@ -847,6 +1086,11 @@ def run():
 
     shape = None
     annotations = {}
+    
+    # Extract annotations if generated by the LLM
+    if "ANNOTATIONS" in ns and isinstance(ns["ANNOTATIONS"], dict):
+        annotations.update(ns["ANNOTATIONS"])
+        
     if "build_model" in ns and callable(ns["build_model"]):
         try:
             res = ns["build_model"](params)
@@ -885,11 +1129,62 @@ def run():
         ry = float(params.get("_model_rotation_y", 0))
         rz = float(params.get("_model_rotation_z", 0))
         if rx or ry or rz:
-            from build123d import Rotation
-            shape = Rotation(rx, ry, rz) * shape
+            from build123d import Rotation, Vector
+            rot = Rotation(rx, ry, rz)
+            shape = rot * shape
+            # Rotate all existing annotation points so they rotate with the model
+            for ann in annotations.values():
+                if isinstance(ann, dict):
+                    if "p1" in ann and len(ann["p1"]) == 3:
+                        v1 = rot * Vector(*ann["p1"])
+                        ann["p1"] = [float(v1.X), float(v1.Y), float(v1.Z)]
+                    if "p2" in ann and len(ann["p2"]) == 3:
+                        v2 = rot * Vector(*ann["p2"])
+                        ann["p2"] = [float(v2.X), float(v2.Y), float(v2.Z)]
+                    if "center" in ann and len(ann["center"]) == 3:
+                        vc = rot * Vector(*ann["center"])
+                        ann["center"] = [float(vc.X), float(vc.Y), float(vc.Z)]
+                    if "axis" in ann and len(ann["axis"]) == 3:
+                        va = rot * Vector(*ann["axis"])
+                        ann["axis"] = [float(va.X), float(va.Y), float(va.Z)]
     except Exception as e:
         print(f"Failed to apply model rotation: {e}")
 
+
+    # Deterministic geometric annotations for the UI (fallback + enrichment)
+    # Derive from the real final shape geometry to ensure 100% spatial alignment.
+    try:
+        derived_annotations = _compute_parametric_annotations(shape, params)
+        # Use derived annotations as authoritative ground truth
+        final_annotations = dict(derived_annotations)
+        
+        # Check LLM annotations for any extra parameters not derived
+        bb = shape.bounding_box()
+        bmin = (bb.min.X, bb.min.Y, bb.min.Z)
+        bmax = (bb.max.X, bb.max.Y, bb.max.Z)
+        diag = max(5.0, ((bmax[0]-bmin[0])**2 + (bmax[1]-bmin[1])**2 + (bmax[2]-bmin[2])**2)**0.5)
+        margin = max(2.0, diag * 0.1)
+
+        for _ann_key, _ann_val in annotations.items():
+            if _ann_key not in final_annotations and isinstance(_ann_val, dict):
+                p1 = _ann_val.get("p1")
+                p2 = _ann_val.get("p2")
+                if p1 and p2 and len(p1) == 3 and len(p2) == 3:
+                    # Check if within bounding box margin
+                    in_bounds = (
+                        (bmin[0] - margin <= p1[0] <= bmax[0] + margin) and
+                        (bmin[1] - margin <= p1[1] <= bmax[1] + margin) and
+                        (bmin[2] - margin <= p1[2] <= bmax[2] + margin) and
+                        (bmin[0] - margin <= p2[0] <= bmax[0] + margin) and
+                        (bmin[1] - margin <= p2[1] <= bmax[1] + margin) and
+                        (bmin[2] - margin <= p2[2] <= bmax[2] + margin)
+                    )
+                    if in_bounds:
+                        final_annotations[_ann_key] = _ann_val
+
+        annotations = final_annotations
+    except Exception as ann_exc:
+        print(f"ANNOTATIONS_WARNING: Could not derive geometric annotations: {ann_exc}")
 
     # ── VALIDATION MODE: strictly check geometry and exit early (no file export) ──
     if _VALIDATION_MODE:
@@ -978,6 +1273,11 @@ class ParameterRenderService:
         """
         is_valid_syntax, syn_err = validate_script_syntax(script)
         if not is_valid_syntax:
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            log_file = log_dir / f"validation_fail_{uuid.uuid4().hex[:6]}.py"
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.write(script)
             return False, syn_err
             
         is_secure, sec_err = validate_script_security(script)
@@ -1026,6 +1326,11 @@ class ParameterRenderService:
                             proc.kill()
                         except Exception:
                             pass
+                        log_dir = Path("logs")
+                        log_dir.mkdir(exist_ok=True)
+                        log_file = log_dir / f"validation_fail_{uuid.uuid4().hex[:6]}.py"
+                        with open(log_file, "w", encoding="utf-8") as f:
+                            f.write(script)
                         return False, "Validation timed out — script geometry is too complex or has an infinite loop."
                 except NotImplementedError:
                     def _run_sync():
@@ -1052,6 +1357,12 @@ class ParameterRenderService:
 
             if returncode == 0 and "VALIDATION_SUCCESS" in stdout_str:
                 return True, ""
+
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            log_file = log_dir / f"validation_fail_{uuid.uuid4().hex[:6]}.py"
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.write(script)
 
             full_log = stdout_str + "\n" + stderr_str
             return False, self._extract_traceback(full_log)

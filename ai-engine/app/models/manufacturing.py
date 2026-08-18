@@ -92,3 +92,10 @@ class FeatureDecision(BaseModel):
     feeds_and_speeds: Optional[Dict[str, float]] = None
     operation_type: Optional[str] = None
     parameters: Dict[str, Any] = Field(default_factory=dict)
+    
+    # Provenance and Confidence (Hybrid 2D->3D)
+    source: str = "VALIDATED"  # OBSERVED, DETERMINISTIC_INFERRED, AI_INFERRED, AI_GENERATED, VALIDATED
+    confidence: float = 1.0
+    evidence_refs: List[str] = Field(default_factory=list)
+    validation_status: str = "VALIDATED"  # PENDING, PASS, FAIL, REQUIRES_REFINEMENT
+

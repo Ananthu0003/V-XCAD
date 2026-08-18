@@ -133,13 +133,22 @@ export async function POST(request: Request): Promise<Response> {
 		}
 	}
 
-	const session = await prisma.cadSession.create({
-		data: {
-			prompt,
-			fileName: (upload instanceof File) ? upload.name : null,
-			userId: validUserId,
-		},
-	});
+	const rawSessionId = formData.get('session_id');
+	let sessionId: string;
+
+	if (typeof rawSessionId === 'string' && rawSessionId.trim()) {
+		sessionId = rawSessionId.trim();
+	} else {
+		const session = await prisma.cadSession.create({
+			data: {
+				prompt,
+				fileName: (upload instanceof File) ? upload.name : null,
+				userId: validUserId,
+			},
+		});
+		sessionId = session.id;
+		formData.set('session_id', sessionId);
+	}
 
 	// If no file was uploaded, remove the empty image field so FastAPI treats it as optional
 	if (!(upload instanceof File)) {
@@ -161,7 +170,7 @@ export async function POST(request: Request): Promise<Response> {
 			buildError(
 				'Unable to connect to AI engine.',
 				error instanceof Error ? error.message : undefined,
-				session.id
+				sessionId
 			),
 			{ status: 502 }
 		);
@@ -170,7 +179,7 @@ export async function POST(request: Request): Promise<Response> {
 	if (!upstream.ok || !upstream.body) {
 		const parsed = await upstream.json().catch(() => null);
 		const extracted = extractErrorFromUnknown(parsed, 'AI engine failed to generate script.');
-		return NextResponse.json(buildError(extracted.message, extracted.hint, session.id), {
+		return NextResponse.json(buildError(extracted.message, extracted.hint, sessionId), {
 			status: upstream.status || 502,
 		});
 	}
@@ -179,7 +188,7 @@ export async function POST(request: Request): Promise<Response> {
 	headers.set('content-type', upstream.headers.get('content-type') ?? 'text/event-stream; charset=utf-8');
 	headers.set('cache-control', 'no-cache, no-transform');
 	headers.set('x-accel-buffering', 'no');
-	headers.set('x-session-id', session.id);
+	headers.set('x-session-id', sessionId);
 
 	// Return the upstream ReadableStream directly so SSE chunks are not buffered.
 	return new Response(upstream.body, {

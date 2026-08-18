@@ -5,10 +5,14 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewcube, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { ViewportController } from '@/components/viewport/ViewportController';
-import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye } from 'lucide-react';
+import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye, FileImage } from 'lucide-react';
 import { DimensionOverlay } from '@/components/viewport/DimensionOverlay';
 import { FeatureHighlight } from '@/components/viewport/FeatureHighlight';
+import { CameraRig } from '@/components/viewport/CameraRig';
 import { VolumetricStock } from '@/components/cam/VolumetricStock';
+import { BlueprintViewer } from '@/components/blueprint/BlueprintViewer';
+import { TargetPortion3DHighlight } from '@/components/viewport/TargetPortion3DHighlight';
+import type { TargetPortion } from '@/components/chat/ChatPanel';
 import type { StlGeometryInfo } from '@/components/viewport/StlMesh';
 
 type AnnotationEntry = {
@@ -78,6 +82,9 @@ type CadViewportProps = {
 	onDownloadGcode?: () => void;
 	annotations?: Record<string, AnnotationEntry>;
 	activeParameter?: string | null;
+	hoveredParameter?: string | null;
+	onSelectParameter?: (key: string | null) => void;
+	onHoverParameter?: (key: string | null) => void;
 	geometryInfo?: StlGeometryInfo | null;
 
 	// CAM/G-code
@@ -107,9 +114,14 @@ type CadViewportProps = {
 	onClearSelection?: () => void;
 	xRayMode?: boolean;
 	onToggleXRay?: () => void;
+	blueprintUrl?: string | null;
+	targetPortion?: TargetPortion | null;
+	onSelectPortion?: (portion: TargetPortion | null) => void;
+	showBlueprintPIP?: boolean;
+	onToggleBlueprintPIP?: () => void;
 };
 
-function AnimatedSetupGroup({ setupToolAxis, children }: { setupToolAxis?: [number, number, number], children: React.ReactNode }) {
+function AnimatedSetupGroup({ setupToolAxis, children, isSetup, hasToolpaths }: { setupToolAxis?: [number, number, number], children: React.ReactNode, isSetup?: boolean, hasToolpaths?: boolean }) {
 	const groupRef = useRef<THREE.Group>(null);
 	const targetQuaternion = useMemo(() => {
 		// By default, map CAD Z (0,0,1) to Three.js Y (0,1,0) so the spindle is always UP
@@ -151,6 +163,9 @@ export function CadViewport({
 	onDownloadGcode,
 	annotations = {},
 	activeParameter = null,
+	hoveredParameter = null,
+	onSelectParameter,
+	onHoverParameter,
 	geometryInfo = null,
 	toolpaths = null,
 	showToolpaths = true,
@@ -176,11 +191,19 @@ export function CadViewport({
 	onClearSelection,
 	xRayMode = false,
 	onToggleXRay,
+	blueprintUrl = null,
+	targetPortion = null,
+	onSelectPortion,
+	showBlueprintPIP,
+	onToggleBlueprintPIP,
 }: CadViewportProps) {
 	const groupRef = useRef<THREE.Group>(null);
 	const exportRef = useRef<HTMLDivElement>(null);
 	const [exportOpen, setExportOpen] = useState(false);
 	const [viewMode, setViewMode] = useState<'both' | 'solid' | 'wireframe'>('both');
+	const [localShowPIP, setLocalShowPIP] = useState(false);
+	const isPIPOpen = showBlueprintPIP !== undefined ? showBlueprintPIP : localShowPIP;
+	const togglePIP = onToggleBlueprintPIP || (() => setLocalShowPIP(prev => !prev));
 
 	const dispatchViewportAction = (action: string) => {
 		window.dispatchEvent(new CustomEvent('viewport-action', { detail: action }));
@@ -329,7 +352,7 @@ export function CadViewport({
 			other: []
 		};
 
-		const allowedSources = ['drill', 'contour', 'pocket', 'boss', 'face', 'turning'];
+		const allowedSources = ['drill', 'drilling', 'contour', '2d_contour', 'pocket', 'pocket_milling', 'boss', 'boss_clearing', 'face', 'facing', 'turning', 'od_turning', 'facing_turning', 'slot_milling', 'chamfer_milling', 'tapping', 'strategy'];
 		const allowedMoveTypes = [
             'rapid_clearance', 'rapid_xy', 'approach_retract', 'retract_clearance',
             'plunge', 'cut', 'arc_cw', 'arc_ccw', 'drill_cycle',
@@ -498,6 +521,7 @@ export function CadViewport({
 					</div>
 				</div>
 			)}
+
 			<header className="flex h-16 items-center justify-between border-b border-transparent bg-background/60 backdrop-blur-xl px-6 z-30">
 				<div className="flex flex-col gap-1.5">
 					<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -515,7 +539,6 @@ export function CadViewport({
 
 				<div className="flex items-center gap-2">
 					{headerActions}
-
 
 					{onShare && (
 						<button
@@ -640,6 +663,33 @@ export function CadViewport({
 						<div className="w-px h-5 bg-border/60 mx-1" />
 						<button onClick={() => dispatchViewportAction('fit')} className="p-2.5 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground transition-all" title="Fit to Screen"><Maximize className="size-4" /></button>
 						<button onClick={() => dispatchViewportAction('reset')} className="p-2.5 rounded-full text-muted-foreground hover:bg-accent hover:text-foreground transition-all" title="Reset Camera"><RotateCcw className="size-4" /></button>
+						{blueprintUrl && (
+							<>
+								<div className="w-px h-5 bg-border/60 mx-1" />
+								<button
+									onClick={togglePIP}
+									className={`p-2.5 rounded-full transition-all ${isPIPOpen ? 'bg-blue-500/20 text-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.3)]' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+									title="Toggle Blueprint Drawing Inspector (2D / PIP)"
+								>
+									<FileImage className="size-4" />
+								</button>
+							</>
+						)}
+					</div>
+				)}
+
+				{/* Floating Blueprint PIP Overlay */}
+				{isPIPOpen && blueprintUrl && (
+					<div className="absolute top-4 right-4 z-40 w-[420px] h-[340px] shadow-2xl rounded-xl border border-border/80 overflow-hidden animate-in fade-in zoom-in-95 duration-200 pointer-events-auto">
+						<BlueprintViewer
+							blueprintUrl={blueprintUrl}
+							targetPortion={targetPortion || null}
+							onSelectPortion={onSelectPortion}
+							activeParameter={activeParameter}
+							onClose={togglePIP}
+							isFloating={true}
+							className="w-full h-full"
+						/>
 					</div>
 				)}
 
@@ -693,6 +743,14 @@ export function CadViewport({
 						workflowStage={workflowStage}
 					/>
 					
+					<CameraRig
+						activeParameter={activeParameter}
+						activeFeatureId={activeFeatureId}
+						annotations={annotations}
+						geometryInfo={geometryInfo}
+						modelToSetupTransform={setupMetadata?.modelToSetupTransform}
+					/>
+					
 					<Suspense fallback={null}>
 						<Environment files="/potsdamer_platz_1k.hdr" />
 						
@@ -710,7 +768,7 @@ export function CadViewport({
 							<Grid infiniteGrid fadeDistance={gridFade} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={gridCell} sectionSize={gridSection} />
 						</DynamicFloor>
 						
-						<AnimatedSetupGroup setupToolAxis={setupToolAxis}>
+						<AnimatedSetupGroup setupToolAxis={setupToolAxis} isSetup={workflowStage === 'cam' || workflowStage === 'gcode'} hasToolpaths={hasValidToolpaths}>
 							<group ref={groupRef}>
 								{/* The CAD model MUST be transformed to setup space using modelToSetupTransform */}
 									{(() => {
@@ -729,15 +787,8 @@ export function CadViewport({
 
 										const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
 										
-										// Toolpaths for parametric features are generated at [0,0] in X/Y in NATIVE space.
-										// Z is generated at stock_top_z in NATIVE space.
-										// By placing them inside the setup transform group, Z is automatically aligned.
-										// We just need to shift them by the native CAD center in X/Y.
 										let simOffsetX = 0;
 										let simOffsetY = 0;
-										
-										// The backend now generates toolpaths in true CAD coordinates (thanks to the B-Rep feature extractor).
-										// We no longer need to shift them by the part center.
 										
 										const simOffset = new THREE.Vector3(simOffsetX, simOffsetY, 0);
 										const cadOffset = new THREE.Vector3(0, 0, 0);
@@ -748,19 +799,30 @@ export function CadViewport({
 												<group position={combinedPos} quaternion={quat} scale={scale}>
 													{isSolidVisible && children}
 													
-													{/* Overlays - placed next to children so they inherit the exact same transforms */}
-													{geometryInfo && (activeParameter || activeFeatureId) && (
-														<>
-															{activeParameter && (
-																<DimensionOverlay 
-																	annotations={annotations}
-																	activeParameter={activeParameter}
-																	geometryScale={geometryInfo.scale}
-																	geometryCenter={geometryInfo.center}
-																/>
-															)}
-														</>
-													)}
+                                                    {/* Overlays - placed next to children so they inherit the exact same transforms */}
+                                                    {geometryInfo && annotations && (
+                                                        <DimensionOverlay
+                                                            annotations={annotations}
+                                                            activeParameter={(activeParameter || activeFeatureId) as string | null}
+                                                            hoveredParameter={hoveredParameter}
+                                                            targetPortion={targetPortion}
+                                                            geometryScale={geometryInfo.scale}
+                                                            geometryCenter={geometryInfo.center}
+                                                            onSelectParameter={onSelectParameter}
+                                                            onHoverParameter={onHoverParameter}
+                                                        />
+                                                    )}
+
+                                                    {/* 3D Target Portion Highlight (Glowing halo + HUD Beacon) */}
+                                                    {targetPortion && geometryInfo && (
+                                                        <TargetPortion3DHighlight
+                                                            targetPortion={targetPortion}
+                                                            geometryInfo={geometryInfo}
+                                                            annotations={annotations}
+                                                            onClear={() => onSelectPortion?.(null)}
+                                                        />
+                                                    )}
+                                                </group>
 
 												{isWireframeVisible && (
 													<group
@@ -796,7 +858,6 @@ export function CadViewport({
 																const rawStickout = activeTool.length_mm || activeTool.stickout || (defaultStickout * (internalUnits === 'in' ? 25.4 : 1));
 																const stickout = internalUnits === 'in' ? rawStickout / 25.4 : rawStickout;
 
-																// Scale the holder completely proportionally to the tool size
 																const colletRadiusBase = shaftRadius * 1.5;
 																const holderTopRad = colletRadiusBase * 1.5;
 																const holderBotRad = colletRadiusBase * 1.2;
@@ -815,11 +876,9 @@ export function CadViewport({
 																const y = activeSegment.end?.y ?? activeSegment.end_y ?? 0;
 																const z = activeSegment.end?.z ?? activeSegment.end_z ?? 0;
 
-																// Visual override to prevent the tool from completely obscuring parts
 																let toolVisScale = 1;
 																if (actualStock) {
 																	const maxStockDim = Math.max(actualStock.dimensions[0], actualStock.dimensions[1]);
-																	// Allow tool to be a bit larger than the stock, but not overwhelmingly huge
 																	const maxToolVisualSize = maxStockDim * 1.5; 
 																	const currentToolVisualSize = Math.max(toolDiameter, stickout);
 																	
@@ -863,7 +922,6 @@ export function CadViewport({
 														)}
 													</group>
 												)}
-												</group>
 											</>
 										);
 									})()
@@ -892,8 +950,6 @@ export function CadViewport({
 
 									return (
 										<group position={simOffset}>
-
-
 											{isCamStage && simulationState?.showStock !== false && simulationState && camTools && (
 												<VolumetricStock 
 													stockType={(camSetup?.stockType as any) || setupMetadata?.stockType || setupMetadata?.resolvedStock?.type || 'box'}
@@ -952,26 +1008,6 @@ export function CadViewport({
 										</group>
 									);
 								})()}
-								
-								{/* FeatureHighlight is already in Setup Space from backend */}
-								{geometryInfo && (activeParameter || activeFeatureId) && (
-									<group position={(() => {
-										const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
-										const offsetAmount = 0;
-										return new THREE.Vector3(-offsetAmount, 0, 0);
-									})()}>
-										<FeatureHighlight 
-											annotations={annotations} 
-											camFeatures={camFeatures}
-											parameters={parameters}
-											activeParameter={(activeParameter || activeFeatureId) as string}
-											geometryScale={geometryInfo.scale}
-											geometryCenter={geometryInfo.center}
-											debugMode={debugMode}
-											onDebugInfo={setFeatureDebug}
-										/>
-									</group>
-								)}
 								</group>
 						</AnimatedSetupGroup>
 

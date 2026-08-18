@@ -75,6 +75,8 @@ class ToolRecommendationEngine:
             req_type = "drill"
         elif operation_type == "boring":
             req_type = "boring_bar"
+        elif operation_type == "helical_bore_milling":
+            req_type = "flat_end_mill"  # Any end mill smaller than the bore works
         elif operation_type == "reaming":
             req_type = "reamer"
         elif operation_type in ("tapping", "threading"):
@@ -143,6 +145,17 @@ class ToolRecommendationEngine:
                         rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) > hole diameter ({target_dia}mm)")
                         continue
 
+                # For helical bore milling, tool must be SMALLER than the bore
+                # Ideal: 50-80% of bore diameter for good chip evacuation
+                if operation_type == "helical_bore_milling":
+                    if target_dia > 0:
+                        if t.diameter >= target_dia:
+                            rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) >= bore diameter ({target_dia}mm) — must be smaller for helical milling")
+                            continue
+                        if t.diameter < target_dia * 0.10:
+                            rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) too small for bore ({target_dia}mm) — less than 10% ratio")
+                            continue
+
                 if operation_type == "facing" and stock_size > 0.0:
                     if t.diameter > max_facing_dia:
                         rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) exceeds facing scale threshold ({round(max_facing_dia, 2)}mm) for stock size ({stock_size}mm)")
@@ -167,10 +180,16 @@ class ToolRecommendationEngine:
                     if min_corner_r > 0 and t.diameter > (min_corner_r * 2.0) + 0.01:
                         rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) exceeds internal corner diameter ({min_corner_r*2}mm)")
                         continue
-
+                # 5. Stickout vs depth constraint
+                # For drilling, stickout is a hard physical requirement
+                # For helical bore milling and other milling ops, we prefer tools
+                # with sufficient stickout but don't hard-block (warn instead)
                 if t.stickout > 0 and t.stickout < target_depth:
-                    rejections.append(f"{t.name}: stickout ({t.stickout}mm) < depth ({target_depth}mm)")
-                    continue
+                    if operation_type in ("drilling", "peck_drilling"):
+                        rejections.append(f"{t.name}: stickout ({t.stickout}mm) < depth ({target_depth}mm)")
+                        continue
+                    # For helical bore milling and other ops, accept but note limitation
+                    # The operator can use a long-reach holder or adjust setup
 
                 candidate_tools.append(t)
 
@@ -189,6 +208,12 @@ class ToolRecommendationEngine:
                     # Feature accessibility:
                     if operation_type in ("drilling", "peck_drilling"):
                         score -= abs(target_dia - t.diameter) * 10
+                    elif operation_type == "helical_bore_milling":
+                        # Prefer largest end mill that fits inside the bore
+                        # Ideal ratio is ~70% of bore diameter
+                        ideal_dia = target_dia * 0.7
+                        score -= abs(ideal_dia - t.diameter) * 5
+                        score += t.diameter  # slightly prefer larger
                     elif operation_type == "facing":
                         # For facing, we want the largest valid tool up to the machine/stock scale limit
                         score += t.diameter * 2.0

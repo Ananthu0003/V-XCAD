@@ -145,19 +145,26 @@ export function SessionBrowserModal({ isOpen, onClose, onSelectSession }: Sessio
 									</p>
 								</div>
 
-								<div className="flex flex-col items-end gap-2 flex-shrink-0">
+								<div className="flex flex-col items-end gap-1 flex-shrink-0">
+									<div className="flex items-center gap-1.5 text-[11px] font-bold text-foreground font-mono">
+										<Clock className="w-3 h-3 text-blue-400" />
+										<span>
+											{new Date(session.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+										</span>
+									</div>
 									<span className="text-[10px] text-muted-foreground font-mono">
-										{new Date(session.createdAt).toLocaleDateString()}
+										{new Date(session.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
 									</span>
-									<div className="flex items-center gap-2">
-										<div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity translate-x-2 group-hover:translate-x-0">
-											Resume <Play className="w-3 h-3" />
+									<div className="flex items-center gap-2 mt-0.5">
+										<div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity translate-x-2 group-hover:translate-x-0">
+											Resume <Play className="w-2.5 h-2.5" />
 										</div>
 										<div
 											onClick={(e) => handleDeleteSession(e, session.id)}
-											className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+											className="p-1 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+											title="Delete session"
 										>
-											{deletingId === session.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+											{deletingId === session.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
 										</div>
 									</div>
 								</div>

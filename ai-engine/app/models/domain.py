@@ -5,7 +5,7 @@ class ModelMetadata(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     name: str
-    vendor: Literal['google', 'deepseek', 'anthropic', 'openai', 'ollama']
+    vendor: Literal['google', 'deepseek', 'anthropic', 'openai', 'ollama', 'openrouter']
     tier: Literal['flash', 'pro', 'ultra']
     maxTokens: int
     supportsThinking: bool
