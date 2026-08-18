@@ -71,11 +71,11 @@ export function ChatBubble({ role, content, fileName }: ChatBubbleProps) {
 					{!isUser && <div className="absolute inset-0 bg-blue-500/20 animate-pulse rounded-lg" />}
 					{isUser ? <User className="size-3.5" /> : <Cpu className="size-3.5 relative z-10" />}
 				</div>
-				<span className="opacity-80">{role === 'assistant' ? 'AI Co-Pilot' : 'Engineer'}</span>
+				<span className="opacity-80">{role === 'assistant' ? 'VexCAD AI' : 'Engineer'}</span>
 			</div>
 
 			<div className={`relative w-full rounded-2xl px-4 py-3 text-sm leading-[1.6] ${bubbleClass} ${isUser ? 'rounded-tr-none ml-auto max-w-[92%]' : 'rounded-tl-none max-w-[96%]'}`}>
-				{fileName && isUser && (
+				{fileName && (
 					<div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-black/5 dark:bg-black/20 border border-transparent dark:border-border w-fit backdrop-blur-sm shadow-inner">
 						<FileImage className="size-3.5 text-blue-400" />
 						<span className="text-[10px] font-mono font-bold text-blue-200 uppercase tracking-wider truncate max-w-[200px]">{fileName}</span>

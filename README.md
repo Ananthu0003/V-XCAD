@@ -71,7 +71,10 @@ vexcad/
 ## Core Features
 
 - AI-driven CAD generation from images/prompts or direct STEP file uploads
-- Automated Feature Recognition (drilling, pocketing, turning, etc.)
+- Advanced Geometry Reasoning (Constraint Solving, Projection Reasoning, Topology Building)
+- 2D Blueprint and Projection Validation
+- Integrated Knowledge Retrieval System
+- Automated B-Rep Feature Recognition (drilling, pocketing, turning, etc.)
 - 88 Industry-standard CNC Machine Profiles (Haas, DMG MORI, Okuma, Makino, Hermle, etc.) with real-world controllers (Fanuc, Siemens, Heidenhain)
 - Comprehensive Material Profiles with Feeds & Speeds calculation capabilities
 - Interactive Tool Wizard for defining custom cutting tools and holder assemblies

@@ -1275,7 +1275,12 @@ export default function HitlWorkspace() {
 
 		setMessages((prev) => [
 			...prev,
-			{ id: makeId('system'), role: 'system', content: `Restoring session: ${session.prompt}` }
+			{ 
+				id: makeId('assistant'), 
+				role: 'assistant', 
+				content: `Restored session: **${session.prompt || 'Untitled project'}**`,
+				fileName: session.fileName || undefined
+			}
 		]);
 
 		setIsHistoryOpen(false);
