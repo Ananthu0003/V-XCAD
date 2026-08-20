@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://localhost:8001';
+function getFastApiUrl(): string {
+	const value = process.env.FASTAPI_URL?.trim() || process.env.AI_ENGINE_URL?.trim() || 'http://127.0.0.1:8001/api/v1';
+	return value.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +18,7 @@ export async function GET(
 	}
 
 	try {
-		const upstream = await fetch(`${AI_ENGINE_URL}/api/v1/blueprint/${id}`, {
+		const upstream = await fetch(`${getFastApiUrl()}/api/v1/blueprint/${id}`, {
 			cache: 'no-store',
 		});
 

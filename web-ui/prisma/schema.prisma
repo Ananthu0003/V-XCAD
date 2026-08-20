@@ -1,13 +1,11 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  directUrl  = env("DIRECT_URL")
-  extensions = [vector]
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model CadSession {
@@ -24,9 +22,31 @@ model CadSession {
   userId       String?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
+  currentVersion Int             @default(1)
   user         User?           @relation(fields: [userId], references: [id])
   camSetups    CamSetup[]
   simulations  SimulationRun[]
+  iterations   CadIteration[]
+}
+
+model CadIteration {
+  id           String      @id @default(cuid())
+  sessionId    String
+  version      Int
+  prompt       String?
+  source       String      @default("prompt")
+  pythonScript String
+  parameters   Json?
+  featureMap   Json?
+  annotations  Json?
+  stlUrl       String?
+  stepUrl      String?
+  dxfUrl       String?
+  createdAt    DateTime    @default(now())
+  session      CadSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, version])
+  @@index([sessionId])
 }
 
 model User {
@@ -466,55 +486,4 @@ model EngineeringRule {
   updatedAt        DateTime          @updatedAt
   ontology_node    OntologyNode?     @relation(fields: [ontology_node_id], references: [id])
   source_document  KnowledgeDocument @relation(fields: [source_id], references: [id])
-}
-
-model KnowledgeDocument {
-  id           String   @id @default(cuid())
-  filename     String
-  version      String   @default("1.0")
-  pageCount    Int
-  status       String   @default("processing") // processing, active, failed
-  failedPages  Json?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  
-  rules        EngineeringRule[]
-}
-
-model OntologyNode {
-  id           String   @id @default(cuid())
-  name         String   @unique
-  description  String?
-  parentId     String?
-  parent       OntologyNode? @relation("OntologyHierarchy", fields: [parentId], references: [id])
-  children     OntologyNode[] @relation("OntologyHierarchy")
-  
-  rules        EngineeringRule[]
-}
-
-model EngineeringRule {
-  id               String   @id @default(cuid())
-  rule_id          String   @unique
-  version          String   @default("1.0")
-  source_id        String
-  source_document  KnowledgeDocument @relation(fields: [source_id], references: [id])
-  topic            String?
-  confidence       Float    @default(1.0)
-  status           String   @default("active") // active, deprecated, experimental
-  reviewer         String?
-  
-  ontology_node_id String?
-  ontology_node    OntologyNode? @relation(fields: [ontology_node_id], references: [id])
-  
-  concept          String?
-  description      String
-  input_signals    Json?
-  required_context Json?
-  validation_rules Json?
-  
-  // Vector embedding of the description/rule content for fallback RAG
-  embedding        Unsupported("vector(1536)")?
-  
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
 }

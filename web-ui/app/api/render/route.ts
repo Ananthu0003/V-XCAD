@@ -106,9 +106,10 @@ function toFastApiRenderRequest(value: unknown): FastApiRenderRequest | null {
 		return null;
 	}
 
-	if (!body.parameters || typeof body.parameters !== 'object' || Array.isArray(body.parameters)) {
-		return null;
-	}
+	const parametersObj =
+		body.parameters && typeof body.parameters === 'object' && !Array.isArray(body.parameters)
+			? (body.parameters as Record<string, unknown>)
+			: {};
 
 	const sessionSource =
 		typeof body.session_id === 'string' && body.session_id.trim()
@@ -119,14 +120,14 @@ function toFastApiRenderRequest(value: unknown): FastApiRenderRequest | null {
 
 	return {
 		python_script: pythonScriptSource,
-		parameters: body.parameters as Record<string, unknown>,
+		parameters: parametersObj,
 		session_id: sessionSource,
 		cam_parameters: (body as any).cam_parameters,
 	};
 }
 
 export async function POST(request: Request): Promise<Response> {
-	let body = null;
+	let body: any = null;
 	try {
 		body = await request.json();
 	} catch (err) {
@@ -150,6 +151,32 @@ export async function POST(request: Request): Promise<Response> {
 		);
 	}
 
+	// Determine next version for this session
+	let nextVersion = 1;
+	try {
+		if ((prisma as any).cadIteration) {
+			const latestIteration = await (prisma as any).cadIteration.findFirst({
+				where: { sessionId: mappedPayload.session_id },
+				select: { version: true },
+				orderBy: { version: 'desc' },
+			});
+
+			if (latestIteration && typeof latestIteration.version === 'number') {
+				nextVersion = latestIteration.version + 1;
+			}
+		} else {
+			const rows = await prisma.$queryRawUnsafe<any[]>(
+				`SELECT version FROM "CadIteration" WHERE "sessionId" = $1 ORDER BY version DESC LIMIT 1`,
+				mappedPayload.session_id
+			).catch(() => []);
+			if (rows && rows.length > 0 && typeof rows[0].version === 'number') {
+				nextVersion = rows[0].version + 1;
+			}
+		}
+	} catch (e) {
+		console.warn('Could not query previous versions for session, defaulting to 1:', e);
+	}
+
 	let upstream: Response;
 	try {
 		upstream = await fetch(`${getFastApiUrl()}/render`, {
@@ -158,8 +185,11 @@ export async function POST(request: Request): Promise<Response> {
 				'content-type': 'application/json',
 				accept: 'application/json',
 			},
-			// Forward only strict FastAPI schema fields.
-			body: JSON.stringify(mappedPayload),
+			// Forward FastAPI schema fields including calculated iteration version
+			body: JSON.stringify({
+				...mappedPayload,
+				version: nextVersion,
+			}),
 			cache: 'no-store',
 		});
 	} catch (error) {
@@ -194,23 +224,31 @@ export async function POST(request: Request): Promise<Response> {
 			: artifacts && typeof artifacts.step_url === 'string'
 				? artifacts.step_url
 				: null;
+	const dxfUrl =
+		typeof data.dxf_url === 'string'
+			? data.dxf_url
+			: artifacts && typeof artifacts.dxf_url === 'string'
+				? artifacts.dxf_url
+				: null;
 
-	const updateResult = await prisma.cadSession.updateMany({
-		where: { id: mappedPayload.session_id },
-		data: {
-			pythonScript: mappedPayload.python_script,
-			parameters: parametersJson,
-			annotations: artifacts && artifacts.annotations ? (artifacts.annotations as Prisma.InputJsonValue) : Prisma.DbNull,
-			stlUrl,
-			stepUrl,
-		},
-	});
+	const iterationPrompt = (body && typeof body.prompt === 'string' && body.prompt.trim()) ? body.prompt.trim() : null;
+	const iterationSource = (body && typeof body.source === 'string' && body.source.trim()) ? body.source.trim() : 'editor_compile';
 
-	if (updateResult.count === 0) {
-		await prisma.cadSession.create({
-			data: {
+	try {
+		// 1. Upsert the main CadSession
+		await prisma.cadSession.upsert({
+			where: { id: mappedPayload.session_id },
+			update: {
+				pythonScript: mappedPayload.python_script,
+				parameters: parametersJson,
+				annotations: artifacts && artifacts.annotations ? (artifacts.annotations as Prisma.InputJsonValue) : Prisma.DbNull,
+				stlUrl,
+				stepUrl,
+				...(iterationPrompt ? { prompt: iterationPrompt } : {}),
+			},
+			create: {
 				id: mappedPayload.session_id,
-				prompt: 'Scripted CAD Design',
+				prompt: iterationPrompt || 'Scripted CAD Design',
 				pythonScript: mappedPayload.python_script,
 				parameters: parametersJson,
 				annotations: artifacts && artifacts.annotations ? (artifacts.annotations as Prisma.InputJsonValue) : Prisma.DbNull,
@@ -218,12 +256,62 @@ export async function POST(request: Request): Promise<Response> {
 				stepUrl,
 			},
 		});
+
+		// 2. Archive this immutable iteration snapshot
+		if ((prisma as any).cadIteration) {
+			await (prisma as any).cadIteration.create({
+				data: {
+					sessionId: mappedPayload.session_id,
+					version: nextVersion,
+					prompt: iterationPrompt,
+					source: iterationSource,
+					pythonScript: mappedPayload.python_script,
+					parameters: parametersJson,
+					annotations: artifacts && artifacts.annotations ? (artifacts.annotations as Prisma.InputJsonValue) : Prisma.DbNull,
+					stlUrl,
+					stepUrl,
+					dxfUrl,
+				},
+			});
+		} else {
+			const itId = crypto.randomUUID();
+			const paramStr = JSON.stringify(parametersJson || {});
+			const annStr = artifacts && artifacts.annotations ? JSON.stringify(artifacts.annotations) : null;
+			await prisma.$executeRawUnsafe(
+				`INSERT INTO "CadIteration" ("id", "sessionId", "version", "prompt", "source", "pythonScript", "parameters", "annotations", "stlUrl", "stepUrl", "dxfUrl", "createdAt")
+				 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, NOW())
+				 ON CONFLICT ("sessionId", "version") DO UPDATE SET
+				   "prompt" = EXCLUDED."prompt",
+				   "source" = EXCLUDED."source",
+				   "pythonScript" = EXCLUDED."pythonScript",
+				   "parameters" = EXCLUDED."parameters",
+				   "annotations" = EXCLUDED."annotations",
+				   "stlUrl" = EXCLUDED."stlUrl",
+				   "stepUrl" = EXCLUDED."stepUrl",
+				   "dxfUrl" = EXCLUDED."dxfUrl"`,
+				itId,
+				mappedPayload.session_id,
+				nextVersion,
+				iterationPrompt,
+				iterationSource,
+				mappedPayload.python_script,
+				paramStr,
+				annStr,
+				stlUrl,
+				stepUrl,
+				dxfUrl
+			);
+		}
+	} catch (dbErr) {
+		console.error('Failed to save iteration to database:', dbErr);
 	}
 
 	const normalizedResponse = {
 		...data,
 		stl_url: stlUrl,
 		step_url: stepUrl,
+		dxf_url: dxfUrl,
+		version: nextVersion,
 	};
 
 	return NextResponse.json(normalizedResponse, {

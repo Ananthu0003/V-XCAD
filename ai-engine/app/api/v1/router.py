@@ -11,6 +11,7 @@ from typing import Any
 import uuid
 import io
 import gc
+import shutil
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, BackgroundTasks
 from app.services.validation.toolpath_schema_validator import ToolpathSchemaValidator
 from app.services.validation.cam_readiness_evaluator import CamReadinessEvaluator
@@ -26,7 +27,15 @@ router = APIRouter(tags=["cad"])
 
 _ALLOWED_MIME_PREFIXES = ()
 _ALLOWED_MIME_EXACT   = {"application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"}
-_DEFAULT_MODEL = os.getenv("GENAI_MODEL", "gemini-3.5-flash")
+_DEFAULT_MODEL = os.getenv("GENAI_MODEL", "gemini-3.5-flash-lite")
+
+# Geometry/rendering policy constants (env-overridable where relevant)
+# Security cap on OpenSCAD tessellation resolution (resource exhaustion guard).
+OPENSCAD_FN_CAP = int(os.getenv("OPENSCAD_FN_CAP", "32"))
+# CGAL crash-prevention epsilon injected into CSG difference() operations.
+CSG_EPS = float(os.getenv("CSG_EPS", "0.02"))
+# Horizontal/vertical spacing (mm) between the four views in a blueprint DXF export.
+BLUEPRINT_DXF_VIEW_SPACING = float(os.getenv("BLUEPRINT_DXF_VIEW_SPACING", "120.0"))
 
 
 import ast
@@ -130,7 +139,7 @@ def export_to_dxf_bytes(shape, dxf_mode: str) -> bytes:
         with BuildSketch(Plane.XY):
             dxf_shape = project(section_profile.edges(), mode=Mode.PRIVATE)
     elif dxf_mode == "blueprint":
-        offset_dist = 120.0
+        offset_dist = BLUEPRINT_DXF_VIEW_SPACING
         with BuildSketch(Plane.XY):
             top_view = project(shape.edges(), mode=Mode.PRIVATE)
             iso_shape = Location((offset_dist, 0, 0)) * Rotation(0, 0, 45) * Rotation(54.7356, 0, 0) * shape
@@ -243,8 +252,8 @@ def _sanitize_script(script: str) -> str:
     # -- Guard 4: Strip BOSL2 includes -----------------------------------------
     script = re.sub(r'include\s*<BOSL2/.*?>;?', '', script, flags=re.I)
 
-    # -- Guard 1: cap every $fn value that exceeds 32 --------------------------
-    FN_CAP = 32
+    # -- Guard 1: cap every $fn value that exceeds OPENSCAD_FN_CAP ------------
+    FN_CAP = OPENSCAD_FN_CAP
 
     def _cap_fn(match: re.Match) -> str:
         val = int(match.group(1))
@@ -253,11 +262,11 @@ def _sanitize_script(script: str) -> str:
 
     script = re.sub(r'\$fn\s*=\s*(\d+)', _cap_fn, script)
 
-    # -- Guard 2: inject $fn = 32 if entirely absent ---------------------------
+    # -- Guard 2: inject $fn = OPENSCAD_FN_CAP if entirely absent ---------------
     if "$fn" not in script:
-        script = "$fn = 32;\n\n" + script
+        script = f"$fn = {OPENSCAD_FN_CAP};\n\n" + script
 
-    # -- Guard 3: inject eps = 0.02 if difference() exists but eps is absent --
+    # -- Guard 3: inject CSG_EPS if difference() exists but eps is absent -------
     has_difference = "difference()" in script
     has_eps        = re.search(r'\beps\s*=', script) is not None
 
@@ -265,14 +274,14 @@ def _sanitize_script(script: str) -> str:
         if "// PARAMETERS_START" in script:
             script = script.replace(
                 "// PARAMETERS_START",
-                "// PARAMETERS_START\neps = 0.02;  // CGAL crash prevention",
+                f"// PARAMETERS_START\neps = {CSG_EPS};  // CGAL crash prevention",
                 1,
             )
         else:
             # Fallback: inject before the first module or difference() block
             script = re.sub(
                 r'(\bmodule\b|\bdifference\(\))',
-                r'eps = 0.02;  // CGAL crash prevention\n\n\1',
+                rf'eps = {CSG_EPS};  // CGAL crash prevention\n\n\1',
                 script,
                 count=1,
             )
@@ -306,6 +315,100 @@ async def get_session_blueprint(session_id: str):
         raise HTTPException(status_code=404, detail="Blueprint not found for this session")
     return Response(content=bp_file.read_bytes(), media_type="image/png")
 
+def _crop_blueprint_image(image_bytes: bytes, crop_box: dict[str, Any]) -> bytes:
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(image_bytes))
+        width, height = img.size
+
+        x = float(crop_box.get("x", 0))
+        y = float(crop_box.get("y", 0))
+        w = float(crop_box.get("w", 100))
+        h = float(crop_box.get("h", 100))
+
+        # Add 5% padding margin to ensure nearby dimensions and leader lines are included
+        margin_x = max(15, int(width * 0.05))
+        margin_y = max(15, int(height * 0.05))
+
+        left = max(0, int((x / 100.0) * width) - margin_x)
+        top = max(0, int((y / 100.0) * height) - margin_y)
+        right = min(width, int(((x + w) / 100.0) * width) + margin_x)
+        bottom = min(height, int(((y + h) / 100.0) * height) + margin_y)
+
+        if (right - left) > 20 and (bottom - top) > 20:
+            cropped = img.crop((left, top, right, bottom))
+            buf = io.BytesIO()
+            cropped.save(buf, format="PNG")
+            return buf.getvalue()
+    except Exception as e:
+        print(f"Failed to crop blueprint image: {e}")
+    return image_bytes
+
+
+def _patch_parameters_in_script(script: str, adjustments: dict[str, Any]) -> str:
+    """
+    Deterministically patch numeric PARAMETERS values into an existing build123d
+    Python script without relying on LLM text surgery.
+
+    For each key/value pair in `adjustments`:
+    - If the key already exists in the PARAMETERS dict, update its value in-place.
+    - If the key is new, append it to the PARAMETERS dict.
+
+    Returns the patched script.  If anything goes wrong, returns the original.
+    """
+    if not adjustments or not script:
+        return script
+
+    patched = script
+    appended_keys: list[str] = []
+
+    for key, value in adjustments.items():
+        if not isinstance(key, str) or not key.strip():
+            continue
+
+        # Format value for Python source
+        if isinstance(value, bool):
+            val_str = "True" if value else "False"
+        elif isinstance(value, float):
+            val_str = str(value) if value != int(value) else f"{value:.1f}"
+        elif isinstance(value, int):
+            val_str = str(value)
+        elif isinstance(value, str):
+            val_str = f'"{value}"'
+        elif isinstance(value, list):
+            val_str = json.dumps(value)
+        else:
+            val_str = str(value)
+
+        # Pattern: match the key inside the PARAMETERS dict and replace its value
+        # Handles   "key": 12.3,   or   "key": 12.3  (no trailing comma)
+        pattern = re.compile(
+            r'(PARAMETERS\s*=\s*\{[^}]*?"' + re.escape(key) + r'"\s*:\s*)([^,\n\}]+)',
+            re.DOTALL,
+        )
+        m = pattern.search(patched)
+        if m:
+            patched = patched[:m.start(2)] + val_str + patched[m.end(2):]
+            print(f"[param-patch] Updated '{key}' → {val_str}")
+        else:
+            # Key not found — queue it for appending
+            appended_keys.append((key, val_str))
+
+    # Append new keys just before the closing } of PARAMETERS
+    if appended_keys:
+        param_close = re.search(r'(PARAMETERS\s*=\s*\{[^}]*?)(\n\})', patched, re.DOTALL)
+        if param_close:
+            insert_text = ""
+            for key, val_str in appended_keys:
+                insert_text += f'\n    "{key}": {val_str},'
+                print(f"[param-patch] Appended new key '{key}' = {val_str}")
+            patched = patched[:param_close.end(1)] + insert_text + patched[param_close.start(2):]
+
+    return patched
+
+
+
 @router.post("/generate")
 async def generate(
     prompt: str = Form(...),
@@ -315,6 +418,7 @@ async def generate(
     selection_context: str | None = Form(None),
     session_id: str | None = Form(None),
     target_portion: str | None = Form(None),
+    crop_box: str | None = Form(None),
 ) -> StreamingResponse:
     """
     Two-stage CAD generation & multi-iteration refinement pipeline:
@@ -376,31 +480,112 @@ async def generate(
 
     async def stream_generator():
         nonlocal feature_map, targeted_feature
+        # Use a mutable local copy so we can patch base_code without
+        # triggering Python's UnboundLocalError for the closure variable.
+        effective_base_code = base_code
         
-        if not base_code:
+        if not effective_base_code:
             # ── Initial Generation (Stage 1: Full Blueprint Audit) ────────────
             if image_bytes and mime_type:
                 yield f'data: {json.dumps({"status": "auditing blueprint (stage 1 of 2)"})}\n\n'
                 try:
                     feature_map = await svc.audit_blueprint(image_bytes, mime_type)
+                    # Persist the full engineering audit so iteration turns can
+                    # refine with full-part context (stock, material, GD&T, ...).
+                    if session_id and feature_map:
+                        try:
+                            fm_file = BLUEPRINTS_DIR / f"{session_id}_feature_map.json"
+                            fm_file.write_text(json.dumps(feature_map), encoding="utf-8")
+                        except Exception as e:
+                            print(f"Failed to cache session feature map: {e}")
                 except Exception as e:
                     print(f"Audit failed: {e}")
             yield f'data: {json.dumps({"status": "generating code (stage 2 of 2)"})}\n\n'
-        else:
+        else:  # iteration turn
             # ── Iteration Turn (Targeted Inspection & Surgical Refinement) ────
+            # Restore the stage-1 engineering audit from the session cache so
+            # the surgical refinement isn't blind to the full-part context.
+            if not feature_map and session_id:
+                fm_file = BLUEPRINTS_DIR / f"{session_id}_feature_map.json"
+                if fm_file.exists():
+                    try:
+                        feature_map = json.loads(fm_file.read_text(encoding="utf-8"))
+                    except Exception as e:
+                        print(f"Failed to read cached session feature map: {e}")
+                else:
+                    yield f'data: {json.dumps({"warning": "Stage-1 engineering audit unavailable for this session; refinement proceeds without full-part context."})}\n\n'
+
+            # Parse the targeted crop box (top-level form field, selection_context
+            # JSON, or the "Custom Region (x%, y%)" naming convention) up front.
+            target_crop_box = None
+            if crop_box:
+                try:
+                    parsed_crop = json.loads(crop_box) if isinstance(crop_box, str) else crop_box
+                    if isinstance(parsed_crop, dict) and parsed_crop.get("crop_box"):
+                        parsed_crop = parsed_crop["crop_box"]
+                    if isinstance(parsed_crop, dict) and all(k in parsed_crop for k in ("x", "y", "w", "h")):
+                        target_crop_box = parsed_crop
+                except Exception:
+                    pass
+
+            if not target_crop_box and selection_context:
+                try:
+                    ctx = json.loads(selection_context) if isinstance(selection_context, str) else selection_context
+                    if isinstance(ctx, dict) and ctx.get("crop_box"):
+                        target_crop_box = ctx["crop_box"]
+                except Exception:
+                    pass
+
+            if not target_crop_box and target_portion:
+                m = re.search(r'\((\d+)%,\s*(\d+)%\)', target_portion)
+                if m:
+                    cx, cy = float(m.group(1)), float(m.group(2))
+                    target_crop_box = {"x": max(0, cx - 10), "y": max(0, cy - 10), "w": 20, "h": 20}
+
+            # Fail loudly when the user explicitly targets a region but the
+            # targeted inspection cannot run - never refine blind silently.
+            if target_portion and not (image_bytes and mime_type):
+                yield f'data: {json.dumps({"error": {"message": "Targeted repair requires the session blueprint image, but none is available for this session. Re-upload the blueprint or start a new generation.", "hint": "Re-attach the blueprint image and retry."}})}\n\n'
+                return
+
             if image_bytes and mime_type and (target_portion or prompt):
                 portion_label = target_portion or "target feature"
                 yield f'data: {json.dumps({"status": f"inspecting blueprint for {portion_label} (targeted vision)..."})}\n\n'
+
+                target_img_bytes = _crop_blueprint_image(image_bytes, target_crop_box) if target_crop_box else image_bytes
+
                 try:
                     targeted_feature = await svc.audit_target_feature(
-                        image_bytes=image_bytes,
+                        image_bytes=target_img_bytes,
                         mime_type=mime_type,
                         target_portion=target_portion or "feature",
                         user_prompt=prompt,
-                        base_code=base_code,
+                        base_code=effective_base_code,
+                        crop_box=target_crop_box,
                     )
                 except Exception as e:
                     print(f"Targeted feature audit failed: {e}")
+                    yield f'data: {json.dumps({"error": {"message": f"Targeted feature inspection failed: {e}", "hint": "Check API key and quota, then retry."}})}\n\n'
+                    return
+
+                # ── Deterministic Server-Side Parameter Patch ─────────────────
+                # CRITICAL: Apply parameter_adjustments directly to base_code via
+                # regex so they are guaranteed to survive even if the LLM rewrites
+                # the script structure. This is the primary mechanism that makes
+                # multi-iteration visually change the 3D model.
+                if targeted_feature and effective_base_code:
+                    param_adjustments = targeted_feature.get("parameter_adjustments") or {}
+                    if param_adjustments:
+                        patched = _patch_parameters_in_script(effective_base_code, param_adjustments)
+                        n_patched = sum(
+                            1 for k in param_adjustments
+                            if k in patched
+                        )
+                        print(f"[param-patch] Applied {n_patched}/{len(param_adjustments)} parameter adjustments to base_code")
+                        # Use patched copy downstream — never reassign the closure variable
+                        effective_base_code = patched
+                        yield f'data: {json.dumps({"status": f"applied {n_patched} parameter patches from blueprint inspection..."})}\n\n'
+
             yield f'data: {json.dumps({"status": "surgically refining CAD script..."})}\n\n'
 
         full_script = ""
@@ -412,7 +597,7 @@ async def generate(
                 mime_type=mime_type,
                 feature_map=feature_map,
                 targeted_feature=targeted_feature,
-                base_code=base_code,
+                base_code=effective_base_code,
                 selection_context=selection_context,
             ):
                 full_script += chunk_text
@@ -605,7 +790,11 @@ async def render(
     STL / STEP / DXF / G-code artifacts. Returns URLs the browser can fetch.
     """
     session_id = request.session_id or uuid.uuid4().hex
-    output_basename = f"cad_{session_id}"
+    version = request.version
+    if version:
+        output_basename = f"cad_{session_id}_v{version}"
+    else:
+        output_basename = f"cad_{session_id}"
 
     svc = ParameterRenderService()
     try:
@@ -632,39 +821,67 @@ async def render(
             detail={"error": {"message": str(exc)}},
         )
     except RuntimeError as exc:
-        # ── Auto-healing Loop ──────────────────────────────────────────────────
-        try:
-            llm_svc = LLMCodegenService()
-            healed_script = await llm_svc.repair_script(
-                current_code=request.python_script,
-                error_log=str(exc)
-            )
-            
-            with open(Path("outputs") / "debug_healed_script.py.txt", "w", encoding="utf-8") as f:
-                f.write(healed_script)
-            
-            # Strictly validate the healed script too
-            is_valid, val_err = await svc.validate_script(
-                script=healed_script,
-                parameters=request.parameters,
-            )
-            if not is_valid:
-                raise RuntimeError(val_err)
-                
-            # Re-run render with the repaired script
-            result = await svc.render_to_outputs(
-                parameters=request.parameters,
-                script=healed_script,
-                output_basename=output_basename,
-                cam_parameters=request.cam_parameters,
-            )
-            
-        except Exception as retry_exc:
-            # If auto-heal fails, raise the original error plus the new one
+        # ── Bounded Auto-healing Loop ─────────────────────────────────────────
+        # Each attempt feeds the LATEST traceback back to the LLM repairer so
+        # successive repairs actually converge instead of repeating the same
+        # mistake. Gives up loudly after RENDER_MAX_REPAIR_ATTEMPTS.
+        max_repair_attempts = max(1, int(os.getenv("RENDER_MAX_REPAIR_ATTEMPTS", "3")))
+        last_error = str(exc)
+        active_params = request.parameters
+
+        for attempt in range(1, max_repair_attempts + 1):
+            try:
+                llm_svc = LLMCodegenService()
+                healed_script = await llm_svc.repair_script(
+                    current_code=request.python_script,
+                    error_log=last_error,
+                )
+
+                # Extract parameters directly from the healed script to avoid re-injecting broken params
+                healed_params = _extract_parameters(healed_script)
+                active_params = healed_params if healed_params else request.parameters
+
+                # Strictly validate the healed script with its own parameters
+                is_valid, val_err = await svc.validate_script(
+                    script=healed_script,
+                    parameters=active_params,
+                )
+                if not is_valid:
+                    last_error = val_err
+                    continue
+
+                # Re-run render with the repaired script and healed parameters
+                result = await svc.render_to_outputs(
+                    parameters=active_params,
+                    script=healed_script,
+                    output_basename=output_basename,
+                    cam_parameters=request.cam_parameters,
+                )
+                # Succeeded — stop looping
+                break
+
+            except Exception as retry_exc:
+                last_error = f"{last_error}\nHeal attempt {attempt} failed: {retry_exc}"
+        else:
+            # If auto-heal exhausts all attempts, raise the accumulated errors
             raise HTTPException(
                 status_code=500,
-                detail={"error": {"message": f"Render failed and auto-heal failed.\nOriginal: {exc}\nHeal: {retry_exc}"}},
+                detail={"error": {"message": f"Render failed after {max_repair_attempts} auto-heal attempts.\nLast error: {last_error}"}},
             )
+
+    # If versioned, maintain alias unversioned files for backwards compatibility
+    if version:
+        try:
+            if result.get("stl_path"):
+                import shutil
+                out_dir = Path(result["stl_path"]).parent
+                for ext in [".stl", ".step", ".dxf", ".py.txt", "_annotations.json"]:
+                    v_file = out_dir / f"cad_{session_id}_v{version}{ext}"
+                    alias_file = out_dir / f"cad_{session_id}{ext}"
+                    if v_file.exists():
+                        shutil.copyfile(v_file, alias_file)
+        except Exception:
+            pass
 
     # Build artifact URLs — the outputs directory is mounted as /outputs
     def _url(path_str: str | None) -> str | None:
@@ -721,10 +938,10 @@ async def render(
     return RenderResponse(
         status="ok",
         session_id=session_id,
+        version=version,
         artifacts=artifacts,
         repaired_script=healed_script if 'healed_script' in locals() else None,
     )
-
 
 
 def _process_import_step(file_bytes: bytes) -> tuple[bytes, Any]:
@@ -896,17 +1113,42 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
         if not setup.get("stockDimensions") and not setup.get("resolvedStock"):
             params = request.parameters
             is_lathe = "outer_diameter" in params or "od" in params
-            stock_x = float(params.get("length") or params.get("width") or params.get("outer_diameter") or 100.0)
-            stock_y = float(params.get("width") or params.get("length") or params.get("outer_diameter") or 100.0)
-            stock_h = float(params.get("height") or params.get("overall_length") or params.get("thickness") or 100.0)
+            stock_x = float(params.get("length") or params.get("width") or params.get("outer_diameter") or 0.0)
+            stock_y = float(params.get("width") or params.get("length") or params.get("outer_diameter") or 0.0)
+            stock_h = float(params.get("height") or params.get("overall_length") or params.get("thickness") or 0.0)
+            if not (stock_x > 0.0 and stock_y > 0.0 and stock_h > 0.0):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "STOCK_DIMENSIONS_MISSING",
+                            "message": (
+                                "Stock dimensions are required. Provide setup.stockDimensions (or "
+                                "setup.resolvedStock), or length/width/height (height/overall_length/"
+                                "thickness) parameters so the stock can be derived. Refusing to "
+                                "fabricate a default stock geometry."
+                            ),
+                        }
+                    },
+                )
             setup["stockDimensions"] = [stock_x, stock_y, stock_h]
             if is_lathe:
                 setup["stockType"] = "cylinder"
         
         # Ensure resolvedStock with bounds exists to pass PlanningContext validation
         if not setup.get("resolvedStock"):
-            sd = setup.get("stockDimensions", [100.0, 100.0, 100.0])
-            sx, sy, sz = sd[0] if len(sd) > 0 else 100.0, sd[1] if len(sd) > 1 else 100.0, sd[2] if len(sd) > 2 else 100.0
+            sd = setup.get("stockDimensions")
+            if not sd or len(sd) < 3 or any(float(v) <= 0.0 for v in sd):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "STOCK_DIMENSIONS_MISSING",
+                            "message": "resolvedStock is missing and stockDimensions are not usable; refusing to fabricate a default stock geometry.",
+                        }
+                    },
+                )
+            sx, sy, sz = float(sd[0]), float(sd[1]), float(sd[2])
             setup["resolvedStock"] = {
                 "type": setup.get("stockType", "box"),
                 "bounds": {
@@ -917,8 +1159,18 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             }
             request.machine_config["setup"] = setup
         elif "bounds" not in setup["resolvedStock"]:
-            sd = setup.get("stockDimensions", [100.0, 100.0, 100.0])
-            sx, sy, sz = sd[0] if len(sd) > 0 else 100.0, sd[1] if len(sd) > 1 else 100.0, sd[2] if len(sd) > 2 else 100.0
+            sd = setup.get("stockDimensions")
+            if not sd or len(sd) < 3 or any(float(v) <= 0.0 for v in sd):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "STOCK_DIMENSIONS_MISSING",
+                            "message": "resolvedStock has no bounds and stockDimensions are not usable; refusing to fabricate a default stock geometry.",
+                        }
+                    },
+                )
+            sx, sy, sz = float(sd[0]), float(sd[1]), float(sd[2])
             setup["resolvedStock"]["bounds"] = {
                 "min": [-sx/2, -sy/2, -sz],
                 "max": [sx/2, sy/2, 0.0]
@@ -1624,3 +1876,86 @@ async def simulate_prepare(request: SimulatePrepareRequest):
             status_code=500,
             detail={"error": {"message": f"Simulation preparation failed: {exc}"}}
         )
+
+
+# ── Knowledge Base Management Endpoints ──────────────────────────────────────
+
+@router.get("/knowledge/documents")
+async def list_knowledge_documents():
+    try:
+        from app.services.knowledge.repository import KnowledgeRepository
+        repo = KnowledgeRepository()
+        docs = repo.list_documents()
+        return {"documents": [d.model_dump() for d in docs]}
+    except Exception as exc:
+        print(f"[Knowledge] List documents error: {exc}")
+        return {"documents": []}
+
+
+@router.post("/knowledge/documents/ingest")
+async def ingest_knowledge_document(file: UploadFile = File(...)):
+    import tempfile
+    from pathlib import Path
+    try:
+        from app.services.knowledge.pipeline import KnowledgeIngestionPipeline
+        
+        temp_dir = Path(tempfile.gettempdir()) / "vexcad_knowledge"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_file = temp_dir / file.filename
+
+        content = await file.read()
+        temp_file.write_bytes(content)
+
+        pipeline = KnowledgeIngestionPipeline()
+        doc_schema, rules = await pipeline.process_pdf(str(temp_file))
+
+        temp_file.unlink(missing_ok=True)
+        return {
+            "success": True,
+            "document": doc_schema.model_dump(),
+            "rules_count": len(rules)
+        }
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"Knowledge ingestion failed: {exc}"}}
+        )
+
+
+@router.post("/knowledge/retrieve")
+async def retrieve_knowledge(query: Dict[str, Any]):
+    try:
+        from app.services.knowledge.retriever import KnowledgeRetriever
+        from app.services.knowledge.schemas import KnowledgeRetrievalQuery
+        
+        q = KnowledgeRetrievalQuery(
+            query=query.get("query", ""),
+            detected_symbols=query.get("detected_symbols", []),
+            feature_candidates=query.get("feature_candidates", []),
+            active_standards=query.get("active_standards", ["ISO", "DIN", "ASME"])
+        )
+        retriever = KnowledgeRetriever()
+        res = retriever.retrieve(q)
+        return res.model_dump()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"Knowledge retrieval failed: {exc}"}}
+        )
+
+
+@router.delete("/knowledge/documents/{doc_id}")
+async def delete_knowledge_document(doc_id: str):
+    try:
+        from app.services.knowledge.repository import KnowledgeRepository
+        repo = KnowledgeRepository()
+        repo.delete_document(doc_id)
+        return {"success": True, "deleted": doc_id}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"Failed to delete document: {exc}"}}
+        )
+

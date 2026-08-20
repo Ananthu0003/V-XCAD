@@ -103,7 +103,7 @@ export async function POST(request: Request): Promise<Response> {
 	}
 
 	const modelRaw = formData.get('model_name');
-	const modelName = typeof modelRaw === 'string' && modelRaw.trim() ? modelRaw.trim() : 'gemini-3.5-flash';
+	const modelName = typeof modelRaw === 'string' && modelRaw.trim() ? modelRaw.trim() : 'gemini-3.5-flash-lite';
 	// FastAPI expects the field named 'model' (alias), not 'model_name'
 	formData.delete('model_name');
 	formData.set('model', modelName);
@@ -133,9 +133,7 @@ export async function POST(request: Request): Promise<Response> {
 	const rawSessionId = formData.get('session_id');
 	let sessionId: string;
 
-	if (typeof rawSessionId === 'string' && rawSessionId.trim()) {
-		sessionId = rawSessionId.trim();
-	} else {
+	if (upload instanceof File || !rawSessionId || typeof rawSessionId !== 'string' || !rawSessionId.trim()) {
 		const session = await prisma.cadSession.create({
 			data: {
 				prompt,
@@ -145,6 +143,8 @@ export async function POST(request: Request): Promise<Response> {
 		});
 		sessionId = session.id;
 		formData.set('session_id', sessionId);
+	} else {
+		sessionId = rawSessionId.trim();
 	}
 
 	// If no file was uploaded, remove the empty image field so FastAPI treats it as optional

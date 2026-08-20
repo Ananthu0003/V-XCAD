@@ -22,7 +22,39 @@ export async function GET() {
             }
         });
 
-        return NextResponse.json(sessions);
+        const sessionIds = sessions.map(s => s.id);
+        let iterationCounts: any[] = [];
+        if ((prisma as any).cadIteration) {
+            iterationCounts = await (prisma as any).cadIteration.groupBy({
+                by: ['sessionId'],
+                where: {
+                    sessionId: { in: sessionIds }
+                },
+                _count: {
+                    id: true
+                }
+            }).catch(() => []);
+        } else if (sessionIds.length > 0) {
+            const rows = await prisma.$queryRawUnsafe<any[]>(
+                `SELECT "sessionId", COUNT("id")::int as count FROM "CadIteration" WHERE "sessionId" = ANY($1) GROUP BY "sessionId"`,
+                sessionIds
+            ).catch(() => []);
+            iterationCounts = rows.map((r: any) => ({ sessionId: r.sessionId, _count: { id: r.count } }));
+        }
+
+        const countMap = new Map<string, number>();
+        iterationCounts.forEach((c: any) => {
+            countMap.set(c.sessionId, c._count?.id || 0);
+        });
+
+        const formatted = sessions.map(s => ({
+            ...s,
+            _count: {
+                iterations: countMap.get(s.id) || 0
+            }
+        }));
+
+        return NextResponse.json(formatted);
     } catch (error) {
         console.error('Failed to fetch sessions:', error);
         return NextResponse.json(

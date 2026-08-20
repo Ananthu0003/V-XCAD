@@ -11,6 +11,10 @@ interface Session {
 	prompt: string | null;
 	pythonScript?: string;
 	parameters?: any;
+	currentVersion?: number;
+	_count?: {
+		iterations?: number;
+	};
 }
 
 interface SessionBrowserModalProps {
@@ -143,6 +147,13 @@ export function SessionBrowserModal({ isOpen, onClose, onSelectSession }: Sessio
 									<p className="text-[11px] text-muted-foreground truncate mt-1">
 										{session.prompt || 'No prompt provided'}
 									</p>
+									{((session._count?.iterations && session._count.iterations > 0) || (session.currentVersion && session.currentVersion > 0)) && (
+										<div className="flex items-center gap-1.5 mt-2">
+											<span className="px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-mono font-medium rounded-md">
+												v{session.currentVersion || session._count?.iterations} &bull; {session._count?.iterations || session.currentVersion} {(session._count?.iterations === 1 || session.currentVersion === 1) ? 'iteration' : 'iterations'}
+											</span>
+										</div>
+									)}
 								</div>
 
 								<div className="flex flex-col items-end gap-1 flex-shrink-0">

@@ -53,6 +53,56 @@ class KnowledgeRepository:
                     return KnowledgeDocumentSchema(id=row[0], filename=row[1], version=row[2], pageCount=row[3], status=row[4])
         return None
         
+    def list_documents(self) -> List[KnowledgeDocumentSchema]:
+        docs = []
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT id, filename, version, "pageCount", status FROM "KnowledgeDocument" ORDER BY "createdAt" DESC')
+                for row in cur.fetchall():
+                    docs.append(KnowledgeDocumentSchema(id=row[0], filename=row[1], version=row[2], pageCount=row[3], status=row[4]))
+        return docs
+
+    def delete_document(self, doc_id: str) -> bool:
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('DELETE FROM "EngineeringRule" WHERE source_id = %s', (doc_id,))
+                cur.execute('DELETE FROM "KnowledgeDocument" WHERE id = %s', (doc_id,))
+            conn.commit()
+        return True
+
+    def search_rules(self, query_text: str, limit: int = 15) -> List[EngineeringRuleSchema]:
+        rules = []
+        if not query_text or not query_text.strip():
+            return rules
+            
+        words = [w.strip() for w in query_text.split() if len(w.strip()) > 2]
+        if not words:
+            return rules
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                conditions = []
+                params = []
+                for w in words:
+                    conditions.append('("description" ILIKE %s OR "topic" ILIKE %s)')
+                    params.extend([f"%{w}%", f"%{w}%"])
+                
+                sql = f'''
+                    SELECT rule_id, version, source_id, topic, confidence, status, description 
+                    FROM "EngineeringRule" 
+                    WHERE {" OR ".join(conditions)}
+                    ORDER BY confidence DESC
+                    LIMIT %s
+                '''
+                params.append(limit)
+                cur.execute(sql, tuple(params))
+                for row in cur.fetchall():
+                    rules.append(EngineeringRuleSchema(
+                        rule_id=row[0], version=row[1], source_id=row[2], topic=row[3], 
+                        confidence=row[4], status=row[5], description=row[6]
+                    ))
+        return rules
+
     def get_rules_by_topic(self, topic: str) -> List[EngineeringRuleSchema]:
         rules = []
         with self._get_connection() as conn:

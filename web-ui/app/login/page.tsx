@@ -69,10 +69,10 @@ export default function LoginPage() {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Email Address</label>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Email or Username</label>
               <input 
-                type="email" 
-                placeholder="you@example.com"
+                type="text" 
+                placeholder="admin or you@example.com"
                 className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-foreground placeholder:text-muted-foreground"
                 required
                 value={formData.email}

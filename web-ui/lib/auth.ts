@@ -1,7 +1,15 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'cadvex-super-secret-key-development');
+// Fail fast: a missing JWT_SECRET must never silently fall back to a
+// publicly-known signing key (token forgery vulnerability).
+if (!process.env.JWT_SECRET) {
+	throw new Error(
+		'JWT_SECRET environment variable is required. Set it in your .env file ' +
+		'(generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))").'
+	);
+}
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
 
 export async function signToken(payload: { userId: string; email: string }) {
   return await new SignJWT(payload)

@@ -579,3 +579,69 @@ class ParametricFeatureExtractor:
     def _matches_any(self, tokens: set, keywords: set) -> bool:
         """Returns True if any token in the prefix matches a feature keyword."""
         return bool(tokens.intersection(keywords))
+
+    def extract_with_engineering_parameters(
+        self,
+        parameters: Dict[str, Any],
+        engineering_audit: Optional[Dict[str, Any]] = None,
+        setup: Optional[Dict[str, Any]] = None,
+        brep_data: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Extracts CAM features and enriches each feature with associated engineering metadata:
+        tolerances, fits, GD&T callouts, surface finishes, chamfers, and fillets.
+        """
+        features = self.extract(parameters, setup=setup, brep_data=brep_data)
+        if not engineering_audit:
+            return features
+
+        # Parse audit if given as raw dictionary
+        from app.services.extraction.generic_parameter_parser import BlueprintParameterNormalizer
+        audit = BlueprintParameterNormalizer.normalize_audit_payload(engineering_audit)
+
+        for feat in features:
+            feat_name = str(feat.get("name", "")).lower()
+            feat_type = str(feat.get("type", "")).lower()
+
+            # 1. Match tolerances
+            feat_tols = {}
+            for dim in audit.all_dimensions:
+                if dim.tolerance and (dim.feature_id in feat_name or feat_name in dim.feature_id):
+                    feat_tols[dim.geometry_reference] = dim.tolerance.model_dump()
+            if feat_tols:
+                feat["tolerances"] = feat_tols
+
+            # 2. Match surface finish
+            for sf in audit.surface_finishes:
+                if sf.target_face_or_feature and (sf.target_face_or_feature in feat_name or feat_name in sf.target_face_or_feature):
+                    feat["surface_finish"] = sf.model_dump()
+                    break
+
+            # 3. Match GD&T callouts
+            feat_gdts = []
+            for gdt in audit.gdt_callouts_parsed:
+                if gdt.target_feature and (gdt.target_feature in feat_name or feat_name in gdt.target_feature):
+                    feat_gdts.append(gdt.model_dump())
+            if feat_gdts:
+                feat["gdt_callouts"] = feat_gdts
+
+            # 4. Match Chamfers & Fillets
+            feat_chamfers = [c.model_dump() for c in audit.all_chamfers if c.feature_id and (c.feature_id in feat_name or feat_name in c.feature_id)]
+            if feat_chamfers:
+                feat["chamfers"] = feat_chamfers
+
+            feat_fillets = [f.model_dump() for f in audit.all_fillets if f.feature_id and (f.feature_id in feat_name or feat_name in f.feature_id)]
+            if feat_fillets:
+                feat["fillets"] = feat_fillets
+
+            # Attach global material & treatment if available
+            if audit.material_parsed:
+                feat["material"] = audit.material_parsed.material_name
+            elif audit.material:
+                feat["material"] = audit.material
+
+            if audit.surface_treatments_parsed:
+                feat["surface_treatments"] = [t.model_dump() for t in audit.surface_treatments_parsed]
+
+        return features
+

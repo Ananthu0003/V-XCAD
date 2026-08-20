@@ -57,6 +57,7 @@ export type TargetPortion = {
 	category: string;
 	description?: string;
 	quickPrompts?: string[];
+	cropBox?: { x: number; y: number; w: number; h: number };
 };
 
 export const CAD_PORTION_PRESETS: TargetPortion[] = [
@@ -64,44 +65,44 @@ export const CAD_PORTION_PRESETS: TargetPortion[] = [
 		id: 'groove',
 		name: 'Groove / Undercut / O-Ring',
 		category: 'Subtractive Features',
-		description: 'Seal grooves, snap ring channels, neck undercuts (e.g. DETAIL-D/C)',
+		description: 'Seal grooves, snap ring channels, neck undercuts from detail-view callouts',
 		quickPrompts: [
-			'The blueprint shows two seal grooves on the collar with R0.2 fillets and a 15° rear taper that were missed.',
-			'Add an O-ring groove: 1.45mm width, 1.95mm depth at the specified collar location.',
-			'Fix groove draft angle to 15 degrees and add root fillets as shown in Detail D.'
+			'Add the groove/undercut feature at the location indicated, using the width, depth and root fillet from the callout.',
+			'Add an O-ring groove at the location indicated, using the width and depth from the callout.',
+			'Fix the groove draft angle and add root fillets as specified in the detail view.'
 		]
 	},
 	{
 		id: 'chamfer',
 		name: 'Chamfer / Bevel / Lead-In',
 		category: 'Edge & Transition',
-		description: 'Outer/inner edge chamfers or conical lead-in angles (e.g. 0.2x45°, 30° nose)',
+		description: 'Outer/inner edge chamfers or conical lead-in angles from the callouts',
 		quickPrompts: [
-			'Add a 0.2 x 45° chamfer to the outer collar corners as shown in Detail-D.',
-			'The shaft tip has a 30-degree lead-in cone with 0.2mm corner blends (Detail-E).',
-			'Add lead-in chamfer to the bore entrance.'
+			'Add the chamfer to the outer corners at the dimensions specified in the detail view callout.',
+			'Model the conical lead-in cone with corner blends as dimensioned in the detail view.',
+			'Add a lead-in chamfer to the bore entrance as specified.'
 		]
 	},
 	{
 		id: 'fillet',
 		name: 'Fillet / Blend Radius',
 		category: 'Edge & Transition',
-		description: 'Internal blend radii or external corner rounds (e.g. R0.2, R0.4)',
+		description: 'Internal blend radii or external corner rounds from the callouts',
 		quickPrompts: [
-			'Add R0.2 corner fillets to all groove root edges.',
-			'The transition shoulder has an R0.4 fillet that was missed.',
-			'Apply R0.2 corner blends at the shaft tip.'
+			'Add corner fillets to all groove root edges at the radius specified in the callout.',
+			'The transition shoulder has a blend fillet that was missed; apply the radius from the callout.',
+			'Apply corner blends at the shaft tip at the radius specified in the detail view.'
 		]
 	},
 	{
 		id: 'stepped_bore',
 		name: 'Stepped Bore / Hole / Counterbore',
 		category: 'Internal Channels',
-		description: 'Internal bore steps, counterbores, blind depths (e.g. SECTION-AA)',
+		description: 'Internal bore steps, counterbores, blind depths from the section view',
 		quickPrompts: [
-			'Section AA shows a stepped bore: Ø17.4 to 1.3mm depth, Ø13.5 to 11.5mm, Ø14 H8, and Ø10 with 10° cone.',
-			'The internal bore transition has a 10-degree taper angle at length 6mm.',
-			'The central hole depth is incorrect, please verify the internal stepped profile.'
+			'The internal stepped bore must follow the diameters and depths called out in the section view.',
+			'The internal bore transition has a taper angle as specified; verify the stepped profile against the callout.',
+			'The central hole depth is incorrect; verify the internal stepped profile against the callout.'
 		]
 	},
 	{
@@ -110,20 +111,20 @@ export const CAD_PORTION_PRESETS: TargetPortion[] = [
 		category: 'Manufacturing Callout',
 		description: 'Tapped holes, bolt threads, ISO metric / UNC specifications',
 		quickPrompts: [
-			'Add M10x1.5 internal thread to the center bore for depth 15mm.',
-			'Model standard metric thread on the external shaft.',
-			'Update thread pitch to coarse standard.'
+			'Add the internal thread to the center bore at the diameter, pitch and depth called out.',
+			'Model the standard metric thread on the external shaft as specified.',
+			'Update thread pitch to the coarse standard for the nominal diameter.'
 		]
 	},
 	{
 		id: 'step_shoulder',
 		name: 'Step / Shoulder / Collar',
 		category: 'Outer Profile & Diameters',
-		description: 'Diameter transitions, collars, stops (e.g. Ø25.5 -> Ø23 -> Ø18 -> Ø25 -> Ø16.975)',
+		description: 'Diameter transitions, collars, stops from the profile callouts',
 		quickPrompts: [
-			'The outer profile has intermediate diameter steps: Ø25.5, Ø23 f8, Ø18 h8, and Ø25.',
-			'The shaft diameter should step down to Ø16.975 along the 38mm gasket working area.',
-			'Add intermediate mounting collar at the specified Z-station.'
+			'The outer profile has intermediate diameter steps that must match the callouts.',
+			'The shaft diameter should step down as dimensioned along the working area.',
+			'Add the intermediate mounting collar at the Z-station specified.'
 		]
 	},
 	{
@@ -132,20 +133,20 @@ export const CAD_PORTION_PRESETS: TargetPortion[] = [
 		category: 'Milling & Features',
 		description: 'Drive keyways, flat milled slots, or internal pockets',
 		quickPrompts: [
-			'Add a drive keyway slot along the shaft.',
-			'Cut a U-shaped slot at the edge with full radius bottom.',
-			'Add milled pocket with depth matching the drawing note.'
+			'Add a drive keyway slot along the shaft as specified.',
+			'Cut a U-shaped slot at the edge with full radius bottom as dimensioned.',
+			'Add a milled pocket with depth matching the drawing note.'
 		]
 	},
 	{
 		id: 'missing_detail',
 		name: 'Missing Detail View Feature',
 		category: 'Detail & Micro-Geometry',
-		description: 'Micro-features from Detail B, C, D, E or note callouts omitted in initial pass',
+		description: 'Micro-features from detail views or note callouts omitted in initial pass',
 		quickPrompts: [
-			'Detail-B shows an undercut with 1.4mm width, 15° angle, and R0.4 fillet.',
-			'Detail-C shows a 20° undercut with 0.2x45° chamfer.',
-			'Detail-E shows a 3mm max recess at the nose with 30° cone.'
+			'The detail view shows an undercut with the width, angle, and fillet specified in the callout.',
+			'The detail view shows an undercut with a chamfer as dimensioned.',
+			'The detail view shows a recess at the nose with a cone angle as specified.'
 		]
 	},
 	{
@@ -154,9 +155,9 @@ export const CAD_PORTION_PRESETS: TargetPortion[] = [
 		category: 'Global Dimensions',
 		description: 'Overall length, primary diameter, base prismoid dimensions',
 		quickPrompts: [
-			'Total part length should be exactly 98.6mm.',
-			'Adjust outer stock diameter to match primary datum.',
-			'Correct overall thickness of the main body.'
+			'Total part length should be exactly as dimensioned in the callout.',
+			'Adjust outer stock diameter to match the primary datum.',
+			'Correct the overall thickness of the main body as specified.'
 		]
 	}
 ];
@@ -168,6 +169,10 @@ type ChatMessage = {
 	role: ChatRole;
 	content: string;
 	fileName?: string;
+	targetPortion?: string;
+	revisionId?: string;
+	revisionNumber?: number;
+	changeLog?: any;
 };
 
 type ChatPanelProps = {
@@ -195,6 +200,8 @@ type ChatPanelProps = {
 	setTargetPortion?: (portion: TargetPortion | null) => void;
 	blueprintUrl?: string | null;
 	onToggleBlueprintView?: () => void;
+	activeRevisionId?: string | null;
+	onRestoreRevision?: (revisionId: string) => void;
 };
 
 export function ChatPanel({
@@ -222,6 +229,8 @@ export function ChatPanel({
 	setTargetPortion,
 	blueprintUrl = null,
 	onToggleBlueprintView,
+	activeRevisionId,
+	onRestoreRevision,
 }: ChatPanelProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
 	const router = useRouter();
@@ -288,11 +297,18 @@ export function ChatPanel({
 					</div>
 
 					<div className="flex items-center gap-1.5">
+						<button
+							onClick={onClear}
+							className="flex size-7 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 hover:text-emerald-300 transition-colors"
+							title="New Blueprint Project Section"
+						>
+							<PlusCircle className="size-3.5" />
+						</button>
 						{messages.length > 0 && (
 							<button
 								onClick={onClear}
 								className="flex size-7 items-center justify-center rounded-lg bg-zinc-900/60 border border-zinc-800/80 text-muted-foreground hover:bg-zinc-800 hover:text-foreground transition-colors"
-								title="Clear chat"
+								title="Clear active workspace"
 							>
 								<Trash2 className="size-3.5" />
 							</button>
@@ -380,7 +396,23 @@ export function ChatPanel({
 					) : (
 						<div className="space-y-4">
 							{messages.map((msg) => (
-								<ChatBubble key={msg.id} {...msg} />
+								<ChatBubble
+									key={msg.id}
+									{...msg}
+									activeRevisionId={activeRevisionId}
+									onRestoreRevision={onRestoreRevision}
+									onRestorePrompt={(text, portionName) => {
+										setPrompt(text);
+										if (portionName && setTargetPortion) {
+											const found = CAD_PORTION_PRESETS.find(
+												(p) => p.name === portionName || p.id === portionName
+											);
+											if (found) {
+												setTargetPortion(found);
+											}
+										}
+									}}
+								/>
 							))}
 							<div ref={scrollRef} />
 						</div>

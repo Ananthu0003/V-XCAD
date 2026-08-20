@@ -61,26 +61,43 @@ class GoogleGateway(BaseLLMGateway):
         config_params = self._build_config(metadata, system_instruction, response_json)
 
         import asyncio
+        fallback_candidates = [metadata.id, "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
+        
         def _call() -> str:
-            try:
-                response = self.client.models.generate_content(
-                    model=metadata.id,
-                    contents=contents,
-                    config=types.GenerateContentConfig(**config_params),
-                )
-                return response.text or ""
-            except Exception as e:
-                if "thinking" in str(e).lower() and "thinking_config" in config_params:
-                    # Retry without thinking_config if the model rejected thinking level/budget
-                    fallback_params = dict(config_params)
-                    fallback_params.pop("thinking_config", None)
+            last_err: Exception | None = None
+            for candidate in fallback_candidates:
+                try:
+                    params = dict(config_params)
+                    if not candidate.startswith("gemini-3") and not candidate.startswith("gemini-2.5"):
+                        params.pop("thinking_config", None)
                     response = self.client.models.generate_content(
-                        model=metadata.id,
+                        model=candidate,
                         contents=contents,
-                        config=types.GenerateContentConfig(**fallback_params),
+                        config=types.GenerateContentConfig(**params),
                     )
                     return response.text or ""
-                raise
+                except Exception as e:
+                    last_err = e
+                    err_str = str(e).lower()
+                    if "thinking" in err_str and "thinking_config" in params:
+                        try:
+                            params.pop("thinking_config", None)
+                            response = self.client.models.generate_content(
+                                model=candidate,
+                                contents=contents,
+                                config=types.GenerateContentConfig(**params),
+                            )
+                            return response.text or ""
+                        except Exception as e2:
+                            last_err = e2
+                            err_str = str(e2).lower()
+                    if "503" in err_str or "unavailable" in err_str or "high demand" in err_str or "404" in err_str or "not found" in err_str:
+                        logger.warning(f"Google model {candidate} returned {e}. Trying next fallback candidate...")
+                        continue
+                    raise e
+            if last_err:
+                raise last_err
+            return ""
 
         return await asyncio.to_thread(_call)
 
@@ -99,23 +116,41 @@ class GoogleGateway(BaseLLMGateway):
         config_params = self._build_config(metadata, system_instruction, response_json=False)
 
         import asyncio
+        fallback_candidates = [metadata.id, "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
+        
         def _call_stream():
-            try:
-                return self.client.models.generate_content_stream(
-                    model=metadata.id,
-                    contents=contents,
-                    config=types.GenerateContentConfig(**config_params),
-                )
-            except Exception as e:
-                if "thinking" in str(e).lower() and "thinking_config" in config_params:
-                    fallback_params = dict(config_params)
-                    fallback_params.pop("thinking_config", None)
+            last_err: Exception | None = None
+            for candidate in fallback_candidates:
+                try:
+                    params = dict(config_params)
+                    if not candidate.startswith("gemini-3") and not candidate.startswith("gemini-2.5"):
+                        params.pop("thinking_config", None)
                     return self.client.models.generate_content_stream(
-                        model=metadata.id,
+                        model=candidate,
                         contents=contents,
-                        config=types.GenerateContentConfig(**fallback_params),
+                        config=types.GenerateContentConfig(**params),
                     )
-                raise
+                except Exception as e:
+                    last_err = e
+                    err_str = str(e).lower()
+                    if "thinking" in err_str and "thinking_config" in params:
+                        try:
+                            params.pop("thinking_config", None)
+                            return self.client.models.generate_content_stream(
+                                model=candidate,
+                                contents=contents,
+                                config=types.GenerateContentConfig(**params),
+                            )
+                        except Exception as e2:
+                            last_err = e2
+                            err_str = str(e2).lower()
+                    if "503" in err_str or "unavailable" in err_str or "high demand" in err_str or "404" in err_str or "not found" in err_str:
+                        logger.warning(f"Google stream model {candidate} returned {e}. Trying next fallback candidate...")
+                        continue
+                    raise e
+            if last_err:
+                raise last_err
+            raise RuntimeError("All Google model candidates failed.")
 
         response_stream = await asyncio.to_thread(_call_stream)
         for chunk in response_stream:

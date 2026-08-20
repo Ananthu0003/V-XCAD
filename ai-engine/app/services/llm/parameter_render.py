@@ -796,35 +796,59 @@ def run():
                 return None
         except Exception:
             pass
-        try:
-            return _orig_fillet(*args, **kwargs)
-        except ValueError as exc:
-            msg = str(exc)
-            if "objects must be provided" in msg:
-                return None
-            if "2D fillet operation takes only Vertices" in msg:
-                if objs is not None:
-                    verts = None
-                    if hasattr(objs, "vertices"):
-                        v = getattr(objs, "vertices")
-                        verts = v() if callable(v) else v
-                    if verts:
-                        if "objects" in kwargs:
-                            kwargs["objects"] = verts
-                        elif args:
-                            args = (verts,) + args[1:]
-                        try:
-                            return _orig_fillet(*args, **kwargs)
-                        except Exception:
-                            return None
-            if "edges are not all the same type" in msg.lower() or "invalid for fillet" in msg.lower():
-                return None
-            raise
-        except Exception as exc:
-            # In validation mode, propagate real geometry failures so the AI can see and fix them
-            if not _VALIDATION_MODE and any(x in str(exc).lower() for x in ["topods_frozenshape", "builder::add", "invalid", "empty", "degenerate", "tolerance", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
-                return objs
-            raise
+
+        radius = kwargs.get("radius")
+        if radius is None and len(args) >= 2:
+            radius = args[1]
+            
+        v = radius if radius is not None else 1.0
+        for attempt in range(5):
+            try:
+                if radius is not None:
+                    if "radius" in kwargs:
+                        kwargs["radius"] = v
+                        return _orig_fillet(*args, **kwargs)
+                    elif len(args) >= 2:
+                        new_args = (args[0], v) + args[2:]
+                        return _orig_fillet(*new_args, **kwargs)
+                return _orig_fillet(*args, **kwargs)
+            except ValueError as exc:
+                msg = str(exc).lower()
+                if "objects must be provided" in msg or "edges are not all the same type" in msg:
+                    return None
+                if "2d fillet operation takes only vertices" in msg:
+                    if objs is not None:
+                        verts = None
+                        if hasattr(objs, "vertices"):
+                            verts = objs.vertices() if callable(objs.vertices) else objs.vertices
+                        if verts:
+                            if "objects" in kwargs:
+                                kwargs["objects"] = verts
+                            elif args:
+                                args = (verts,) + args[1:]
+                            try:
+                                return _orig_fillet(*args, **kwargs)
+                            except Exception:
+                                return None
+                if "smaller value" in msg or "failed creating a fillet" in msg or "invalid for fillet" in msg:
+                    v = v / 2.0
+                    if v < 1e-3:
+                        return None
+                    continue
+                if not _VALIDATION_MODE:
+                    return objs
+                raise
+            except Exception as exc:
+                msg = str(exc).lower()
+                if any(x in msg for x in ["topods_frozenshape", "builder::add", "invalid", "empty", "degenerate", "tolerance", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+                    v = v / 2.0
+                    if v < 1e-3:
+                        return objs if not _VALIDATION_MODE else None
+                    continue
+                if not _VALIDATION_MODE:
+                    return objs
+                raise
+        return None
     build123d.fillet = smart_fillet
     ns["fillet"] = smart_fillet
 
@@ -836,19 +860,45 @@ def run():
                 return None
         except Exception:
             pass
-        try:
-            return _orig_chamfer(*args, **kwargs)
-        except ValueError as exc:
-            msg = str(exc)
-            if "objects must be provided" in msg:
-                return None
-            if "edges are not all the same type" in msg.lower():
-                return None
-            raise
-        except Exception as exc:
-            if not _VALIDATION_MODE and any(x in str(exc).lower() for x in ["topods_frozenshape", "builder::add", "invalid", "empty", "degenerate", "tolerance", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
-                return objs
-            raise
+
+        length = kwargs.get("length")
+        if length is None and len(args) >= 2:
+            length = args[1]
+            
+        v = length if length is not None else 1.0
+        for attempt in range(5):
+            try:
+                if length is not None:
+                    if "length" in kwargs:
+                        kwargs["length"] = v
+                        return _orig_chamfer(*args, **kwargs)
+                    elif len(args) >= 2:
+                        new_args = (args[0], v) + args[2:]
+                        return _orig_chamfer(*new_args, **kwargs)
+                return _orig_chamfer(*args, **kwargs)
+            except ValueError as exc:
+                msg = str(exc).lower()
+                if "objects must be provided" in msg or "edges are not all the same type" in msg:
+                    return None
+                if "smaller value" in msg or "failed creating a chamfer" in msg or "chamfer" in msg:
+                    v = v / 2.0
+                    if v < 1e-3:
+                        return None
+                    continue
+                if not _VALIDATION_MODE:
+                    return objs
+                raise
+            except Exception as exc:
+                msg = str(exc).lower()
+                if any(x in msg for x in ["topods_frozenshape", "builder::add", "invalid", "empty", "degenerate", "tolerance", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+                    v = v / 2.0
+                    if v < 1e-3:
+                        return objs if not _VALIDATION_MODE else None
+                    continue
+                if not _VALIDATION_MODE:
+                    return objs
+                raise
+        return None
     build123d.chamfer = smart_chamfer
     ns["chamfer"] = smart_chamfer
 
@@ -936,6 +986,103 @@ def run():
     build123d.extrude = safe_extrude
     ns["extrude"] = safe_extrude
     ns["Extrude"] = safe_extrude
+
+    def _builder_transform(self, *args, **kwargs):
+        if hasattr(self, "_obj") and self._obj is not None:
+            if hasattr(self._obj, "move"):
+                self._obj = self._obj.move(*args, **kwargs)
+            elif hasattr(self._obj, "locate"):
+                self._obj = self._obj.locate(*args, **kwargs)
+            elif hasattr(self._obj, "translate"):
+                self._obj = self._obj.translate(*args, **kwargs)
+            return self._obj
+        return self
+
+    if hasattr(build123d, "BuildSketch"):
+        build123d.BuildSketch.move = _builder_transform
+        build123d.BuildSketch.locate = _builder_transform
+        build123d.BuildSketch.translate = _builder_transform
+        build123d.BuildSketch.rotate = _builder_transform
+
+    if hasattr(build123d, "BuildPart"):
+        build123d.BuildPart.move = _builder_transform
+        build123d.BuildPart.locate = _builder_transform
+        build123d.BuildPart.translate = _builder_transform
+        build123d.BuildPart.rotate = _builder_transform
+
+    if hasattr(build123d, "BuildLine"):
+        build123d.BuildLine.move = _builder_transform
+        build123d.BuildLine.locate = _builder_transform
+        build123d.BuildLine.translate = _builder_transform
+        build123d.BuildLine.rotate = _builder_transform
+
+    if hasattr(build123d, "SlotOverall"):
+        _orig_slot_overall = build123d.SlotOverall.__init__
+        def safe_slot_overall(self, *args, **kwargs):
+            w = kwargs.pop("width", None) or kwargs.pop("length", None) or kwargs.pop("slot_length", None)
+            h = kwargs.pop("height", None) or kwargs.pop("slot_width", None) or kwargs.pop("dia", None) or kwargs.pop("diameter", None)
+            rot = kwargs.pop("rotation", 0)
+
+            if args:
+                if len(args) >= 1 and w is None:
+                    w = args[0]
+                if len(args) >= 2 and h is None:
+                    h = args[1]
+                if len(args) >= 3 and rot == 0:
+                    rot = args[2]
+
+            w = float(w) if w is not None else 10.0
+            h = float(h) if h is not None else 5.0
+
+            if w < h:
+                w, h = h, w
+                rot = (rot + 90) % 360
+
+            return _orig_slot_overall(self, width=w, height=h, rotation=rot, **kwargs)
+
+        build123d.SlotOverall.__init__ = safe_slot_overall
+        ns["SlotOverall"] = build123d.SlotOverall
+
+    if hasattr(build123d, "SlotCenterToCenter"):
+        _orig_slot_c2c = build123d.SlotCenterToCenter.__init__
+        def safe_slot_c2c(self, *args, **kwargs):
+            sep = (
+                kwargs.pop("center_separation", None)
+                or kwargs.pop("center_to_center", None)
+                or kwargs.pop("separation", None)
+                or kwargs.pop("distance", None)
+                or kwargs.pop("length", None)
+                or kwargs.pop("c2c", None)
+            )
+            h = (
+                kwargs.pop("height", None)
+                or kwargs.pop("slot_width", None)
+                or kwargs.pop("width", None)
+                or kwargs.pop("dia", None)
+                or kwargs.pop("diameter", None)
+            )
+            rot = kwargs.pop("rotation", 0)
+
+            if args:
+                if len(args) >= 1 and sep is None:
+                    sep = args[0]
+                if len(args) >= 2 and h is None:
+                    h = args[1]
+                if len(args) >= 3 and rot == 0:
+                    rot = args[2]
+
+            sep = float(sep) if sep is not None else 10.0
+            h = float(h) if h is not None else 5.0
+
+            if sep < 0:
+                sep = abs(sep)
+            if sep < 1e-4:
+                sep = 1e-4
+
+            return _orig_slot_c2c(self, center_separation=sep, height=h, rotation=rot, **kwargs)
+
+        build123d.SlotCenterToCenter.__init__ = safe_slot_c2c
+        ns["SlotCenterToCenter"] = build123d.SlotCenterToCenter
 
     if hasattr(build123d, "Polygon"):
         _orig_polygon = build123d.Polygon
@@ -1040,31 +1187,82 @@ def run():
     @classmethod
     def safe_solid_revolve(cls, section, angle, axis, inner_wires=None):
         try:
-            is_x_axis = False
-            if hasattr(axis, "direction"):
-                is_x_axis = abs(axis.direction.X) > 0.99 and abs(axis.direction.Y) < 0.01 and abs(axis.direction.Z) < 0.01
+            return _orig_solid_revolve(section, angle, axis, inner_wires)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if not any(k in msg for k in ["not done", "stdfail", "brep_api", "empty", "invalid", "degenerate", "self-intersect", "chfi3d", "constructionerror"]):
+                raise
+        
+        # Attempt half-space splitting along axis
+        try:
+            if isinstance(section, build123d.Wire):
+                section_face = build123d.Face(section, inner_wires or [])
+            elif isinstance(section, (list, tuple)) and len(section) > 0:
+                section_face = section[0]
+            else:
+                section_face = section
+
+            p0_v = getattr(axis, "position", build123d.Vector(0, 0, 0))
+            d_v = getattr(axis, "direction", build123d.Vector(0, 0, 1))
             
-            if is_x_axis:
-                half_plane_ge = build123d.Face.make_rect(20000, 20000).translate((0, 10000, 0))
-                half_plane_le = build123d.Face.make_rect(20000, 20000).translate((0, -10000, 0))
-                
-                if isinstance(section, build123d.Wire):
-                    section_face = build123d.Face(section, inner_wires or [])
-                else:
-                    section_face = section
-                
-                part_ge = section_face & half_plane_ge
-                part_le = section_face & half_plane_le
-                
-                area_ge = part_ge.area if hasattr(part_ge, "area") else 0.0
-                area_le = part_le.area if hasattr(part_le, "area") else 0.0
-                
-                if area_ge > 1e-5 and area_le > 1e-5:
-                    section = part_ge
-                    inner_wires = []
+            p0 = [getattr(p0_v, "X", 0.0), getattr(p0_v, "Y", 0.0), getattr(p0_v, "Z", 0.0)]
+            d = [getattr(d_v, "X", 0.0), getattr(d_v, "Y", 0.0), getattr(d_v, "Z", 1.0)]
+            d_len = math.sqrt(d[0]**2 + d[1]**2 + d[2]**2)
+            if d_len > 1e-6:
+                d = [x / d_len for x in d]
+
+            n_vec = section_face.normal_at() if hasattr(section_face, "normal_at") else build123d.Vector(0, 1, 0)
+            n = [getattr(n_vec, "X", 0.0), getattr(n_vec, "Y", 1.0), getattr(n_vec, "Z", 0.0)]
+            n_len = math.sqrt(n[0]**2 + n[1]**2 + n[2]**2)
+            if n_len > 1e-6:
+                n = [x / n_len for x in n]
+
+            # In-plane normal perpendicular to axis: cross(d, n)
+            v = [
+                d[1]*n[2] - d[2]*n[1],
+                d[2]*n[0] - d[0]*n[2],
+                d[0]*n[1] - d[1]*n[0]
+            ]
+            v_len = math.sqrt(v[0]**2 + v[1]**2 + v[2]**2)
+            if v_len < 1e-4:
+                # If d is parallel to n, pick orthogonal vector
+                v = [n[1], -n[0], 0.0] if abs(n[2]) < 0.9 else [0.0, -n[2], n[1]]
+                v_len = math.sqrt(v[0]**2 + v[1]**2 + v[2]**2)
+            if v_len > 1e-6:
+                v = [x / v_len for x in v]
+
+            # Positive half space
+            center_pos = [p0[i] + 10000.0 * v[i] for i in range(3)]
+            pl_pos = build123d.Plane(
+                origin=build123d.Vector(center_pos),
+                z_dir=build123d.Vector(n),
+                x_dir=build123d.Vector(d)
+            )
+            half_pos = build123d.Face.make_rect(20000, 20000, plane=pl_pos)
+            part_pos = section_face & half_pos
+            if getattr(part_pos, "area", 0) > 1e-4:
+                try:
+                    return _orig_solid_revolve(part_pos, angle, axis)
+                except Exception:
+                    pass
+
+            # Negative half space
+            center_neg = [p0[i] - 10000.0 * v[i] for i in range(3)]
+            pl_neg = build123d.Plane(
+                origin=build123d.Vector(center_neg),
+                z_dir=build123d.Vector(n),
+                x_dir=build123d.Vector(d)
+            )
+            half_neg = build123d.Face.make_rect(20000, 20000, plane=pl_neg)
+            part_neg = section_face & half_neg
+            if getattr(part_neg, "area", 0) > 1e-4:
+                try:
+                    return _orig_solid_revolve(part_neg, angle, axis)
+                except Exception:
+                    pass
         except Exception:
             pass
-        return _orig_solid_revolve(section, angle, axis, inner_wires)
+        raise
     build123d.Solid.revolve = safe_solid_revolve
 
 

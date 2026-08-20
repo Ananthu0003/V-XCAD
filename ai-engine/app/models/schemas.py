@@ -329,7 +329,7 @@ class EditRequest(StrictModel):
     prompt: str
     current_code: str
     target_point: list[float] | None = None
-    model: str = "gemini-3.5-flash"
+    model: str = "gemini-3.5-flash-lite"
 
 
 class StepRequest(StrictModel):
@@ -342,6 +342,7 @@ class RenderRequest(BaseModel):
     python_script: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     session_id: Optional[str] = None
+    version: Optional[int] = None
     cam_parameters: Optional[dict[str, Any]] = None
     generate_cam: bool = False
 
@@ -368,6 +369,7 @@ class RenderResponse(BaseModel):
     """Payload returned after a successful /api/v1/render call."""
     status: str = "ok"
     session_id: str
+    version: Optional[int] = None
     artifacts: RenderArtifacts
     repaired_script: Optional[str] = None
 

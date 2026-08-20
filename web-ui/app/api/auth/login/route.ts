@@ -12,7 +12,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing email or password' }, { status: 400 });
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const lookup = email.trim().toLowerCase();
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: lookup },
+          { email: lookup === 'admin' ? 'admin@vexcad.local' : lookup },
+          { name: { equals: email.trim(), mode: 'insensitive' } },
+        ],
+      },
+    });
     if (!user) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }

@@ -12,6 +12,10 @@ type CadSession = {
     stlUrl: string;
     stepUrl: string;
     createdAt: string;
+    currentVersion?: number;
+    _count?: {
+        iterations?: number;
+    };
 };
 
 interface HistoryDrawerProps {
@@ -149,6 +153,12 @@ export function HistoryDrawer({ isOpen, onClose, onRestore }: HistoryDrawerProps
                                     {session.prompt}
                                 </p>
                                 <div className="flex flex-wrap gap-2">
+                                    {((session._count?.iterations && session._count.iterations > 0) || (session.currentVersion && session.currentVersion > 0)) && (
+                                        <span className="px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 rounded-md text-[10px] text-blue-300 font-mono font-medium tracking-wide flex items-center gap-1.5">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                            v{session.currentVersion || session._count?.iterations} ({session._count?.iterations || session.currentVersion} {((session._count?.iterations === 1 || session.currentVersion === 1) ? 'iteration' : 'iterations')})
+                                        </span>
+                                    )}
                                     <span className="px-2.5 py-1 bg-muted/50 border border-border rounded-md text-[10px] text-zinc-300 font-medium tracking-wide flex items-center gap-1.5">
                                         <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
                                         {Object.keys(session.parameters || {}).length} Params

@@ -226,6 +226,37 @@ export function SettingsPanel({ isOpen, onClose, user }: SettingsPanelProps) {
 						)}
 					</section>
 
+					{/* ──────── ADMIN TOOLS (Visible if Admin) ──────── */}
+					{(user?.email === 'admin@vexcad.local' || user?.name?.toLowerCase() === 'admin') && (
+						<section>
+							<div className="flex items-center gap-2 mb-4">
+								<div className="size-1.5 rounded-full bg-cyan-500" />
+								<span className="text-[10px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Admin Console</span>
+							</div>
+
+							<div className="space-y-2">
+								<a
+									href="/admin/knowledge"
+									className="group w-full flex items-center justify-between px-4 py-3 rounded-xl
+										bg-cyan-500/10 border border-cyan-500/20
+										hover:bg-cyan-500/15 hover:border-cyan-500/40
+										transition-all duration-200"
+								>
+									<div className="flex items-center gap-3">
+										<div className="size-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+											<KeyRound className="size-4 text-cyan-400" />
+										</div>
+										<div>
+											<div className="text-[12px] font-bold text-zinc-900 dark:text-white">Knowledge Base Admin</div>
+											<div className="text-[10px] text-zinc-400 dark:text-zinc-500">Manage manufacturing standards & rules</div>
+										</div>
+									</div>
+									<ChevronRight className="size-3.5 text-cyan-400 group-hover:translate-x-0.5 transition-all" />
+								</a>
+							</div>
+						</section>
+					)}
+
 					{/* ──────── ACCOUNT ──────── */}
 					<section>
 						<div className="flex items-center gap-2 mb-4">

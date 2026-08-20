@@ -77,11 +77,15 @@ class CamPipelineManager:
             "total_features": len(features)
         }
         
-        stock_suggestions = {
-            "type": "box",
-            "dimensions": [100, 100, 20],
-            "offset": [5, 5, 2]
-        }
+        setup_stock = (setup or {}).get("stockDimensions") if isinstance(setup, dict) else None
+        if setup_stock and len(setup_stock) == 3 and all(float(v) > 0 for v in setup_stock):
+            stock_suggestions = {
+                "type": (setup or {}).get("stockType", "box"),
+                "dimensions": [float(v) for v in setup_stock],
+            }
+        else:
+            # No stock known yet - do not fabricate a default geometry.
+            stock_suggestions = {}
         model_hash = "parametric"
         setup_metadata = {}
 

@@ -81,8 +81,17 @@ class SymbolDictionary:
         
     @classmethod
     def extract_symbols(cls, text: str) -> List[Dict[str, Any]]:
+        import re
         found = []
-        for key, value in SYMBOL_DICTIONARY.items():
-            if key in text:
-                found.append({"symbol": key, **value})
+        # Special character symbols
+        for sym in ["Ø", "±", "⌴", "⌵", "↧", "SR", "SØ"]:
+            if sym in text:
+                found.append({"symbol": sym, **SYMBOL_DICTIONARY[sym]})
+        # Word-boundary / pattern symbols
+        if re.search(r'\bM\d+', text):
+            found.append({"symbol": "M", **SYMBOL_DICTIONARY["M"]})
+        if re.search(r'\bRa\s*\d+', text, re.IGNORECASE):
+            found.append({"symbol": "Ra", **SYMBOL_DICTIONARY["Ra"]})
+        if re.search(r'\bR\d+', text):
+            found.append({"symbol": "R", **SYMBOL_DICTIONARY["R"]})
         return found

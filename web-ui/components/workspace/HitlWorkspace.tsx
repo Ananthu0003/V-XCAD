@@ -14,22 +14,113 @@ import { WorkflowNav } from '@/components/workspace/WorkflowNav';
 import { WorkspaceSettings } from '@/components/workspace/WorkspaceSettings';
 import { migrateLegacyCamSetup, validateMachineControllerPost } from '@/lib/cam/machineValidation';
 import { MACHINE_MATRIX, ControllerId } from '@/lib/cam/machineProfiles';
+import { RevisionHistoryDropdown, type CadRevision } from '@/components/workspace/RevisionHistoryDropdown';
 import { EngineeringConsole } from '@/components/workspace/EngineeringConsole';
 import { ChatPanel, type TargetPortion } from '@/components/chat/ChatPanel';
 import { SessionBrowserModal } from '@/components/workspace/SessionBrowserModal';
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { History, Cuboid, RotateCcw, IndianRupee } from 'lucide-react';
+import { History, Cuboid, RotateCcw, IndianRupee, Plus, FolderKanban } from 'lucide-react';
 import Link from 'next/link';
 import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, CamFeature, PostProcessor, OperationType, ToolType, ToolMaterial, CoolantType, CamSetupPlan } from '@/types/cam';
 
 type ChatRole = 'user' | 'assistant' | 'system';
+
+export type ParameterDiff = {
+	name: string;
+	oldValue?: any;
+	newValue?: any;
+	type: 'added' | 'modified' | 'deleted';
+};
+
+export type IterationChangeLog = {
+	summary?: string;
+	details?: string[];
+	parameterDiff?: ParameterDiff[];
+	targetPortion?: string;
+};
 
 type ChatMessage = {
 	id: string;
 	role: ChatRole;
 	content: string;
 	fileName?: string;
+	targetPortion?: string;
+	revisionId?: string;
+	revisionNumber?: number;
+	changeLog?: IterationChangeLog;
 };
+
+export function extractChangeLog(
+	script: string, 
+	newParams: Record<string, any>, 
+	oldParams: Record<string, any> = {},
+	targetPortion?: string
+): IterationChangeLog {
+	// 1. Calculate parameter diff
+	const parameterDiff: ParameterDiff[] = [];
+	const allKeys = new Set([...Object.keys(newParams || {}), ...Object.keys(oldParams || {})]);
+	
+	for (const key of allKeys) {
+		if (key.startsWith('_')) continue;
+		const oldVal = oldParams[key];
+		const newVal = newParams[key];
+		
+		if (oldVal === undefined && newVal !== undefined) {
+			parameterDiff.push({ name: key, newValue: newVal, type: 'added' });
+		} else if (oldVal !== undefined && newVal === undefined) {
+			parameterDiff.push({ name: key, oldValue: oldVal, type: 'deleted' });
+		} else if (oldVal !== undefined && newVal !== undefined && oldVal !== newVal) {
+			parameterDiff.push({ name: key, oldValue: oldVal, newValue: newVal, type: 'modified' });
+		}
+	}
+
+	// 2. Parse script comments for revision log or mental walkthrough
+	let summary = '';
+	const details: string[] = [];
+
+	const revLogMatch = script.match(/#\s*---\s*REVISION\s*&\s*MODIFICATION\s*LOG\s*---([\s\S]*?)(?:#\s*---+|PARAMETERS|with\s+bd)/i);
+	if (revLogMatch) {
+		const block = revLogMatch[1];
+		const summaryMatch = block.match(/#\s*SUMMARY:\s*(.+)/i);
+		if (summaryMatch) {
+			summary = summaryMatch[1].trim();
+		}
+		
+		const lines = block.split('\n');
+		for (const line of lines) {
+			const trimmed = line.trim().replace(/^#\s*/, '');
+			if (trimmed.startsWith('-') || trimmed.startsWith('*')) {
+				details.push(trimmed.replace(/^[-*]\s*/, '').trim());
+			}
+		}
+	}
+
+	if (!summary) {
+		const walkthroughMatch = script.match(/#\s*---\s*MENTAL\s*WALKTHROUGH\s*---([\s\S]*?)(?:#\s*---+|with\s+bd)/i);
+		if (walkthroughMatch) {
+			const lines = walkthroughMatch[1].split('\n')
+				.map(l => l.trim().replace(/^#\s*/, ''))
+				.filter(l => l && !l.startsWith('---'));
+			if (lines.length > 0) {
+				summary = lines[0];
+				if (lines.length > 1 && details.length === 0) {
+					details.push(...lines.slice(1));
+				}
+			}
+		}
+	}
+
+	if (!summary && targetPortion) {
+		summary = `Applied targeted geometric repairs and refinements to ${targetPortion}.`;
+	}
+
+	return {
+		summary: summary || undefined,
+		details: details.length > 0 ? details : undefined,
+		parameterDiff: parameterDiff.length > 0 ? parameterDiff : undefined,
+		targetPortion,
+	};
+}
 
 type RenderPayload = {
 	stl_url?: string;
@@ -72,7 +163,7 @@ type DrawerTab = 'parameters' | 'code' | 'cam';
 import { MODEL_REGISTRY } from '@/lib/models-registry';
 
 const DEFAULT_PROMPT = 'generate a 3D model of the attached file.';
-const DEFAULT_MODEL = 'gemini-3.5-flash';
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const MODEL_OPTIONS = MODEL_REGISTRY.map(m => ({ value: m.id, label: m.name }));
 
 
@@ -308,7 +399,8 @@ export default function HitlWorkspace() {
 		machine: undefined,
 		stockType: undefined,
 		material: undefined,
-		stockDimensions: [100, 100, 20],
+		// stockDimensions intentionally left unset: real CAD bounds are injected
+		// before auto-planning (see handleAutoGenerateOperations) when missing.
 		wcs: undefined,
 		originPosition: undefined,
 		tolerance: 0.01,
@@ -368,6 +460,11 @@ export default function HitlWorkspace() {
 	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 	const [isChatOpen, setIsChatOpen] = useState(false);
 
+	// CAD Revision History & Rollback Stack
+	const [revisions, setRevisions] = useState<CadRevision[]>([]);
+	const [activeRevisionIndex, setActiveRevisionIndex] = useState<number>(-1);
+	const activeRevisionId = activeRevisionIndex >= 0 && revisions[activeRevisionIndex] ? revisions[activeRevisionIndex].id : null;
+
 	const [statusText, setStatusText] = useState<string>('Ready');
 	const [workflowStage, setWorkflowStage] = useState<'blueprint' | 'extraction' | 'cad' | 'cam' | 'gcode'>('blueprint');
 	const [annotations, setAnnotations] = useState<Record<string, { p1: [number, number, number]; p2: [number, number, number] }>>({});
@@ -392,6 +489,16 @@ export default function HitlWorkspace() {
 		return null;
 	}, [selectedFile, sessionId]);
 
+	const activeProjectName = useMemo(() => {
+		if (sourceFilename) return sourceFilename;
+		if (selectedFile?.name) return selectedFile.name;
+		if (revisions.length > 0 && revisions[0]?.title && !revisions[0]?.title.startsWith('Restored Session')) {
+			return revisions[0].title;
+		}
+		if (sessionId) return `Blueprint Section #${sessionId.slice(0, 8)}`;
+		return null;
+	}, [sourceFilename, selectedFile, revisions, sessionId]);
+
 	useEffect(() => {
 		if (workflowStage === 'cam' || workflowStage === 'gcode') {
 			setActiveRightTab('cam');
@@ -399,6 +506,25 @@ export default function HitlWorkspace() {
 			setActiveRightTab('cad');
 		}
 	}, [workflowStage]);
+
+	// Restore session from URL search params if ?session=<id> is present on mount
+	useEffect(() => {
+		if (typeof window === 'undefined') return;
+		const urlParams = new URLSearchParams(window.location.search);
+		const initialSessionId = urlParams.get('session');
+		if (initialSessionId && !sessionId) {
+			fetch(`/api/sessions/${initialSessionId}`)
+				.then((res) => (res.ok ? res.json() : null))
+				.then((sessionData) => {
+					if (sessionData && sessionData.id) {
+						void handleRestoreSession(sessionData);
+					}
+				})
+				.catch((err) => {
+					console.warn('Failed to load session from URL param:', err);
+				});
+		}
+	}, []);
 
 	const parameterEntries = Object.entries(parameters).filter(([_, v]) => typeof v === 'number' || typeof v === 'string');
 
@@ -425,10 +551,151 @@ export default function HitlWorkspace() {
 
 	const pythonScriptRef = useRef('');
 
-	const updatePythonScript = (nextScript: string) => {
+	const updatePythonScript = useCallback((nextScript: string) => {
 		pythonScriptRef.current = nextScript;
 		setPythonScript(nextScript);
-	};
+	}, []);
+
+	// Record a snapshot into the Revision History stack
+	const recordRevision = useCallback((snapshot: {
+		title: string;
+		description?: string;
+		targetPortion?: string;
+		script: string;
+		params: Record<string, unknown>;
+		stl?: string | null;
+		step?: string | null;
+		dxf?: string | null;
+		annotations?: Record<string, any>;
+		parameterMetadata?: Record<string, any>;
+		camFeatures?: any[];
+		setupMetadata?: any;
+		revisionNumber?: number;
+	}): { revId: string; revNumber: number } => {
+		const revId = makeId('rev');
+		let revNumber = snapshot.revisionNumber || 1;
+		setRevisions((prev) => {
+			const base = activeRevisionIndex >= 0 ? prev.slice(0, activeRevisionIndex + 1) : prev;
+			const last = base[base.length - 1];
+			if (last && last.pythonScript === snapshot.script && JSON.stringify(last.parameters) === JSON.stringify(snapshot.params) && last.stlUrl === snapshot.stl) {
+				return prev;
+			}
+			revNumber = snapshot.revisionNumber || (base.length + 1);
+			const newRev: CadRevision = {
+				id: revId,
+				revisionNumber: revNumber,
+				timestamp: Date.now(),
+				title: snapshot.title,
+				description: snapshot.description,
+				targetPortion: snapshot.targetPortion,
+				pythonScript: snapshot.script,
+				parameters: snapshot.params,
+				stlUrl: snapshot.stl ?? null,
+				stepUrl: snapshot.step ?? null,
+				dxfUrl: snapshot.dxf ?? null,
+				annotations: snapshot.annotations,
+				parameterMetadata: snapshot.parameterMetadata,
+				camFeatures: snapshot.camFeatures,
+				setupMetadata: snapshot.setupMetadata,
+			};
+			const nextList = [...base, newRev];
+			setActiveRevisionIndex(nextList.length - 1);
+			return nextList;
+		});
+		return { revId, revNumber };
+	}, [activeRevisionIndex]);
+
+	// Restore an earlier or specific revision
+	const handleRestoreRevision = useCallback(async (targetRevId: string) => {
+		const targetIdx = revisions.findIndex((r) => r.id === targetRevId);
+		if (targetIdx === -1) return;
+		const targetRev = revisions[targetIdx];
+
+		setActiveRevisionIndex(targetIdx);
+		updatePythonScript(targetRev.pythonScript);
+		setParameters(targetRev.parameters || {});
+		if (targetRev.stlUrl) setStlUrl(targetRev.stlUrl);
+		if (targetRev.stepUrl) setStepUrl(targetRev.stepUrl);
+		if (targetRev.dxfUrl) setDxfUrl(targetRev.dxfUrl);
+		if (targetRev.annotations) setAnnotations(targetRev.annotations);
+		if (targetRev.parameterMetadata) setParameterMetadata(targetRev.parameterMetadata);
+		if (targetRev.camFeatures) setCamFeatures(targetRev.camFeatures);
+		if (targetRev.setupMetadata) setDefaultSetupMetadata(targetRev.setupMetadata);
+
+		setStatusText(`Reverted to Revision #${targetRev.revisionNumber}: ${targetRev.title}`);
+		toast.success(`Reverted to Revision #${targetRev.revisionNumber}`, {
+			description: targetRev.title,
+		});
+
+		// Sync with backend session
+		if (sessionId) {
+			try {
+				await fetch('/api/render', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+					body: JSON.stringify({
+						python_script: targetRev.pythonScript,
+						parameters: targetRev.parameters,
+						session_id: sessionId,
+						cam_parameters: {
+							controller: camSetup.controller || 'FANUC_0I_MF',
+							post_processor: camSetup.postProcessor || 'AUTO',
+							setup: camSetup,
+							tools: camTools,
+							operations: camOperations,
+						}
+					}),
+				});
+			} catch (e) {
+				console.error('Failed to sync restored revision to backend:', e);
+			}
+		}
+	}, [revisions, sessionId, camSetup, camTools, camOperations, updatePythonScript]);
+
+	const canUndo = activeRevisionIndex > 0;
+	const canRedo = activeRevisionIndex >= 0 && activeRevisionIndex < revisions.length - 1;
+
+	const handleUndo = useCallback(() => {
+		if (!canUndo) return;
+		const prevRev = revisions[activeRevisionIndex - 1];
+		if (prevRev) {
+			void handleRestoreRevision(prevRev.id);
+		}
+	}, [canUndo, activeRevisionIndex, revisions, handleRestoreRevision]);
+
+	const handleRedo = useCallback(() => {
+		if (!canRedo) return;
+		const nextRev = revisions[activeRevisionIndex + 1];
+		if (nextRev) {
+			void handleRestoreRevision(nextRev.id);
+		}
+	}, [canRedo, activeRevisionIndex, revisions, handleRestoreRevision]);
+
+	// Global Keyboard Shortcuts (Ctrl+Z: Undo, Ctrl+Shift+Z / Ctrl+Y: Redo)
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			const target = e.target as HTMLElement | null;
+			if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+				return;
+			}
+
+			if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+				if (e.shiftKey) {
+					e.preventDefault();
+					handleRedo();
+				} else {
+					e.preventDefault();
+					handleUndo();
+				}
+			} else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+				e.preventDefault();
+				handleRedo();
+			}
+		};
+
+		window.addEventListener('keydown', handleKeyDown);
+		return () => window.removeEventListener('keydown', handleKeyDown);
+	}, [handleUndo, handleRedo]);
 
 	useEffect(() => {
 		const handleMouseMove = (e: MouseEvent) => {
@@ -483,22 +750,50 @@ export default function HitlWorkspace() {
 	}, [toolpaths, activeSetupId, camSetups, selectedOperationIds]);
 
 
+	type GenerateSseEvent = {
+		error?: { message?: string; hint?: string };
+		warning?: string;
+		status?: string;
+		chunk?: string;
+		script?: string;
+		parameters?: Record<string, unknown>;
+		metadata?: unknown;
+	};
+
 	async function handleGenerate(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
-		if (!prompt.trim()) {
+		const submittedPrompt = prompt.trim();
+		if (!submittedPrompt) {
 			setStatusText('Please provide a prompt.');
 			return;
 		}
 
 		const assistantMessageId = makeId('assistant');
-		setMessages((prev) => [...prev, { id: makeId('user'), role: 'user', content: prompt, fileName: selectedFile?.name }, { id: assistantMessageId, role: 'assistant', content: '' }]);
+		const submittedTargetPortion = targetPortion;
+		const submittedSelectionContext = selectionContext;
+		const activeTargetName = targetPortion ? targetPortion.name : undefined;
+
+		setMessages((prev) => [
+			...prev,
+			{
+				id: makeId('user'),
+				role: 'user',
+				content: submittedPrompt,
+				fileName: selectedFile?.name,
+				targetPortion: activeTargetName,
+			},
+			{ id: assistantMessageId, role: 'assistant', content: '' }
+		]);
 		setIsGenerating(true);
 		setWorkflowStage('extraction');
 
 		const formData = new FormData();
-		formData.append('prompt', prompt.trim());
+		formData.append('prompt', submittedPrompt);
 		if (selectedFile) {
 			formData.append('image', selectedFile);
+			// New blueprint file uploaded -> Start a new Project Section without carrying over previous session_id
+		} else if (sessionId) {
+			formData.append('session_id', sessionId);
 		}
 		if (selectionContext) {
 			formData.append('selection_context', JSON.stringify(selectionContext));
@@ -506,32 +801,43 @@ export default function HitlWorkspace() {
 		if (pythonScript) {
 			formData.append('base_code', pythonScript);
 		}
-		if (sessionId) {
-			formData.append('session_id', sessionId);
-		}
 		if (targetPortion) {
 			formData.append('target_portion', targetPortion.name);
+			// Top-level crop_box so the backend can crop the blueprint even when
+			// a 3D mesh selection_context (point) is also active, and so preset
+			// portions with a drawn region keep their crop.
+			if (targetPortion.cropBox) {
+				formData.append('crop_box', JSON.stringify(targetPortion.cropBox));
+			}
 			if (!selectionContext) {
 				formData.append('selection_context', JSON.stringify({
 					portion_id: targetPortion.id,
 					portion_name: targetPortion.name,
 					category: targetPortion.category,
 					description: targetPortion.description,
+					crop_box: targetPortion.cropBox,
 				}));
 			}
 		}
 		formData.append('model_name', selectedModel);
 
-		// Clear input fields after securing the payload
+		// Clear input fields and active target portion after securing the payload
 		setPrompt('');
 		setSourceFilename(selectedFile?.name || null);
 		setSelectedFile(null);
 		setSelectionContext(null);
+		setTargetPortion(null);
+		setShowBlueprintPIP(false);
 
 		try {
 			const response = await fetch('/api/generate', { method: 'POST', body: formData });
 			const nextSessionId = response.headers.get('x-session-id');
-			if (nextSessionId) setSessionId(nextSessionId);
+			if (nextSessionId) {
+				setSessionId(nextSessionId);
+				if (typeof window !== 'undefined') {
+					window.history.replaceState(null, '', `/workspace?session=${nextSessionId}`);
+				}
+			}
 
 			if (!response.ok) {
 				const errorMsg = await readErrorFromResponse(response, 'Failed to connect to backend.');
@@ -545,45 +851,84 @@ export default function HitlWorkspace() {
 			let accumulated = '';
 			let fullScript = '';
 			let finalParams = parameters;
+			// Cross-chunk buffer: SSE events can be split across network chunks,
+			// so partial lines are accumulated until a complete line arrives.
+			let pendingLine = '';
+
+			const handleEvent = (rawData: GenerateSseEvent) => {
+				if (rawData?.error) {
+					const msg = rawData.error.message || 'Generation failed.';
+					const hint = rawData.error.hint ? ` Hint: ${rawData.error.hint}` : '';
+					throw new Error(`${msg}${hint}`);
+				}
+
+				if (rawData.warning) {
+					toast.warning(rawData.warning);
+					setStatusText(rawData.warning);
+				}
+
+				if (rawData.status === 'generating_cad') {
+					setStatusText('Generating CAD...');
+					setWorkflowStage('cad');
+				} else if (rawData.status === 'completed') {
+					setWorkflowStage('cam');
+				} else if (rawData.status) {
+					// Backend streams human-readable phase strings (e.g.
+					// "auditing blueprint (stage 1 of 2)", "surgically refining
+					// CAD script...") — surface them directly.
+					setStatusText(rawData.status);
+				}
+
+				if (rawData.chunk) {
+					accumulated += rawData.chunk;
+					setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, content: accumulated } : m)));
+				}
+				if (rawData.script) fullScript = rawData.script;
+				if (rawData.parameters) {
+					finalParams = rawData.parameters;
+					setParameters(rawData.parameters);
+				}
+				if (rawData.metadata) {
+					setParameterMetadata(rawData.metadata);
+				}
+			};
+
+			const processLine = (line: string) => {
+				if (!line.startsWith('data: ')) return;
+				const dataPayload = line.slice(6).trim();
+				if (!dataPayload) return;
+
+				let rawData: GenerateSseEvent | null = null;
+				try {
+					rawData = JSON.parse(dataPayload) as GenerateSseEvent;
+				} catch {
+					// Incomplete/fragmentary JSON - only happens when a line was
+					// split mid-content without a trailing newline; the buffer
+					// logic below prevents this, so just skip defensively.
+					return;
+				}
+				if (rawData) handleEvent(rawData);
+			};
 
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) break;
 
-				const chunkText = decoder.decode(value);
-				const lines = chunkText.split('\n');
+				pendingLine += decoder.decode(value, { stream: true });
+				const lines = pendingLine.split('\n');
+				// Keep the trailing fragment (no newline yet) in the buffer
+				pendingLine = lines.pop() ?? '';
 
 				for (const line of lines) {
-					if (!line.startsWith('data: ')) continue;
-					try {
-						const rawData = JSON.parse(line.slice(6));
-						if (rawData.error) {
-							const msg = rawData.error.message || 'Generation failed.';
-							const hint = rawData.error.hint ? ` Hint: ${rawData.error.hint}` : '';
-							throw new Error(`${msg}${hint}`);
-						}
-
-						if (rawData.status === 'generating_cad') {
-							setStatusText('Generating CAD...');
-							setWorkflowStage('cad');
-						} else if (rawData.status === 'completed') {
-							setWorkflowStage('cam');
-						}
-
-						if (rawData.chunk) {
-							accumulated += rawData.chunk;
-							setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, content: accumulated } : m)));
-						}
-						if (rawData.script) fullScript = rawData.script;
-						if (rawData.parameters) {
-							finalParams = rawData.parameters;
-							setParameters(rawData.parameters);
-						}
-						if (rawData.metadata) {
-							setParameterMetadata(rawData.metadata);
-						}
-					} catch { }
+					processLine(line);
 				}
+			}
+
+			// Stream finished - flush any remaining decoder bytes and the
+			// final partial line (e.g. a script event without trailing newline).
+			pendingLine += decoder.decode();
+			if (pendingLine) {
+				processLine(pendingLine);
 			}
 
 			if (fullScript) {
@@ -592,10 +937,21 @@ export default function HitlWorkspace() {
 				setIsDrawerOpen(true);
 				setStatusText('Script generated. Compiling 3D model...');
 
+				const revTitle = activeTargetName 
+					? `Targeted: ${activeTargetName}`
+					: submittedPrompt.length > 36 
+						? submittedPrompt.slice(0, 36) + '...' 
+						: submittedPrompt;
+
 				// Automatically trigger sync after generation
 				const currentSession = nextSessionId || sessionId;
 				if (currentSession) {
-					await performSync(fullScript, finalParams, currentSession);
+					await performSync(fullScript, finalParams, currentSession, {
+						title: revTitle,
+						description: submittedPrompt,
+						targetPortion: activeTargetName,
+						assistantMessageId,
+					});
 				}
 			} else {
 				throw new Error('No script returned from model.');
@@ -604,12 +960,35 @@ export default function HitlWorkspace() {
 			const errorText = error instanceof Error ? error.message : String(error);
 			setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, content: `Error: ${errorText}` } : m)));
 			setStatusText(`Generation failed: ${errorText}`);
+
+			// Restore user prompt and target selection back to the texting area so user doesn't lose their input
+			setPrompt(submittedPrompt);
+			if (submittedTargetPortion) {
+				setTargetPortion(submittedTargetPortion);
+			}
+			if (submittedSelectionContext) {
+				setSelectionContext(submittedSelectionContext);
+			}
 		} finally {
 			setIsGenerating(false);
 		}
 	}
 
-	async function performSync(script: string, params: Record<string, any>, session: string) {
+	async function performSync(
+		script: string, 
+		params: Record<string, any>, 
+		session: string,
+		revisionContext?: {
+			title: string;
+			description?: string;
+			targetPortion?: string;
+			assistantMessageId?: string;
+		}
+	) {
+		if (!script || typeof script !== 'string' || !script.trim()) {
+			return;
+		}
+
 		setIsGenerating(true);
 		setStatusText('Syncing to backend engine...');
 
@@ -622,6 +1001,8 @@ export default function HitlWorkspace() {
 					python_script: script,
 					parameters: params,
 					session_id: session,
+					prompt: revisionContext?.description || revisionContext?.title || prompt,
+					source: revisionContext ? 'prompt' : 'editor_compile',
 					cam_parameters: {
 						controller: camSetup.controller || 'FANUC_0I_MF',
 						post_processor: camSetup.postProcessor || 'AUTO',
@@ -644,8 +1025,14 @@ export default function HitlWorkspace() {
                 toast.info('Script was auto-healed during rendering');
             }
             
+			let finalStlUrl: string | null = null;
+			let finalStepUrl: string | null = null;
+			let finalDxfUrl: string | null = null;
+			let setupMeta: any = undefined;
+
 			if (payload.artifacts?.stl_url) {
-				setStlUrl(resolveModelUrl(payload.artifacts.stl_url, Date.now().toString()));
+				finalStlUrl = resolveModelUrl(payload.artifacts.stl_url, Date.now().toString());
+				setStlUrl(finalStlUrl);
 				setWorkflowStage(prev => (prev === 'blueprint' || prev === 'extraction' ? 'cad' : prev));
 				
 				// Clear CAM state on new CAD model
@@ -662,15 +1049,21 @@ export default function HitlWorkspace() {
 				setGcodeUrl(null);
 				
 				// Extract Setup Metadata correctly from the artifacts
-				const setupMeta = (payload.artifacts as any)?.setupMetadata || (payload.artifacts as any)?.setup_metadata;
+				setupMeta = (payload.artifacts as any)?.setupMetadata || (payload.artifacts as any)?.setup_metadata;
 				if (setupMeta) {
 					setDefaultSetupMetadata(setupMeta);
 				} else {
 					setDefaultSetupMetadata(undefined);
 				}
 			}
-			if (payload.artifacts?.step_url) setStepUrl(resolveModelUrl(payload.artifacts.step_url));
-			if (payload.artifacts?.dxf_url) setDxfUrl(resolveModelUrl(payload.artifacts.dxf_url));
+			if (payload.artifacts?.step_url) {
+				finalStepUrl = resolveModelUrl(payload.artifacts.step_url);
+				setStepUrl(finalStepUrl);
+			}
+			if (payload.artifacts?.dxf_url) {
+				finalDxfUrl = resolveModelUrl(payload.artifacts.dxf_url);
+				setDxfUrl(finalDxfUrl);
+			}
 			if (payload.artifacts?.annotations) {
 				setAnnotations(payload.artifacts.annotations);
 
@@ -689,8 +1082,62 @@ export default function HitlWorkspace() {
 					}
 				}
 			}
+
+			// Record CAD Revision Snapshot with version tag
+			const targetRevNumber = (payload as any).version || undefined;
+			if (finalStlUrl) {
+				const { revId, revNumber } = recordRevision({
+					title: revisionContext?.title || `Iteration v${targetRevNumber || revisions.length + 1}`,
+					description: revisionContext?.description || (revisionContext ? 'AI Prompt Iteration' : 'Script Compilation'),
+					targetPortion: revisionContext?.targetPortion,
+					script: payload.repaired_script || script,
+					params,
+					stl: finalStlUrl,
+					step: finalStepUrl,
+					dxf: finalDxfUrl,
+					annotations: payload.artifacts?.annotations,
+					parameterMetadata,
+					camFeatures: payload.artifacts?.features || [],
+					setupMetadata: setupMeta,
+					revisionNumber: targetRevNumber,
+				});
+
+				if (revisionContext) {
+					// Extract structured change log for this iteration
+					const prevParams = activeRevisionIndex >= 0 && revisions[activeRevisionIndex]
+						? revisions[activeRevisionIndex].parameters
+						: parameters;
+
+					const changeLog = extractChangeLog(
+						payload.repaired_script || script,
+						params,
+						prevParams,
+						revisionContext.targetPortion
+					);
+
+					if (revisionContext.assistantMessageId) {
+						setMessages((prev) =>
+							prev.map((m) =>
+								m.id === revisionContext.assistantMessageId
+									? { ...m, revisionId: revId, revisionNumber: revNumber, changeLog }
+									: m
+							)
+						);
+					}
+
+					toast.success('Geometry recompiled successfully', {
+						description: `Revision #${revNumber}: ${revisionContext.title}`,
+						action: {
+							label: '↩ Undo',
+							onClick: () => handleUndo(),
+						}
+					});
+				} else {
+					toast.success(`Geometry recompiled (v${revNumber})`);
+				}
+			}
+
 			setStatusText('Geometry recompiled successfully.');
-			toast.success('Sync successful');
 		} catch (error) {
 			const errorText = error instanceof Error ? error.message : String(error);
 			setStatusText(`Sync failed: ${errorText}`);
@@ -1270,43 +1717,137 @@ export default function HitlWorkspace() {
 
 	const handleRestoreSession = async (session: any) => {
 		setSessionId(session.id);
-		updatePythonScript(session.pythonScript);
-		setParameters(session.parameters || {});
+		if (typeof window !== 'undefined') {
+			window.history.replaceState(null, '', `/workspace?session=${session.id}`);
+		}
+		if (session.fileName) {
+			setSourceFilename(session.fileName);
+		}
 
-		setMessages((prev) => [
-			...prev,
-			{ 
-				id: makeId('assistant'), 
-				role: 'assistant', 
-				content: `Restored session: **${session.prompt || 'Untitled project'}**`,
-				fileName: session.fileName || undefined
+		let activeScript = session.pythonScript || '';
+		let activeParams = session.parameters || {};
+		let activeStl = session.stlUrl ? resolveModelUrl(session.stlUrl) : null;
+		let activeStep = session.stepUrl ? resolveModelUrl(session.stepUrl) : null;
+		let activeDxf: string | null = null;
+
+		let initialRevisions: CadRevision[] = [
+			{
+				id: makeId('rev'),
+				revisionNumber: session.currentVersion || 1,
+				timestamp: new Date(session.createdAt || Date.now()).getTime(),
+				title: session.prompt ? (session.prompt.length > 30 ? session.prompt.slice(0, 30) + '...' : session.prompt) : 'Restored Session',
+				description: session.prompt || undefined,
+				pythonScript: session.pythonScript || '',
+				parameters: session.parameters || {},
+				stlUrl: activeStl,
+				stepUrl: activeStep,
+				dxfUrl: null,
 			}
-		]);
+		];
+
+		const reconstructedMessages: ChatMessage[] = [];
+
+		try {
+			const itRes = await fetch(`/api/sessions/${session.id}/iterations`);
+			if (itRes.ok) {
+				const itData = await itRes.json();
+				if (itData.iterations && Array.isArray(itData.iterations) && itData.iterations.length > 0) {
+					initialRevisions = itData.iterations.map((it: any) => ({
+						id: it.id || makeId('rev'),
+						revisionNumber: it.version,
+						timestamp: new Date(it.createdAt).getTime(),
+						title: it.prompt ? (it.prompt.length > 35 ? it.prompt.slice(0, 35) + '...' : it.prompt) : `Iteration v${it.version}`,
+						description: it.prompt || (it.source === 'prompt' ? 'AI Prompt Iteration' : 'Script Compilation'),
+						pythonScript: it.pythonScript,
+						parameters: it.parameters || {},
+						stlUrl: it.stlUrl ? resolveModelUrl(it.stlUrl) : null,
+						stepUrl: it.stepUrl ? resolveModelUrl(it.stepUrl) : null,
+						dxfUrl: it.dxfUrl ? resolveModelUrl(it.dxfUrl) : null,
+						annotations: it.annotations || undefined,
+					}));
+
+					// Use latest iteration data
+					const latest = itData.iterations[itData.iterations.length - 1];
+					if (latest.pythonScript) activeScript = latest.pythonScript;
+					if (latest.parameters) activeParams = latest.parameters;
+					if (latest.stlUrl) activeStl = resolveModelUrl(latest.stlUrl);
+					if (latest.stepUrl) activeStep = resolveModelUrl(latest.stepUrl);
+					if (latest.dxfUrl) activeDxf = resolveModelUrl(latest.dxfUrl);
+
+					// Reconstruct full chat conversation from iterations
+					itData.iterations.forEach((it: any, index: number) => {
+						if (it.prompt) {
+							reconstructedMessages.push({
+								id: makeId('user'),
+								role: 'user',
+								content: it.prompt,
+								fileName: index === 0 ? session.fileName || undefined : undefined,
+							});
+						}
+						reconstructedMessages.push({
+							id: makeId('assistant'),
+							role: 'assistant',
+							content: index === 0
+								? `Generated initial 3D CAD model${session.fileName ? ` from **${session.fileName}**` : ''}.`
+								: `Updated model for **Iteration v${it.version}** (${it.prompt || it.source || 'parameter update'}).`,
+							fileName: index === 0 ? session.fileName || undefined : undefined,
+							revisionId: it.id,
+						});
+					});
+				}
+			}
+		} catch (e) {
+			console.warn('Could not fetch iteration history for session:', e);
+		}
+
+		updatePythonScript(activeScript);
+		setParameters(activeParams);
+		if (activeStl) setStlUrl(activeStl);
+		if (activeStep) setStepUrl(activeStep);
+		if (activeDxf) setDxfUrl(activeDxf);
+
+		setRevisions(initialRevisions);
+		setActiveRevisionIndex(initialRevisions.length - 1);
+
+		if (reconstructedMessages.length > 0) {
+			setMessages(reconstructedMessages);
+		} else {
+			setMessages([
+				{ 
+					id: makeId('assistant'), 
+					role: 'assistant', 
+					content: `Restored session: **${session.prompt || 'Untitled project'}**`,
+					fileName: session.fileName || undefined
+				}
+			]);
+		}
 
 		setIsHistoryOpen(false);
 		setActiveDrawerTab('parameters');
 		setIsDrawerOpen(true);
-		setStatusText('Restoring session and rebuilding geometry...');
-		setWorkflowStage('cad');
 
-		// Always trigger a sync to ensure the environment matches the script
-		await performSync(session.pythonScript, session.parameters || {}, session.id);
+		// If the session has a CAD script, sync and rebuild geometry
+		if (activeScript && typeof activeScript === 'string' && activeScript.trim()) {
+			setStatusText('Restoring session and rebuilding geometry...');
+			setWorkflowStage('cad');
+			await performSync(activeScript, activeParams, session.id);
+		} else {
+			setStatusText('Session loaded. Ready to generate.');
+			setWorkflowStage(session.fileName ? 'extraction' : 'blueprint');
+		}
 
-		toast.success('Session restored');
+		toast.success('Session restored', {
+			description: session.fileName || session.prompt || undefined,
+		});
 	};
 
 	const hasStl = Boolean(stlUrl);
 	const hasStep = Boolean(stepUrl);
 	const hasDxf = Boolean(dxfUrl);
 
-	const handleClear = async () => {
-		if (sessionId) {
-			try {
-				await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
-			} catch (err) {
-				console.error('Failed to delete session', err);
-			}
-		}
+	const handleClear = () => {
+		setRevisions([]);
+		setActiveRevisionIndex(-1);
 		setMessages([]);
 		setPrompt(DEFAULT_PROMPT);
 		setSelectedFile(null);
@@ -1322,9 +1863,15 @@ export default function HitlWorkspace() {
 		setParameterMetadata({});
 		setActiveParameter(null);
 		setHoveredParameter(null);
+		setTargetPortion(null);
+		setShowBlueprintPIP(false);
+		setSelectionContext(null);
 		setStatusText('Ready');
 		setWorkflowStage('blueprint');
-		toast.info('Session cleared');
+		if (typeof window !== 'undefined') {
+			window.history.replaceState(null, '', '/workspace');
+		}
+		toast.info('Workspace reset for new project');
 	};
 
 	useEffect(() => {
@@ -1379,6 +1926,8 @@ export default function HitlWorkspace() {
 										targetPortion={targetPortion}
 										setTargetPortion={setTargetPortion}
 										blueprintUrl={blueprintUrl}
+										activeRevisionId={activeRevisionId}
+										onRestoreRevision={handleRestoreRevision}
 									/>
 								</div>
 							</div>
@@ -1504,10 +2053,40 @@ export default function HitlWorkspace() {
 													blueprintUrl={blueprintUrl}
 													targetPortion={targetPortion}
 													onSelectPortion={setTargetPortion}
+													projectName={activeProjectName}
+													onOpenProjects={() => setIsSessionBrowserOpen(true)}
 													showBlueprintPIP={showBlueprintPIP}
 													onToggleBlueprintPIP={() => setShowBlueprintPIP(prev => !prev)}
+													onAttachBlueprint={(file) => {
+														setSelectedFile(file);
+														setShowBlueprintPIP(true);
+														toast.success('Blueprint drawing attached to workspace', {
+															description: file.name
+														});
+													}}
 													headerActions={
 														<div className="flex items-center gap-2">
+															{/* + New Project Button */}
+															<button
+																type="button"
+																onClick={handleClear}
+																className="flex h-8 items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 hover:border-emerald-500/60 px-2.5 text-[11px] font-bold text-emerald-300 transition-all shadow-sm active:scale-95 group"
+																title="Start a new Blueprint Project Section from scratch"
+															>
+																<Plus className="size-3.5 text-emerald-400 group-hover:rotate-90 transition-transform duration-200" />
+																<span className="hidden sm:inline">New Project</span>
+															</button>
+
+															{/* CAD Revision History with Undo / Redo */}
+															<RevisionHistoryDropdown
+																revisions={revisions}
+																activeRevisionIndex={activeRevisionIndex}
+																onRestoreRevision={handleRestoreRevision}
+																canUndo={canUndo}
+																canRedo={canRedo}
+																onUndo={handleUndo}
+																onRedo={handleRedo}
+															/>
 
 															{/* Setup Selector */}
 															{camSetups.length > 1 && (
@@ -1527,15 +2106,15 @@ export default function HitlWorkspace() {
 																	</SelectContent>
 																</Select>
 															)}
+
 															<div className="relative">
 																<button
 																	onClick={() => setIsWorkspaceMenuOpen(!isWorkspaceMenuOpen)}
-																	className="flex items-center gap-2 px-4 py-2 rounded-lg bg-muted/50 border border-border hover:bg-muted text-foreground transition-all pointer-events-auto"
+																	className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-muted/50 border border-border hover:bg-muted text-foreground transition-all pointer-events-auto text-[11px] font-bold"
+																	title="Manage project and view history"
 																>
-																	<svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-																		<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-																	</svg>
-																	<span className="text-[10px] font-bold uppercase tracking-widest">Project</span>
+																	<History className="size-3.5 text-blue-400" />
+																	<span className="hidden sm:inline">Projects</span>
 																</button>
 																{isWorkspaceMenuOpen && (
 																	<div className="absolute right-0 mt-2 w-56 rounded-xl border border-border bg-card/95 backdrop-blur-md shadow-xl overflow-hidden z-50 py-1 pointer-events-auto">

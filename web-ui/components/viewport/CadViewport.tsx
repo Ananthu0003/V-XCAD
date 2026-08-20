@@ -5,7 +5,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewcube, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { ViewportController } from '@/components/viewport/ViewportController';
-import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye, FileImage } from 'lucide-react';
+import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye, FileImage, Folder } from 'lucide-react';
 import { DimensionOverlay } from '@/components/viewport/DimensionOverlay';
 import { FeatureHighlight } from '@/components/viewport/FeatureHighlight';
 import { CameraRig } from '@/components/viewport/CameraRig';
@@ -109,6 +109,8 @@ type CadViewportProps = {
 
 	children?: React.ReactNode; // For StlMesh
 	headerActions?: React.ReactNode;
+	projectName?: string | null;
+	onOpenProjects?: () => void;
 	setupToolAxis?: [number, number, number];
 	onMeshClick?: (point: [number, number, number]) => void;
 	onClearSelection?: () => void;
@@ -119,6 +121,7 @@ type CadViewportProps = {
 	onSelectPortion?: (portion: TargetPortion | null) => void;
 	showBlueprintPIP?: boolean;
 	onToggleBlueprintPIP?: () => void;
+	onAttachBlueprint?: (file: File) => void;
 };
 
 function AnimatedSetupGroup({ setupToolAxis, children, isSetup, hasToolpaths }: { setupToolAxis?: [number, number, number], children: React.ReactNode, isSetup?: boolean, hasToolpaths?: boolean }) {
@@ -127,33 +130,36 @@ function AnimatedSetupGroup({ setupToolAxis, children, isSetup, hasToolpaths }: 
 		// By default, map CAD Z (0,0,1) to Three.js Y (0,1,0) so the spindle is always UP
 		// If setupToolAxis is provided, map that axis to Three.js Y.
 		const axis = setupToolAxis ? new THREE.Vector3(...setupToolAxis).normalize() : new THREE.Vector3(0, 0, 1);
-		
-		// If axis is already [0,1,0], we still want to map CAD Z to Y for the rest of the scene?
-		// Actually, setupToolAxis is in CAD coordinates. We want setupToolAxis to point UP (0,1,0).
-		return new THREE.Quaternion().setFromUnitVectors(axis, new THREE.Vector3(0, 1, 0));
+		const defaultUp = new THREE.Vector3(0, 1, 0);
+		const q = new THREE.Quaternion().setFromUnitVectors(axis, defaultUp);
+		return q;
 	}, [setupToolAxis]);
 
-	useFrame((state, delta) => {
+	useFrame((_, delta) => {
 		if (groupRef.current) {
-			groupRef.current.quaternion.slerp(targetQuaternion, 8 * delta);
+			groupRef.current.quaternion.slerp(targetQuaternion, Math.min(delta * 4, 0.2));
 		}
 	});
 
-	return <group ref={groupRef}>{children}</group>;
+	return (
+		<group ref={groupRef}>
+			{children}
+		</group>
+	);
 }
 
 export function CadViewport({
 	stlUrl,
 	statusText,
-	isRecompiling,
-	hasStl,
-	hasStep,
-	hasDxf,
+	isRecompiling = false,
+	hasStl = false,
+	hasStep = false,
+	hasDxf = false,
 	hasGcode = false,
 	isDeveloper,
-	isDownloadingStl,
-	isDownloadingStep,
-	isDownloadingDxf,
+	isDownloadingStl = false,
+	isDownloadingStep = false,
+	isDownloadingDxf = false,
 	isDownloadingGcode = false,
 	isSharing = false,
 	onShare,
@@ -169,7 +175,7 @@ export function CadViewport({
 	geometryInfo = null,
 	toolpaths = null,
 	showToolpaths = true,
-	workflowStage = 'blueprint',
+	workflowStage = 'cad',
 	camFeatures = [],
 	parameters = {},
 	hasBlockedOperations = false,
@@ -187,6 +193,8 @@ export function CadViewport({
 	setupToolAxis,
 	children,
 	headerActions,
+	projectName,
+	onOpenProjects,
 	onMeshClick,
 	onClearSelection,
 	xRayMode = false,
@@ -196,6 +204,7 @@ export function CadViewport({
 	onSelectPortion,
 	showBlueprintPIP,
 	onToggleBlueprintPIP,
+	onAttachBlueprint,
 }: CadViewportProps) {
 	const groupRef = useRef<THREE.Group>(null);
 	const exportRef = useRef<HTMLDivElement>(null);
@@ -523,11 +532,21 @@ export function CadViewport({
 			)}
 
 			<header className="flex h-16 items-center justify-between border-b border-transparent bg-background/60 backdrop-blur-xl px-6 z-30">
-				<div className="flex flex-col gap-1.5">
-					<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-						{/* Workflow breadcrumb removed per user request */}
-					</div>
-					<p className="text-sm font-semibold text-foreground flex items-center gap-2">
+				<div className="flex flex-col gap-1">
+					{projectName && (
+						<div className="flex items-center gap-2">
+							<button
+								type="button"
+								onClick={onOpenProjects}
+								className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[11px] font-semibold hover:bg-blue-500/20 hover:border-blue-500/50 transition-all shadow-sm group"
+								title="Click to view all Project Sections"
+							>
+								<Folder className="size-3 text-blue-400 group-hover:scale-110 transition-transform" />
+								<span className="max-w-[200px] truncate font-medium">Project: {projectName}</span>
+							</button>
+						</div>
+					)}
+					<p className="text-xs font-semibold text-foreground flex items-center gap-2">
 						{isRecompiling || statusText.includes('Extracting') || statusText.includes('Generating') || statusText.includes('Syncing') ? (
 							<Loader2 className="size-3.5 animate-spin text-blue-500" />
 						) : (
@@ -679,7 +698,7 @@ export function CadViewport({
 				)}
 
 				{/* Floating Blueprint PIP Overlay */}
-				{isPIPOpen && blueprintUrl && (
+				{isPIPOpen && blueprintUrl && !isRecompiling && (
 					<div className="absolute top-4 right-4 z-40 w-[420px] h-[340px] shadow-2xl rounded-xl border border-border/80 overflow-hidden animate-in fade-in zoom-in-95 duration-200 pointer-events-auto">
 						<BlueprintViewer
 							blueprintUrl={blueprintUrl}
@@ -689,6 +708,7 @@ export function CadViewport({
 							onClose={togglePIP}
 							isFloating={true}
 							className="w-full h-full"
+							onAttachBlueprint={onAttachBlueprint}
 						/>
 					</div>
 				)}
