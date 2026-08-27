@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Tuple
+from app.constants import CYLINDRICAL_STOCK_TYPES
 
 class StockGeometry(ABC):
     """
@@ -63,7 +64,7 @@ def create_stock_geometry(setup_resolved_stock: Dict[str, Any]) -> StockGeometry
         return BoxStockGeometry({"bounds": {"min": (0,0,0), "max": (0,0,0)}})
         
     stock_type = str(setup_resolved_stock.get("stockType", "box")).lower()
-    if stock_type in ("cylinder", "relative_cylinder", "fixed_cylinder"):
+    if stock_type in CYLINDRICAL_STOCK_TYPES:
         return CylinderStockGeometry(setup_resolved_stock)
         
     return BoxStockGeometry(setup_resolved_stock)

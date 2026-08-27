@@ -226,6 +226,10 @@ export type Tool = {
     gaugeLength?: number;
     toolLife?: number;
     toolWear?: number;
+    toolCost?: number;
+    toolLifeMinutes?: number;
+    holderCost?: number;
+    holderLifeMinutes?: number;
     cuttingData?: ToolCuttingData; // Stores optimal defaults from ToolDefinition
 };
 
@@ -325,27 +329,97 @@ export type MaterialCostDetail = {
     density_g_cm3: number;
     mass_kg: number;
     cost_per_kg: number;
+    markup_pct: number;
+    scrap_recovery_value?: number;
     cost: number;
 };
 
 export type MachiningCostDetail = {
     total_time_s: number;
-    hourly_rate: number;
+    machine_rate: number;
+    labor_rate: number;
+    overhead_rate: number;
+    hourly_rate_used: number;
+    cost: number;
+};
+
+export type EnergyCostDetail = {
+    avg_power_kw: number;
+    energy_price_per_kwh: number;
+    energy_kwh: number;
     cost: number;
 };
 
 export type SetupCostDetail = {
     setup_time_s: number;
     setup_rate: number;
+    min_setup_charge: number;
     cost: number;
+};
+
+export type ToolingItemDetail = {
+    tool_id: string;
+    tool_name: string;
+    cutting_time_min: number;
+    tool_life_min?: number;
+    tool_cost: number;
+    wear_cost: number;
+    holder_cost?: number;
+    holder_life_min?: number;
+    holder_amort?: number;
+};
+
+export type ToolingCostDetail = {
+    items: ToolingItemDetail[];
+    total: number;
+};
+
+export type SecondaryOpDetail = {
+    id: string;
+    name: string;
+    basis: string;
+    value: number;
+    computed_cost: number;
+};
+
+export type SecondaryCostDetail = {
+    items: SecondaryOpDetail[];
+    per_part_total: number;
+    per_batch_total: number;
+};
+
+export type ManufacturingCostDetail = {
+    material_cost: number;
+    machining_cost: number;
+    energy_cost: number;
+    setup_cost: number;
+    tooling_cost: number;
+    secondary_cost: number;
+    per_part: number;
+    lot: number;
+};
+
+export type SellingPriceDetail = {
+    margin_pct: number;
+    manufacturing_lot: number;
+    profit: number;
+    lot: number;
+    per_unit: number;
 };
 
 export type CostEstimateResult = {
     status: string;
     currency: string;
+    quantity?: number;
+    learning_rate?: number;
     material?: MaterialCostDetail;
     machining?: MachiningCostDetail;
+    energy?: EnergyCostDetail | null;
     setup?: SetupCostDetail;
+    tooling?: ToolingCostDetail;
+    secondary?: SecondaryCostDetail;
+    manufacturing_cost?: ManufacturingCostDetail;
+    selling_price?: SellingPriceDetail;
     total?: {
         material_cost: number;
         machining_cost: number;

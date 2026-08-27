@@ -57,3 +57,44 @@ export async function DELETE(request: Request, context: any) {
 		return NextResponse.json({ error: 'Failed to delete session' }, { status: 500 });
 	}
 }
+
+export async function PATCH(request: Request, context: any) {
+	try {
+		const { id } = await context.params;
+		const authSession = await getSession();
+		const userId = authSession?.userId || null;
+		const body = await request.json();
+
+		const session = await prisma.cadSession.findUnique({
+			where: { id },
+			select: { id: true, userId: true },
+		});
+
+		if (!session) {
+			return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+		}
+
+		if (session.userId !== userId && session.userId !== null) {
+			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+		}
+
+		const updated = await prisma.cadSession.update({
+			where: { id },
+			data: {
+				...(body.currentVersion !== undefined ? { currentVersion: body.currentVersion } : {}),
+				...(body.pythonScript !== undefined ? { pythonScript: body.pythonScript } : {}),
+				...(body.parameters !== undefined ? { parameters: body.parameters } : {}),
+				...(body.annotations !== undefined ? { annotations: body.annotations } : {}),
+				...(body.stlUrl !== undefined ? { stlUrl: body.stlUrl } : {}),
+				...(body.stepUrl !== undefined ? { stepUrl: body.stepUrl } : {}),
+				...(body.prompt !== undefined ? { prompt: body.prompt } : {}),
+			},
+		});
+
+		return NextResponse.json(updated);
+	} catch (error) {
+		console.error('Failed to update session:', error);
+		return NextResponse.json({ error: 'Failed to update session' }, { status: 500 });
+	}
+}
+

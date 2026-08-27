@@ -65,44 +65,55 @@ export function ViewportController({
 		}
 	}, [geometryInfo, camera]);
 
-	// Auto-framing on load
+	// Auto-framing on load & on viewport size / layout changes
+	const prevSizeRef = useRef({ width: size.width, height: size.height });
 	useEffect(() => {
 		if (!controlsRef.current || !hasStl) return;
-		if (hasFramed) return;
+		
+		const sizeChanged = Math.abs(size.width - prevSizeRef.current.width) > 20 || Math.abs(size.height - prevSizeRef.current.height) > 20;
+		prevSizeRef.current = { width: size.width, height: size.height };
 
-		const timer = setTimeout(() => {
-			let box: THREE.Box3;
-			if (modelGroupRef?.current) {
-				box = new THREE.Box3().setFromObject(modelGroupRef.current);
-			} else if (geometryInfo?.bounding_box) {
-				const { min, max } = geometryInfo.bounding_box;
-				box = new THREE.Box3(
-					new THREE.Vector3(min[0], min[1], min[2]),
-					new THREE.Vector3(max[0], max[1], max[2])
-				);
-			} else {
-				return;
-			}
+		if (!hasFramed || sizeChanged) {
+			const timer = setTimeout(() => {
+				if (!controlsRef.current) return;
+				let box: THREE.Box3;
+				if (modelGroupRef?.current) {
+					box = new THREE.Box3().setFromObject(modelGroupRef.current);
+				} else if (geometryInfo?.bounding_box) {
+					const { min, max } = geometryInfo.bounding_box;
+					box = new THREE.Box3(
+						new THREE.Vector3(min[0], min[1], min[2]),
+						new THREE.Vector3(max[0], max[1], max[2])
+					);
+				} else {
+					return;
+				}
 
-			if (box.isEmpty()) return;
+				if (box.isEmpty()) return;
 
-			// Expand box to ensure comfortable framing (prevents "too close" view)
-			const sizeVec = new THREE.Vector3();
-			box.getSize(sizeVec);
-			const maxDim = Math.max(sizeVec.x, sizeVec.y, sizeVec.z);
-			box.expandByScalar(maxDim * 0.4);
+				// Expand box to ensure comfortable framing (prevents "too close" view)
+				const sizeVec = new THREE.Vector3();
+				box.getSize(sizeVec);
+				const maxDim = Math.max(sizeVec.x, sizeVec.y, sizeVec.z);
+				box.expandByScalar(maxDim * 0.35);
 
-			// Frame the entire model dynamically
-			controlsRef.current.fitToBox(box, true, { paddingLeft: 0.1, paddingRight: 0.1, paddingBottom: 0.2, paddingTop: 0.1 });
-			
-			// Set a professional isometric angle
-			controlsRef.current.rotateTo(Math.PI / 4, Math.PI / 4, true);
+				// Frame the entire model dynamically with comfortable padding
+				controlsRef.current.fitToBox(box, true, { 
+					paddingLeft: 0.1, 
+					paddingRight: 0.1, 
+					paddingBottom: 0.18, 
+					paddingTop: 0.15 
+				});
+				
+				if (!hasFramed) {
+					controlsRef.current.rotateTo(Math.PI / 4, Math.PI / 4, true);
+					setHasFramed(true);
+				}
+			}, 100);
 
-			setHasFramed(true);
-		}, 150); // Short delay to allow AnimatedSetupGroup to slerp near its target
-
-		return () => clearTimeout(timer);
-	}, [geometryInfo, hasStl, hasFramed, modelGroupRef]);
+			return () => clearTimeout(timer);
+		}
+	}, [geometryInfo, hasStl, hasFramed, modelGroupRef, size.width, size.height, workflowStage]);
 
 	// Feature selection focus
 	useEffect(() => {

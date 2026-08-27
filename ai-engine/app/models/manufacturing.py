@@ -1,6 +1,16 @@
 from typing import List, Dict, Any, Optional, Literal
 from pydantic import BaseModel, Field
 
+class SecondaryOpConfig(BaseModel):
+    """
+    A secondary (post-machining) operation with an explicit, non-ambiguous pricing basis.
+    The estimator never infers the basis; it is declared here.
+    """
+    id: str
+    name: str
+    basis: Literal["per_batch", "per_unit", "per_kg", "per_dm2", "per_feature"]
+    value: float  # monetary amount in the machine currency for the chosen basis
+
 class MachineProfile(BaseModel):
     machine_id: str
     machine_name: str
@@ -19,7 +29,7 @@ class MachineProfile(BaseModel):
     available_tool_ids: List[str] = Field(default_factory=list)
     tool_change_time: float = 15.0  # seconds
     rapid_feedrate: float = 5000.0  # mm/min
-    
+
     # ATC specifics
     atc_type: Literal["carousel", "chain", "linear", "random_pocket", "manual"] = "carousel"
     atc_capacity: int = 20
@@ -36,10 +46,31 @@ class MachineProfile(BaseModel):
     max_simultaneous_axes: int = 3
 
     # Spindle specs
-    spindle_power_kw: float = 15.0
+    spindle_power_kw: float = 15.0  # rated max; NOT used for energy costing (avg_power_kw is)
     spindle_torque_nm: float = 100.0
-    hourly_rate: float = 8400.0
-    setup_rate: float = 6720.0
+
+    # --- Rate composition (deterministic; estimator picks exactly one resolution path) ---
+    # Decomposed running rates (preferred). Energy is reported separately from these.
+    machine_rate: Optional[float] = 1800.0   # ownership: depreciation + maintenance (excludes energy)
+    labor_rate: Optional[float] = 1000.0     # operator wage + labor burden
+    overhead_rate: Optional[float] = 700.0  # facility / supervision / general consumables
+    # Legacy combined running rate (used only if decomposed rates are all absent)
+    hourly_rate: Optional[float] = 3500.0
+    setup_rate: Optional[float] = 2500.0
+
+    # Setup minimum charge (batch rule headroom)
+    min_setup_charge: float = 1000.0
+
+    # Energy costing (separate line; must not be double counted inside machine_rate)
+    avg_power_kw: Optional[float] = 7.5       # expected AVERAGE draw during cutting (not rated)
+    energy_price_per_kwh: Optional[float] = 8.5
+
+    # Profit margin applied to the TOTAL quote (true margin = profit / selling_price)
+    margin_pct: float = 0.15
+
+    # Secondary operations
+    secondary_operations: List[SecondaryOpConfig] = Field(default_factory=list)
+
     currency: str = "INR"
 
 class MaterialProfile(BaseModel):
@@ -58,6 +89,8 @@ class MaterialProfile(BaseModel):
     hardness: str = "95 HB"
     description: str = ""
     cost_per_kg: float = 420.0
+    # Material handling/markup applied to material only (user-configured, distinct from profit margin)
+    material_markup_pct: float = 0.0
     currency: str = "INR"
 
 class ToolProfile(BaseModel):
@@ -77,6 +110,12 @@ class ToolProfile(BaseModel):
     supported_machines: List[str] = Field(default_factory=lambda: ["all"])
     max_depth: float = 50.0
     minimum_hole_diameter: Optional[float] = None
+
+    # --- Tooling cost inputs (consumed deterministically by the estimator) ---
+    tool_cost: float = 1500.0                 # purchase price of the cutting tool in INR
+    tool_life_minutes: Optional[float] = 120.0  # expected cutting life in minutes
+    holder_cost: float = 4000.0               # purchase price of the holder/tool assembly in INR
+    holder_life_minutes: Optional[float] = 3000.0  # expected cutting life of the holder in minutes
 
 class FeatureDecision(BaseModel):
     feature_id: str

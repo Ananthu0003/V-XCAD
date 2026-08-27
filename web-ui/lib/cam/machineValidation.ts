@@ -143,14 +143,5 @@ export function migrateLegacyCamSetup(setup: SetupSettings): SetupSettings {
     }
   }
 
-  if (!newSetup.material && !newSetup.workpieceMaterialId) {
-    newSetup.material = "aluminum_6061";
-    newSetup.workpieceMaterialId = "aluminum_6061";
-  }
-  if (!newSetup.machineProfile && !newSetup.machine) {
-    newSetup.machine = "haas_vf2";
-    newSetup.machineProfile = "haas_vf2";
-  }
-
   return newSetup;
 }

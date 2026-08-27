@@ -23,6 +23,7 @@ from app.services.geometry.topology_extractor import TopologyExtractor
 
 from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.GeomAbs import GeomAbs_Cylinder
+from app.constants import TURNING_FEATURE_TYPES
 
 
 class GeometryMapper:
@@ -66,7 +67,7 @@ class GeometryMapper:
                     self._map_face_geometry(feature)
                 elif feat_type == "step":
                     self._map_step_geometry(feature)
-                elif feat_type in ("external_cylinder", "shaft", "turned_od"):
+                elif feat_type in TURNING_FEATURE_TYPES:
                     # Only map geometry if the feature is not blocked (turning_required on 3-axis)
                     if feature.get("machinable_in_current_setup", True) and not feature.get("blocked_reason"):
                         self._map_external_cylinder_geometry(feature, setup)

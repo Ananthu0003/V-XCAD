@@ -1,7 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import { prisma } from '../lib/prisma';
+import { fileURLToPath } from 'url';
+import { PrismaClient } from '@prisma/client';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const prisma = new PrismaClient();
 const jsonPath = path.join(__dirname, "comprehensive_tools.json");
 
 function mapType(rawType: string): any {

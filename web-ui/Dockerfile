@@ -18,10 +18,11 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Generate Prisma client (needs DATABASE_URL at build time only for types)
-# We use a placeholder — the real URL is injected at runtime via env.
+# Generate Prisma client and Next.js build (needs placeholder envs at build time)
+# Real URLs and secrets are injected at runtime via docker-compose / env.
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 ENV DIRECT_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
+ENV JWT_SECRET="build_time_jwt_secret_placeholder_replace_at_runtime"
 
 RUN npx prisma generate
 RUN npm run build

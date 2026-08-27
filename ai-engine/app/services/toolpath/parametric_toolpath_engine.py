@@ -1,5 +1,11 @@
 import math
 from typing import Dict, Any, List
+from app.constants import (
+    CYLINDRICAL_STOCK_TYPES,
+    CIRCULAR_FEATURE_TYPES,
+    DEFAULT_CIRCLE_SEGMENTS,
+    POCKET_CIRCLE_SEGMENTS,
+)
 
 class ParametricToolpathEngine:
     """
@@ -259,7 +265,7 @@ class ParametricToolpathEngine:
             cy = min_y + (stock_l / 2.0)
             
             # Identify if we need circular facing
-            is_cylindrical_face = stock_geom.get("provenance", {}).get("derived_from", "") in ("cylinder", "relative_cylinder", "fixed_cylinder")
+            is_cylindrical_face = stock_geom.get("provenance", {}).get("derived_from", "") in CYLINDRICAL_STOCK_TYPES
             stock_dia = max(stock_w, stock_l) if is_cylindrical_face else 0.0
             
             overhang = tool_dia * 0.6  # Extend tool outside stock by 60% tool dia
@@ -380,7 +386,7 @@ class ParametricToolpathEngine:
             length = float(feature.get("length") or feature.get("diameter") or stock.get("length") or stock.get("diameter") or (stock_dims[0] if stock_dims else 20.0))
             
             is_circular = (
-                feat_type in ("cylinder", "external_cylinder", "shaft", "boss", "circular_boss", "round_boss", "hole", "bore", "circle")
+                feat_type in CIRCULAR_FEATURE_TYPES
                 or "cylinder" in feat_type or "shaft" in feat_type or "circle" in feat_type
                 or ("cylinder" in str(feature.get("subtype", "")).lower())
                 or ("shaft" in str(feature.get("name", "")).lower())
@@ -403,7 +409,7 @@ class ParametricToolpathEngine:
 
                     for s in range(1, num_shells + 1):
                         r_s = (s / float(num_shells)) * max_r
-                        num_pts = 16
+                        num_pts = POCKET_CIRCLE_SEGMENTS
                         for i in range(num_pts + 1):
                             angle = -2.0 * math.pi * (i / float(num_pts))
                             px = cx + r_s * math.cos(angle)
@@ -603,7 +609,7 @@ class ParametricToolpathEngine:
             stock_is_cylindrical = any(kw in stock_type_str for kw in ("cylinder", "round", "bar", "rod"))
             
             is_circular = (
-                feat_type in ("cylinder", "external_cylinder", "shaft", "boss", "circular_boss", "round_boss", "hole", "bore", "circle")
+                feat_type in CIRCULAR_FEATURE_TYPES
                 or "cylinder" in feat_type or "shaft" in feat_type or "circle" in feat_type
                 or ("cylinder" in str(feature.get("subtype", "")).lower())
                 or ("shaft" in str(feature.get("name", "")).lower())
@@ -631,8 +637,8 @@ class ParametricToolpathEngine:
                     # Tangent lead-in to cut radius
                     add_move("cut", x=cx - r_cut, y=cy, z=curr_z, source=src)
 
-                    # Smooth 24-point circular arc loop around cylinder/shaft
-                    num_pts = 24
+                    # Smooth circular arc loop around cylinder/shaft
+                    num_pts = DEFAULT_CIRCLE_SEGMENTS
                     for i in range(1, num_pts + 1):
                         angle = -2.0 * math.pi * (i / float(num_pts))
                         px = cx + r_cut * math.cos(angle)

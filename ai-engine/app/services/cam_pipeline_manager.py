@@ -18,7 +18,9 @@ from app.services.cam.material_validation import get_material_profile
 from app.services.validation.manufacturing_capability_matrix import ManufacturingCapabilityMatrix
 from app.services.planning.manufacturing_strategy_planner import ManufacturingStrategyPlanner
 from app.services.gcode.gcode_generator import PostProcessorFactory
+from app.constants import CYLINDRICAL_STOCK_TYPES
 from app.services.validation.coordinate_validator import CoordinateValidator
+from app.services.planning.machine_recommendation_engine import MachineRecommendationEngine
 
 class CamPipelineManager:
     """
@@ -34,6 +36,8 @@ class CamPipelineManager:
         self.operation_strategy_planner = OperationStrategyPlanner()
         self.operation_planner = OperationPlanner()
         self.coord_validator = CoordinateValidator()
+        self.machine_recommender = MachineRecommendationEngine()
+
         
     def analyze_features(self, parameters: Dict[str, Any], job_id: str, cam_run_id: str, setup: Dict[str, Any] = None) -> Dict[str, Any]:
         from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
@@ -90,25 +94,51 @@ class CamPipelineManager:
         setup_metadata = {}
 
         try:
-            from app.services.cam.cost_estimation import CostEstimationEngine
+            from app.services.cam.cost_estimation import CostEstimationEngine, build_quote_context
             from app.services.cam.material_validation import get_material_profile
             cost_engine = CostEstimationEngine()
-            
-            mat_id = setup.get("workpieceMaterialId") or setup.get("material") if isinstance(setup, dict) else None
+
+            setup_dict = setup if isinstance(setup, dict) else {}
+            mat_id = setup_dict.get("workpieceMaterialId") or setup_dict.get("material")
             material_obj = get_material_profile(mat_id)
             material_profile = material_obj.model_dump() if hasattr(material_obj, 'model_dump') else {}
-            machine_profile = setup if isinstance(setup, dict) else {}
-            
-            cost_estimate_result = cost_engine.estimate(
-                context=None,
-                total_time_s=0,
-                setup_time_s=0,
+
+            quote_context = build_quote_context(
+                setup=setup_dict,
                 material_profile=material_profile,
-                machine_profile=machine_profile
+                machine_profile=setup_dict,
             )
+            cost_estimate_result = cost_engine.estimate(quote_context)
             stats = {"costEstimate": cost_estimate_result.model_dump()}
         except Exception as e:
             stats = {"costEstimate": {"status": "error", "currency": "USD", "errors": [{"code": "ESTIMATION_FAILED", "message": str(e)}]}}
+
+        # Machine recommendation
+        try:
+            script_text = None
+            try:
+                py_file = Path(__file__).resolve().parents[4] / "storage" / "jobs" / job_id / f"cad_{job_id}.py"
+                if not py_file.exists():
+                    py_file = Path(__file__).resolve().parents[4] / "outputs" / f"cad_{job_id}.py"
+                if py_file.exists():
+                    script_text = py_file.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+            stock_dims = stock_suggestions.get("dimensions") if stock_suggestions else None
+            rec_res = self.machine_recommender.recommend_machine(
+                features=features,
+                topology_info=topology_info if topology_info else {},
+                stock_dimensions=stock_dims,
+                blueprint_data=parameters.get("blueprint_data") if parameters else None,
+                parameters=parameters,
+                python_script=script_text
+            )
+            machine_rec = rec_res.model_dump()
+        except Exception as e:
+            print(f"[MachineRecommendationEngine] Error in analyze_features: {e}")
+            machine_rec = None
+
 
         return {
             "status": "success",
@@ -121,8 +151,10 @@ class CamPipelineManager:
             "stock_suggestions": stock_suggestions,
             "camModelHash": model_hash,
             "setup_metadata": setup_metadata,
+            "machine_recommendation": machine_rec,
             "stats": stats
         }
+
 
     def auto_plan_cam(self, machine_config: Dict[str, Any], job_id: str = "default_job", parameters: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -717,17 +749,28 @@ class CamPipelineManager:
         # --- Cost Estimation ---
         stats = {}
         try:
-            from app.services.cam.cost_estimation import CostEstimationEngine
+            from app.services.cam.cost_estimation import CostEstimationEngine, build_quote_context
             cost_engine = CostEstimationEngine()
             material_profile = material.model_dump() if hasattr(material, 'model_dump') else (material if isinstance(material, dict) else {})
-            print(f"DEBUG: auto_plan_cam material={material}, material_profile={material_profile}")
-            cost_estimate_result = cost_engine.estimate(
-                context=setup_obj,
-                total_time_s=planned_cycle_time_seconds,
-                setup_time_s=0, # setup time is handled within the engine if not provided
+            machine_profile = machine.model_dump() if hasattr(machine, "model_dump") else machine
+            tool_library_dicts = [t.model_dump() for t in tool_library] if tool_library else []
+            quantity = int(setup_obj.get("quantity", 1) or 1)
+            learning_rate = float(setup_obj.get("learningRate", 1.0) or 1.0)
+
+            quote_context = build_quote_context(
+                setup=setup_obj,
                 material_profile=material_profile,
-                machine_profile=machine.model_dump() if hasattr(machine, "model_dump") else machine
+                machine_profile=machine_profile,
+                tool_library=tool_library_dicts,
+                operations=all_operations,
+                quantity=quantity,
+                learning_rate=learning_rate,
+                surface_area_dm2=setup_obj.get("surfaceAreaDm2"),
+                feature_count=len(features) if features else None,
+                cycle_time_s=planned_cycle_time_seconds,
+                setup_time_s=0,  # setup time resolved separately when available
             )
+            cost_estimate_result = cost_engine.estimate(quote_context)
             stats = {"costEstimate": cost_estimate_result.model_dump()}
         except Exception as e:
             import traceback
@@ -885,7 +928,7 @@ class CamPipelineManager:
                 model_bb = shape_in_setup.bounding_box()
                 feat_clone["machinable_in_current_setup"] = True
                 stock_type = setup.get("stockType") or setup_metadata.get("resolvedStock", {}).get("stockType", "box")
-                if stock_type in ("cylinder", "relative_cylinder", "fixed_cylinder"):
+                if stock_type in CYLINDRICAL_STOCK_TYPES:
                     import math
                     cx = (s_max_x + s_min_x) / 2.0
                     cy = (s_max_y + s_min_y) / 2.0
@@ -1356,24 +1399,35 @@ class CamPipelineManager:
             
         # Cost Estimation Integration
         try:
-            from app.services.cam.cost_estimation import CostEstimationEngine
+            from app.services.cam.cost_estimation import CostEstimationEngine, build_quote_context
             from app.services.cam.material_validation import get_material_profile
             cost_engine = CostEstimationEngine()
-            
+
             mat_id = setup.get("workpieceMaterialId") or setup.get("material") if isinstance(setup, dict) else None
             material_obj = get_material_profile(mat_id)
             material_profile = material_obj.model_dump() if hasattr(material_obj, 'model_dump') else {}
             total_machining_time_s = sum(op.get("estimated_time_s", 0) for op in operations)
-            setup_time_s = setup.get("estimated_time_s", 0) if setup else 0
-            
-            cost_estimate_result = cost_engine.estimate(
-                context=planning_context,
-                total_time_s=total_machining_time_s,
-                setup_time_s=setup_time_s,
+            setup_time_s = setup_time_details.get("total_setup_time_seconds", 0) if setup else 0
+            tool_library_dicts = [t.model_dump() for t in tool_library] if tool_library else []
+            quantity = int(setup.get("quantity", 1) or 1) if setup else 1
+            learning_rate = float(setup.get("learningRate", 1.0) or 1.0) if setup else 1.0
+
+            quote_context = build_quote_context(
+                setup=setup if isinstance(setup, dict) else {},
                 material_profile=material_profile,
-                machine_profile=machine_profile_dict
+                machine_profile=machine_profile_dict,
+                tool_library=tool_library_dicts,
+                operations=operations,
+                quantity=quantity,
+                learning_rate=learning_rate,
+                surface_area_dm2=setup.get("surfaceAreaDm2") if isinstance(setup, dict) else None,
+                feature_count=len(features) if features else None,
+                cycle_time_s=total_machining_time_s,
+                setup_time_s=setup_time_s,
             )
-            
+
+            cost_estimate_result = cost_engine.estimate(quote_context)
+
             cost_estimate_data = cost_estimate_result.model_dump()
         except Exception as e:
             import traceback

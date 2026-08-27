@@ -52,11 +52,16 @@ export function PostProcessorSelectionModal({
         setOpen(false);
     };
 
-    const currentPostLabel = currentPostId === 'AUTO' 
-        ? "AUTO (Determined by Controller)" 
-        : (MACHINE_MATRIX.postProcessors[currentPostId as PostProcessorId]?.label || "Select Format");
+    const hasConfig = Boolean(machineProfileId || currentPostId || currentControllerId);
+    const currentPostLabel = !hasConfig
+        ? "Select Format & Controller"
+        : (currentPostId === 'AUTO' 
+            ? "AUTO (Determined by Controller)" 
+            : (MACHINE_MATRIX.postProcessors[currentPostId as PostProcessorId]?.label || "Select Format"));
         
-    const currentControllerLabel = MACHINE_MATRIX.controllers[currentControllerId as ControllerId]?.label || "No Controller";
+    const currentControllerLabel = currentControllerId
+        ? (MACHINE_MATRIX.controllers[currentControllerId as ControllerId]?.label || "No Controller")
+        : (hasConfig ? "No Controller" : "No Machine Selected");
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>

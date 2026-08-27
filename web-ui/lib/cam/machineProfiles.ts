@@ -58,6 +58,10 @@ export interface MachineProfile {
   compatibleControllers: ControllerId[];
   recommendedPost: PostProcessorId;
   camSupport: CamSupport;
+  travelX?: number;
+  travelY?: number;
+  travelZ?: number;
+  maxSpindleRpm?: number;
 }
 
 export interface ControllerInfo {
@@ -74,9 +78,31 @@ export interface PostProcessorInfo {
   supports: Record<string, boolean>;
 }
 
+export interface MachineRecommendation {
+  profileId: string;
+  label: string;
+  machineType: string;
+  confidence: number;
+  isRecommended: boolean;
+  reason: string;
+  setupCount: number;
+  requiredAxes: number;
+  fitsEnvelope: boolean;
+  envelopeDetails?: string;
+}
+
+export interface MachineRecommendationResponse {
+  status: string;
+  primaryRecommendation: MachineRecommendation;
+  alternatives: MachineRecommendation[];
+  detectedPartType: string;
+  analysisSummary: Record<string, any>;
+}
+
 export const MACHINE_MATRIX = matrixData as unknown as {
   machineTypes: { id: MachineType; label: string }[];
   machineProfiles: MachineProfile[];
   controllers: Record<ControllerId, ControllerInfo>;
   postProcessors: Record<PostProcessorId, PostProcessorInfo>;
 };
+

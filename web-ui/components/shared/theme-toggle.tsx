@@ -4,7 +4,7 @@ import * as React from "react"
 import { Moon, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
 
-export function ThemeToggle() {
+export function ThemeToggle({ className }: { className?: string } = {}) {
   const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = React.useState(false)
 
@@ -17,13 +17,13 @@ export function ThemeToggle() {
   return (
     <button
       onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-      className="inline-flex items-center justify-center rounded-full p-3 bg-slate-50/90 dark:bg-gray-800 border border-slate-200/80 dark:border-gray-700 shadow-md text-slate-700 dark:text-gray-200 hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 focus:ring-offset-background"
+      className={`inline-flex items-center justify-center size-11 rounded-full bg-slate-50/90 dark:bg-[#0b1220]/90 border border-slate-200/80 dark:border-white/10 shadow-md text-slate-700 dark:text-gray-200 hover:bg-slate-100 dark:hover:bg-[#111c33] hover:border-cyan-500/50 transition-all focus:outline-none cursor-pointer ${className || ''}`}
       aria-label="Toggle theme"
     >
       {theme === "light" ? (
-        <Moon className="h-5 w-5" />
+        <Moon className="size-5" />
       ) : (
-        <Sun className="h-5 w-5" />
+        <Sun className="size-5" />
       )}
     </button>
   )

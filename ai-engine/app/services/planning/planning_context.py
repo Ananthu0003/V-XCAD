@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional
 import math
 from shapely.geometry import Polygon, MultiPolygon, box
 from shapely.ops import unary_union
+from app.constants import CYLINDRICAL_STOCK_TYPES
 
 class PlanningContext:
     """
@@ -63,7 +64,7 @@ class PlanningContext:
         
         stock_type = str(self.stock.get("stockType", "")).lower()
         
-        if stock_type in ("cylinder", "relative_cylinder", "fixed_cylinder"):
+        if stock_type in CYLINDRICAL_STOCK_TYPES:
             cx = (s_min_x + s_max_x) / 2.0
             cy = (s_min_y + s_max_y) / 2.0
             radius = min(s_max_x - s_min_x, s_max_y - s_min_y) / 2.0

@@ -10,6 +10,7 @@ import uuid
 import math
 from typing import List, Dict, Any, Optional
 from app.services.io.step_importer import StepImporter
+from app.constants import TURNING_FEATURE_TYPES
 from app.services.geometry.topology_extractor import TopologyExtractor
 
 
@@ -74,7 +75,7 @@ class CamFeature:
         elif feature_type == "boss":
             self.recommendedToolType = "flat_end_mill"
             self.recommendedOperation = "boss_clearing"
-        elif feature_type in ("external_cylinder", "shaft", "turned_od", "side_protrusion"):
+        elif feature_type in TURNING_FEATURE_TYPES:
             self.recommendedToolType = "lathe_tool"
             self.recommendedOperation = "turning"
         else:

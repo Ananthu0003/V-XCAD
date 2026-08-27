@@ -257,9 +257,10 @@ export async function POST(request: Request): Promise<Response> {
 			},
 		});
 
-		// 2. Archive this immutable iteration snapshot
-		if ((prisma as any).cadIteration) {
-			await (prisma as any).cadIteration.create({
+		// 2. Archive this immutable iteration snapshot (only for actual edits/prompts, not restores)
+		if (iterationSource !== 'restore' && !body.is_restore) {
+			if ((prisma as any).cadIteration) {
+				await (prisma as any).cadIteration.create({
 				data: {
 					sessionId: mappedPayload.session_id,
 					version: nextVersion,
@@ -302,6 +303,7 @@ export async function POST(request: Request): Promise<Response> {
 				dxfUrl
 			);
 		}
+	}
 	} catch (dbErr) {
 		console.error('Failed to save iteration to database:', dbErr);
 	}

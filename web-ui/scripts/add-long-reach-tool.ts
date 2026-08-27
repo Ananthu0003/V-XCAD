@@ -1,4 +1,5 @@
-import { prisma } from '../lib/prisma';
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
 
 async function run() {
   console.log("Adding Long Reach 12mm Flat End Mill...");

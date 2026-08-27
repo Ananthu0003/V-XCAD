@@ -13,15 +13,17 @@ import { HistoryDrawer } from '@/components/workspace/HistoryDrawer';
 import { WorkflowNav } from '@/components/workspace/WorkflowNav';
 import { WorkspaceSettings } from '@/components/workspace/WorkspaceSettings';
 import { migrateLegacyCamSetup, validateMachineControllerPost } from '@/lib/cam/machineValidation';
-import { MACHINE_MATRIX, ControllerId } from '@/lib/cam/machineProfiles';
+import { MACHINE_MATRIX, ControllerId, MachineRecommendationResponse } from '@/lib/cam/machineProfiles';
 import { RevisionHistoryDropdown, type CadRevision } from '@/components/workspace/RevisionHistoryDropdown';
 import { EngineeringConsole } from '@/components/workspace/EngineeringConsole';
 import { ChatPanel, type TargetPortion } from '@/components/chat/ChatPanel';
 import { SessionBrowserModal } from '@/components/workspace/SessionBrowserModal';
+import { PromptAssistantWidget } from '@/components/assistant/PromptAssistantWidget';
+import { ThemeToggle } from '@/components/shared/theme-toggle';
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { History, Cuboid, RotateCcw, IndianRupee, Plus, FolderKanban } from 'lucide-react';
-import Link from 'next/link';
+import { History, Cuboid, RotateCcw, IndianRupee, Plus, FolderKanban, Sparkles } from 'lucide-react';
 import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, CamFeature, PostProcessor, OperationType, ToolType, ToolMaterial, CoolantType, CamSetupPlan } from '@/types/cam';
+
 
 type ChatRole = 'user' | 'assistant' | 'system';
 
@@ -373,7 +375,7 @@ export default function HitlWorkspace() {
 	const [sourceFilename, setSourceFilename] = useState<string | null>(null);
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [isRecompiling, setIsRecompiling] = useState(false);
-	const [isDrawerOpen, setIsDrawerOpen] = useState(true);
+	const [isCamDrawerOpen, setIsCamDrawerOpen] = useState(false);
 	const [sessionId, setSessionId] = useState<string | null>(null);
 	const [pythonScript, setPythonScript] = useState('');
 	const [activeDrawerTab, setActiveDrawerTab] = useState<DrawerTab>('parameters');
@@ -429,7 +431,9 @@ export default function HitlWorkspace() {
 	const [canGenerateGcode, setCanGenerateGcode] = useState<boolean>(false);
 	const [plannedCycleTimeSeconds, setPlannedCycleTimeSeconds] = useState<number>(0);
 	const [camStats, setCamStats] = useState<any>(null);
+	const [camRecommendation, setCamRecommendation] = useState<MachineRecommendationResponse | null>(null);
 	const [xRayMode, setXRayMode] = useState(false);
+
 
 	const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 	const [isSharing, setIsSharing] = useState(false);
@@ -506,6 +510,57 @@ export default function HitlWorkspace() {
 			setActiveRightTab('cad');
 		}
 	}, [workflowStage]);
+
+	// Automatically fetch machine recommendation and auto-select optimal machine
+	useEffect(() => {
+		if ((camFeatures && camFeatures.length > 0) || (parameters && Object.keys(parameters).length > 0) || geometryInfo) {
+			const backendUrl = process.env.NEXT_PUBLIC_FASTAPI_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
+			const apiUrl = backendUrl.endsWith('/api/v1') ? `${backendUrl}/cam/recommend-machine` : `${backendUrl}/api/v1/cam/recommend-machine`;
+			
+			const dims = camSetup.stockDimensions || (geometryInfo?.bounding_box ? [
+				geometryInfo.bounding_box.max[0] - geometryInfo.bounding_box.min[0],
+				geometryInfo.bounding_box.max[1] - geometryInfo.bounding_box.min[1],
+				geometryInfo.bounding_box.max[2] - geometryInfo.bounding_box.min[2]
+			] : undefined);
+
+			fetch(apiUrl, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					features: camFeatures || [],
+					topologyInfo: defaultSetupMetadata?.topology || {},
+					stockDimensions: dims,
+					parameters: parameters || {},
+					pythonScript: pythonScript || undefined
+				})
+
+			})
+			.then(r => r.ok ? r.json() : null)
+			.then(data => {
+				if (data?.primaryRecommendation) {
+					setCamRecommendation(data);
+					const primary = data.primaryRecommendation;
+					const prof = MACHINE_MATRIX.machineProfiles.find(p => p.id === primary.profileId);
+					if (prof) {
+						setCamSetup(prev => {
+							if (prev.machineProfile !== prof.id) {
+								return {
+									...prev,
+									machineType: prof.machineType,
+									machineProfile: prof.id,
+									controller: prof.defaultController,
+									postProcessor: 'AUTO'
+								};
+							}
+							return prev;
+						});
+					}
+				}
+			})
+			.catch(() => null);
+		}
+	}, [camFeatures, parameters, defaultSetupMetadata, geometryInfo]);
+
 
 	// Restore session from URL search params if ?session=<id> is present on mount
 	useEffect(() => {
@@ -627,33 +682,88 @@ export default function HitlWorkspace() {
 			description: targetRev.title,
 		});
 
-		// Sync with backend session
+		// Sync active session state with backend without re-generating iteration rows
 		if (sessionId) {
 			try {
-				await fetch('/api/render', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+				await fetch(`/api/sessions/${sessionId}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({
-						python_script: targetRev.pythonScript,
+						currentVersion: targetRev.revisionNumber,
+						pythonScript: targetRev.pythonScript,
 						parameters: targetRev.parameters,
-						session_id: sessionId,
-						cam_parameters: {
-							controller: camSetup.controller || 'FANUC_0I_MF',
-							post_processor: camSetup.postProcessor || 'AUTO',
-							setup: camSetup,
-							tools: camTools,
-							operations: camOperations,
-						}
+						stlUrl: targetRev.stlUrl,
+						stepUrl: targetRev.stepUrl,
+						prompt: targetRev.description || targetRev.title,
 					}),
 				});
 			} catch (e) {
 				console.error('Failed to sync restored revision to backend:', e);
 			}
 		}
-	}, [revisions, sessionId, camSetup, camTools, camOperations, updatePythonScript]);
+	}, [revisions, sessionId, updatePythonScript]);
 
 	const canUndo = activeRevisionIndex > 0;
 	const canRedo = activeRevisionIndex >= 0 && activeRevisionIndex < revisions.length - 1;
+
+	// Delete an unwanted or degraded revision and revert to previous if active
+	const handleDeleteRevision = useCallback(async (targetRevId: string) => {
+		setRevisions((prev) => {
+			const targetIdx = prev.findIndex((r) => r.id === targetRevId);
+			if (targetIdx === -1) return prev;
+
+			if (prev.length <= 1) {
+				toast.error('Cannot delete the only CAD revision in the project.');
+				return prev;
+			}
+
+			const deletedRev = prev[targetIdx];
+			const nextList = prev.filter((r) => r.id !== targetRevId);
+			const isTargetActive = targetIdx === activeRevisionIndex;
+
+			// Also clean up any chat bubble pointing to this deleted revision
+			setMessages((prevMsgs) =>
+				prevMsgs.filter((m) => m.revisionId !== targetRevId && m.revisionNumber !== deletedRev.revisionNumber)
+			);
+
+			if (isTargetActive) {
+				const newActiveIdx = targetIdx > 0 ? targetIdx - 1 : 0;
+				const newActiveRev = nextList[newActiveIdx];
+				setActiveRevisionIndex(newActiveIdx);
+
+				updatePythonScript(newActiveRev.pythonScript);
+				setParameters(newActiveRev.parameters || {});
+				if (newActiveRev.stlUrl) setStlUrl(newActiveRev.stlUrl);
+				if (newActiveRev.stepUrl) setStepUrl(newActiveRev.stepUrl);
+				if (newActiveRev.dxfUrl) setDxfUrl(newActiveRev.dxfUrl);
+				if (newActiveRev.annotations) setAnnotations(newActiveRev.annotations);
+				if (newActiveRev.parameterMetadata) setParameterMetadata(newActiveRev.parameterMetadata);
+				if (newActiveRev.camFeatures) setCamFeatures(newActiveRev.camFeatures);
+				if (newActiveRev.setupMetadata) setDefaultSetupMetadata(newActiveRev.setupMetadata);
+
+				setStatusText(`Deleted Revision #${deletedRev.revisionNumber}. Reverted to Revision #${newActiveRev.revisionNumber}`);
+				toast.success(`Deleted Revision #${deletedRev.revisionNumber}`, {
+					description: `Reverted to Revision #${newActiveRev.revisionNumber}: ${newActiveRev.title}`,
+				});
+			} else {
+				if (targetIdx < activeRevisionIndex) {
+					setActiveRevisionIndex((idx) => Math.max(0, idx - 1));
+				}
+				toast.success(`Deleted Revision #${deletedRev.revisionNumber}`, {
+					description: deletedRev.title,
+				});
+			}
+
+			// Delete from PostgreSQL CadIteration & sync parent CadSession
+			if (sessionId) {
+				fetch(`/api/sessions/${sessionId}/iterations?iterationId=${targetRevId}&version=${deletedRev.revisionNumber}`, {
+					method: 'DELETE',
+				}).catch((err) => console.warn('Could not delete iteration from DB:', err));
+			}
+
+			return nextList;
+		});
+	}, [activeRevisionIndex, sessionId, updatePythonScript]);
 
 	const handleUndo = useCallback(() => {
 		if (!canUndo) return;
@@ -798,8 +908,9 @@ export default function HitlWorkspace() {
 		if (selectionContext) {
 			formData.append('selection_context', JSON.stringify(selectionContext));
 		}
-		if (pythonScript) {
-			formData.append('base_code', pythonScript);
+		const activeBaseCode = pythonScriptRef.current || pythonScript;
+		if (activeBaseCode) {
+			formData.append('base_code', activeBaseCode);
 		}
 		if (targetPortion) {
 			formData.append('target_portion', targetPortion.name);
@@ -934,7 +1045,6 @@ export default function HitlWorkspace() {
 			if (fullScript) {
 				updatePythonScript(fullScript);
 				setActiveDrawerTab('code');
-				setIsDrawerOpen(true);
 				setStatusText('Script generated. Compiling 3D model...');
 
 				const revTitle = activeTargetName 
@@ -1055,8 +1165,34 @@ export default function HitlWorkspace() {
 				} else {
 					setDefaultSetupMetadata(undefined);
 				}
+
+				// Auto-select CNC Machine from AI recommendation
+				const rec = (payload.artifacts as any)?.machine_recommendation || 
+							(payload.artifacts as any)?.machineRecommendation || 
+							setupMeta?.machine_recommendation || 
+							setupMeta?.machineRecommendation;
+				if (rec) {
+					setCamRecommendation(rec);
+					if (rec.primaryRecommendation?.profileId) {
+						const primary = rec.primaryRecommendation;
+						const prof = MACHINE_MATRIX.machineProfiles.find(p => p.id === primary.profileId);
+						if (prof) {
+							setCamSetup(prev => ({
+								...prev,
+								machineType: prof.machineType,
+								machineProfile: prof.id,
+								controller: prof.defaultController,
+								postProcessor: 'AUTO'
+							}));
+							toast.success(`AI Auto-Selected Machine: ${primary.label}`, {
+								description: primary.reason
+							});
+						}
+					}
+				}
 			}
 			if (payload.artifacts?.step_url) {
+
 				finalStepUrl = resolveModelUrl(payload.artifacts.step_url);
 				setStepUrl(finalStepUrl);
 			}
@@ -1420,9 +1556,30 @@ export default function HitlWorkspace() {
 			
 			const data = await res.json();
 			setCamFeatures(data.features || []);
+			if (data.machine_recommendation) {
+				setCamRecommendation(data.machine_recommendation);
+				if (data.machine_recommendation.primaryRecommendation) {
+					const primary = data.machine_recommendation.primaryRecommendation;
+					const prof = MACHINE_MATRIX.machineProfiles.find(p => p.id === primary.profileId);
+					if (prof && (!camSetup.machineProfile || camSetup.machineProfile === 'haas_umc750' || camSetup.machineProfile === 'haas_vf2')) {
+						setCamSetup(prev => ({
+							...prev,
+							machineType: prof.machineType,
+							machineProfile: prof.id,
+							controller: prof.defaultController,
+							postProcessor: 'AUTO'
+						}));
+					}
+					toast.success(`AI Recommended Machine: ${primary.label}`, {
+						description: primary.reason
+					});
+				}
+			} else {
+				toast.success('Features analyzed successfully');
+			}
 			setStatusText('Feature analysis complete.');
-			toast.success('Features analyzed successfully');
 			setWorkflowStage('cam');
+
 		} catch (error) {
 			const errorText = error instanceof Error ? error.message : String(error);
 			setStatusText(`Analysis failed: ${errorText}`);
@@ -1824,13 +1981,10 @@ export default function HitlWorkspace() {
 
 		setIsHistoryOpen(false);
 		setActiveDrawerTab('parameters');
-		setIsDrawerOpen(true);
 
-		// If the session has a CAD script, sync and rebuild geometry
-		if (activeScript && typeof activeScript === 'string' && activeScript.trim()) {
-			setStatusText('Restoring session and rebuilding geometry...');
+		if (activeStl || (activeScript && typeof activeScript === 'string' && activeScript.trim())) {
+			setStatusText('Ready');
 			setWorkflowStage('cad');
-			await performSync(activeScript, activeParams, session.id);
 		} else {
 			setStatusText('Session loaded. Ready to generate.');
 			setWorkflowStage(session.fileName ? 'extraction' : 'blueprint');
@@ -1846,19 +2000,19 @@ export default function HitlWorkspace() {
 	const hasDxf = Boolean(dxfUrl);
 
 	const handleClear = () => {
+		// 1. Reset CAD State
 		setRevisions([]);
 		setActiveRevisionIndex(-1);
 		setMessages([]);
 		setPrompt(DEFAULT_PROMPT);
 		setSelectedFile(null);
+		setSourceFilename(null);
 		setSessionId(null);
 		updatePythonScript('');
 		setParameters({});
 		setStlUrl(null);
 		setStepUrl(null);
 		setDxfUrl(null);
-		setGcodeUrl(null);
-		setGcodeContent(null);
 		setAnnotations({});
 		setParameterMetadata({});
 		setActiveParameter(null);
@@ -1866,6 +2020,48 @@ export default function HitlWorkspace() {
 		setTargetPortion(null);
 		setShowBlueprintPIP(false);
 		setSelectionContext(null);
+		setGeometryInfo(null);
+		setActiveRightTab('cad');
+		setIsCamDrawerOpen(false);
+
+		// 2. Reset Complete CAM State
+		setCamSetup(migrateLegacyCamSetup({
+			units: undefined,
+			machine: undefined,
+			stockType: undefined,
+			material: undefined,
+			wcs: undefined,
+			originPosition: undefined,
+			tolerance: 0.01,
+			stockOffset: 2,
+		} as any));
+		setCamSetups([]);
+		setActiveSetupId(null);
+		setCamTools([]);
+		setCamOperations([]);
+		setSelectedOperationIds(new Set());
+		setActiveOperationId(null);
+		setCamFeatures([]);
+		setDefaultSetupMetadata(undefined);
+		setActiveFeatureId(null);
+		setHoveredFeatureId(null);
+		setCoordValidation(null);
+		setCamSimulation({ isPlaying: false, progress: 0, speed: 1 });
+		setToolpaths(null);
+		setCamModelHash(null);
+		setCadModelHash(null);
+		setGcodeUrl(null);
+		setGcodeContent(null);
+		setKlartextContent(null);
+		setGcodeErrors([]);
+		setCamReadinessScore(null);
+		setCamStatus(null);
+		setCanGenerateGcode(false);
+		setPlannedCycleTimeSeconds(0);
+		setCamStats(null);
+		setCamRecommendation(null);
+
+		// 3. Reset Stage & URL
 		setStatusText('Ready');
 		setWorkflowStage('blueprint');
 		if (typeof window !== 'undefined') {
@@ -1893,9 +2089,13 @@ export default function HitlWorkspace() {
 	return (
 		<div className="h-screen w-full bg-background text-foreground overflow-hidden flex flex-col p-3">
 			<main className="flex-1 flex overflow-hidden w-full gap-0 relative">
-				<PanelGroup id="workspace-layout-v5" orientation="vertical">
+				<PanelGroup 
+					id="workspace-layout-root" 
+					orientation="vertical"
+					className="h-full w-full flex flex-col"
+				>
 					{/* Top: Navigation + Viewport + Settings */}
-					<Panel defaultSize={70} minSize={40}>
+					<Panel id="top-workspace-panel" defaultSize="70%" minSize="20%">
 						<div className="h-full w-full flex">
 
 							{/* 1. Left Navigation (Fixed Width) */}
@@ -1928,6 +2128,7 @@ export default function HitlWorkspace() {
 										blueprintUrl={blueprintUrl}
 										activeRevisionId={activeRevisionId}
 										onRestoreRevision={handleRestoreRevision}
+										onDeleteRevision={handleDeleteRevision}
 									/>
 								</div>
 							</div>
@@ -1937,7 +2138,7 @@ export default function HitlWorkspace() {
 								<PanelGroup id="top-horizontal-v4" orientation="horizontal">
 
 									{/* Center: CAD/CAM Viewport */}
-									<Panel defaultSize={70} minSize={40}>
+									<Panel defaultSize="70%" minSize="35%">
 										<div 
 											className="h-full w-full bg-card rounded-xl border border-border shadow-2xl overflow-hidden relative"
 										>
@@ -2066,33 +2267,23 @@ export default function HitlWorkspace() {
 													}}
 													headerActions={
 														<div className="flex items-center gap-2">
-															{/* + New Project Button */}
-															<button
-																type="button"
-																onClick={handleClear}
-																className="flex h-8 items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 hover:border-emerald-500/60 px-2.5 text-[11px] font-bold text-emerald-300 transition-all shadow-sm active:scale-95 group"
-																title="Start a new Blueprint Project Section from scratch"
-															>
-																<Plus className="size-3.5 text-emerald-400 group-hover:rotate-90 transition-transform duration-200" />
-																<span className="hidden sm:inline">New Project</span>
-															</button>
-
-															{/* CAD Revision History with Undo / Redo */}
+															{/* Unified CAD Revision History with Undo / Redo */}
 															<RevisionHistoryDropdown
 																revisions={revisions}
 																activeRevisionIndex={activeRevisionIndex}
 																onRestoreRevision={handleRestoreRevision}
+																onDeleteRevision={handleDeleteRevision}
 																canUndo={canUndo}
 																canRedo={canRedo}
 																onUndo={handleUndo}
 																onRedo={handleRedo}
 															/>
 
-															{/* Setup Selector */}
+															{/* Setup Selector (CAM Mode) */}
 															{camSetups.length > 1 && (
 																<Select value={activeSetupId || ''} onValueChange={(val: string | null) => val && setActiveSetupId(val)}>
 																	<SelectTrigger 
-																		className="h-8 rounded-lg border-border bg-muted/50 text-foreground text-[10px] font-bold uppercase tracking-widest hover:bg-muted transition-all"
+																		className="h-8 rounded-xl border-white/10 bg-black/40 text-foreground text-[10px] font-bold uppercase tracking-wider hover:bg-white/5 transition-all"
 																		title="Switch active setup to view its toolpaths"
 																	>
 																		<SelectValue placeholder="Select setup" />
@@ -2106,49 +2297,6 @@ export default function HitlWorkspace() {
 																	</SelectContent>
 																</Select>
 															)}
-
-															<div className="relative">
-																<button
-																	onClick={() => setIsWorkspaceMenuOpen(!isWorkspaceMenuOpen)}
-																	className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-muted/50 border border-border hover:bg-muted text-foreground transition-all pointer-events-auto text-[11px] font-bold"
-																	title="Manage project and view history"
-																>
-																	<History className="size-3.5 text-blue-400" />
-																	<span className="hidden sm:inline">Projects</span>
-																</button>
-																{isWorkspaceMenuOpen && (
-																	<div className="absolute right-0 mt-2 w-56 rounded-xl border border-border bg-card/95 backdrop-blur-md shadow-xl overflow-hidden z-50 py-1 pointer-events-auto">
-																		<button
-																			onClick={() => {
-																				setIsWorkspaceMenuOpen(false);
-																				setIsChatOpen(true);
-																				setTimeout(() => fileUploadRef.current?.click(), 100);
-																			}}
-																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted transition-colors"
-																		>
-																			<svg className="size-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-																				<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-																			</svg>
-																			<div className="flex flex-col">
-																				<span className="text-[11px] font-bold uppercase tracking-wider text-foreground">Upload Blueprint</span>
-																			</div>
-																		</button>
-
-																		<button
-																			onClick={() => {
-																				setIsWorkspaceMenuOpen(false);
-																				setIsSessionBrowserOpen(true);
-																			}}
-																			className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted transition-colors border-t border-border mt-1 pt-2"
-																		>
-																			<History className="size-4 text-muted-foreground" />
-																			<div className="flex flex-col">
-																				<span className="text-[11px] font-bold uppercase tracking-wider text-foreground">Recent Projects</span>
-																			</div>
-																		</button>
-																	</div>
-																)}
-															</div>
 														</div>
 													}
 												>
@@ -2204,11 +2352,19 @@ export default function HitlWorkspace() {
 																			<svg className="size-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
 																		</div>
 																		<div className="flex flex-col">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Machine</span>
+																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
+																				Machine
+																				{camRecommendation?.primaryRecommendation?.profileId === camSetup.machineProfile && (
+																					<span className="text-[8px] text-emerald-400 font-bold bg-emerald-500/20 px-1 py-0.2 rounded inline-flex items-center gap-0.5">
+																						<Sparkles className="size-2" /> AI
+																					</span>
+																				)}
+																			</span>
 																			<span className="text-[12px] font-bold text-foreground capitalize truncate max-w-[140px]" title={MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Generic VMC'}>
 																				{MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Generic VMC'}
 																			</span>
 																		</div>
+
 																	</div>
 
 																	<div className="w-px h-8 bg-white/10" />
@@ -2264,7 +2420,10 @@ export default function HitlWorkspace() {
 																		<div className="flex items-center gap-2 ml-2">
 																			<IndianRupee className="size-3.5 text-green-400" />
 																			<span className="text-[12px] font-bold text-green-400 tracking-wide">
-																				{camStats?.costEstimate?.total?.total_cost != null ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: camStats.costEstimate.currency || 'INR', maximumFractionDigits: 0 }).format(camStats.costEstimate.total.total_cost).replace('₹', '') : '---'}
+																				{(() => {
+																					const sp = camStats?.costEstimate?.selling_price?.per_unit ?? camStats?.costEstimate?.manufacturing_cost?.per_part;
+																					return sp != null ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: camStats.costEstimate.currency || 'INR', maximumFractionDigits: 0 }).format(sp).replace('₹', '') : '---';
+																				})()}
 																			</span>
 																		</div>
 																	</div>
@@ -2298,13 +2457,16 @@ export default function HitlWorkspace() {
 									</PanelResizeHandle>
 
 									{/* Right: Workspace Settings */}
-									<Panel defaultSize={30} minSize={20}>
+									<Panel defaultSize="30%" minSize="20%">
 										<div className="h-full w-full glass-panel bg-card/40 rounded-xl overflow-hidden relative flex flex-col">
 											{/* Segmented Control Header */}
 											<div className="flex h-14 shrink-0 items-center justify-center px-4 border-b border-border/50 bg-background/50 dark:bg-background/20 backdrop-blur-md">
 												<div className="flex bg-black/5 dark:bg-black/40 p-1 rounded-lg border border-black/5 dark:border-white/5 w-full max-w-[280px]">
 													<button
-														onClick={() => setActiveRightTab('cad')}
+														onClick={() => {
+															setActiveRightTab('cad');
+															setIsCamDrawerOpen(false);
+														}}
 														className={`flex-1 py-1.5 px-3 text-[11px] font-bold tracking-widest uppercase rounded-md transition-all duration-200 ${
 															activeRightTab === 'cad'
 																? 'bg-blue-100/50 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(59,130,246,0.15)]'
@@ -2314,7 +2476,10 @@ export default function HitlWorkspace() {
 														📐 CAD Design
 													</button>
 													<button
-														onClick={() => setActiveRightTab('cam')}
+														onClick={() => {
+															setActiveRightTab('cam');
+															setIsCamDrawerOpen(true);
+														}}
 														className={`flex-1 py-1.5 px-3 text-[11px] font-bold tracking-widest uppercase rounded-md transition-all duration-200 ${
 															activeRightTab === 'cam'
 																? 'bg-amber-100/50 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(245,158,11,0.15)]'
@@ -2370,66 +2535,76 @@ export default function HitlWorkspace() {
 						</div>
 					</Panel>
 
-					<PanelResizeHandle className="h-3 relative group flex items-center justify-center cursor-row-resize z-50">
-						<div className="h-1 w-8 rounded-full bg-muted group-hover:bg-blue-500/50 transition-colors" />
-					</PanelResizeHandle>
+					{isCamDrawerOpen && (
+						<>
+							<PanelResizeHandle className="h-4 w-full relative group flex items-center justify-center cursor-row-resize z-50 hover:bg-cyan-500/10 active:bg-cyan-500/20 transition-colors my-1 touch-none">
+								<div className="h-1.5 w-24 rounded-full bg-white/30 group-hover:bg-cyan-400 group-hover:shadow-[0_0_12px_rgba(34,211,238,0.8)] transition-all pointer-events-none" />
+							</PanelResizeHandle>
 
-					{/* Bottom: Engineering Console */}
-					<Panel defaultSize={25} minSize={10}>
-						<div className="h-full w-full bg-card rounded-xl border border-border overflow-hidden relative">
-							<EngineeringConsole
-								sourceFilename={sourceFilename}
-								workflowStage={workflowStage}
-								camSetup={camSetup}
-								camSetups={camSetups}
-								activeSetupId={activeSetupId}
-								setCamSetup={setCamSetup}
-								camTools={camTools}
-								setCamTools={setCamTools}
-								onGenerateGCode={handleGenerateGCode}
-								onGenerateToolpaths={handleGenerateToolpaths}
-								isGeneratingGcode={isGeneratingGcode}
-								gcodeContent={gcodeContent}
-								klartextContent={klartextContent}
-								gcodeErrors={gcodeErrors}
-								camFeatures={camFeatures}
-								setCamFeatures={setCamFeatures}
-								activeFeatureId={activeFeatureId}
-								setActiveFeatureId={setActiveFeatureId}
-								onAutoGenerateOperations={handleAutoGenerateOperations}
-								onRunFeatureRecognition={handleAnalyzeFeatures}
-								camOperations={camOperations}
-								setCamOperations={setCamOperations}
-								activeOperationId={activeOperationId}
-								setActiveOperationId={setActiveOperationId}
-								selectedOperationIds={selectedOperationIds}
-								setSelectedOperationIds={setSelectedOperationIds}
-								camSimulation={camSimulation}
-								setCamSimulation={setCamSimulation}
-								toolpathValid={coordValidation?.status !== 'error'}
-								toolpathsStale={false}
-								camReadinessScore={camReadinessScore}
-								camStatus={camStatus}
-								canGenerateGcode={canGenerateGcode}
-								parameters={parameters}
-								setupMetadata={{
-									...(defaultSetupMetadata || {}),
-									topology: {
-										...(defaultSetupMetadata?.topology || {}),
-										bounds: geometryInfo?.bounding_box ? [
-											geometryInfo.bounding_box.min[0],
-											geometryInfo.bounding_box.min[1],
-											geometryInfo.bounding_box.min[2],
-											geometryInfo.bounding_box.max[0],
-											geometryInfo.bounding_box.max[1],
-											geometryInfo.bounding_box.max[2],
-										] : defaultSetupMetadata?.topology?.bounds
-									}
-								}}
-								camValidation={undefined}
-							/>
-						</div>
-					</Panel>
+							{/* Bottom: Engineering Console (Slid up with animation) */}
+							<Panel id="bottom-cam-panel" defaultSize="30%" minSize="15%" maxSize="80%">
+								<div className="h-full w-full bg-card rounded-xl border border-border overflow-hidden relative animate-in slide-in-from-bottom duration-300 shadow-2xl">
+									<EngineeringConsole
+										sourceFilename={sourceFilename}
+										workflowStage={workflowStage}
+										onMinimize={() => {
+											setIsCamDrawerOpen(false);
+											setActiveRightTab('cad');
+										}}
+										camSetup={camSetup}
+										camSetups={camSetups}
+										activeSetupId={activeSetupId}
+										setCamSetup={setCamSetup}
+										camTools={camTools}
+										setCamTools={setCamTools}
+										onGenerateGCode={handleGenerateGCode}
+										onGenerateToolpaths={handleGenerateToolpaths}
+										isGeneratingGcode={isGeneratingGcode}
+										gcodeContent={gcodeContent}
+										klartextContent={klartextContent}
+										gcodeErrors={gcodeErrors}
+										camFeatures={camFeatures}
+										setCamFeatures={setCamFeatures}
+										activeFeatureId={activeFeatureId}
+										setActiveFeatureId={setActiveFeatureId}
+										onAutoGenerateOperations={handleAutoGenerateOperations}
+										onRunFeatureRecognition={handleAnalyzeFeatures}
+										camOperations={camOperations}
+										setCamOperations={setCamOperations}
+										activeOperationId={activeOperationId}
+										setActiveOperationId={setActiveOperationId}
+										selectedOperationIds={selectedOperationIds}
+										setSelectedOperationIds={setSelectedOperationIds}
+										camSimulation={camSimulation}
+										setCamSimulation={setCamSimulation}
+										toolpathValid={coordValidation?.status !== 'error'}
+										toolpathsStale={false}
+										camReadinessScore={camReadinessScore}
+										camStatus={camStatus}
+										canGenerateGcode={canGenerateGcode}
+										parameters={parameters}
+										setupMetadata={{
+											...(defaultSetupMetadata || {}),
+											topology: {
+												...(defaultSetupMetadata?.topology || {}),
+												bounds: geometryInfo?.bounding_box ? [
+													geometryInfo.bounding_box.min[0],
+													geometryInfo.bounding_box.min[1],
+													geometryInfo.bounding_box.min[2],
+													geometryInfo.bounding_box.max[0],
+													geometryInfo.bounding_box.max[1],
+													geometryInfo.bounding_box.max[2],
+												] : defaultSetupMetadata?.topology?.bounds
+											}
+										}}
+										camValidation={undefined}
+										recommendation={camRecommendation}
+									/>
+								</div>
+							</Panel>
+						</>
+					)}
+
 				</PanelGroup>
 
 
@@ -2454,6 +2629,19 @@ export default function HitlWorkspace() {
 				onDeveloperPasswordChange={setDeveloperPassword}
 				onDeveloperLogin={handleDeveloperLogin}
 			/>
+
+			{/* Unified Floating Action Dock (Animated Robot + Theme Toggle) */}
+			<div className="fixed bottom-6 right-6 z-50 flex flex-col items-center gap-3">
+				<PromptAssistantWidget
+					blueprintUrl={blueprintUrl}
+					sessionId={sessionId}
+					onApplyPrompt={(newPrompt) => {
+						setPrompt(newPrompt);
+						setIsChatOpen(true);
+					}}
+				/>
+				<ThemeToggle />
+			</div>
 		</div>
 	);
 }

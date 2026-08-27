@@ -1,10 +1,12 @@
+'use client';
+
 import ReactMarkdown from 'react-markdown';
 import { toast } from 'sonner';
 import { 
-	User, Cpu, Copy, Check, Info, FileImage, Target, RotateCcw, 
+	User, Bot, Copy, Check, Info, FileImage, Target, RotateCcw, 
 	AlertTriangle, CornerDownLeft, Sparkles, SlidersHorizontal, 
 	ArrowRight, Plus, Minus, Edit3, Code2, ChevronDown, ChevronRight,
-	Layers, CheckCircle2
+	Layers, CheckCircle2, Trash2, ShieldCheck, Clock
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -36,6 +38,7 @@ type ChatBubbleProps = {
 	changeLog?: IterationChangeLog;
 	onRestorePrompt?: (text: string, targetPortion?: string) => void;
 	onRestoreRevision?: (revisionId: string) => void;
+	onDeleteRevision?: (revisionId: string) => void;
 };
 
 export function ChatBubble({ 
@@ -48,7 +51,8 @@ export function ChatBubble({
 	activeRevisionId, 
 	changeLog,
 	onRestorePrompt, 
-	onRestoreRevision 
+	onRestoreRevision,
+	onDeleteRevision
 }: ChatBubbleProps) {
 	const [copied, setCopied] = useState(false);
 	const [isCodeExpanded, setIsCodeExpanded] = useState(false);
@@ -99,78 +103,80 @@ export function ChatBubble({
 		};
 	};
 
-	// System messages render as a premium centered pill
+	// System messages render as a sleek centered pill
 	if (role === 'system') {
 		const isRestoring = content.startsWith('Restoring session');
 		const displayText = isRestoring ? content.replace('Restoring session:', '').replace('Restoring session', '').trim() : content;
 		
 		return (
-			<div className="flex justify-center w-full my-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
-				<div className="flex items-center gap-3 rounded-full border border-blue-500/20 bg-blue-500/10 backdrop-blur-md px-4 py-2 shadow-[0_0_20px_rgba(59,130,246,0.1)] relative overflow-hidden group max-w-[90%]">
-					<div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-400/10 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] pointer-events-none" />
-					
-					{isRestoring ? (
-						<>
-							<div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-blue-500/20 border border-blue-500/30">
-								<Info className="size-3.5 text-blue-400" />
-							</div>
-							<div className="flex flex-col min-w-0">
-								<span className="text-[9px] font-bold uppercase tracking-[0.2em] text-blue-400">Session Restored</span>
-								<span className="text-[11px] font-medium text-slate-300 truncate" title={displayText}>
-									{displayText || 'Workspace loaded'}
-								</span>
-							</div>
-						</>
-					) : (
-						<>
-							<Info className="size-4 shrink-0 text-muted-foreground" />
-							<p className="text-[11px] font-medium text-muted-foreground truncate">{content}</p>
-						</>
-					)}
+			<div className="flex justify-center w-full my-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+				<div className="flex items-center gap-2.5 rounded-full border border-white/10 bg-black/40 backdrop-blur-md px-3.5 py-1.5 shadow-lg text-xs max-w-[90%]">
+					<Info className="size-3.5 text-cyan-400 shrink-0" />
+					<span className="text-[11px] text-muted-foreground truncate" title={displayText}>
+						{displayText || 'Workspace loaded'}
+					</span>
 				</div>
 			</div>
 		);
 	}
 
-	const bubbleClass = isUser
-		? 'bg-gradient-to-br from-[#1e293b] to-[#0f172a] border border-[#334155] text-foreground shadow-xl'
-		: isError
-		? 'bg-rose-950/30 backdrop-blur-md text-rose-200 border border-rose-500/40 shadow-[0_0_20px_rgba(244,63,94,0.15)]'
-		: 'bg-muted/80 backdrop-blur-md text-blue-50 border border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.15)]';
-
 	const handleCopy = (text: string) => {
 		navigator.clipboard.writeText(text);
 		setCopied(true);
-		toast.success('Code copied to clipboard');
+		toast.success('Prompt copied to clipboard');
 		setTimeout(() => setCopied(false), 2000);
 	};
 
 	return (
-		<div className={`group flex w-full flex-col gap-2.5 animate-message ${isUser ? 'items-end' : 'items-start'}`}>
-			<div className={`flex items-center gap-2 px-1.5 text-[9px] font-bold uppercase tracking-[0.1em] ${isUser ? 'flex-row-reverse text-slate-400' : 'text-blue-400'}`}>
-				<div className={`flex size-6 items-center justify-center rounded-lg shadow-lg ${isUser ? 'bg-slate-800 text-slate-300 border border-slate-700' : 'bg-blue-950/50 text-blue-400 border border-blue-500/50 relative'}`}>
-					{!isUser && <div className="absolute inset-0 bg-blue-500/20 animate-pulse rounded-lg" />}
-					{isUser ? <User className="size-3.5" /> : <Cpu className="size-3.5 relative z-10" />}
+		<div className={`group flex w-full flex-col gap-1.5 animate-in fade-in duration-200 ${isUser ? 'items-end' : 'items-start'}`}>
+			{/* Role Header & Metadata */}
+			<div className={`flex items-center gap-2 px-1 text-[10px] font-bold uppercase tracking-wider ${isUser ? 'flex-row-reverse text-muted-foreground' : 'text-cyan-400'}`}>
+				<div className={`flex size-5 items-center justify-center rounded-lg shadow-md ${
+					isUser 
+						? 'bg-white/10 text-white border border-white/15' 
+						: 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 shadow-[0_0_10px_rgba(34,211,238,0.2)]'
+				}`}>
+					{isUser ? <User className="size-3 text-white" /> : <Bot className="size-3 text-cyan-400" />}
 				</div>
-				<span className="opacity-80">{role === 'assistant' ? 'VexCAD AI' : 'Engineer'}</span>
+				<span className="font-mono text-[9.5px]">
+					{role === 'assistant' ? 'VEXCAD AI' : 'ENGINEER'}
+				</span>
+				{revisionNumber && (
+					<span className="px-1.5 py-0.2 rounded text-[8.5px] font-mono font-extrabold bg-cyan-400/15 text-cyan-300 border border-cyan-400/30">
+						v{revisionNumber}
+					</span>
+				)}
 			</div>
 
-			<div className={`relative w-full rounded-2xl px-4 py-3 text-sm leading-[1.6] ${bubbleClass} ${isUser ? 'rounded-tr-none ml-auto max-w-[92%]' : 'rounded-tl-none max-w-[96%]'}`}>
+			{/* Main Chat Bubble Card */}
+			<div className={`relative w-full rounded-2xl p-3.5 text-xs leading-relaxed transition-all shadow-lg ${
+				isUser
+					? 'bg-gradient-to-br from-[#111a2e] to-[#0a1120] border border-cyan-500/20 text-white rounded-tr-none ml-auto max-w-[94%] shadow-[0_8px_24px_rgba(0,0,0,0.4)]'
+					: isError
+					? 'bg-rose-950/40 backdrop-blur-md text-rose-200 border border-rose-500/40 rounded-tl-none max-w-[96%] shadow-[0_0_20px_rgba(244,63,94,0.15)]'
+					: 'bg-[#0b101d]/90 backdrop-blur-xl text-foreground border border-white/[0.08] rounded-tl-none max-w-[96%] shadow-[0_8px_30px_rgba(0,0,0,0.5)]'
+			}`}>
+				{/* Target Tag Badge */}
 				{targetPortion && (
-					<div className="flex items-center gap-1.5 mb-2.5 px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 w-fit backdrop-blur-sm shadow-inner text-[10px] font-semibold">
+					<div className="flex items-center gap-1.5 mb-2 px-2 py-0.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 w-fit text-[10px] font-mono font-semibold">
 						<Target className="size-3 text-cyan-400 shrink-0" />
-						<span className="truncate max-w-[220px]">Target: {targetPortion}</span>
+						<span className="truncate max-w-[200px]">Target: {targetPortion}</span>
 					</div>
 				)}
+
+				{/* Blueprint Attachment Badge */}
 				{fileName && (
-					<div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl bg-black/5 dark:bg-black/20 border border-transparent dark:border-border w-fit backdrop-blur-sm shadow-inner">
-						<FileImage className="size-3.5 text-blue-400" />
-						<span className="text-[10px] font-mono font-bold text-blue-200 uppercase tracking-wider truncate max-w-[200px]">{fileName}</span>
+					<div className="flex items-center gap-2 mb-2.5 px-2.5 py-1.5 rounded-xl bg-black/40 border border-emerald-500/30 text-emerald-300 w-fit text-[10.5px] font-mono">
+						<FileImage className="size-3.5 text-emerald-400" />
+						<span className="font-semibold truncate max-w-[180px]">{fileName}</span>
 					</div>
 				)}
-				<div className="prose prose-sm dark:prose-invert max-w-none wrap-break-word font-sans">
+
+				{/* Markdown Content */}
+				<div className="prose prose-invert prose-xs max-w-none break-words font-sans text-[12px] leading-relaxed text-white/90 w-full min-w-0">
 					<ReactMarkdown
 						components={{
+							pre: ({ children }) => <div className="w-full min-w-0 my-1">{children}</div>,
 							code({ node, className, children, ...props }) {
 								const match = /language-(\w+)/.exec(className || '');
 								const codeText = String(children).replace(/\n$/, '');
@@ -182,13 +188,13 @@ export function ChatBubble({
 									const activeTarget = targetPortion || changeLog?.targetPortion;
 
 									return (
-										<div className="my-2.5 overflow-hidden rounded-xl border border-blue-500/30 bg-zinc-950/70 backdrop-blur-md shadow-xl w-full">
+										<div className="my-2.5 overflow-hidden rounded-xl border border-cyan-500/25 bg-black/60 backdrop-blur-md shadow-xl w-full min-w-0">
 											{/* Report Top Bar */}
-											<div className="flex items-center justify-between gap-2 bg-zinc-900/90 px-3 py-2 border-b border-border/60">
+											<div className="flex items-center justify-between gap-2 bg-white/[0.03] px-3 py-2 border-b border-white/[0.08]">
 												<div className="flex items-center gap-1.5 min-w-0">
-													<div className="size-2 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_6px_rgba(6,182,212,0.6)] shrink-0" />
-													<span className="text-[10px] font-bold uppercase tracking-wider text-cyan-300 truncate">
-														{revisionNumber ? `Revision #${revisionNumber}` : 'Model Synthesis'}
+													<div className="size-2 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_6px_rgba(34,211,238,0.6)] shrink-0" />
+													<span className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-300 font-mono">
+														{revisionNumber ? `Revision v${revisionNumber}` : 'Model Synthesis'}
 													</span>
 												</div>
 												{activeTarget && (
@@ -199,71 +205,47 @@ export function ChatBubble({
 											</div>
 											
 											{/* Report Body */}
-											<div className="p-3 space-y-2.5">
+											<div className="p-3 space-y-2.5 w-full min-w-0">
 												{/* Summary Narrative */}
-												<div className="p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-100/90 leading-relaxed flex items-start gap-2">
+												<div className="p-2.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-100 leading-relaxed flex items-start gap-2 w-full min-w-0">
 													<Sparkles className="size-3.5 text-cyan-400 shrink-0 mt-0.5" />
-													<div className="space-y-0.5 min-w-0">
-														<div className="text-[9px] font-bold uppercase tracking-wider text-cyan-300">
-															Iteration Summary & Modifications
-														</div>
-														<p className="text-[11px] text-zinc-200 break-words font-normal leading-normal">
+													<div className="space-y-0.5 min-w-0 flex-1">
+														<p className="text-[11px] text-white/90 break-words font-normal leading-relaxed whitespace-normal">
 															{summary}
 														</p>
 													</div>
 												</div>
 
-												{/* No Changes Detected Notice (when revision > 1 and 0 parameter/geometric diffs) */}
-												{revisionNumber && revisionNumber > 1 && paramDiffs.length === 0 && details.length === 0 && (
-													<div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-xs text-amber-200/90 leading-relaxed space-y-1">
-														<div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-amber-400">
-															<AlertTriangle className="size-3 text-amber-400 shrink-0" />
-															<span>No Geometric Changes in this Iteration</span>
-														</div>
-														<p className="text-[10px] text-amber-100/80 leading-normal">
-															The AI reviewed your prompt, but no dimensional values or shapes were modified from Revision #{revisionNumber - 1}.
-														</p>
-														<p className="text-[9px] text-muted-foreground pt-1 border-t border-amber-500/20">
-															💡 <strong>Tip:</strong> Specify exact dimensions (e.g. <em>&quot;Set outer_dia to 28mm&quot;</em>) or edit directly in the CAD Design panel on the right.
-														</p>
-													</div>
-												)}
-
 												{/* Parameter Differences Badge Section */}
 												{paramDiffs.length > 0 && (
-													<div className="space-y-1">
-														<div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
-															<SlidersHorizontal className="size-3 text-blue-400 shrink-0" />
+													<div className="space-y-1 pt-1 w-full min-w-0">
+														<div className="flex items-center gap-1.5 text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground">
+															<SlidersHorizontal className="size-3 text-cyan-400 shrink-0" />
 															<span>Parameter Adjustments ({paramDiffs.length})</span>
 														</div>
 														<div className="space-y-1">
 															{paramDiffs.map((diff, i) => (
 																<div 
 																	key={`diff_${i}`} 
-																	className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-zinc-900/90 border border-border/70 text-[11px] font-mono"
+																	className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-black/50 border border-white/[0.06] text-[10.5px] font-mono"
 																>
-																	<span className="font-medium text-zinc-300 truncate max-w-[130px]" title={diff.name}>
+																	<span className="font-medium text-white/80 truncate max-w-[130px]" title={diff.name}>
 																		{diff.name}
 																	</span>
 																	<div className="flex items-center gap-1 shrink-0 text-[10px]">
 																		{diff.type === 'modified' ? (
 																			<>
-																				<span className="text-zinc-500 line-through text-[9px]">{String(diff.oldValue)}</span>
-																				<ArrowRight className="size-2 text-cyan-400" />
+																				<span className="text-muted-foreground line-through text-[9px]">{String(diff.oldValue)}</span>
+																				<ArrowRight className="size-2.5 text-cyan-400" />
 																				<span className="text-emerald-400 font-bold">{String(diff.newValue)}</span>
-																				{typeof diff.oldValue === 'number' && typeof diff.newValue === 'number' && (
-																					<span className="text-[8px] text-cyan-400/80">
-																						({diff.newValue - diff.oldValue > 0 ? '+' : ''}{(diff.newValue - diff.oldValue).toFixed(2)})
-																					</span>
-																				)}
 																			</>
 																		) : diff.type === 'added' ? (
 																			<span className="text-emerald-400 font-bold flex items-center gap-0.5">
-																				<Plus className="size-2" /> {String(diff.newValue)}
+																				<Plus className="size-2.5" /> {String(diff.newValue)}
 																			</span>
 																		) : (
 																			<span className="text-rose-400 font-bold flex items-center gap-0.5">
-																				<Minus className="size-2" /> Deleted
+																				<Minus className="size-2.5" /> Deleted
 																			</span>
 																		)}
 																	</div>
@@ -275,16 +257,16 @@ export function ChatBubble({
 
 												{/* Geometric Details List */}
 												{details.length > 0 && (
-													<div className="space-y-1">
-														<div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+													<div className="space-y-1.5 pt-1 w-full min-w-0">
+														<div className="flex items-center gap-1.5 text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground">
 															<Layers className="size-3 text-cyan-400 shrink-0" />
-															<span>Geometric Changes</span>
+															<span>Geometric Modifications</span>
 														</div>
-														<ul className="space-y-1 text-[11px] text-zinc-300">
+														<ul className="space-y-1.5 text-[11px] text-white/80 w-full min-w-0">
 															{details.map((d, i) => (
-																<li key={`detail_${i}`} className="flex items-start gap-1.5 leading-snug break-words">
+																<li key={`detail_${i}`} className="flex items-start gap-1.5 leading-snug break-words w-full min-w-0">
 																	<CheckCircle2 className="size-3 text-emerald-400 shrink-0 mt-0.5" />
-																	<span className="break-words min-w-0">{d}</span>
+																	<span className="break-words min-w-0 flex-1 whitespace-normal text-white/90">{d}</span>
 																</li>
 															))}
 														</ul>
@@ -292,20 +274,21 @@ export function ChatBubble({
 												)}
 
 												{/* Expandable Python Code View */}
-												<div className="pt-2 border-t border-border/40 flex items-center justify-between text-[10px] font-mono">
+												<div className="pt-2 border-t border-white/[0.08] flex items-center justify-between text-[10px] font-mono">
 													<button
 														type="button"
 														onClick={() => setIsCodeExpanded(!isCodeExpanded)}
-														className="flex items-center gap-1 text-muted-foreground hover:text-cyan-300 transition-colors py-0.5 cursor-pointer"
+														className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors cursor-pointer"
 													>
-														{isCodeExpanded ? <ChevronDown className="size-3 text-cyan-400" /> : <ChevronRight className="size-3 text-cyan-400" />}
 														<Code2 className="size-3" />
-														<span>{isCodeExpanded ? 'Hide Python Script' : 'View Python Script'}</span>
+														<span>{isCodeExpanded ? 'Hide Code' : 'View Generated CAD Script'}</span>
+														{isCodeExpanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
 													</button>
 													<button
 														type="button"
 														onClick={() => handleCopy(codeText)}
-														className="flex items-center gap-1 text-muted-foreground hover:text-cyan-300 transition-colors py-0.5 px-1.5 rounded hover:bg-zinc-800 cursor-pointer"
+														className="text-muted-foreground hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+														title="Copy Python script"
 													>
 														{copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
 														<span>{copied ? 'Copied' : 'Copy'}</span>
@@ -313,101 +296,84 @@ export function ChatBubble({
 												</div>
 
 												{isCodeExpanded && (
-													<div className="rounded-lg bg-black/80 border border-border/80 overflow-hidden animate-in fade-in duration-200">
-														<pre className="overflow-x-auto p-3 text-[10px] font-mono leading-relaxed text-cyan-100/90 custom-scrollbar max-h-52">
-															<code>{codeText}</code>
-														</pre>
+													<div className="mt-2 p-2.5 rounded-lg bg-black/90 border border-white/10 overflow-x-auto max-h-60 text-[10.5px] font-mono text-cyan-200 leading-normal">
+														<pre className="whitespace-pre">{codeText}</pre>
 													</div>
 												)}
 											</div>
 										</div>
 									);
 								}
-
-								if (match) {
-									return (
-										<div className="relative my-2.5 overflow-hidden rounded-xl bg-black/5 dark:bg-black/40 border border-transparent dark:border-border shadow-inner group/code">
-											<div className="flex items-center justify-between bg-black/5 dark:bg-white/3 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.05em] text-muted-foreground border-b border-transparent dark:border-border">
-												<span className="flex items-center gap-1.5">
-													<div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.25)]" />
-													{match[1]}
-												</span>
-												<button
-													onClick={() => handleCopy(codeText)}
-													className="flex items-center gap-1 hover:text-blue-400 transition-colors opacity-0 group-hover/code:opacity-100 duration-200"
-												>
-													{copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-													{copied ? 'Copied' : 'Copy'}
-												</button>
-											</div>
-											<pre className="overflow-x-auto p-3 font-mono text-[11px] leading-[1.6] whitespace-pre custom-scrollbar">
-												<code className={className} {...props}>
-													{children}
-												</code>
-											</pre>
-										</div>
-									);
-								}
 								return (
-									<code className="rounded-md bg-accent dark:bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[11px] text-blue-600 dark:text-blue-400 border border-transparent dark:border-zinc-700/50" {...props}>
+									<code className="rounded px-1.5 py-0.5 font-mono text-[11px] text-cyan-300 bg-white/10 border border-white/10" {...props}>
 										{children}
 									</code>
 								);
 							},
-							p: ({ children }) => <p className="mb-2 last:mb-0 font-light leading-relaxed">{children}</p>,
-							ul: ({ children }) => <ul className="mb-2 list-disc pl-4 last:mb-0 marker:text-blue-500/50 space-y-0.5">{children}</ul>,
-							ol: ({ children }) => <ol className="mb-2 list-decimal pl-4 last:mb-0 marker:text-blue-500/50 space-y-0.5">{children}</ol>,
-							strong: ({ children }) => <strong className="font-bold text-blue-400/90 tracking-tight">{children}</strong>,
+							p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed break-words whitespace-normal">{children}</p>,
+							ul: ({ children }) => <ul className="mb-2 list-disc pl-4 last:mb-0 marker:text-cyan-400 space-y-1">{children}</ul>,
+							ol: ({ children }) => <ol className="mb-2 list-decimal pl-4 last:mb-0 marker:text-cyan-400 space-y-1">{children}</ol>,
+							strong: ({ children }) => <strong className="font-extrabold text-cyan-300">{children}</strong>,
 						}}
 					>
 						{content || '...'}
 					</ReactMarkdown>
 				</div>
+
+				{/* Assistant Revision Action Footer */}
 				{isAssistant && revisionId && (
-					<div className="mt-2.5 pt-2 border-t border-blue-500/20 flex items-center justify-between gap-2">
-						<div className="flex items-center gap-1.5 text-[10px] font-semibold text-blue-300 min-w-0">
+					<div className="mt-2.5 pt-2 border-t border-white/[0.08] flex items-center justify-between gap-2">
+						<div className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground min-w-0">
 							<span className="size-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0" />
-							<span className="truncate">CAD Version {revisionNumber ? `#${revisionNumber}` : ''}</span>
+							<span className="truncate">Rev {revisionNumber ? `#${revisionNumber}` : ''}</span>
 						</div>
-						{activeRevisionId === revisionId ? (
-							<span className="flex items-center gap-1 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 shrink-0">
-								<Check className="size-2.5" /> Active Model
-							</span>
-						) : (
-							<button
-								type="button"
-								onClick={() => onRestoreRevision?.(revisionId)}
-								className="flex items-center gap-1 text-[10px] font-bold text-cyan-300 hover:text-white bg-cyan-500/20 hover:bg-cyan-500/30 px-2.5 py-1 rounded-lg border border-cyan-500/30 transition-all shadow-sm active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
-								title="Revert the 3D model, script, and parameters back to this version"
-							>
-								<RotateCcw className="size-2.5 text-cyan-400" />
-								<span>Revert to this version</span>
-							</button>
-						)}
+
+						<div className="flex items-center gap-1.5 shrink-0">
+							{activeRevisionId === revisionId ? (
+								<span className="flex items-center gap-1 text-[9.5px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/25 shrink-0 font-mono">
+									<Check className="size-2.5" /> Active
+								</span>
+							) : (
+								<button
+									type="button"
+									onClick={() => onRestoreRevision?.(revisionId)}
+									className="flex items-center gap-1 text-[10px] font-bold text-cyan-300 hover:text-white bg-cyan-500/15 hover:bg-cyan-500/25 px-2.5 py-1 rounded-lg border border-cyan-500/30 transition-all shadow-sm active:scale-95 cursor-pointer shrink-0 whitespace-nowrap"
+									title="Revert to this revision"
+								>
+									<RotateCcw className="size-2.5 text-cyan-400" />
+									<span>Revert to v{revisionNumber}</span>
+								</button>
+							)}
+
+							{onDeleteRevision && (
+								<button
+									type="button"
+									onClick={() => onDeleteRevision(revisionId)}
+									className="p-1 text-muted-foreground hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer shrink-0"
+									title="Delete revision"
+								>
+									<Trash2 className="size-3" />
+								</button>
+							)}
+						</div>
 					</div>
 				)}
+
+				{/* User Action Footer (Quick Reuse Prompt) */}
 				{isUser && onRestorePrompt && (
-					<div className="mt-2 pt-2 border-t border-slate-700/50 flex justify-end">
+					<div className="mt-2 pt-1.5 border-t border-white/10 flex justify-end">
 						<button
 							type="button"
 							onClick={() => {
 								onRestorePrompt(content, targetPortion);
-								toast.info('Prompt loaded into editor');
+								toast.info('Prompt loaded into input');
 							}}
-							className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-cyan-300 transition-colors opacity-70 group-hover:opacity-100"
+							className="flex items-center gap-1 text-[9.5px] font-semibold text-muted-foreground hover:text-cyan-300 transition-colors cursor-pointer"
 							title="Load this prompt back into the input box"
 						>
-							<CornerDownLeft className="size-3" />
+							<CornerDownLeft className="size-2.5 text-cyan-400" />
 							<span>Edit in input</span>
 						</button>
-					</div>
-				)}
-				{isError && (
-					<div className="mt-3 pt-2.5 border-t border-rose-500/20 flex items-center justify-between">
-						<div className="flex items-center gap-1.5 text-[11px] text-rose-300/90 font-medium">
-							<AlertTriangle className="size-3.5 text-rose-400 shrink-0" />
-							<span>Prompt preserved in text box for editing</span>
-						</div>
 					</div>
 				)}
 			</div>

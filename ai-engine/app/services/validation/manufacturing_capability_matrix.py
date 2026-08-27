@@ -1,5 +1,6 @@
 from typing import Dict, Any, Tuple
 from app.models.manufacturing import MachineProfile
+from app.constants import TURNING_FEATURE_TYPES
 
 class ManufacturingCapabilityMatrix:
     """
@@ -19,7 +20,7 @@ class ManufacturingCapabilityMatrix:
         is_turning_machine = any(t in mtype_str for t in ("lathe", "turning", "mill_turn", "swiss", "cnc_lathe"))
 
         # 1. Turning features (external cylinder, shaft)
-        if feat_type in ("external_cylinder", "shaft") or feat_subtype in ("shaft", "external_cylinder"):
+        if feat_type in TURNING_FEATURE_TYPES or feat_subtype in TURNING_FEATURE_TYPES:
             feature_axis = feature.get("axis", [0, 0, 1])
             dot = sum(a*b for a, b in zip(feature_axis, setup_axis)) if setup_axis else 0
             

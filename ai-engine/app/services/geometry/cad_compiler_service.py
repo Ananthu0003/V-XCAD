@@ -1,5 +1,14 @@
 from app.models.efg import EngineeringFeatureGraph
 from app.services.geometry.cad_planner_service import CADFeaturePlan
+from app.constants import (
+    DEFAULT_BASE_DIAMETER,
+    DEFAULT_BASE_LENGTH,
+    DEFAULT_BASE_WIDTH,
+    DEFAULT_BASE_HEIGHT,
+    DEFAULT_BASE_DEPTH,
+    DEFAULT_HOLE_DIAMETER,
+    DEFAULT_HOLE_DEPTH,
+)
 
 class CADCompilerService:
     """
@@ -27,15 +36,25 @@ class CADCompilerService:
         # e.g. mapping BASE_FEATURE to bd.Cylinder or bd.Box.
         for op in plan.operations:
             lines.append(f"        # Execute {op.operation_id}: {op.operation_type}")
+            params = op.parameters or {}
             if op.operation_type == "BASE_FEATURE":
-                # Assuming parameters have diameter and length
-                dia = op.parameters.get("diameter", 10.0)
-                length = op.parameters.get("length", 20.0)
-                lines.append(f"        bd.Cylinder(radius={dia/2}, height={length})")
+                # The primitive is derived from the operation parameters rather than
+                # being hardcoded. A prismatic envelope uses width/height/depth, while a
+                # revolved envelope uses diameter/length.
+                shape = str(params.get("shape", params.get("primitive", ""))).lower()
+                if shape in ("box", "block", "rectangular", "prismatic"):
+                    w = float(params.get("width", DEFAULT_BASE_WIDTH))
+                    h = float(params.get("height", DEFAULT_BASE_HEIGHT))
+                    d = float(params.get("depth", DEFAULT_BASE_DEPTH))
+                    lines.append(f"        bd.Box(width={w}, height={h}, depth={d})")
+                else:
+                    dia = float(params.get("diameter", DEFAULT_BASE_DIAMETER))
+                    length = float(params.get("length", params.get("height", DEFAULT_BASE_LENGTH)))
+                    lines.append(f"        bd.Cylinder(radius={dia/2}, height={length})")
             elif op.operation_type == "HOLE":
-                dia = op.parameters.get("diameter", 5.0)
-                depth = op.parameters.get("depth", 10.0)
-                lines.append(f"        # Stub hole")
+                dia = params.get("diameter", DEFAULT_HOLE_DIAMETER)
+                depth = params.get("depth", DEFAULT_HOLE_DEPTH)
+                lines.append(f"        # Stub hole: diameter={dia}, depth={depth}")
                 lines.append(f"        pass")
             else:
                 lines.append(f"        pass")

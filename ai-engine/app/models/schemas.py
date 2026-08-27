@@ -363,6 +363,8 @@ class RenderArtifacts(BaseModel):
     geometry_mapping_summary: Optional[dict[str, Any]] = None
     operations: Optional[list[CamOperationSchema]] = None
     stats: Optional[dict[str, Any]] = None
+    machine_recommendation: Optional[dict[str, Any]] = None
+
 
 
 class RenderResponse(BaseModel):
@@ -403,3 +405,52 @@ class GCodeResponse(BaseModel):
 
     inferred_fields: list[str] = Field(default_factory=list)
     defaulted_fields: list[str] = Field(default_factory=list)
+
+
+class MachineRecommendation(BaseModel):
+    profileId: str
+    label: str
+    machineType: str
+    confidence: float
+    isRecommended: bool
+    reason: str
+    setupCount: int = 1
+    requiredAxes: int = 3
+    fitsEnvelope: bool = True
+    envelopeDetails: Optional[str] = None
+
+
+class MachineRecommendationRequest(BaseModel):
+    features: Optional[list[dict[str, Any]]] = None
+    topologyInfo: Optional[dict[str, Any]] = None
+    blueprintData: Optional[dict[str, Any]] = None
+    stockDimensions: Optional[list[float]] = None
+    parameters: Optional[dict[str, Any]] = None
+    pythonScript: Optional[str] = None
+
+
+
+class MachineRecommendationResponse(BaseModel):
+    status: str = "ok"
+    primaryRecommendation: MachineRecommendation
+    alternatives: list[MachineRecommendation] = Field(default_factory=list)
+    detectedPartType: str = "prismatic"
+    analysisSummary: dict[str, Any] = Field(default_factory=dict)
+
+
+class CADPromptAssistantRequest(BaseModel):
+    blueprint_image: Optional[str] = None
+    model_snapshot: Optional[str] = None
+    model_snapshots: list[str] = Field(default_factory=list)
+    message: str = ""
+    history: list[dict[str, str]] = Field(default_factory=list)
+    model: Optional[str] = None
+
+
+class CADPromptAssistantResponse(BaseModel):
+    reply: str
+    analysis: Optional[dict[str, Any]] = None
+    suggested_prompt: Optional[str] = None
+    error: Optional[str] = None
+
+

@@ -1,12 +1,84 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
+import fs from 'fs';
+import path from 'path';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+async function autoSyncDiskSessions() {
+    try {
+        const outputsDirs = [
+            path.resolve(process.cwd(), '../outputs'),
+            path.resolve(process.cwd(), 'outputs'),
+            path.resolve('/app/outputs')
+        ];
+
+        let outputsDir: string | null = null;
+        for (const d of outputsDirs) {
+            if (fs.existsSync(d)) {
+                outputsDir = d;
+                break;
+            }
+        }
+
+        if (!outputsDir) return;
+
+        const files = fs.readdirSync(outputsDir);
+        const pyFiles = files.filter(f => f.startsWith('cad_') && f.endsWith('.py'));
+
+        for (const file of pyFiles) {
+            const sessionId = file.replace(/^cad_/, '').replace(/\.py$/, '');
+            const filePath = path.join(outputsDir, file);
+            
+            const existing = await prisma.cadSession.findUnique({ where: { id: sessionId } });
+            if (!existing) {
+                const scriptContent = fs.readFileSync(filePath, 'utf-8');
+                const stats = fs.statSync(filePath);
+
+                let params: any = {};
+                const paramMatch = scriptContent.match(/PARAMETERS\s*=\s*(\{[\s\S]*?\n\})/);
+                if (paramMatch) {
+                    try {
+                        const cleanJson = paramMatch[1]
+                            .replace(/'/g, '"')
+                            .replace(/\bTrue\b/g, 'true')
+                            .replace(/\bFalse\b/g, 'false')
+                            .replace(/\bNone\b/g, 'null');
+                        params = JSON.parse(cleanJson);
+                    } catch {
+                        params = {};
+                    }
+                }
+
+                const stepExists = fs.existsSync(path.join(outputsDir, `cad_${sessionId}.step`));
+                const stlExists = fs.existsSync(path.join(outputsDir, `cad_${sessionId}.stl`));
+
+                await prisma.cadSession.create({
+                    data: {
+                        id: sessionId,
+                        prompt: 'Parametric CAD Model',
+                        fileName: stepExists ? 'model.step' : null,
+                        pythonScript: scriptContent,
+                        parameters: params,
+                        stlUrl: stlExists ? `/api/export?session_id=${sessionId}&type=stl` : null,
+                        stepUrl: stepExists ? `/api/export?session_id=${sessionId}&type=step` : null,
+                        createdAt: stats.mtime,
+                        updatedAt: stats.mtime
+                    }
+                }).catch(() => null);
+            }
+        }
+    } catch (e) {
+        console.warn('[autoSyncDiskSessions] Notice:', e);
+    }
+}
+
 export async function GET() {
     try {
+        await autoSyncDiskSessions();
+
         const authSession = await getSession();
         const userId = authSession?.userId || null;
 
@@ -21,6 +93,7 @@ export async function GET() {
                 createdAt: 'desc'
             }
         });
+
 
         const sessionIds = sessions.map(s => s.id);
         let iterationCounts: any[] = [];

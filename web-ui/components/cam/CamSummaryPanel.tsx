@@ -3,6 +3,23 @@ import { Target, Layers, Settings2, Scissors, Activity, FileCode, CircleDollarSi
 import { MACHINE_MATRIX } from '@/lib/cam/machineProfiles';
 import { getMaterialLabel } from '@/lib/cam/materialProfiles';
 
+function fmt(currency: string, value?: number): string {
+    if (value == null || isNaN(value)) return '—';
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD' }).format(value);
+}
+
+function Row({ label, value, currency, sub }: { label: string; value?: number; currency: string; sub?: string }) {
+    return (
+        <div className="flex justify-between">
+            <span className="text-muted-foreground">{label}</span>
+            <span className="flex flex-col items-end">
+                <span className="font-medium text-foreground">{fmt(currency, value)}</span>
+                {sub && <span className="text-[8px] text-muted-foreground/70 font-mono">{sub}</span>}
+            </span>
+        </div>
+    );
+}
+
 type CamSummaryPanelProps = {
     setup: SetupSettings;
     setups?: CamSetupPlan[];
@@ -33,7 +50,10 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
             {costEstimate && (
                 <div className="p-4 rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-500/20 flex flex-col gap-2 dark:shadow-[inset_0_1px_0_0_rgba(34,197,94,0.1)] mb-2">
                     <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-bold text-[11px] uppercase tracking-widest">
-                        <CircleDollarSign className="size-3.5" /> Estimated Manufacturing Cost
+                        <CircleDollarSign className="size-3.5" /> Estimated Cost
+                        {costEstimate.quantity && costEstimate.quantity > 1 && (
+                            <span className="ml-auto text-[9px] normal-case tracking-normal text-muted-foreground">Qty {costEstimate.quantity}</span>
+                        )}
                     </div>
                     {costEstimate.status === 'incomplete' ? (
                         <div className="text-[11px] text-red-500 flex items-start gap-2 mt-1">
@@ -46,23 +66,81 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                         </div>
                     ) : (
                         <div className="flex flex-col gap-2 mt-1">
-                            <div className="text-2xl font-bold text-foreground">
-                                {new Intl.NumberFormat('en-US', { style: 'currency', currency: costEstimate.currency }).format(costEstimate.total?.total_cost || 0)}
-                            </div>
-                            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-green-200/50 dark:border-green-500/10 text-[10px]">
+                            {/* Selling price headline */}
+                            <div className="flex items-end justify-between">
                                 <div className="flex flex-col">
-                                    <span className="text-muted-foreground">Material</span>
-                                    <span className="font-medium text-foreground">{new Intl.NumberFormat('en-US', { style: 'currency', currency: costEstimate.currency }).format(costEstimate.material?.cost || 0)}</span>
+                                    <span className="text-[9px] uppercase tracking-wide text-muted-foreground">Selling Price / unit</span>
+                                    <span className="text-2xl font-bold text-foreground">
+                                        {fmt(costEstimate.currency, costEstimate.selling_price?.per_unit || costEstimate.manufacturing_cost?.per_part || 0)}
+                                    </span>
                                 </div>
-                                <div className="flex flex-col">
-                                    <span className="text-muted-foreground">Machining</span>
-                                    <span className="font-medium text-foreground">{new Intl.NumberFormat('en-US', { style: 'currency', currency: costEstimate.currency }).format(costEstimate.machining?.cost || 0)}</span>
-                                </div>
-                                <div className="flex flex-col">
-                                    <span className="text-muted-foreground">Setup</span>
-                                    <span className="font-medium text-foreground">{new Intl.NumberFormat('en-US', { style: 'currency', currency: costEstimate.currency }).format(costEstimate.setup?.cost || 0)}</span>
+                                <div className="flex flex-col text-right">
+                                    <span className="text-[9px] uppercase tracking-wide text-muted-foreground">Lot ({costEstimate.quantity || 1})</span>
+                                    <span className="font-semibold text-foreground">{fmt(costEstimate.currency, costEstimate.selling_price?.lot || costEstimate.manufacturing_cost?.lot || 0)}</span>
                                 </div>
                             </div>
+
+                            {/* Manufacturing cost breakdown */}
+                            <div className="pt-2 border-t border-green-200/50 dark:border-green-500/10 text-[10px] flex flex-col gap-1">
+                                <span className="uppercase tracking-wide text-muted-foreground font-semibold">Manufacturing Cost</span>
+                                <Row label="Material" value={costEstimate.material?.cost} currency={costEstimate.currency} sub={costEstimate.material ? `${costEstimate.material.mass_kg.toFixed(2)} kg` : undefined} />
+                                <Row label="Machining" value={costEstimate.machining?.cost} currency={costEstimate.currency}
+                                    sub={costEstimate.machining ? `mach ${fmt(costEstimate.currency, costEstimate.machining.machine_rate)} · lab ${fmt(costEstimate.currency, costEstimate.machining.labor_rate)} · ovh ${fmt(costEstimate.currency, costEstimate.machining.overhead_rate)}/hr` : undefined} />
+                                {costEstimate.energy && (
+                                    <Row label="Energy" value={costEstimate.energy?.cost} currency={costEstimate.currency}
+                                        sub={costEstimate.energy ? `${costEstimate.energy.avg_power_kw} kW · ${costEstimate.energy.energy_kwh.toFixed(2)} kWh` : undefined} />
+                                )}
+                                <Row label={`Setup (amort / ${costEstimate.quantity || 1})`} value={costEstimate.manufacturing_cost?.setup_cost} currency={costEstimate.currency}
+                                    sub={costEstimate.setup ? `batch ${fmt(costEstimate.currency, costEstimate.setup.cost)}${costEstimate.setup.min_setup_charge ? ' · min' : ''}` : undefined} />
+                                {costEstimate.tooling && costEstimate.tooling.items.length > 0 && (
+                                    <div className="flex flex-col gap-0.5">
+                                        <div className="flex justify-between">
+                                            <span className="text-muted-foreground">Tooling</span>
+                                            <span className="font-medium text-foreground">{fmt(costEstimate.currency, costEstimate.tooling.total)}</span>
+                                        </div>
+                                        {costEstimate.tooling.items.map((it) => (
+                                            <div key={it.tool_id} className="flex justify-between pl-2 text-[9px] text-muted-foreground font-mono">
+                                                <span>{it.tool_name} · {it.cutting_time_min.toFixed(1)} min</span>
+                                                <span>{fmt(costEstimate.currency, it.wear_cost + (it.holder_amort || 0))}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {costEstimate.secondary && costEstimate.secondary.items.length > 0 && (
+                                    <div className="flex flex-col gap-0.5">
+                                        <div className="flex justify-between">
+                                            <span className="text-muted-foreground">Secondary Ops</span>
+                                            <span className="font-medium text-foreground">{fmt(costEstimate.currency, costEstimate.secondary.per_part_total * (costEstimate.quantity || 1) + costEstimate.secondary.per_batch_total)}</span>
+                                        </div>
+                                        {costEstimate.secondary.items.map((s) => (
+                                            <div key={s.id} className="flex justify-between pl-2 text-[9px] text-muted-foreground font-mono">
+                                                <span>{s.name} · {s.basis}</span>
+                                                <span>{fmt(costEstimate.currency, s.computed_cost)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="flex justify-between pt-1 border-t border-green-200/50 dark:border-green-500/10 font-semibold">
+                                    <span className="text-foreground">Mfg / unit</span>
+                                    <span className="text-foreground">{fmt(costEstimate.currency, costEstimate.manufacturing_cost?.per_part || 0)}</span>
+                                </div>
+                            </div>
+
+                            {/* Selling / margin */}
+                            {costEstimate.selling_price && (
+                                <div className="pt-2 border-t border-green-200/50 dark:border-green-500/10 text-[10px] flex flex-col gap-1">
+                                    <span className="uppercase tracking-wide text-muted-foreground font-semibold">Selling Price</span>
+                                    <Row label={`Profit (margin ${(costEstimate.selling_price.margin_pct * 100).toFixed(0)}%)`} value={costEstimate.selling_price.profit} currency={costEstimate.currency} />
+                                </div>
+                            )}
+
+                            {costEstimate.warnings && costEstimate.warnings.length > 0 && (
+                                <div className="text-[9px] text-amber-600 dark:text-amber-400 flex flex-col gap-0.5 mt-1">
+                                    {costEstimate.warnings.map((w, i) => (
+                                        <span key={i}>⚠ {w.message}</span>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -179,12 +257,29 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                 <Settings2 className="size-3.5" /> Setup
                             </div>
                             <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-muted-foreground mt-1">
-                                <div>Machine:</div><div className="text-foreground capitalize">{MACHINE_MATRIX.machineProfiles.find(p => p.id === setup.machineProfile)?.label || setup.machineProfile || 'Not selected'}</div>
-                                <div>Type:</div><div className="text-foreground capitalize">{(setup as any).setupType || '3-Axis'}</div>
-                                <div>Tool Axis:</div><div className="text-foreground font-mono">[{(setup as any).toolAxis?.join(', ') || '0, 0, 1'}]</div>
-                                <div>Material:</div><div className="text-foreground font-medium">{getMaterialLabel(setup.material)}</div>
-                                <div>Stock:</div><div className="text-foreground">{setup.stockDimensions?.join(' x ') || 'Not set'} mm</div>
-                                <div>WCS:</div><div className="text-foreground">{setup.wcs}</div>
+                                <div>Machine:</div><div className="text-foreground capitalize">{setup?.machineProfile ? (MACHINE_MATRIX.machineProfiles.find(p => p.id === setup.machineProfile)?.label || setup.machineProfile) : 'Not selected'}</div>
+                                <div>Type:</div><div className="text-foreground capitalize">{setup?.machineType ? setup.machineType.replace(/_/g, ' ') : ((setup as any)?.setupType || 'Not set')}</div>
+                                <div>Tool Axis:</div><div className="text-foreground font-mono">{(setup as any)?.toolAxis ? `[${(setup as any).toolAxis.join(', ')}]` : 'Not set'}</div>
+                                <div>Material:</div><div className="text-foreground font-medium">{setup?.material ? getMaterialLabel(setup.material) : 'Not selected'}</div>
+                                <div>Stock:</div>
+                                <div className="text-foreground font-mono">
+                                    {(() => {
+                                        if (!setup?.stockDimensions || (!setup.stockDimensions[0] && !setup.stockDimensions[1] && !setup.stockDimensions[2])) {
+                                            return 'Not set';
+                                        }
+                                        const isCyl = setup.stockType?.includes('cylinder') || (setup as any).machineType === 'CNC_LATHE';
+                                        const d0 = Number(setup.cylinderDiameter ?? setup.stockDimensions[0]).toFixed(2).replace(/\.00$/, '');
+                                        const d1 = Number(setup.stockDimensions[1]).toFixed(2).replace(/\.00$/, '');
+                                        const d2 = Number(setup.cylinderLength ?? setup.stockDimensions[2]).toFixed(2).replace(/\.00$/, '');
+                                        const unit = setup.displayUnits || setup.units || 'mm';
+
+                                        if (isCyl) {
+                                            return `ø${d0} × ${d2} ${unit}`;
+                                        }
+                                        return `${d0} × ${d1} × ${d2} ${unit}`;
+                                    })()}
+                                </div>
+                                <div>WCS:</div><div className="text-foreground">{setup?.wcs || 'Not set'}</div>
                             </div>
                         </div>
 

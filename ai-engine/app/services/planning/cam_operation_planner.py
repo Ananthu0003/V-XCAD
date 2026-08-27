@@ -1,5 +1,6 @@
 import uuid
 from typing import List, Dict, Any
+from app.constants import TURNING_FEATURE_TYPES
 
 class CamOperation:
     """Represents a planned machining operation linked to a specific feature."""
@@ -125,7 +126,7 @@ class CamOperationPlanner:
             # A future optimization might use 'adaptive_clearing'.
             op.machining_strategy = feature.get('preferred_strategy', 'offset_clearing')
             
-        elif feat_type in ['external_cylinder', 'shaft', 'turned_od', 'od_diameter', 'shoulder', 'turned_profile']:
+        elif feat_type in TURNING_FEATURE_TYPES:
             # If it got here and is valid, it implies we are in a turning setup (since milling_3axis blocks it)
             op = CamOperation("turning", feat_id)
             

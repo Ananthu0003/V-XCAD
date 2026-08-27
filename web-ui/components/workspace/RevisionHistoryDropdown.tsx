@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { History, RotateCcw, Check, ChevronDown, Clock, Sparkles, Target, Sliders } from 'lucide-react';
+import { History, RotateCcw, Check, ChevronDown, Clock, Sparkles, Target, Sliders, Trash2 } from 'lucide-react';
 
 export type CadRevision = {
 	id: string;
@@ -25,6 +25,7 @@ interface RevisionHistoryDropdownProps {
 	revisions: CadRevision[];
 	activeRevisionIndex: number;
 	onRestoreRevision: (revisionId: string) => void;
+	onDeleteRevision?: (revisionId: string) => void;
 	canUndo: boolean;
 	canRedo: boolean;
 	onUndo: () => void;
@@ -35,6 +36,7 @@ export function RevisionHistoryDropdown({
 	revisions,
 	activeRevisionIndex,
 	onRestoreRevision,
+	onDeleteRevision,
 	canUndo,
 	canRedo,
 	onUndo,
@@ -67,46 +69,35 @@ export function RevisionHistoryDropdown({
 	};
 
 	return (
-		<div className="flex items-center gap-1.5" ref={dropdownRef}>
+		<div className="inline-flex items-center rounded-xl border border-white/10 bg-black/40 backdrop-blur-md p-0.5 shadow-sm" ref={dropdownRef}>
 			{/* Undo Button */}
 			<button
 				type="button"
 				onClick={onUndo}
 				disabled={!canUndo}
-				className="flex h-8 items-center gap-1.5 rounded-lg border border-border/80 bg-background/80 px-2.5 text-[11px] font-semibold text-foreground hover:bg-muted hover:border-blue-500/40 transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm group"
-				title={canUndo ? `Undo: Go back to Revision #${revisions[activeRevisionIndex - 1]?.revisionNumber || ''} (Ctrl+Z)` : 'No earlier version to undo'}
+				className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 disabled:opacity-20 disabled:hover:bg-transparent transition-all cursor-pointer"
+				title={canUndo ? `Undo (Ctrl+Z)` : 'No earlier version to undo'}
 			>
-				<RotateCcw className="size-3.5 text-muted-foreground group-hover:text-blue-400 transition-colors" />
-				<span className="hidden sm:inline">Undo</span>
+				<RotateCcw className="size-3.5" />
 			</button>
 
-			{/* Redo Button */}
-			<button
-				type="button"
-				onClick={onRedo}
-				disabled={!canRedo}
-				className="flex h-8 items-center gap-1.5 rounded-lg border border-border/80 bg-background/80 px-2.5 text-[11px] font-semibold text-foreground hover:bg-muted hover:border-blue-500/40 transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-sm group"
-				title={canRedo ? `Redo: Step forward to Revision #${revisions[activeRevisionIndex + 1]?.revisionNumber || ''} (Ctrl+Shift+Z / Ctrl+Y)` : 'No newer version to redo'}
-			>
-				<RotateCcw className="size-3.5 text-muted-foreground group-hover:text-blue-400 transition-colors -scale-x-100" />
-				<span className="hidden sm:inline">Redo</span>
-			</button>
+			<div className="w-px h-3.5 bg-white/10 mx-0.5" />
 
 			{/* Revisions Selector */}
 			<div className="relative">
 				<button
 					type="button"
 					onClick={() => setIsOpen(!isOpen)}
-					className={`flex h-8 items-center gap-2 rounded-lg border px-3 text-[11px] font-semibold transition-all shadow-sm ${
+					className={`flex h-7 items-center gap-1.5 px-2.5 rounded-lg text-[11px] font-mono font-bold transition-all cursor-pointer ${
 						isOpen
-							? 'bg-blue-500/15 border-blue-500/50 text-blue-300 shadow-[0_0_12px_rgba(59,130,246,0.2)]'
-							: 'bg-background/80 border-border/80 text-foreground hover:bg-muted hover:border-blue-500/40'
+							? 'bg-cyan-500/20 text-cyan-300'
+							: 'text-cyan-400 hover:text-white hover:bg-white/10'
 					}`}
 					title="Browse and restore CAD model revision history"
 				>
-					<History className="size-3.5 text-blue-400" />
-					<span className="font-mono text-[10px] font-bold uppercase tracking-wider text-blue-300">
-						Rev {activeRevision ? activeRevision.revisionNumber : 1}/{revisions.length}
+					<History className="size-3 text-cyan-400" />
+					<span>
+						REV {activeRevision ? activeRevision.revisionNumber : 1}/{revisions.length}
 					</span>
 					<ChevronDown className={`size-3 text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
 				</button>
@@ -160,23 +151,39 @@ export function RevisionHistoryDropdown({
 												</span>
 											</div>
 
-											{isActive ? (
-												<span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 shrink-0">
-													<Check className="size-3" /> Active
-												</span>
-											) : (
-												<button
-													type="button"
-													onClick={(e) => {
-														e.stopPropagation();
-														onRestoreRevision(rev.id);
-														setIsOpen(false);
-													}}
-													className="flex items-center gap-1 text-[10px] font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 px-2 py-0.5 rounded-md border border-blue-500/20 transition-all opacity-0 group-hover:opacity-100 shrink-0"
-												>
-													<RotateCcw className="size-2.5" /> Revert
-												</button>
-											)}
+											<div className="flex items-center gap-1 shrink-0">
+												{isActive ? (
+													<span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 shrink-0">
+														<Check className="size-3" /> Active
+													</span>
+												) : (
+													<button
+														type="button"
+														onClick={(e) => {
+															e.stopPropagation();
+															onRestoreRevision(rev.id);
+															setIsOpen(false);
+														}}
+														className="flex items-center gap-1 text-[10px] font-bold text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 px-2 py-0.5 rounded-md border border-blue-500/20 transition-all opacity-0 group-hover:opacity-100 shrink-0"
+													>
+														<RotateCcw className="size-2.5" /> Revert
+													</button>
+												)}
+
+												{onDeleteRevision && revisions.length > 1 && (
+													<button
+														type="button"
+														onClick={(e) => {
+															e.stopPropagation();
+															onDeleteRevision(rev.id);
+														}}
+														className="flex items-center justify-center size-6 text-muted-foreground hover:text-red-400 hover:bg-red-500/15 rounded-md border border-transparent hover:border-red-500/30 transition-all opacity-0 group-hover:opacity-100 shrink-0"
+														title={`Delete Revision #${rev.revisionNumber}`}
+													>
+														<Trash2 className="size-3" />
+													</button>
+												)}
+											</div>
 										</div>
 
 										{rev.targetPortion && (
@@ -206,6 +213,19 @@ export function RevisionHistoryDropdown({
 					</div>
 				)}
 			</div>
+
+			<div className="w-px h-3.5 bg-white/10 mx-0.5" />
+
+			{/* Redo Button */}
+			<button
+				type="button"
+				onClick={onRedo}
+				disabled={!canRedo}
+				className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 disabled:opacity-20 disabled:hover:bg-transparent transition-all cursor-pointer"
+				title={canRedo ? `Redo (Ctrl+Y)` : 'No newer version to redo'}
+			>
+				<RotateCcw className="size-3.5 -scale-x-100" />
+			</button>
 		</div>
 	);
 }

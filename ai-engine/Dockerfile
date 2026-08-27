@@ -3,10 +3,11 @@
 # Python 3.12 + FastAPI + build123d (cadquery-ocp)
 # ─────────────────────────────────────────────────────────────────────────────
 
-FROM python:3.13-slim
+FROM python:3.12-slim
 
 # System dependencies needed by build123d / OCP (OpenCASCADE via cadquery-ocp)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     libgl1 \
     libglib2.0-0 \
     libxrender1 \

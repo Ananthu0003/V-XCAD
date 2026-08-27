@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Settings, Cpu, PenTool, Sliders, PlaySquare, Code2, Activity, Database } from 'lucide-react';
+import { Settings, Cpu, PenTool, Sliders, PlaySquare, Code2, Activity, Database, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SetupSection } from '../cam/SetupSection';
 import { ToolLibrarySection } from '../cam/ToolLibrarySection';
@@ -14,11 +14,13 @@ import { GCodeViewer } from '../cam/GCodeViewer';
 import { OperationPlanningTable } from '../cam/OperationPlanningTable';
 import { ManageHoldersTab } from '../cam/ManageHoldersTab';
 import type { SetupSettings, Tool, CamOperation, SimulationState, CamFeature, PostProcessor, OperationType } from '@/types/cam';
+import type { MachineRecommendationResponse } from '@/lib/cam/machineProfiles';
 
 interface EngineeringConsoleProps {
   sourceFilename?: string | null;
   workflowStage: string;
   setWorkflowStage?: (v: string) => void;
+  onMinimize?: () => void;
   // CAM Setup
   camSetup: SetupSettings;
   setCamSetup: (v: SetupSettings) => void;
@@ -33,7 +35,7 @@ interface EngineeringConsoleProps {
   isGeneratingGcode: boolean;
   gcodeContent: string | null;
   klartextContent?: string | null;
-  gcodeErrors?: any[];
+  gcodeErrors: any[];
   // Features
   camFeatures: CamFeature[];
   setCamFeatures: (v: CamFeature[]) => void;
@@ -46,22 +48,23 @@ interface EngineeringConsoleProps {
   setCamOperations: (v: CamOperation[]) => void;
   activeOperationId: string | null;
   setActiveOperationId: (v: string | null) => void;
-  selectedOperationIds?: Set<string>;
-  setSelectedOperationIds?: (v: Set<string>) => void;
+  selectedOperationIds: Set<string>;
+  setSelectedOperationIds: (v: Set<string>) => void;
   // Simulation
   camSimulation: SimulationState;
   setCamSimulation: (v: SimulationState) => void;
   // Validation
   toolpathValid?: boolean;
   toolpathsStale?: boolean;
-  coordValidation?: any;
   camValidation?: any;
   camReadinessScore?: number | null;
   camStatus?: string | null;
   canGenerateGcode?: boolean;
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
   setupMetadata?: any;
+  recommendation?: MachineRecommendationResponse | null;
 }
+
 
 type TabType = 'setup' | 'features' | 'tools' | 'holders' | 'params' | 'simulation' | 'gcode';
 
@@ -120,11 +123,6 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
       }
 
       const hasMissingTools = props.camOperations && props.camOperations.some(op => !props.camTools.find(t => t.id === op.toolId));
-      if (hasMissingTools) {
-        score -= 30;
-        if (errors.length === 0) errors.push("One or more operations have missing tools.");
-      }
-
       if (props.toolpathsStale) {
         score -= 40;
         errors.push("Toolpaths are stale. Please regenerate.");
@@ -152,29 +150,42 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
   return (
     <div className="flex h-full w-full flex-col bg-transparent font-sans relative">
       {/* Tabs Header */}
-      <div className="flex h-14 shrink-0 items-center px-4 bg-transparent border-b border-white/5 overflow-x-auto custom-scrollbar gap-2">
-        {tabs.map((tab) => (
+      <div className="flex h-14 shrink-0 items-center justify-between px-4 bg-transparent border-b border-white/5 gap-2">
+        <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar py-1">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as TabType)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 group whitespace-nowrap",
+                activeTab === tab.id
+                  ? "bg-gradient-primary text-white shadow-[0_0_15px_rgba(59,130,246,0.4)]"
+                  : "text-muted-foreground/60 hover:text-white hover:bg-white/5"
+              )}
+            >
+              <div className={cn(
+                "[&>svg]:size-3.5 transition-colors",
+                activeTab === tab.id ? "text-white" : "text-muted-foreground/60 group-hover:text-white"
+              )}>
+                {tab.icon}
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-[0.1em]">
+                {tab.label}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {props.onMinimize && (
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as TabType)}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 group whitespace-nowrap",
-              activeTab === tab.id
-                ? "bg-gradient-primary text-white shadow-[0_0_15px_rgba(59,130,246,0.4)]"
-                : "text-muted-foreground/60 hover:text-white hover:bg-white/5"
-            )}
+            onClick={props.onMinimize}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-muted-foreground hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-all shrink-0 cursor-pointer shadow-sm"
+            title="Minimize CAM Studio"
           >
-            <div className={cn(
-              "[&>svg]:size-3.5 transition-colors",
-              activeTab === tab.id ? "text-white" : "text-muted-foreground/60 group-hover:text-white"
-            )}>
-              {tab.icon}
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-[0.1em]">
-              {tab.label}
-            </span>
+            <ChevronDown className="size-3.5" />
+            <span>Minimize CAM</span>
           </button>
-        ))}
+        )}
       </div>
 
       {/* Tab Content */}
@@ -187,7 +198,9 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                 onChange={props.setCamSetup} 
                 parameters={props.parameters}
                 setupMetadata={props.setupMetadata}
+                recommendation={props.recommendation}
               />
+
             </div>
           )}
 

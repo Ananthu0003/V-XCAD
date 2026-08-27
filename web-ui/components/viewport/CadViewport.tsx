@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState, useRef, useEffect, useMemo } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewcube, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { ViewportController } from '@/components/viewport/ViewportController';
@@ -21,6 +21,16 @@ type AnnotationEntry = {
 	text?: string;
 	type?: 'distance' | 'diameter' | 'radius' | 'angle';
 };
+
+function CanvasBridge() {
+	const { gl } = useThree();
+	useEffect(() => {
+		if (gl?.domElement) {
+			(window as any).__VEXCAD_CANVAS__ = gl.domElement;
+		}
+	}, [gl]);
+	return null;
+}
 
 function DynamicFloor({ targetRef, children }: { targetRef: React.RefObject<THREE.Group | null>, children: React.ReactNode }) {
 	const floorRef = useRef<THREE.Group>(null);
@@ -531,42 +541,58 @@ export function CadViewport({
 				</div>
 			)}
 
-			<header className="flex h-16 items-center justify-between border-b border-transparent bg-background/60 backdrop-blur-xl px-6 z-30">
-				<div className="flex flex-col gap-1">
+			<header className="flex h-12 items-center justify-between border-b border-border/40 bg-background/50 backdrop-blur-2xl px-3 sm:px-4 z-30 gap-2">
+				<div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
 					{projectName && (
-						<div className="flex items-center gap-2">
-							<button
-								type="button"
-								onClick={onOpenProjects}
-								className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[11px] font-semibold hover:bg-blue-500/20 hover:border-blue-500/50 transition-all shadow-sm group"
-								title="Click to view all Project Sections"
-							>
-								<Folder className="size-3 text-blue-400 group-hover:scale-110 transition-transform" />
-								<span className="max-w-[200px] truncate font-medium">Project: {projectName}</span>
-							</button>
-						</div>
+						<button
+							type="button"
+							onClick={onOpenProjects}
+							className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-black/40 border border-white/10 hover:border-cyan-500/40 text-muted-foreground hover:text-cyan-300 text-[11px] font-semibold transition-all shadow-sm group cursor-pointer shrink-0"
+							title={`Current Project: ${projectName}\nClick to view sessions & switch projects`}
+						>
+							<Folder className="size-3 text-cyan-400 group-hover:scale-110 transition-transform shrink-0" />
+							<span className="max-w-[110px] sm:max-w-[150px] truncate font-medium text-white/90">
+								{projectName.replace(/^#\d+_/, '')}
+							</span>
+							<ChevronDown className="size-2.5 text-muted-foreground group-hover:text-cyan-300 shrink-0" />
+						</button>
 					)}
-					<p className="text-xs font-semibold text-foreground flex items-center gap-2">
+
+					{/* Live Compilation Status (Compact dot with expandable text when busy) */}
+					<div 
+						className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground min-w-0"
+						title={statusText}
+					>
 						{isRecompiling || statusText.includes('Extracting') || statusText.includes('Generating') || statusText.includes('Syncing') ? (
-							<Loader2 className="size-3.5 animate-spin text-blue-500" />
+							<>
+								<Loader2 className="size-3 animate-spin text-cyan-400 shrink-0" />
+								<span className="text-cyan-300 font-mono text-[10.5px] truncate animate-pulse">
+									{statusText.replace('Geometry ', '')}
+								</span>
+							</>
 						) : (
-							<span className={`size-1.5 rounded-full ${hasStl ? 'bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.8)]' : 'bg-muted'}`} />
+							<div className="flex items-center gap-1.5 text-muted-foreground/70">
+								<span className={`size-1.5 rounded-full shrink-0 ${hasStl ? 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]' : 'bg-muted-foreground/40'}`} />
+								<span className="text-[10px] font-mono uppercase tracking-wider hidden md:inline text-muted-foreground/60">
+									Ready
+								</span>
+							</div>
 						)}
-						{statusText}
-					</p>
+					</div>
 				</div>
 
-				<div className="flex items-center gap-2">
+				<div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
 					{headerActions}
 
 					{onShare && (
 						<button
 							onClick={onShare}
 							disabled={isSharing}
-							className="flex h-9 items-center gap-2 rounded-lg border border-transparent bg-background px-4 text-[11px] font-bold uppercase tracking-wider text-foreground hover:border-blue-500 hover:text-blue-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+							className="flex h-8 items-center gap-1.5 rounded-xl border border-white/10 bg-black/30 hover:bg-white/10 px-3 text-[11px] font-semibold text-muted-foreground hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+							title="Share 3D Model link"
 						>
-							{isSharing ? <Loader2 className="size-3 animate-spin" /> : <Share2 className="size-3" />}
-							Share
+							{isSharing ? <Loader2 className="size-3 animate-spin text-cyan-400" /> : <Share2 className="size-3" />}
+							<span className="hidden sm:inline">Share</span>
 						</button>
 					)}
 
@@ -574,11 +600,11 @@ export function CadViewport({
 						<div className="relative" ref={exportRef}>
 							<button
 								onClick={() => setExportOpen(!exportOpen)}
-								className="flex h-9 items-center gap-2 rounded-lg bg-blue-500 px-4 text-[11px] font-bold uppercase tracking-wider text-black hover:bg-blue-400 shadow-sm transition-all"
+								className="flex h-8 items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 px-3 text-[11px] font-extrabold text-black transition-all shadow-[0_0_12px_rgba(34,211,238,0.25)] cursor-pointer"
 							>
 								<Download className="size-3" />
-								Export
-								<ChevronDown className={`size-3 transition-transform ${exportOpen ? 'rotate-180' : ''}`} />
+								<span>Export</span>
+								<ChevronDown className={`size-2.5 transition-transform ${exportOpen ? 'rotate-180' : ''}`} />
 							</button>
 							{exportOpen && (
 								<div className="absolute right-0 mt-2 w-52 rounded-xl border border-transparent bg-background/95 backdrop-blur-md shadow-xl overflow-hidden z-50 py-1">
@@ -753,7 +779,8 @@ export function CadViewport({
 					</div>
 				)}
 
-				<Canvas shadows dpr={[1, 2]} className="relative z-10" onPointerMissed={onClearSelection}>
+				<Canvas id="cad-three-canvas" shadows dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }} className="relative z-10" onPointerMissed={onClearSelection}>
+					<CanvasBridge />
 					<ViewportController 
 						modelGroupRef={groupRef}
 						geometryInfo={geometryInfo} 

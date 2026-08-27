@@ -92,15 +92,19 @@ Before outputting any JSON, you MUST perform a deep visual audit of the blueprin
 2. Explicitly trace the axial (Z) dimensions and radial (X) dimensions to verify Wall Thickness at every step.
 3. Catalogue every single dimensional annotation, upper/lower tolerance, fit callout (e.g. H8, h8, h11), angle, chamfer, fillet, GD&T control frame, datum symbol, surface roughness callout, material, stock spec, surface treatment, and manufacturing requirement.
 4. Associate every annotation with its corresponding geometric feature and source view.
+5. For Multi-Boss / Lever / Linkage / Offset Arm parts (e.g. Pitman arms, control arms, rocker arms, connecting rods, bell cranks, offset brackets):
+   a. Identify all discrete boss eyelets (Boss 1 / Large Head, Boss 2 / Small Head, intermediate pivots) and their center-to-center pitch distances.
+   b. Inspect longitudinal section views (e.g., Section A-A) for non-coplanar boss faces, axial step offsets / dog-leg neck bends (e.g. step offset between boss centerlines), neck thickness vs. boss thickness, and transition slopes.
+   c. Trace the Connecting Arm / Web envelope connecting the bosses (tapered web width, thickness, draft angles, and blend fillets).
 Only after this analysis, output a valid JSON feature-map matching the exact schema below, wrapped in ```json ... ``` tags.
 
 ## 1. COORDINATE SYSTEM CONSTRAINTS
-- **Origin**: Place (0,0,0) at the primary datum face/axis of the main body for symmetric stability.
+- **Origin**: Place (0,0,0) at the primary datum face/axis of the main body or primary boss eyelet for symmetric stability.
 - **Z-Axis**: Points along the primary axis of rotation or build direction. Face pockets, blind steps, and through-boring occur relative to this axis.
 - **Rationale**: State the exact placement logic in `origin_rationale`.
 
 ## 2. FEATURE TAXONOMY
-- **ADDITIVE**: `base_prismoid`, `base_cylinder`, `mounting_ear`, `alignment_boss`, `reinforcement_rib`, `spherical_dome`, `revolved_profile`, `complex_shell`
+- **ADDITIVE**: `base_prismoid`, `base_cylinder`, `boss_eyelet`, `connecting_arm`, `offset_neck`, `dogleg_bend`, `tangent_web`, `tapered_shank`, `mounting_ear`, `alignment_boss`, `reinforcement_rib`, `spherical_dome`, `revolved_profile`, `complex_shell`
 - **SUBTRACTIVE**: `pocket_interior`, `step_shoulder`, `counterbore`, `hole_through`, `hole_blind`, `thread_internal`, `oring_groove`, `revolved_cutout`
 - **SURFACE / MANUFACTURING**: `thread_external`
 - **EDGE_MODIFIER**: `fillet_interior`, `chamfer_exterior`, `edge_treatment`
@@ -111,6 +115,12 @@ Only after this analysis, output a valid JSON feature-map matching the exact sch
 - **Profile Decompositions**: For parts with asymmetric or multi-angular walls, capture the exact 2D coordinate paths outlining the perimeter.
 - **Z-Reference & Coordinate Independence**: Every feature must declare an exact `z_reference`: `"bottom_of_feature"`, `"top_of_feature"`, or `"absolute_zero"`. Map every single Z-height strictly to the dimension lines provided, independent of other features.
 - **Revolved / Lathe Parts (MANDATORY DIMENSIONAL PARAMETERIZATION)**: Extract all sequential diameters, step lengths, groove widths/depths, tapers, and corner radii as explicit named dimensional parameters in `dims` and `all_dimensions`. In section views, carefully distinguish between inner bore lines and outer profile lines. Verify `Wall Thickness = Outer_Radius - Inner_Radius > 0`.
+- **Multi-Boss Links, Lever Arms & Offset Arm Parts (MANDATORY GEOMETRIC DECOMPOSITION)**:
+  - For parts consisting of multiple bosses connected by an arm, web, or neck (e.g. Pitman arm, control arm, connecting rod, rocker arm, bell crank, offset bracket):
+    1. **Boss Eyelets**: Model Boss 1 (primary) and Boss 2 (secondary) as distinct features with their respective outer diameters, thicknesses, and center coordinates `(0, 0)` and `(0, center_distance)`.
+    2. **Section A-A & Dog-Leg Neck Bends**: Inspect the cross-section view to check if Boss 1 and Boss 2 lie on different Z-planes. Extract the axial step offset (`neck_step_offset`), boss thicknesses, and neck web thickness (`neck_thickness`) as dedicated dimensional parameters.
+    3. **Connecting Arm / Web Profile**: Extract the connecting web width at Boss 1 (`arm_width_head`), width at Boss 2 (`arm_width_tail`), central web thickness, and transition fillet radii connecting the web to the boss eyelets.
+    4. **Boss Internal Geometry**: Associate internal bores, counterbores, tapers (e.g. 1:10 taper), and internal serrations/splines directly with the specific parent boss ID.
 - **Half-Section Views (ANTI-HALLUCINATION)**: Never interpret crosshatching on a symmetric part as a physical cutout. Extract internal bores as `revolved_cutout` or `counterbore` / `hole_through` features.
 - **End Face Steps & Recesses**: When detail views show an end-face step or recess, capture the axial step length and diameter as dedicated parameters.
 - **Conical Internal Bores & Angle Tracing**: When bore entries or internal transitions specify an angle (e.g. 60° entry cone or 10°/20° transition cone), extract the cone angle and axial depth as explicit named parameters.
@@ -494,6 +504,15 @@ You may ONLY use the following exact signatures. DO NOT INVENT kwargs.
 - **Spherical Domes**: If the blueprint calls for a spherical dome of radius `R` intersecting a base of radius `r_base`, DO NOT fake it with a filleted cylinder! Use `bd.Sphere(radius=R)` and shift its center down along Z to perfectly intersect the base plane. To find the exact Z-shift distance, let Python do the math: `import math` and use `math.sqrt(R**2 - r_base**2)` to calculate the distance from the sphere center to the intersection plane. NEVER hardcode the square root result!
 - **Half-Section Views (ANTI-HALLUCINATION)**: NEVER model a cutout or slot through a symmetrical cylinder just because the blueprint shows a half-section view! Half-sections are just drafting conventions to show internal bores and threads. The cylinder MUST remain a full 360-degree revolved solid unless a physical slot is explicitly dimensioned.
 - **Internal Stepped Bores**: ALWAYS construct complex internal bores using a single `BuildSketch` with `bd.Polygon` containing the exact `profile_points` array, and then `bd.revolve(axis=bd.Axis.Z, mode=bd.Mode.SUBTRACT)`. Do NOT use multiple `bd.Cylinder` subtractions! Stacking multiple cylinders for a stepped bore often leads to zero-thickness faces and boolean failures (`StdFail_NotDone`).
+- **Multi-Boss & Connecting Arm Modeling**:
+  - To model parts with two or more cylindrical bosses (eyelets) connected by a central arm/web (e.g. Pitman arm, rocker arm, connecting rod, bell crank, offset bracket):
+    1. Create Boss 1 cylinder at `(0, 0, boss1_z)`.
+    2. Create Boss 2 cylinder at `(0, center_distance, boss2_z)` (where `boss2_z` reflects any axial step offset / neck bend from section views).
+    3. Connect them with a bridging arm/web:
+       - For flat/coplanar connections: In `with bd.BuildSketch():`, use `bd.Polygon` or `bd.make_hull()` to bridge between the boss perimeters, then `bd.extrude(amount=web_thickness)`.
+       - For offset / dog-leg neck bends (Section A-A): In `with bd.BuildSketch(bd.Plane.YZ):`, draw a 2D profile tracing the stepped/cranked neck from `(0, z1)` to `(center_distance, z2)`, then `bd.extrude(amount=arm_width, both=True)` or extrude symmetrically across X.
+    4. Cut the bores/tapers/holes at `(0, 0)` and `(0, center_distance)`.
+    5. Fillet the web-to-boss junction edges using `bd.fillet()`.
 - **Keyways & Slots**: For keyways ALONG a shaft, use `bd.SlotOverall(width=Length, height=Width)` BUT YOU MUST rotate it 90 degrees using `with bd.Locations(bd.Rotation(0, 0, 90)):` inside the `BuildSketch`! If you don't rotate it 90 degrees, the slot will be cut perpendicularly across the shaft instead of along it!
 - **U-Shaped Edge Slots**: To cut an open U-shaped slot at the edge of a part, DO NOT center a `bd.SlotOverall` exactly on the edge unless you offset it. The best way is to create a `bd.SlotOverall` (or `bd.SlotCenterToCenter`) in a `BuildSketch` and place it so that one of its rounded ends hangs completely off the edge of the part into empty space, then `bd.extrude(..., mode=bd.Mode.SUBTRACT)`. Ensure `eps` is added so it cuts cleanly through boundaries.
 - **Height Derivations**: When you calculate variables in the PARAMETERS section based on derived heights (e.g. `block_height = base_thickness + slot_depth`), explicitly write out this math and extract it to a dedicated parameter. Never hardcode the summation result in the BuildPart block!
@@ -527,7 +546,9 @@ THREAD_CAD_RULES = """
 
 SYSTEM_INSTRUCTION = """
 # ROLE: Expert Python Parametric CAD Engineer
-Generate production-grade, mathematically robust, parametric CAD code## 🎯 GOLDEN RULES
+Generate production-grade, mathematically robust, parametric CAD code
+
+## 🎯 GOLDEN RULES
 1. **Blueprint Adherence**: You MUST strictly follow the provided `FEATURE_MAP`. Do not invent new features or ignore existing ones. When identifying threads from the blueprint, ensure every single topological feature (chamfers, cutouts, ribs, holes, threads) described in the map is modeled.
 2. **Manifold Stability & The Epsilon Protocol**: Every boolean operation must resolve cleanly. To prevent zero-thickness faces, you MUST declare `eps = 0.01` in your `PARAMETERS` dictionary. For all through-holes or subtractive cutouts, extend the depth/height by `eps` (or `2*eps`) and adjust placement by `eps` to guarantee a clean pierce through the boundary.
 3. **STRICT PARAMETRIC PURITY (ABSOLUTELY NO HARDCODED ARRAYS OR MAGIC NUMBERS)**:
@@ -545,7 +566,14 @@ Generate production-grade, mathematically robust, parametric CAD code## 🎯 GOL
 10. **Parameter Usage Completeness (CRITICAL)**: After writing your `with bd.BuildPart()` block, you MUST verify that EVERY SINGLE key defined in your `PARAMETERS` dictionary is actually used somewhere in the construction logic. If a parameter exists in `PARAMETERS` but has no corresponding `bd.fillet()`, `bd.chamfer()`, `bd.Hole()`, `bd.Polygon()`, or other build123d operation that references it, this is a FATAL ERROR — you MUST add the missing operation. In your MENTAL WALKTHROUGH, explicitly list every edge treatment parameter and map it to its corresponding `bd.fillet()` or `bd.chamfer()` call. A dead parameter means a missing manufacturing feature!
 11. **Edge Treatment Feature Handling (CRITICAL)**: When the FEATURE_MAP contains features of type `edge_treatment`, you MUST generate the corresponding `bd.fillet()` or `bd.chamfer()` code for EACH one. Extract the `radius` or `size` into a named PARAMETERS entry (e.g., `fillet_bore_step_r`). Use precise edge selection: `part.edges().filter_by(bd.GeomType.CIRCLE).filter_by_position(bd.Axis.Z, z_min, z_max)` where `z_min` and `z_max` bracket the `z_position` from the feature. For `target_edge: "inner"`, also filter by radius to select only bore edges. For `target_edge: "groove"`, select edges near the groove Z-range. If a fillet/chamfer operation fails geometrically (e.g., radius too large), wrap it in a `try/except` block and print a warning, but do NOT silently omit it from the code!
 12. **Detail View Micro-Features & Lead-In Angles (CRITICAL)**: Detail views (e.g. DETAIL-A, B, C, D, E) define functional micro-geometry such as lead-in tapers (e.g. a 30° sliding cut or 15° entry chamfer), O-ring retaining grooves, and corner radii. You MUST incorporate these features into the 2D profile geometry or apply precise `bd.chamfer()` / `bd.fillet()` operations. In precision CNC manufacturing, omitting a 30° lead-in angle or seal groove prevents proper assembly and will cause part rejection. Treat all detail view features as mandatory production geometry!
-13. **Conical Bore Profiles & Right-Datum Stationing (MANDATORY)**: When drawing internal bore profiles for parts with angled bore entries (e.g. 60° entry chamfer cone) or conical step transitions (e.g. 120° internal transition), calculate the exact sloped (X, Z) coordinate vertices using trigonometry and parameters. For dimensions measured from the opposite right face (e.g. length 57.2 from right face), the Z-station on the global axis must be algebraically derived as `total_length - right_dim`. Never approximate internal cones with generic flat steps! approximate internal cones with generic flat steps!
+13. **Conical Bore Profiles & Right-Datum Stationing (MANDATORY)**: When drawing internal bore profiles for parts with angled bore entries (e.g. 60° entry chamfer cone) or conical step transitions (e.g. 120° internal transition), calculate the exact sloped (X, Z) coordinate vertices using trigonometry and parameters. For dimensions measured from the opposite right face (e.g. length 57.2 from right face), the Z-station on the global axis must be algebraically derived as `total_length - right_dim`. Never approximate internal cones with generic flat steps!
+14. **Multi-Boss, Lever Arm & Offset Connecting Linkage Construction (CRITICAL)**:
+   - For mechanical parts featuring multiple cylindrical or rounded bosses connected by an arm, web, or neck (e.g. Pitman arms, control arms, rocker arms, connecting rods, bell cranks, idler arms, offset brackets):
+     a) **Boss Construction**: Instantiate the primary boss at `(0, 0, boss1_z)` with `radius = boss1_dia / 2.0` and `height = boss1_thickness`. Instantiate the secondary boss at `(0, center_distance, boss2_z)` with `radius = boss2_dia / 2.0` and `height = boss2_thickness`. The `boss2_z` position must account for any axial step offset / neck bend (`neck_step_offset`) between the bosses shown in section views.
+     b) **Connecting Arm / Web (Coplanar or Tapered)**: If the bosses are in-plane, create the connecting web using a 2D sketch on the base/mid plane containing tangent lines/polygon bridging between the boss perimeters (e.g., `pts = [(r1_t, 0), (r2_t, center_distance), (-r2_t, center_distance), (-r1_t, 0)]`) and extrude by `arm_web_thickness`.
+     c) **Offset / Dog-Leg Neck Bends (from Section A-A)**: If the bosses are at different Z-levels (an axial step / cranked bend), bridge the level difference by creating a longitudinal profile sketch on the side plane (e.g., `with bd.BuildSketch(bd.Plane.YZ):`) tracing the stepped/sloped neck contour between `(0, boss1_z)` and `(center_distance, boss2_z)` with thickness `neck_thickness`, then extrude symmetrically across the arm width.
+     d) **Machined Bores & Features**: Cut bores, tapers (e.g. `bd.Cone(..., mode=bd.Mode.SUBTRACT)` for tapered bores or `bd.Hole`), counterbores, and serrations at their respective boss centers `(0, 0)` and `(0, center_distance)`.
+     e) **Fillet Blends**: Apply `bd.fillet()` to the intersection edges where the connecting arm/web meets each boss cylinder.
 
 
 
@@ -731,17 +759,18 @@ You are an expert CAD engineer surgically modifying an existing build123d Python
 ## 🎯 MANDATORY MISSION & SURGICAL MODIFICATION RULES
 1. **MANDATORY GEOMETRIC MODIFICATION (CRITICAL)**:
    - You MUST apply the requested modifications to the existing Python script. NEVER return the exact same code unchanged when a revision, adjustment, or feature addition is requested.
-   - The `PARAMETERS` dictionary MUST contain ONLY individual scalar float/int variables (e.g. `shaft_dia_1`, `groove_1_width`, `collar_dia`, `counterbore_1_dia`). 🚫 NEVER put static coordinate lists (like `profile_points: [...]`) inside `PARAMETERS`!
-   - Every single vertex coordinate of a sketch profile (e.g. `outer_profile`, `inner_profile`) MUST be dynamically calculated in Python using individual named variables from `PARAMETERS` (e.g. `r_shaft = shaft_dia / 2.0`, `z_step = z_start + step_length`).
-   - If the user or targeted inspection requests a feature that is MISSING or INCORRECT in the existing model (e.g. O-ring groove, seal undercut, lead-in cone, step shoulder, counterbore, chamfer, fillet, keyway, thread, hollow through-bore), you MUST:
-     a) Add/update named scalar keys in the `PARAMETERS` dictionary (e.g. `groove_1_width`, `groove_1_depth`, `collar_chamfer`, `taper_cone_angle`).
+   - The `PARAMETERS` dictionary MUST contain ONLY individual scalar float/int variables (e.g. `shaft_dia_1`, `groove_1_width`, `collar_dia`, `boss2_center_dist`, `neck_step_offset`). 🚫 NEVER put static coordinate lists (like `profile_points: [...]`) inside `PARAMETERS`!
+   - Every single vertex coordinate of a sketch profile (e.g. `outer_profile`, `inner_profile`, `arm_web_polygon`) MUST be dynamically calculated in Python using individual named variables from `PARAMETERS` (e.g. `r_shaft = shaft_dia / 2.0`, `z_step = z_start + step_length`).
+   - If the user or targeted inspection requests a feature that is MISSING or INCORRECT in the existing model (e.g. multi-boss link, connecting arm, offset neck bend / dog-leg step, tapered web, O-ring groove, seal undercut, lead-in cone, step shoulder, counterbore, chamfer, fillet, keyway, thread, hollow through-bore), you MUST:
+     a) Add/update named scalar keys in the `PARAMETERS` dictionary (e.g. `center_to_center_dist`, `neck_step_offset`, `arm_thickness`, `groove_1_width`, `groove_1_depth`, `collar_chamfer`, `taper_cone_angle`).
      b) Add matching metadata to `PARAMETER_METADATA` and spatial points to `ANNOTATIONS`.
      c) Add or update the corresponding `build123d` construction/subtraction operations inside `with bd.BuildPart() as part:`.
 2. **USER EDIT REQUEST & TARGETED INSPECTION HAVE HIGHEST PRIORITY**:
    - If `MANDATORY TARGETED FEATURE REVISIONS` or `USER_REQUEST` lists specific profile modifications or parameter adjustments, you MUST implement every single one of them directly into the script.
    - Do NOT just rewrite comments. You MUST update the actual Python math and geometry operations.
-3. **REVOLVED PROFILES & SKETCH COORDINATES**:
+3. **REVOLVED PROFILES & SKETCH COORDINATES / MULTI-BOSS ASSEMBLIES**:
    - Revolved polygon profiles (`outer_profile`, `inner_profile`) MUST be assembled by chaining computed radial and axial variables (e.g. `[(0, 0), (r_left, 0), (r_left, z_g1), (r_groove, z_g1), ...]`).
+   - For multi-boss and offset arm parts: construct the discrete bosses at `(0, 0)` and `(0, center_distance, z_offset)` and bridge them with a connecting arm web or longitudinal side-plane profile extruded to the arm width.
    - For cones and angled lead-in tapers, calculate transition lengths using trigonometry: `taper_len = abs(r_start - r_end) / math.tan(math.radians(angle))`.
    - Alternatively, add subtractive features after the main body: e.g. `with bd.BuildSketch(bd.Plane.XZ): ... bd.revolve(axis=bd.Axis.Z, mode=bd.Mode.SUBTRACT)` or `bd.Hole()` or `bd.extrude(mode=bd.Mode.SUBTRACT)`.
 4. **SPATIAL LOCALIZATION (3D Coordinates & Features)**:
@@ -818,8 +847,9 @@ __THREAD_CAD_RULES__
 
 _CODE_FENCE_RE = re.compile(r"```(?:scad|openscad|text|python)?\s*(.*?)```", re.I | re.S)
 _CODE_START_RE = re.compile(
-    r"(?m)^(?:import\s+|from\s+|PARAMETERS\s*=)"
+    r"(?m)^(?:import\s+|from\s+|PARAMETERS\s*=|with\s+bd\.BuildPart|with\s+BuildPart|#\s*---|def\s+|part\s*=)"
 )
+
 
 
 # -- Service -------------------------------------------------------------------
@@ -900,7 +930,10 @@ class LLMCodegenService:
                 cad_fences.append(c[m.start():].strip())
         
         if cad_fences:
-            return max(cad_fences, key=len)
+            code = max(cad_fences, key=len)
+            if "import build123d as bd" not in code and ("bd." in code or "BuildPart" in code):
+                code = "import build123d as bd\n" + code
+            return code
         
         # Fallback: search for code start in raw text directly (handles missing/unclosed code fences)
         m_raw = _CODE_START_RE.search(raw)
@@ -912,10 +945,26 @@ class LLMCodegenService:
                 end_idx = candidate.find("\n\n", idx + 50)
                 if end_idx != -1:
                     candidate = candidate[:end_idx].strip()
+            if "import build123d as bd" not in candidate and ("bd." in candidate or "BuildPart" in candidate):
+                candidate = "import build123d as bd\n" + candidate
             return candidate
+
+        # Additional fallback: if 'BuildPart' or 'bd.' is anywhere in raw text
+        if "BuildPart" in raw or "bd." in raw:
+            idx = raw.find("with bd.BuildPart")
+            if idx == -1:
+                idx = raw.find("with BuildPart")
+            if idx == -1:
+                idx = raw.find("bd.")
+            if idx != -1:
+                extracted = raw[idx:].strip().rstrip("`").strip()
+                if "import build123d as bd" not in extracted:
+                    extracted = "import build123d as bd\n" + extracted
+                return extracted
 
         # If no valid code block was found, raise an error
         raise ValueError(f"LLM failed to generate a valid Python code block. Response was: {raw[:100]}...")
+
 
 
     @staticmethod

@@ -1,4 +1,5 @@
 from typing import Dict, Any, Tuple
+from app.constants import TURNING_FEATURE_TYPES
 
 class ManufacturingStrategyPlanner:
     """
@@ -13,7 +14,7 @@ class ManufacturingStrategyPlanner:
         mtype_str = str(machine_type).lower() if machine_type else ""
         is_turning = any(t in mtype_str for t in ("lathe", "turning", "mill_turn", "swiss", "cnc_lathe"))
 
-        if feat_type in ("external_cylinder", "shaft") or feat_subtype in ("shaft", "external_cylinder") or any(kw in str(feat_type).lower() for kw in ("dia", "od", "shaft", "cylinder", "turn", "bore", "id", "groove")):
+        if feat_type in TURNING_FEATURE_TYPES or feat_subtype in TURNING_FEATURE_TYPES or any(kw in str(feat_type).lower() for kw in ("dia", "od", "shaft", "cylinder", "turn", "bore", "id", "groove")):
             feature_axis = feature.get("axis", [0, 0, 1])
             dot = sum(a*b for a, b in zip(feature_axis, setup_axis)) if setup_axis else 0
             

@@ -18,7 +18,11 @@ from app.services.validation.cam_readiness_evaluator import CamReadinessEvaluato
 from app.services.cam_pipeline_manager import CamPipelineManager
 from app.services.cam_input_router import CamInputRouter
 from fastapi.responses import FileResponse, StreamingResponse, Response
-from app.models.schemas import GenerateResponse, EditRequest, StepRequest, RenderRequest, RenderResponse, RenderArtifacts, GCodeResponse, CAMJobRequest
+from app.models.schemas import (
+    GenerateResponse, EditRequest, StepRequest, RenderRequest, RenderResponse, RenderArtifacts,
+    GCodeResponse, CAMJobRequest, MachineRecommendationRequest, MachineRecommendationResponse,
+    CADPromptAssistantRequest, CADPromptAssistantResponse
+)
 from app.services.geometry.csg_parser import CSGParser, export_to_step
 from app.services.llm.llm_codegen import LLMCodegenService
 from app.services.llm.parameter_render import ParameterRenderService
@@ -604,13 +608,22 @@ async def generate(
                 yield f'data: {json.dumps({"chunk": chunk_text})}\n\n'
 
             # ── Server-side safety net ────────────────────────────────────────
-            clean_script = LLMCodegenService._normalize_script(full_script)
+            try:
+                clean_script = LLMCodegenService._normalize_script(full_script)
+            except Exception as norm_err:
+                print(f"[generate stream] _normalize_script failed: {norm_err}. Falling back to effective_base_code.")
+                if effective_base_code:
+                    clean_script = effective_base_code
+                else:
+                    raise norm_err
+
             clean_script = _sanitize_script(clean_script)
             params = _extract_parameters(clean_script)
             metadata = _extract_metadata(clean_script)
             
             # Send final script and parameters
             yield f'data: {json.dumps({"script": clean_script, "parameters": params, "metadata": metadata})}\n\n'
+
             
         except Exception as exc:
             print(f"[generate stream] error: {exc}")
@@ -933,7 +946,9 @@ async def render(
         geometry_mapping_summary=mapping_summary,
         operations=None,
         stats=analysis_result.get("stats") if 'analysis_result' in locals() and analysis_result else None,
+        machine_recommendation=analysis_result.get("machine_recommendation") if 'analysis_result' in locals() and analysis_result else None,
     )
+
 
     return RenderResponse(
         status="ok",
@@ -1282,7 +1297,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
         
         # Calculate cost estimation
         try:
-            from app.services.cam.cost_estimation import CostEstimationEngine
+            from app.services.cam.cost_estimation import CostEstimationEngine, build_quote_context
             from app.services.cam.material_validation import get_material_profile
             cost_engine = CostEstimationEngine()
             total_machining_time_s = sum(op.get("estimated_time_s", 0) for op in operations)
@@ -1294,11 +1309,19 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             material_profile = material_obj.model_dump() if hasattr(material_obj, 'model_dump') else {}
             
             cost_estimate_result = cost_engine.estimate(
-                context=planning_context,
-                total_time_s=total_machining_time_s,
-                setup_time_s=setup_time_s,
-                material_profile=material_profile,
-                machine_profile=machine_profile.model_dump() if hasattr(machine_profile, "model_dump") else machine_profile
+                build_quote_context(
+                    setup=setup if isinstance(setup, dict) else {},
+                    material_profile=material_profile,
+                    machine_profile=machine_profile.model_dump() if hasattr(machine_profile, "model_dump") else machine_profile,
+                    tool_library=tools,
+                    operations=operations,
+                    quantity=int(setup.get("quantity", 1) or 1) if isinstance(setup, dict) else 1,
+                    learning_rate=float(setup.get("learningRate", 1.0) or 1.0) if isinstance(setup, dict) else 1.0,
+                    surface_area_dm2=setup.get("surfaceAreaDm2") if isinstance(setup, dict) else None,
+                    feature_count=len(features) if features else None,
+                    cycle_time_s=total_machining_time_s,
+                    setup_time_s=setup_time_s,
+                )
             )
             if "stats" not in result:
                 result["stats"] = {}
@@ -1958,4 +1981,83 @@ async def delete_knowledge_document(doc_id: str):
             status_code=500,
             detail={"error": {"message": f"Failed to delete document: {exc}"}}
         )
+
+
+@router.post("/cam/recommend-machine")
+async def recommend_machine(req: MachineRecommendationRequest) -> Dict[str, Any]:
+    """
+    Intelligently recommends the best CNC machine profile based on features,
+    topology, stock dimensions, and blueprint annotations.
+    """
+    try:
+        from app.services.planning.machine_recommendation_engine import MachineRecommendationEngine
+        engine = MachineRecommendationEngine()
+        res = engine.recommend_machine(
+            features=req.features,
+            topology_info=req.topologyInfo,
+            stock_dimensions=req.stockDimensions,
+            blueprint_data=req.blueprintData,
+            parameters=req.parameters,
+            python_script=req.pythonScript
+        )
+        return res.model_dump()
+
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"message": f"Machine recommendation failed: {exc}"}}
+        )
+
+
+@router.post("/assistant/compare-and-prompt", response_model=CADPromptAssistantResponse)
+async def assistant_compare_and_prompt(req: CADPromptAssistantRequest):
+    """
+    Multimodal CAD Prompt Co-Pilot: Compares reference 2D blueprint with live 3D canvas snapshot,
+    pinpoints geometric discrepancies, and constructs precision build123d prompts.
+    """
+    try:
+        from app.services.agents.cad_prompt_assistant import CADPromptAssistantService
+        service = CADPromptAssistantService()
+        result = await service.compare_and_suggest_prompt(
+            blueprint_image=req.blueprint_image,
+            model_snapshot=req.model_snapshot,
+            model_snapshots=req.model_snapshots,
+            user_message=req.message,
+            chat_history=req.history,
+            model_override=req.model,
+        )
+        return CADPromptAssistantResponse(
+            reply=result.get("reply", ""),
+            analysis=result.get("analysis"),
+            suggested_prompt=result.get("suggested_prompt"),
+            error=result.get("error"),
+        )
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return CADPromptAssistantResponse(
+            reply=f"Error in prompt assistant: {exc}",
+            analysis=None,
+            suggested_prompt=None,
+            error=str(exc),
+        )
+
+
+@router.get("/assistant/dictionary")
+async def assistant_dictionary():
+    """Returns active mechanical vocabulary taxonomy used by the Prompt Assistant."""
+    try:
+        from app.services.agents.cad_prompt_assistant import CADPromptAssistantService
+        service = CADPromptAssistantService()
+        entries = service.get_parts_dictionary()
+        return {
+            "count": len(entries),
+            "entries": entries,
+        }
+    except Exception as exc:
+        return {"count": 0, "entries": [], "error": str(exc)}
+
+
 

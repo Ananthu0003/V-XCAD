@@ -42,6 +42,7 @@ Thumbs.db
 *.db
 *.db-journal
 tmp_*.txt
+*sessions_backup.json
 
 # Scratch scripts & temporary test artifacts
 scratch.py

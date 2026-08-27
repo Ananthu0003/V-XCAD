@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import type { SetupSettings, StockType, MaterialType, WorkCoordinateSystem, OriginPosition, PostProcessor } from '@/types/cam';
-import { MACHINE_MATRIX, MachineType, ControllerId, PostProcessorId, MachineProfile } from '@/lib/cam/machineProfiles';
+import { MACHINE_MATRIX, MachineType, ControllerId, PostProcessorId, MachineProfile, MachineRecommendationResponse } from '@/lib/cam/machineProfiles';
 import { getProfilesForMachineType, getCompatibleControllers, getCompatiblePostProcessors } from '@/lib/cam/machineValidation';
 import { MATERIAL_MATRIX, getMaterialProfile, getMaterialsByCategory } from '@/lib/cam/materialProfiles';
-import { AlertTriangle, Info, Box, Cylinder, Layers, Upload, FileCheck } from 'lucide-react';
+import { AlertTriangle, Info, Box, Cylinder, Layers, Upload, FileCheck, Sparkles, CheckCircle2 } from 'lucide-react';
 import { StockPreview } from './StockPreview';
 import { MachineSelectionModal } from './MachineSelectionModal';
 import { MaterialSelectionModal } from './MaterialSelectionModal';
@@ -43,7 +43,9 @@ type SetupSectionProps = {
     onChange: (setup: SetupSettings) => void;
     parameters?: Record<string, any>;
     setupMetadata?: any;
+    recommendation?: MachineRecommendationResponse | null;
 };
+
 
 function NumberInput({ value, onChange, step, className }: { value: number | string, onChange: (v: string) => void, step?: string, className?: string }) {
     const [localValue, setLocalValue] = useState(String(value));
@@ -73,8 +75,9 @@ function NumberInput({ value, onChange, step, className }: { value: number | str
     );
 }
 
-export function SetupSection({ setup, onChange, parameters, setupMetadata }: SetupSectionProps) {
+export function SetupSection({ setup, onChange, parameters, setupMetadata, recommendation }: SetupSectionProps) {
     const update = (field: keyof SetupSettings, value: any) => {
+
         onChange({ ...setup, internalUnits: 'mm', [field]: value });
     };
 
@@ -176,6 +179,12 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
     const showHobbyWarning = controllerInfo && !controllerInfo.industrial && currentProfile && currentProfile.machineType !== 'ROUTER_3X';
     const showUnsupportedWarning = currentProfile && !currentProfile.camSupport.gcodeGeneration;
 
+    const activeRecommendation: MachineRecommendationResponse | null = 
+        recommendation || 
+        setupMetadata?.machine_recommendation || 
+        parameters?.machine_recommendation || 
+        null;
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in duration-300">
             {/* Left Column: Machine Configuration */}
@@ -187,10 +196,56 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                 </h3>
                 
                 <div className="flex flex-col gap-5">
-                                        <div className="flex flex-col gap-2 mb-2">
+                    {/* AI Machine Recommendation Card */}
+                    {activeRecommendation?.primaryRecommendation && (
+                        <div className="flex flex-col gap-2 p-3.5 rounded-xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/20">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                                    <Sparkles className="size-3.5 text-primary animate-pulse" />
+                                    <span>AI Optimal CNC Machine</span>
+                                </div>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    {Math.round(activeRecommendation.primaryRecommendation.confidence * 100)}% Match
+                                </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 mt-0.5">
+                                <div className="flex flex-col">
+                                    <span className="text-xs font-bold text-foreground">
+                                        {activeRecommendation.primaryRecommendation.label} ({activeRecommendation.primaryRecommendation.machineType.replace(/_/g, ' ')})
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                                        {activeRecommendation.primaryRecommendation.reason}
+                                    </span>
+                                </div>
+                                {setup.machineProfile !== activeRecommendation.primaryRecommendation.profileId && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const prof = MACHINE_MATRIX.machineProfiles.find(p => p.id === activeRecommendation.primaryRecommendation.profileId);
+                                            if (prof) {
+                                                onChange({
+                                                    ...setup,
+                                                    machineType: prof.machineType,
+                                                    machineProfile: prof.id,
+                                                    controller: prof.defaultController,
+                                                    postProcessor: 'AUTO'
+                                                });
+                                            }
+                                        }}
+                                        className="px-2.5 py-1 text-[10px] font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors shrink-0 shadow-sm"
+                                    >
+                                        Apply AI Pick
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="flex flex-col gap-2 mb-2">
                         <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/80 pl-1">CNC Machine Selection</label>
                         <MachineSelectionModal 
                             currentProfileId={setup.machineProfile || ""}
+                            recommendation={activeRecommendation}
                             onSelect={(machineType, profileId, controller, postProcessor) => {
                                 onChange({
                                     ...setup,
@@ -202,6 +257,7 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                             }}
                         />
                     </div>
+
 
                                         <div className="flex flex-col gap-2 mb-2">
                         <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/80 pl-1">Controller & CNC Format</label>
@@ -302,9 +358,10 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                     <div className="grid grid-cols-2 gap-3">
                         {/* Card 1: Rectangular Box */}
                         {(() => {
-                            const st = setup.stockType || 'relative_box';
-                            const isSelected = st.includes('box') || !setup.stockType;
+                            const st = setup.stockType || '';
+                            const isSelected = Boolean(setup.stockType && st.includes('box'));
                             const { x: partX, y: partY, z: partZ } = getBasePartDims();
+                            const hasPart = partX > 0 || partY > 0 || partZ > 0;
                             const xy = setup.stockOffsetXY ?? setup.stockOffset ?? 2;
                             const top = setup.stockOffsetTop ?? 1;
                             const bot = setup.clampingAllowance ?? setup.stockOffsetBottom ?? setup.axialOffsetBottom ?? 5.0;
@@ -318,7 +375,9 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                 : setup.stockDimensions;
 
                             const unitStr = isInch ? "in" : "mm";
-                            const dimStr = `${toDisplay(dims[0])} × ${toDisplay(dims[1])} × ${toDisplay(dims[2])} ${unitStr}`;
+                            const dimStr = hasPart 
+                                ? `${toDisplay(dims[0])} × ${toDisplay(dims[1])} × ${toDisplay(dims[2])} ${unitStr}`
+                                : 'Not set (Load CAD)';
                             return (
                                 <button
                                     type="button"
@@ -346,7 +405,7 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                         </div>
                                         {isSelected && <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />}
                                     </div>
-                                    <span className="text-[10px] font-mono text-blue-400 font-bold mt-0.5">{dimStr}</span>
+                                    <span className={`text-[10px] font-mono mt-0.5 ${isSelected ? 'text-blue-400 font-bold' : 'text-muted-foreground'}`}>{dimStr}</span>
                                 </button>
                             );
                         })()}
@@ -354,8 +413,9 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                         {/* Card 2: Cylindrical Bar */}
                         {(() => {
                             const st = setup.stockType || '';
-                            const isSelected = st.includes('cylinder');
+                            const isSelected = Boolean(setup.stockType && st.includes('cylinder'));
                             const { z: partZ, dia: partDia } = getBasePartDims();
+                            const hasPart = partZ > 0 || partDia > 0;
                             const rOff = setup.radialOffset ?? 1;
                             const aTop = setup.axialOffsetTop ?? 1;
                             const aBot = setup.clampingAllowance ?? setup.axialOffsetBottom ?? setup.stockOffsetBottom ?? 5.0;
@@ -370,7 +430,9 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                             const unitStr = isInch ? "in" : "mm";
                             const dia = toDisplay(dims[0]);
                             const h = toDisplay(dims[2] || dims[1]);
-                            const dimStr = `ø ${dia} × ${h} ${unitStr}`;
+                            const dimStr = hasPart 
+                                ? `ø ${dia} × ${h} ${unitStr}`
+                                : 'Not set (Load CAD)';
                             return (
                                 <button
                                     type="button"
@@ -400,23 +462,24 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                         </div>
                                         {isSelected && <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />}
                                     </div>
-                                    <span className="text-[10px] font-mono text-cyan-300 font-bold mt-0.5">{dimStr}</span>
+                                    <span className={`text-[10px] font-mono mt-0.5 ${isSelected ? 'text-cyan-400 font-bold' : 'text-muted-foreground'}`}>{dimStr}</span>
                                 </button>
                             );
                         })()}
                     </div>
 
-                    {/* Unified Stock & Workholding Control Card */}
-                    <div className="flex flex-col gap-4 p-4 rounded-xl bg-background/30 border border-border/40">
-                        {/* Header Row: Sizing Mode Toggle + Workpiece Material Selection */}
-                        <div className="grid grid-cols-2 gap-4 pb-3 border-b border-border/30">
+                    {/* Stock Configuration Rows */}
+                    <div className="grid grid-cols-2 gap-4">
+                        {/* Column 1: Sizing Mode & Material */}
+                        <div className="flex flex-col gap-3">
                             <div className="flex flex-col gap-1.5">
                                 <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/80">Sizing Mode</label>
                                 <div className="flex items-center p-1 bg-background/50 rounded-xl border border-border/40">
                                     {(() => {
-                                        const currentSt = setup.stockType || 'relative_box';
+                                        const currentSt = setup.stockType || '';
                                         const isCyl = currentSt.includes('cylinder');
-                                        const isRelative = currentSt.startsWith('relative') || !setup.stockType;
+                                        const isRelative = Boolean(setup.stockType && currentSt.startsWith('relative'));
+                                        const isFixed = Boolean(setup.stockType && currentSt.startsWith('fixed'));
                                         return (
                                             <>
                                                 <button
@@ -452,7 +515,7 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                     type="button"
                                                     onClick={() => update('stockType', isCyl ? 'fixed_cylinder' : 'fixed_box')}
                                                     className={`flex-1 py-1.5 px-2 text-[10px] font-bold rounded-lg transition-all ${
-                                                        !isRelative 
+                                                        isFixed 
                                                             ? 'bg-primary text-primary-foreground shadow-sm' 
                                                             : 'text-muted-foreground hover:text-foreground'
                                                     }`}
@@ -566,7 +629,15 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                 <div className="flex items-center justify-between gap-1">
                                                     <NumberInput
                                                         value={toDisplay(setup.stockDimensions?.[0])}
-                                                        onChange={(val) => updateDimension(0, parseFloat(val) || 0)}
+                                                        onChange={(val) => {
+                                                            const v = fromDisplay(parseFloat(val) || 0);
+                                                            const cur = setup.stockDimensions || [0, 0, 0];
+                                                            onChange({
+                                                                ...setup,
+                                                                internalUnits: 'mm',
+                                                                stockDimensions: [v, cur[1], cur[2]]
+                                                            });
+                                                        }}
                                                         className="w-full bg-transparent border-none p-0 text-xs font-mono text-foreground outline-none font-bold"
                                                     />
                                                     <span className="text-[10px] font-mono text-muted-foreground/80 font-bold shrink-0">{isInch ? "in" : "mm"}</span>
@@ -577,7 +648,15 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                 <div className="flex items-center justify-between gap-1">
                                                     <NumberInput
                                                         value={toDisplay(setup.stockDimensions?.[1])}
-                                                        onChange={(val) => updateDimension(1, parseFloat(val) || 0)}
+                                                        onChange={(val) => {
+                                                            const v = fromDisplay(parseFloat(val) || 0);
+                                                            const cur = setup.stockDimensions || [0, 0, 0];
+                                                            onChange({
+                                                                ...setup,
+                                                                internalUnits: 'mm',
+                                                                stockDimensions: [cur[0], v, cur[2]]
+                                                            });
+                                                        }}
                                                         className="w-full bg-transparent border-none p-0 text-xs font-mono text-foreground outline-none font-bold"
                                                     />
                                                     <span className="text-[10px] font-mono text-muted-foreground/80 font-bold shrink-0">{isInch ? "in" : "mm"}</span>
@@ -588,7 +667,15 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                 <div className="flex items-center justify-between gap-1">
                                                     <NumberInput
                                                         value={toDisplay(setup.stockDimensions?.[2])}
-                                                        onChange={(val) => updateDimension(2, parseFloat(val) || 0)}
+                                                        onChange={(val) => {
+                                                            const v = fromDisplay(parseFloat(val) || 0);
+                                                            const cur = setup.stockDimensions || [0, 0, 0];
+                                                            onChange({
+                                                                ...setup,
+                                                                internalUnits: 'mm',
+                                                                stockDimensions: [cur[0], cur[1], v]
+                                                            });
+                                                        }}
                                                         className="w-full bg-transparent border-none p-0 text-xs font-mono text-foreground outline-none font-bold"
                                                     />
                                                     <span className="text-[10px] font-mono text-muted-foreground/80 font-bold shrink-0">{isInch ? "in" : "mm"}</span>
@@ -644,13 +731,17 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                 <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Bar Diameter (D)</span>
                                                 <div className="flex items-center justify-between gap-1">
                                                     <NumberInput
-                                                        value={toDisplay(setup.cylinderDiameter || setup.stockDimensions?.[0])}
+                                                        value={toDisplay(setup.cylinderDiameter ?? setup.stockDimensions?.[0])}
                                                         onChange={(val) => {
                                                             const v = parseFloat(val) || 0;
                                                             const vMM = fromDisplay(v);
-                                                            update('cylinderDiameter', vMM);
-                                                            updateDimension(0, v);
-                                                            updateDimension(1, v);
+                                                            const currentZ = setup.stockDimensions?.[2] ?? setup.cylinderLength ?? fromDisplay(96);
+                                                            onChange({
+                                                                ...setup,
+                                                                internalUnits: 'mm',
+                                                                cylinderDiameter: vMM,
+                                                                stockDimensions: [vMM, vMM, currentZ]
+                                                            });
                                                         }}
                                                         className="w-full bg-transparent border-none p-0 text-xs font-mono text-foreground outline-none font-bold"
                                                     />
@@ -661,12 +752,17 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
                                                 <span className="text-[9px] uppercase text-muted-foreground/80 font-bold">Bar Length (L)</span>
                                                 <div className="flex items-center justify-between gap-1">
                                                     <NumberInput
-                                                        value={toDisplay(setup.cylinderLength || setup.stockDimensions?.[2])}
+                                                        value={toDisplay(setup.cylinderLength ?? setup.stockDimensions?.[2])}
                                                         onChange={(val) => {
                                                             const v = parseFloat(val) || 0;
                                                             const vMM = fromDisplay(v);
-                                                            update('cylinderLength', vMM);
-                                                            updateDimension(2, v);
+                                                            const currentDia = setup.stockDimensions?.[0] ?? setup.cylinderDiameter ?? fromDisplay(35);
+                                                            onChange({
+                                                                ...setup,
+                                                                internalUnits: 'mm',
+                                                                cylinderLength: vMM,
+                                                                stockDimensions: [currentDia, currentDia, vMM]
+                                                            });
                                                         }}
                                                         className="w-full bg-transparent border-none p-0 text-xs font-mono text-foreground outline-none font-bold"
                                                     />
@@ -810,7 +906,16 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata }: Set
 
                     <StockPreview 
                         stockType={setup.stockType}
-                        dimensions={setup.stockDimensions || [100, 100, 20]} 
+                        dimensions={(() => {
+                            const isCyl = setup.stockType?.includes('cylinder');
+                            if (isCyl) {
+                                const dia = toDisplay(setup.cylinderDiameter ?? setup.stockDimensions?.[0] ?? 35);
+                                const len = toDisplay(setup.cylinderLength ?? setup.stockDimensions?.[2] ?? 96);
+                                return [dia, dia, len] as [number, number, number];
+                            }
+                            const dims = setup.stockDimensions || [100, 100, 20];
+                            return [toDisplay(dims[0]), toDisplay(dims[1]), toDisplay(dims[2])] as [number, number, number];
+                        })()} 
                         units={(setup.displayUnits || setup.units || 'mm') as 'mm'|'in'} 
                         origin={setup.originPosition || 'top_center'} 
                     />
