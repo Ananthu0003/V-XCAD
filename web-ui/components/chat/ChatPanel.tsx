@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ChatBubble } from '@/components/chat/ChatBubble';
+import { Logo } from '@/components/shared/Logo';
 import { SettingsPanel } from '@/components/workspace/SettingsPanel';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -245,21 +246,19 @@ export function ChatPanel({
 
 	return (
 		<>
-			<div className="flex h-full flex-col bg-[#070b14]/95 backdrop-blur-2xl border-r border-white/[0.08] select-none">
+			<div className="flex h-full flex-col bg-slate-50 dark:bg-[#070b14]/95 backdrop-blur-2xl border-r border-slate-200/80 dark:border-white/[0.08] select-none">
 				{/* Top Ambient Highlight */}
 				<div className="h-[1px] w-full bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent" />
 
 				{/* Header */}
-				<div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] bg-white/[0.01]">
+				<div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/80 dark:border-white/[0.06] bg-white/70 dark:bg-white/[0.01]">
 					<div className="flex items-center gap-2.5">
-						<div className="flex size-7 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-500/30 text-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.2)]">
-							<Cuboid className="size-4" />
-						</div>
+						<Logo size={28} showGlow />
 						<div className="flex items-center gap-2">
-							<span className="text-sm font-extrabold tracking-wider text-white font-mono">
-								VEXCAD
+							<span className="text-sm font-bold tracking-[0.16em] text-slate-900 dark:text-white uppercase font-sans">
+								VΞXCAD
 							</span>
-							<span className="text-[9px] text-cyan-300 font-mono font-bold bg-cyan-500/10 px-1.5 py-0.5 rounded-md border border-cyan-500/25">
+							<span className="text-[9px] text-cyan-600 dark:text-cyan-300 font-mono font-bold bg-cyan-500/15 dark:bg-cyan-500/10 px-1.5 py-0.5 rounded-md border border-cyan-500/30 dark:border-cyan-500/25">
 								v0.1.0
 							</span>
 						</div>
@@ -269,7 +268,7 @@ export function ChatPanel({
 					<div className="flex items-center gap-1">
 						<button
 							onClick={onClear}
-							className="flex size-7 items-center justify-center rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 transition-all cursor-pointer shadow-sm"
+							className="flex size-7 items-center justify-center rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-all cursor-pointer shadow-sm"
 							title="New Blueprint CAD Project"
 						>
 							<PlusCircle className="size-3.5" />
@@ -277,7 +276,7 @@ export function ChatPanel({
 						{messages.length > 0 && (
 							<button
 								onClick={onClear}
-								className="flex size-7 items-center justify-center rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 text-muted-foreground hover:text-white transition-colors cursor-pointer"
+								className="flex size-7 items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-white/[0.03] dark:hover:bg-white/[0.08] border border-slate-200 dark:border-white/10 text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
 								title="Clear active workspace"
 							>
 								<Trash2 className="size-3.5" />
@@ -285,7 +284,7 @@ export function ChatPanel({
 						)}
 						<button
 							onClick={() => setIsSettingsOpen(true)}
-							className="flex size-7 items-center justify-center rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 text-muted-foreground hover:text-white transition-colors cursor-pointer"
+							className="flex size-7 items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-white/[0.03] dark:hover:bg-white/[0.08] border border-slate-200 dark:border-white/10 text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
 							title="Settings"
 						>
 							<Settings className="size-3.5" />
@@ -293,11 +292,11 @@ export function ChatPanel({
 						<button
 							onClick={handleLogout}
 							disabled={isLoggingOut}
-							className="flex size-7 items-center justify-center rounded-lg bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 text-muted-foreground hover:text-rose-400 transition-colors disabled:opacity-50 cursor-pointer"
+							className="flex size-7 items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-white/[0.03] dark:hover:bg-white/[0.08] border border-slate-200 dark:border-white/10 text-slate-600 dark:text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 transition-colors disabled:opacity-50 cursor-pointer"
 							title="Logout"
 						>
 							{isLoggingOut ? (
-								<Loader2 className="size-3.5 animate-spin text-cyan-400" />
+								<Loader2 className="size-3.5 animate-spin text-cyan-500" />
 							) : (
 								<LogOut className="size-3.5" />
 							)}
@@ -316,17 +315,14 @@ export function ChatPanel({
 					{messages.length === 0 ? (
 						<div className="flex flex-col items-center justify-center h-full text-center px-4 space-y-5 max-w-xs mx-auto animate-in fade-in duration-300">
 							<div className="relative flex items-center justify-center">
-								<div className="absolute -inset-3 rounded-full bg-cyan-500/10 blur-xl" />
-								<div className="relative flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-500/30 text-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
-									<Cuboid className="size-6" />
-								</div>
+								<Logo size={48} showGlow />
 							</div>
 
 							<div className="space-y-1">
-								<h3 className="text-xs font-bold uppercase tracking-wider text-white font-mono">
-									Parametric CAD Copilot
+								<h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white font-sans">
+									VΞXCAD AI Assistant
 								</h3>
-								<p className="text-[11px] text-muted-foreground leading-relaxed">
+								<p className="text-[11px] text-slate-500 dark:text-muted-foreground leading-relaxed">
 									Upload a 2D engineering blueprint or enter parametric CAD prompts below.
 								</p>
 							</div>
@@ -336,18 +332,18 @@ export function ChatPanel({
 								<button
 									type="button"
 									onClick={() => setPrompt('Design a stepped shaft with dual O-ring seal grooves and internal bore.')}
-									className="w-full px-3 py-2 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.06] hover:border-cyan-500/40 text-left text-xs text-muted-foreground hover:text-white transition-all flex items-center gap-2 cursor-pointer group"
+									className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.02] hover:bg-slate-100 dark:hover:bg-white/[0.06] hover:border-cyan-500/40 text-left text-xs text-slate-700 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-white shadow-xs transition-all flex items-center gap-2 cursor-pointer group"
 								>
-									<span className="text-cyan-400 group-hover:scale-110 transition-transform text-xs">⚡</span>
+									<span className="text-cyan-500 dark:text-cyan-400 group-hover:scale-110 transition-transform text-xs">⚡</span>
 									<span className="truncate">Stepped Shaft with Grooves</span>
 								</button>
 
 								<button
 									type="button"
 									onClick={() => setPrompt('Convert attached 2D blueprint drawing into a fully parametric 3D model.')}
-									className="w-full px-3 py-2 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.06] hover:border-cyan-500/40 text-left text-xs text-muted-foreground hover:text-white transition-all flex items-center gap-2 cursor-pointer group"
+									className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.02] hover:bg-slate-100 dark:hover:bg-white/[0.06] hover:border-cyan-500/40 text-left text-xs text-slate-700 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-white shadow-xs transition-all flex items-center gap-2 cursor-pointer group"
 								>
-									<span className="text-emerald-400 group-hover:scale-110 transition-transform text-xs">📐</span>
+									<span className="text-emerald-500 dark:text-emerald-400 group-hover:scale-110 transition-transform text-xs">📐</span>
 									<span className="truncate">Convert Blueprint to 3D CAD</span>
 								</button>
 							</div>
@@ -376,8 +372,8 @@ export function ChatPanel({
 							))}
 
 							{isGenerating && (
-								<div className="flex items-center gap-2.5 p-3 rounded-2xl bg-cyan-500/[0.05] border border-cyan-500/20 text-cyan-300 text-xs animate-pulse">
-									<RefreshCw className="size-3.5 animate-spin text-cyan-400" />
+								<div className="flex items-center gap-2.5 p-3 rounded-2xl bg-blue-50 dark:bg-cyan-500/[0.05] border border-blue-200 dark:border-cyan-500/20 text-blue-700 dark:text-cyan-300 text-xs animate-pulse">
+									<RefreshCw className="size-3.5 animate-spin text-blue-600 dark:text-cyan-400" />
 									<span>Computing CAD Geometry & B-Rep Topology...</span>
 								</div>
 							)}
@@ -387,7 +383,7 @@ export function ChatPanel({
 				</div>
 
 				{/* Floating Command Input Dock */}
-				<div className="px-3.5 pb-3.5 pt-1.5 border-t border-white/[0.06] bg-[#070b14]">
+				<div className="px-3.5 pb-3.5 pt-1.5 border-t border-slate-200/80 dark:border-white/[0.06] bg-slate-50 dark:bg-[#070b14]">
 					<form onSubmit={onSubmit} className="relative flex flex-col gap-1.5">
 						{/* Target Feature Pill (When Model Active) */}
 						{hasActiveModel && (
@@ -399,12 +395,12 @@ export function ChatPanel({
 											onClick={() => setIsPortionPickerOpen(!isPortionPickerOpen)}
 											className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold transition-all border cursor-pointer ${
 												targetPortion
-													? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.2)]'
-													: 'bg-white/[0.03] border-white/10 text-muted-foreground hover:text-white hover:border-cyan-500/40'
+													? 'bg-blue-50 dark:bg-cyan-500/15 border-blue-300 dark:border-cyan-500/40 text-blue-700 dark:text-cyan-300 shadow-xs'
+													: 'bg-slate-100 dark:bg-white/[0.03] border-slate-200 dark:border-white/10 text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-white hover:border-blue-400 dark:hover:border-cyan-500/40'
 											}`}
 											title="Target specific CAD feature"
 										>
-											<Target className={`size-3 ${targetPortion ? 'text-cyan-400' : 'text-muted-foreground'}`} />
+											<Target className={`size-3 ${targetPortion ? 'text-blue-600 dark:text-cyan-400' : 'text-slate-500 dark:text-muted-foreground'}`} />
 											<span className="truncate max-w-[150px]">
 												{targetPortion ? targetPortion.name : 'Target: Whole Model'}
 											</span>
@@ -413,13 +409,13 @@ export function ChatPanel({
 
 										{/* Dropdown Menu for CAD Portions */}
 										{isPortionPickerOpen && (
-											<div className="absolute bottom-full left-0 mb-2 w-72 rounded-2xl border border-white/10 bg-[#0c1222]/95 backdrop-blur-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in zoom-in-95 duration-150">
-												<div className="flex items-center justify-between px-2 py-1 border-b border-white/[0.06] text-[10px] font-bold uppercase tracking-wider text-cyan-400 font-mono">
+											<div className="absolute bottom-full left-0 mb-2 w-72 rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0c1222]/95 backdrop-blur-2xl shadow-xl p-2 z-50 space-y-1 animate-in fade-in zoom-in-95 duration-150">
+												<div className="flex items-center justify-between px-2 py-1 border-b border-slate-200 dark:border-white/[0.06] text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-cyan-400 font-mono">
 													<span>Select CAD Feature Focus</span>
 													<button
 														type="button"
 														onClick={() => setIsPortionPickerOpen(false)}
-														className="text-muted-foreground hover:text-white p-0.5"
+														className="text-slate-400 hover:text-slate-700 dark:text-muted-foreground dark:hover:text-white p-0.5"
 													>
 														<X className="size-3" />
 													</button>
@@ -431,10 +427,10 @@ export function ChatPanel({
 														if (setTargetPortion) setTargetPortion(null);
 														setIsPortionPickerOpen(false);
 													}}
-													className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-white/10 text-white flex items-center justify-between cursor-pointer"
+													className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-100 dark:hover:bg-white/10 text-slate-800 dark:text-white flex items-center justify-between cursor-pointer"
 												>
 													<span className="font-semibold">Whole Model (Default)</span>
-													{!targetPortion && <Check className="size-3 text-cyan-400" />}
+													{!targetPortion && <Check className="size-3 text-blue-600 dark:text-cyan-400" />}
 												</button>
 
 												<div className="max-h-48 overflow-y-auto space-y-0.5 no-scrollbar">
@@ -445,12 +441,12 @@ export function ChatPanel({
 															onClick={() => handleSelectPortion(p)}
 															className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
 																targetPortion?.id === p.id
-																	? 'bg-cyan-500/20 text-cyan-300 font-bold'
-																	: 'hover:bg-white/[0.06] text-muted-foreground hover:text-white'
+																	? 'bg-blue-50 dark:bg-cyan-500/20 text-blue-700 dark:text-cyan-300 font-bold'
+																	: 'hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-white'
 															}`}
 														>
 															<span className="truncate">{p.name}</span>
-															{targetPortion?.id === p.id && <Check className="size-3 text-cyan-400 shrink-0" />}
+															{targetPortion?.id === p.id && <Check className="size-3 text-blue-600 dark:text-cyan-400 shrink-0" />}
 														</button>
 													))}
 												</div>
@@ -508,7 +504,7 @@ export function ChatPanel({
 						)}
 
 						{/* Main Floating Glass Input Bar */}
-						<div className="relative flex flex-col rounded-2xl bg-white/[0.03] border border-white/10 focus-within:border-cyan-400/60 focus-within:bg-white/[0.05] shadow-[0_8px_30px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-all duration-200">
+						<div className="relative flex flex-col rounded-2xl bg-white dark:bg-white/[0.03] border border-slate-200/90 dark:border-white/10 focus-within:border-cyan-500/60 focus-within:bg-white dark:focus-within:bg-white/[0.05] shadow-sm dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-all duration-200">
 							<textarea
 								value={prompt}
 								onChange={(e) => setPrompt(e.target.value)}
@@ -524,19 +520,19 @@ export function ChatPanel({
 										? `Describe revisions for ${targetPortion.name}...`
 										: hasActiveModel
 											? "Iterate on geometry (e.g. increase boss height, add 4x holes)..."
-											: "Ask VEXCAD AI or describe your part..."
+											: "Ask VΞXCAD AI or describe your part..."
 								}
-								className="w-full resize-none bg-transparent px-3.5 pt-3 pb-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none font-sans leading-relaxed"
+								className="w-full resize-none bg-transparent px-3.5 pt-3 pb-2 text-xs text-slate-900 dark:text-foreground placeholder:text-slate-400 dark:placeholder:text-muted-foreground/60 focus:outline-none font-sans leading-relaxed"
 							/>
 
-							<div className="flex items-center justify-between px-3 pb-2.5 pt-1 border-t border-white/[0.04]">
+							<div className="flex items-center justify-between px-3 pb-2.5 pt-1 border-t border-slate-100 dark:border-white/[0.04]">
 								<div className="flex items-center gap-1.5">
 									{/* Attach File Button */}
 									<label
 										className={`flex size-7 cursor-pointer items-center justify-center rounded-xl transition-all duration-200 ${
 											selectedFile
-												? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-												: 'text-muted-foreground hover:bg-white/10 hover:text-white'
+												? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
+												: 'text-slate-500 dark:text-muted-foreground hover:bg-slate-100 dark:hover:bg-white/10 hover:text-slate-900 dark:hover:text-white'
 										}`}
 										title="Attach technical blueprint (PDF/PNG/JPG)"
 									>
@@ -555,11 +551,11 @@ export function ChatPanel({
 
 									{/* Model Selector Dropdown */}
 									<Select value={selectedModel} onValueChange={(val: string | null) => val && setSelectedModel(val)}>
-										<SelectTrigger className="h-7 px-2 border-0 bg-transparent hover:bg-white/5 text-[10.5px] font-mono font-semibold text-muted-foreground hover:text-white rounded-lg focus:ring-0 gap-1">
-											<Sparkles className="size-3 text-cyan-400" />
+										<SelectTrigger className="h-7 px-2 border-0 bg-transparent hover:bg-slate-100 dark:hover:bg-white/5 text-[10.5px] font-mono font-semibold text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-white rounded-lg focus:ring-0 gap-1">
+											<Sparkles className="size-3 text-cyan-500 dark:text-cyan-400" />
 											<SelectValue placeholder="Model" />
 										</SelectTrigger>
-										<SelectContent className="rounded-xl border border-white/10 bg-[#090e1a]/95 backdrop-blur-xl text-xs z-50">
+										<SelectContent className="rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#090e1a]/95 backdrop-blur-xl text-xs text-slate-900 dark:text-slate-100 z-50 shadow-lg">
 											{modelOptions.map((opt) => (
 												<SelectItem key={opt.value} value={opt.value} className="text-xs font-mono">
 													{opt.label}
@@ -573,11 +569,11 @@ export function ChatPanel({
 								<button
 									type="submit"
 									disabled={isGenerating || (!prompt.trim() && !selectedFile)}
-									className="size-7.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-30 text-black flex items-center justify-center transition-all shadow-[0_0_12px_rgba(34,211,238,0.3)] shrink-0 cursor-pointer font-bold"
+									className="size-7.5 rounded-xl bg-blue-600 dark:bg-cyan-400 hover:bg-blue-500 dark:hover:bg-cyan-300 disabled:opacity-30 text-white dark:text-black flex items-center justify-center transition-all shadow-sm dark:shadow-[0_0_12px_rgba(34,211,238,0.3)] shrink-0 cursor-pointer font-bold"
 									title="Generate CAD Model (Enter)"
 								>
 									{isGenerating ? (
-										<Loader2 className="size-3.5 animate-spin text-black" />
+										<Loader2 className="size-3.5 animate-spin" />
 									) : (
 										<Send className="size-3.5" />
 									)}

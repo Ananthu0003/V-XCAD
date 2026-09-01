@@ -11,51 +11,51 @@ import { WorkflowStep } from '@/components/workspace/WorkflowStep';
 import { LandingClient } from '@/components/landing/LandingClient';
 import { BackToTop } from '@/components/landing/BackToTop';
 import { ValueGrid } from '@/components/landing/ValueGrid';
+import { Logo } from '@/components/shared/Logo';
+import { ThemeToggle } from '@/components/shared/theme-toggle';
 
 export default async function LandingPage() {
   const session = await getSession();
   const isLoggedIn = Boolean(session);
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-[#080c10] text-zinc-900 dark:text-white selection:bg-blue-500/30 overflow-hidden relative font-sans">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#080c10] text-slate-900 dark:text-white selection:bg-blue-500/30 overflow-hidden relative font-sans">
 
       {/* ── Ambient background glows ── */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        {/* Ambient background glows removed for a cleaner CAD look */}
+        {/* Soft studio radial glow */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-[radial-gradient(ellipse_at_top,rgba(37,99,235,0.1)_0%,transparent_70%)] pointer-events-none" />
         {/* Grid overlay */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:48px_48px]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(15,23,42,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.03)_1px,transparent_1px)] dark:bg-[linear-gradient(to_right,rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:48px_48px]" />
       </div>
 
       {/* ── Navigation ── */}
-      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-black/10 dark:border-white/5">
-        <div className="flex items-center justify-between px-6 py-5 max-w-7xl mx-auto w-full">
-          
+      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-slate-200/80 dark:border-white/5 bg-white/80 dark:bg-[#080c10]/80 backdrop-blur-xl">
+        <div className="flex items-center justify-between px-6 py-4 max-w-7xl mx-auto w-full">
+
           {/* Targets #home at the top of your page content wrapper */}
-          <Link href="/" className="flex items-center gap-2 group">
-            <div className="relative w-12 h-12 flex items-center justify-center">
-              <div className="absolute inset-0 bg-blue-500 rounded-xl transform rotate-45 opacity-20 group-hover:opacity-30 transition-opacity"></div>
-              <Cuboid className="w-7 h-7 text-blue-400 relative z-10" />
-            </div>
-            <span className="text-3xl font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-500 dark:from-gray-100 dark:to-gray-500">
+          <Link href="/" className="flex items-center gap-3 group">
+            <Logo size={38} showGlow />
+            <span className="text-2xl font-bold tracking-widest text-slate-900 dark:text-white font-sans">
               VΞXCAD
             </span>
           </Link>
 
-          <div className="hidden md:flex items-center text-zinc-900 dark:text-white gap-8">
-            <a href="#how-it-works" className="text-sm text-zinc-600 dark:text-gray-400 hover:text-zinc-900 dark:text-white scroll-smooth transition-colors">How it Works</a>
-            <a href="#features" className="text-sm text-zinc-600 dark:text-gray-400 hover:text-zinc-900 dark:text-white scroll-smooth transition-colors">Features</a>
+          <div className="hidden md:flex items-center text-slate-900 dark:text-white gap-8">
+            <a href="#how-it-works" className="text-sm font-medium text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white scroll-smooth transition-colors">How it Works</a>
+            <a href="#features" className="text-sm font-medium text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white scroll-smooth transition-colors">Features</a>
           </div>
 
           <div className="flex items-center gap-4">
             {isLoggedIn ? (
-              <Link href="/workspace" className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-zinc-900 dark:bg-blue-600 hover:bg-zinc-800 dark:hover:bg-blue-500 rounded-xl transition-all duration-200 shadow-[0_0_20px_rgba(37,99,235,0.4)]">
+              <Link href="/workspace" className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all duration-200 shadow-md shadow-blue-500/25">
                 Open Workspace
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
             ) : (
               <>
-                <Link href="/login" className="text-sm text-zinc-600 dark:text-gray-400 hover:text-zinc-900 dark:text-white transition-colors font-medium">Sign in</Link>
-                <Link href="/register" className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-zinc-900 dark:bg-blue-600 hover:bg-zinc-800 dark:hover:bg-blue-500 rounded-xl transition-all duration-200 shadow-[0_0_20px_rgba(37,99,235,0.35)]">
+                <Link href="/login" className="text-sm text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:text-white transition-colors font-medium">Sign in</Link>
+                <Link href="/register" className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all duration-200 shadow-md shadow-blue-500/25">
                   Get Started
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </Link>
@@ -67,9 +67,9 @@ export default async function LandingPage() {
       </nav>
 
       {/* ── Hero ── */}
-      <main className="relative z-10 px-6 pt-24 pb-12 max-w-5xl mx-auto text-center">
+      <main className="relative z-10 px-6 pt-28 pb-12 max-w-5xl mx-auto text-center">
         <AnimatedSection delay={0} direction="down" duration={0.6}>
-          <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/25 text-blue-400 text-xs font-semibold tracking-widest mb-8 uppercase">
+          <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/25 text-blue-600 dark:text-blue-400 text-xs font-semibold tracking-widest mb-8 uppercase">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
@@ -80,14 +80,14 @@ export default async function LandingPage() {
 
         <AnimatedSection delay={0.1} direction="up" duration={0.9}>
           <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight leading-[1.05] mb-6">
-            <span className="block text-zinc-900 dark:text-white mb-1">From Sketch to Spindle.</span>
-            <span className="block text-primary">In Seconds.</span>
-            <span className="block text-zinc-900 dark:text-white mt-1">Powered by AI.</span>
+            <span className="block text-slate-900 dark:text-white mb-1">From Sketch to Spindle.</span>
+            <span className="block text-blue-600 dark:text-primary">In Seconds.</span>
+            <span className="block text-slate-900 dark:text-white mt-1">Powered by AI.</span>
           </h1>
         </AnimatedSection>
 
         <AnimatedSection delay={0.22} direction="up" duration={0.8}>
-          <p className="text-lg md:text-xl text-zinc-600 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed mt-4">
+          <p className="text-lg md:text-xl text-slate-600 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed mt-4">
             Stop wrestling with disconnected CAD and CAM software. VΞXCAD instantly transforms your 2D sketches and PDFs into parametric 3D models and production-ready G-code—right in your browser.
           </p>
         </AnimatedSection>
@@ -96,15 +96,15 @@ export default async function LandingPage() {
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
               href={isLoggedIn ? '/workspace' : '/register'}
-              className="group relative inline-flex items-center gap-2 px-8 py-4 text-base font-bold text-white bg-gradient-to-b from-zinc-800 to-zinc-950 dark:from-blue-500 dark:to-blue-700 border border-blue-400/20 rounded-2xl hover:from-zinc-700 dark:hover:from-blue-400 hover:to-zinc-900 dark:hover:to-blue-600 shadow-[0_0_50px_rgba(37,99,235,0.45)] transition-all duration-200 overflow-hidden"
+              className="group relative inline-flex items-center gap-2 px-8 py-4 text-base font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-2xl shadow-lg shadow-blue-500/30 transition-all duration-200 overflow-hidden"
             >
-              <div className="absolute inset-0 -ml-16 bg-gradient-to-r from-transparent via-white/15 to-transparent skew-x-[20deg] group-hover:translate-x-[300%] transition-transform duration-700 ease-in-out" />
+              <div className="absolute inset-0 -ml-16 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-[20deg] group-hover:translate-x-[300%] transition-transform duration-700 ease-in-out" />
               {isLoggedIn ? 'Open Workspace' : 'Start Designing for Free'}
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Link>
             <a
               href="#how-it-works"
-              className="inline-flex items-center gap-2 px-8 py-4 text-base font-medium text-zinc-700 dark:text-gray-300 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-2xl hover:bg-black/10 dark:bg-white/8 hover:text-zinc-900 dark:text-white hover:border-white/20 transition-all duration-200 backdrop-blur-sm"
+              className="inline-flex items-center gap-2 px-8 py-4 text-base font-medium text-slate-700 dark:text-gray-300 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl hover:bg-slate-100 dark:hover:bg-white/10 hover:text-slate-900 dark:hover:text-white transition-all duration-200 shadow-xs"
             >
               See how it works
               <ChevronRight className="w-4 h-4" />
@@ -387,17 +387,19 @@ export default async function LandingPage() {
         </AnimatedSection>
       </section>
 
-      {/* ── Footer ── */}
+      {/* ── Floating Controls ── */}
       <BackToTop />
+      <div className="fixed bottom-6 right-6 z-50">
+        <ThemeToggle />
+      </div>
+
+      {/* ── Footer ── */}
       <footer className="relative z-10 py-10 border-t border-black/10 dark:border-white/5 bg-zinc-50 dark:bg-[#080c10]">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <Link href="/" className="flex items-center gap-2 group">
-              <div className="relative w-8 h-8 flex items-center justify-center">
-                <div className="absolute inset-0 bg-blue-500 rounded-xl transform rotate-45 opacity-20 group-hover:opacity-30 transition-opacity"/>
-                <Cuboid className="w-4 h-4 text-blue-400 relative z-10" />
-              </div>
-              <span className="text-base font-bold tracking-widest text-zinc-900 dark:text-white">VΞXCAD</span>
+              <Logo size={24} />
+              <span className="text-base font-bold tracking-widest text-zinc-900 dark:text-white font-sans">VΞXCAD</span>
             </Link>
             <span className="text-zinc-500 dark:text-gray-400 text-sm">by</span>
             <a href="https://datavex.in/" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400 font-semibold text-sm transition-colors">Datavex.ai</a>

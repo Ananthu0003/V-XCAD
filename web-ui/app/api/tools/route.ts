@@ -3,6 +3,9 @@ import { getTools, createTool } from '@/lib/db/tools';
 import { toolSchema } from '@/lib/validation/toolSchema';
 import { Prisma } from '@prisma/client';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const tools = await getTools();

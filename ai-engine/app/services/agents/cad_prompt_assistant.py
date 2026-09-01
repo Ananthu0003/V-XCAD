@@ -1,4 +1,4 @@
-"""VEXCAD AI Prompt Assistant & Iterative CAD Co-Pilot Agent.
+"""VΞXCAD AI Prompt Assistant & Iterative CAD Assistant Agent.
 
 Performs multimodal visual reasoning comparing reference 2D blueprints with
 live 3D canvas snapshots to identify mechanical discrepancies and construct

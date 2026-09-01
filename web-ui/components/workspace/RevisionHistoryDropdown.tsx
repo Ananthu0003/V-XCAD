@@ -69,19 +69,19 @@ export function RevisionHistoryDropdown({
 	};
 
 	return (
-		<div className="inline-flex items-center rounded-xl border border-white/10 bg-black/40 backdrop-blur-md p-0.5 shadow-sm" ref={dropdownRef}>
+		<div className="inline-flex items-center rounded-xl border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-black/40 backdrop-blur-md p-0.5 shadow-xs" ref={dropdownRef}>
 			{/* Undo Button */}
 			<button
 				type="button"
 				onClick={onUndo}
 				disabled={!canUndo}
-				className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 disabled:opacity-20 disabled:hover:bg-transparent transition-all cursor-pointer"
+				className="flex size-7 items-center justify-center rounded-lg text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-white/10 disabled:opacity-20 disabled:hover:bg-transparent transition-all cursor-pointer"
 				title={canUndo ? `Undo (Ctrl+Z)` : 'No earlier version to undo'}
 			>
 				<RotateCcw className="size-3.5" />
 			</button>
 
-			<div className="w-px h-3.5 bg-white/10 mx-0.5" />
+			<div className="w-px h-3.5 bg-slate-300 dark:bg-white/10 mx-0.5" />
 
 			{/* Revisions Selector */}
 			<div className="relative">
@@ -90,24 +90,24 @@ export function RevisionHistoryDropdown({
 					onClick={() => setIsOpen(!isOpen)}
 					className={`flex h-7 items-center gap-1.5 px-2.5 rounded-lg text-[11px] font-mono font-bold transition-all cursor-pointer ${
 						isOpen
-							? 'bg-cyan-500/20 text-cyan-300'
-							: 'text-cyan-400 hover:text-white hover:bg-white/10'
+							? 'bg-blue-100 dark:bg-cyan-500/20 text-blue-700 dark:text-cyan-300'
+							: 'text-blue-600 dark:text-cyan-400 hover:text-blue-800 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-white/10'
 					}`}
 					title="Browse and restore CAD model revision history"
 				>
-					<History className="size-3 text-cyan-400" />
+					<History className="size-3 text-blue-600 dark:text-cyan-400" />
 					<span>
 						REV {activeRevision ? activeRevision.revisionNumber : 1}/{revisions.length}
 					</span>
-					<ChevronDown className={`size-3 text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+					<ChevronDown className={`size-3 text-slate-500 dark:text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
 				</button>
 
 				{/* Dropdown Menu */}
 				{isOpen && (
-					<div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto rounded-2xl border border-border/80 bg-popover/95 backdrop-blur-2xl shadow-2xl z-50 p-2 space-y-1.5 animate-in fade-in zoom-in-95 duration-150">
-						<div className="px-3 py-2 border-b border-border/60 flex items-center justify-between">
+					<div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto rounded-2xl border border-slate-200 dark:border-border/80 bg-white dark:bg-popover/95 text-slate-900 dark:text-foreground backdrop-blur-2xl shadow-2xl z-50 p-2 space-y-1.5 animate-in fade-in zoom-in-95 duration-150">
+						<div className="px-3 py-2 border-b border-slate-200 dark:border-border/60 flex items-center justify-between">
 							<div className="flex items-center gap-2">
-								<History className="size-4 text-blue-400" />
+								<History className="size-4 text-blue-600 dark:text-blue-400" />
 								<span className="text-xs font-bold text-foreground">CAD Revision History</span>
 							</div>
 							<span className="text-[10px] font-mono text-muted-foreground">

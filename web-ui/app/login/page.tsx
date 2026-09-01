@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Cuboid, Loader2 } from 'lucide-react';
+import { ArrowRight, Loader2 } from 'lucide-react';
+import { Logo } from '@/components/shared/Logo';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -38,42 +39,37 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
-      {/* Background Effects */}
-      <div className="absolute inset-0 z-0">
-        {/* Removed glow */}
-      </div>
+    <div className="min-h-screen bg-slate-100/90 dark:bg-[#070b14] text-foreground flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
+      {/* Ambient Depth Background Glow */}
+      <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.1)_0%,transparent_70%)] pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-md">
-        <div className="flex flex-col items-center mb-10">
-          <Link href="/" className="flex items-center gap-2 group mb-8">
-            <div className="relative w-12 h-12 flex items-center justify-center">
-              <div className="absolute inset-0 bg-blue-500 rounded-xl transform rotate-45 opacity-20 group-hover:opacity-30 transition-opacity"></div>
-              <Cuboid className="w-7 h-7 text-blue-400 relative z-10" />
-            </div>
-            <span className="text-3xl font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-500 dark:from-gray-100 dark:to-gray-500">
+        <div className="flex flex-col items-center mb-8">
+          <Link href="/" className="flex items-center gap-3 group mb-6 hover:opacity-90 transition-opacity">
+            <Logo size={48} showGlow />
+            <span className="text-3xl font-bold tracking-widest text-slate-900 dark:text-white font-sans">
               VΞXCAD
             </span>
           </Link>
           
-          <h1 className="text-2xl font-semibold mb-2">Welcome Back</h1>
-          <p className="text-muted-foreground text-center">Log in to your account to continue designing.</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-1.5">Welcome Back</h1>
+          <p className="text-sm text-slate-500 dark:text-muted-foreground text-center">Log in to your account to continue designing.</p>
         </div>
 
-        <div className="bg-card border border-border rounded-3xl p-8 backdrop-blur-xl shadow-2xl">
-          <form className="space-y-6" onSubmit={handleSubmit}>
+        <div className="bg-white dark:bg-[#0c1222]/90 border border-slate-200/90 dark:border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-xl shadow-slate-200/70 dark:shadow-[0_12px_40px_rgba(0,0,0,0.6)]">
+          <form className="space-y-5" onSubmit={handleSubmit}>
             {error && (
-              <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-xl text-sm">
+              <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/50 text-rose-700 dark:text-rose-400 px-4 py-3 rounded-xl text-sm">
                 {error}
               </div>
             )}
 
             <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Email or Username</label>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-muted-foreground mb-2">Email or Username</label>
               <input 
                 type="text" 
                 placeholder="admin or you@example.com"
-                className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-foreground placeholder:text-muted-foreground"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-[#111a2e] border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-[#111a2e] transition-all text-slate-900 dark:text-foreground placeholder:text-slate-400 dark:placeholder:text-muted-foreground font-medium text-sm"
                 required
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -82,13 +78,13 @@ export default function LoginPage() {
             
             <div>
               <div className="flex justify-between items-center mb-2">
-                <label className="block text-sm font-medium text-muted-foreground">Password</label>
-                <Link href="/forgot-password" className="text-sm text-blue-400 hover:text-blue-300 transition-colors">Forgot?</Link>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-muted-foreground">Password</label>
+                <Link href="/forgot-password" className="text-xs font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400 transition-colors">Forgot?</Link>
               </div>
               <input 
                 type="password" 
                 placeholder="••••••••"
-                className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-foreground placeholder:text-muted-foreground"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-[#111a2e] border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-[#111a2e] transition-all text-slate-900 dark:text-foreground placeholder:text-slate-400 dark:placeholder:text-muted-foreground font-medium text-sm"
                 required
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
@@ -98,7 +94,7 @@ export default function LoginPage() {
             <button 
               type="submit" 
               disabled={loading}
-              className="w-full group relative inline-flex items-center justify-center px-6 py-3.5 text-sm font-bold text-white transition-all duration-200 bg-blue-600 rounded-xl hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 focus:ring-offset-black shadow-[0_0_20px_rgba(37,99,235,0.3)] mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full group relative inline-flex items-center justify-center px-6 py-3.5 text-sm font-bold text-white transition-all duration-200 bg-blue-600 rounded-xl hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 shadow-md shadow-blue-500/25 mt-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />

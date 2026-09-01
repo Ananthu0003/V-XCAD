@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Cuboid, Loader2 } from 'lucide-react';
+import { ArrowRight, Loader2 } from 'lucide-react';
+import { Logo } from '@/components/shared/Logo';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -47,42 +48,37 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
-      {/* Background Effects */}
-      <div className="absolute inset-0 z-0">
-        {/* Removed glow */}
-      </div>
+    <div className="min-h-screen bg-slate-100/90 dark:bg-[#070b14] text-foreground flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans">
+      {/* Ambient Depth Background Glow */}
+      <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.1)_0%,transparent_70%)] pointer-events-none" />
 
-      <div className="relative z-10 w-full max-w-md mt-10 mb-10">
-        <div className="flex flex-col items-center mb-10">
-          <Link href="/" className="flex items-center gap-2 group mb-8">
-            <div className="relative w-12 h-12 flex items-center justify-center">
-              <div className="absolute inset-0 bg-blue-500 rounded-xl transform rotate-45 opacity-20 group-hover:opacity-30 transition-opacity"></div>
-              <Cuboid className="w-7 h-7 text-blue-400 relative z-10" />
-            </div>
-            <span className="text-3xl font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-500 dark:from-gray-100 dark:to-gray-500">
+      <div className="relative z-10 w-full max-w-md my-8">
+        <div className="flex flex-col items-center mb-8">
+          <Link href="/" className="flex items-center gap-3 group mb-6 hover:opacity-90 transition-opacity">
+            <Logo size={48} showGlow />
+            <span className="text-3xl font-bold tracking-widest text-slate-900 dark:text-white font-sans">
               VΞXCAD
             </span>
           </Link>
           
-          <h1 className="text-2xl font-semibold mb-2">Create an Account</h1>
-          <p className="text-muted-foreground text-center">Join VΞXCAD and start designing in intelligent 3D.</p>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-1.5">Create an Account</h1>
+          <p className="text-sm text-slate-500 dark:text-muted-foreground text-center">Join VΞXCAD and start designing in intelligent 3D.</p>
         </div>
 
-        <div className="bg-card border border-border rounded-3xl p-8 backdrop-blur-xl shadow-2xl">
-          <form className="space-y-5" onSubmit={handleSubmit}>
+        <div className="bg-white dark:bg-[#0c1222]/90 border border-slate-200/90 dark:border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-xl shadow-slate-200/70 dark:shadow-[0_12px_40px_rgba(0,0,0,0.6)]">
+          <form className="space-y-4" onSubmit={handleSubmit}>
             {error && (
-              <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-xl text-sm">
+              <div className="bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/50 text-rose-700 dark:text-rose-400 px-4 py-3 rounded-xl text-sm">
                 {error}
               </div>
             )}
             
             <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Full Name</label>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-muted-foreground mb-2">Full Name</label>
               <input 
                 type="text" 
                 placeholder="John Doe"
-                className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-foreground placeholder:text-muted-foreground"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-[#111a2e] border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-[#111a2e] transition-all text-slate-900 dark:text-foreground placeholder:text-slate-400 dark:placeholder:text-muted-foreground font-medium text-sm"
                 required
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -90,11 +86,11 @@ export default function RegisterPage() {
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Email Address</label>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-muted-foreground mb-2">Email Address</label>
               <input 
                 type="email" 
                 placeholder="you@example.com"
-                className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-foreground placeholder:text-muted-foreground"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-[#111a2e] border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-[#111a2e] transition-all text-slate-900 dark:text-foreground placeholder:text-slate-400 dark:placeholder:text-muted-foreground font-medium text-sm"
                 required
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -102,11 +98,11 @@ export default function RegisterPage() {
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Password</label>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-muted-foreground mb-2">Password</label>
               <input 
                 type="password" 
                 placeholder="Create a strong password"
-                className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-foreground placeholder:text-muted-foreground"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-[#111a2e] border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-[#111a2e] transition-all text-slate-900 dark:text-foreground placeholder:text-slate-400 dark:placeholder:text-muted-foreground font-medium text-sm"
                 required
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}

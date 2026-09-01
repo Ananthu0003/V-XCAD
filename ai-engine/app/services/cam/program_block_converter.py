@@ -211,20 +211,26 @@ class ProgramBlockConverter:
             op_id = op.get("id")
             tool_id = op.get("toolId") or op.get("tool_id")
             params = op.get("parameters", {})
-            feed = params.get("feedRate", 1000.0)
-            rpm = params.get("spindleSpeed", 5000.0)
+            feeds = params.get("feeds_and_speeds", {}) or {}
+            feed = params.get("feedRate") or feeds.get("feedrate_mm_min") or 1000.0
+            rpm = params.get("spindleSpeed") or feeds.get("spindle_rpm") or 5000.0
             
             toolpaths = op.get("toolpaths", [])
             
             for i, seg in enumerate(toolpaths):
-                # We expect dict here, assuming pydantic dump
-                seg_type = seg.get("type", "LINEAR")
-                
+                # Canonical move type is `moveType` (lowercase enum set by the
+                # toolpath engine); fall back to `type` for legacy payloads.
+                raw_type = (seg.get("moveType") or seg.get("type") or "cut").lower()
                 sp_dict = seg.get("start", {"x": 0, "y": 0, "z": 0})
                 ep_dict = seg.get("end", {"x": 0, "y": 0, "z": 0})
+
+                is_rapid = raw_type in (
+                    "rapid_clearance", "rapid_xy", "approach_retract", "retract_clearance"
+                )
+                is_drill = raw_type == "drill_cycle"
+                is_arc = raw_type in ("arc_cw", "arc_ccw")
                 
-                # Check for DRILL_CYCLE
-                if seg_type == "DRILL_CYCLE":
+                if is_drill:
                     c_type = seg.get("parameters", {}).get("cycle_type", "G81")
                     p_depth = seg.get("parameters", {}).get("peckDepth", 5.0)
                     
@@ -246,9 +252,7 @@ class ProgramBlockConverter:
                     
                 else:
                     # RAPID, LINEAR, ARC
-                    m_type = "linear"
-                    if seg_type == "RAPID":
-                        m_type = "rapid"
+                    m_type = "rapid" if is_rapid else "linear"
                         
                     mb = MotionBlock(
                         block_id=f"blk_tp_{i}_{uuid.uuid4().hex[:4]}",
@@ -264,8 +268,8 @@ class ProgramBlockConverter:
                     )
                     
                     # Add arc info if applicable
-                    if seg_type in ("ARC_CW", "ARC_CCW"):
-                        mb.motion_type = "arc_cw" if seg_type == "ARC_CW" else "arc_ccw"
+                    if is_arc:
+                        mb.motion_type = "arc_cw" if raw_type == "arc_cw" else "arc_ccw"
                         c_dict = seg.get("center")
                         if c_dict:
                             mb.arc_center = Position(**c_dict)

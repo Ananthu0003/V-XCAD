@@ -26,6 +26,7 @@ from app.models.schemas import (
 from app.services.geometry.csg_parser import CSGParser, export_to_step
 from app.services.llm.llm_codegen import LLMCodegenService
 from app.services.llm.parameter_render import ParameterRenderService
+from app.constants import CYLINDRICAL_STOCK_TYPES
 
 router = APIRouter(tags=["cad"])
 
@@ -1126,11 +1127,48 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
         # Inject stock dimensions from parameters into setup if missing
         setup = request.machine_config.get("setup", {})
         if not setup.get("stockDimensions") and not setup.get("resolvedStock"):
-            params = request.parameters
-            is_lathe = "outer_diameter" in params or "od" in params
-            stock_x = float(params.get("length") or params.get("width") or params.get("outer_diameter") or 0.0)
-            stock_y = float(params.get("width") or params.get("length") or params.get("outer_diameter") or 0.0)
-            stock_h = float(params.get("height") or params.get("overall_length") or params.get("thickness") or 0.0)
+            params = request.parameters or {}
+            
+            def _extract_param_dim(tokens: list[str]) -> float:
+                for k, v in params.items():
+                    if not isinstance(v, (int, float)) or float(v) <= 0:
+                        continue
+                    norm_k = str(k).strip().lower().replace(" ", "_").replace("-", "_")
+                    parts = norm_k.split("_")
+                    for token in tokens:
+                        if token in parts or norm_k.endswith(token) or norm_k == token:
+                            return float(v)
+                return 0.0
+
+            m_type = str(request.machine_config.get("machine_type") or setup.get("machineType", "")).lower()
+            is_lathe_machine = any(t in m_type for t in ("lathe", "turning", "mill_turn", "swiss"))
+
+            dia = _extract_param_dim(["outer_diameter", "outside_diameter", "body_diameter", "diameter", "dia", "od", "radius"])
+            length = _extract_param_dim(["total_length", "overall_length", "part_length", "body_length", "length", "len", "height"])
+            width = _extract_param_dim(["width", "w"])
+            height = _extract_param_dim(["height", "thickness", "h", "depth"])
+
+            is_cyl = is_lathe_machine or (dia > 0 and width <= 0) or "cylinder" in str(setup.get("stockType", "")).lower()
+
+            if is_cyl and dia > 0 and length > 0:
+                stock_x = dia
+                stock_y = dia
+                stock_h = length
+                setup["stockType"] = "cylinder"
+            elif width > 0 and length > 0:
+                stock_x = width
+                stock_y = length
+                stock_h = height if height > 0 else (dia if dia > 0 else 10.0)
+            elif dia > 0 and (length > 0 or height > 0):
+                stock_x = dia
+                stock_y = dia
+                stock_h = length if length > 0 else height
+                setup["stockType"] = "cylinder"
+            else:
+                stock_x = float(params.get("length") or params.get("width") or params.get("outer_diameter") or 0.0)
+                stock_y = float(params.get("width") or params.get("length") or params.get("outer_diameter") or 0.0)
+                stock_h = float(params.get("height") or params.get("overall_length") or params.get("thickness") or 0.0)
+
             if not (stock_x > 0.0 and stock_y > 0.0 and stock_h > 0.0):
                 raise HTTPException(
                     status_code=422,
@@ -1147,13 +1185,36 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
                     },
                 )
             setup["stockDimensions"] = [stock_x, stock_y, stock_h]
-            if is_lathe:
+            if is_cyl or is_lathe_machine:
                 setup["stockType"] = "cylinder"
         
         # Ensure resolvedStock with bounds exists to pass PlanningContext validation
+        def _normalize_stock_dims(raw_dims, stock_type_str, axis="z"):
+            """Return a 3-element bounding-box representation of stock dimensions.
+
+            Cylindrical stock may be supplied as [diameter, length] (2 elements);
+            expand it so the length sits on the chosen axial axis and the diameter
+            fills the two radial axes, keeping downstream (X, Y, Z) consumers
+            consistent regardless of orientation.
+            """
+            dims = [float(v) for v in raw_dims]
+            if str(stock_type_str).lower() in CYLINDRICAL_STOCK_TYPES and len(dims) == 2:
+                dia, length = dims[0], dims[1]
+                if axis == "x":
+                    dims = [length, dia, dia]
+                elif axis == "y":
+                    dims = [dia, length, dia]
+                else:
+                    dims = [dia, dia, length]
+            return dims
+
+        stock_type_str = setup.get("stockType", "box")
+        stock_axis = str(setup.get("stockAxis") or setup.get("axis") or "z").lower()
+        if stock_axis not in ("x", "y", "z"):
+            stock_axis = "z"
         if not setup.get("resolvedStock"):
             sd = setup.get("stockDimensions")
-            if not sd or len(sd) < 3 or any(float(v) <= 0.0 for v in sd):
+            if not sd or len(sd) < 2 or any(float(v) <= 0.0 for v in sd):
                 raise HTTPException(
                     status_code=422,
                     detail={
@@ -1163,9 +1224,11 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
                         }
                     },
                 )
-            sx, sy, sz = float(sd[0]), float(sd[1]), float(sd[2])
+            sd = _normalize_stock_dims(sd, stock_type_str, stock_axis)
+            setup["stockDimensions"] = sd
+            sx, sy, sz = sd
             setup["resolvedStock"] = {
-                "type": setup.get("stockType", "box"),
+                "type": stock_type_str,
                 "bounds": {
                     "min": [-sx/2, -sy/2, -sz],
                     "max": [sx/2, sy/2, 0.0]
@@ -1175,7 +1238,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             request.machine_config["setup"] = setup
         elif "bounds" not in setup["resolvedStock"]:
             sd = setup.get("stockDimensions")
-            if not sd or len(sd) < 3 or any(float(v) <= 0.0 for v in sd):
+            if not sd or len(sd) < 2 or any(float(v) <= 0.0 for v in sd):
                 raise HTTPException(
                     status_code=422,
                     detail={
@@ -1185,7 +1248,9 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
                         }
                     },
                 )
-            sx, sy, sz = float(sd[0]), float(sd[1]), float(sd[2])
+            sd = _normalize_stock_dims(sd, stock_type_str, stock_axis)
+            setup["stockDimensions"] = sd
+            sx, sy, sz = sd
             setup["resolvedStock"]["bounds"] = {
                 "min": [-sx/2, -sy/2, -sz],
                 "max": [sx/2, sy/2, 0.0]
@@ -1253,18 +1318,48 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
         
         flat_paths = []
         for op in operations:
+            # Blocked / unsupported / error operations have no tool and no geometry —
+            # never attempt parametric toolpath generation for them (it would raise
+            # "Tool diameter is missing or invalid"). Mark them and continue.
+            op_status = str(op.get("status", "") or "").lower()
+            if op_status in ("blocked", "unsupported", "error"):
+                op.setdefault("parameters", {})
+                op["toolpaths"] = []
+                op["status"] = op.get("status") or "blocked"
+                continue
+
             if op.get("toolpaths"):
                 paths = op["toolpaths"]
             else:
                 fid = op.get("feature_id")
                 feat = next((f for f in features if f.get("id") == fid), {})
-                paths, validation_result = engine.generate_toolpath(op, feat, request.machine_config, planning_context)
-                op["toolpaths"] = paths
-                if not validation_result.get("valid", True):
-                    op["validation_errors"] = validation_result.get("errors", [])
+                # Ensure the operation carries a tool dict the engine can read.
+                tool_ref = op.get("tool") or op.get("selected_tool")
+                if tool_ref and "diameter" not in tool_ref:
+                    tool_ref = None
+                if not tool_ref:
+                    t_id = op.get("tool_id") or op.get("toolId")
+                    if t_id and tools:
+                        tool_map = {t.get("tool_id") or t.get("id"): t for t in tools if isinstance(t, dict)}
+                        if t_id in tool_map:
+                            tool_ref = tool_map[t_id]
+                            op["tool"] = tool_ref
+                if not tool_ref:
+                    op.setdefault("parameters", {})
+                    op["parameters"]["error"] = "Tool diameter is missing or invalid; cannot generate parametric toolpath"
+                    op["toolpaths"] = []
                     op["status"] = "blocked"
+                    continue
+                paths, validation_result = engine.generate_toolpath(op, feat, request.machine_config, planning_context)
+                is_valid = validation_result.get("valid", True) and len(paths) > 0
+                op["status"] = "generated" if is_valid else "blocked"
+                if not is_valid:
+                    op["validation_errors"] = validation_result.get("errors", []) or ["Operation has no toolpath segments to generate."]
+                    if not op.get("parameters"):
+                        op["parameters"] = {}
+                    op["parameters"]["errorReason"] = op["validation_errors"][0]
                     with open("debug_validation_errors.txt", "a") as f:
-                        f.write(f"Operation {op.get('id')} blocked. Errors: {validation_result.get('errors')}\n")
+                        f.write(f"Operation {op.get('id')} blocked. Errors: {op['validation_errors']}\n")
                 
             try:
                 for p in paths:
@@ -1289,6 +1384,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
                 
             op["status"] = op.get("status") or "generated"
             op["toolpath_schema_version"] = "semantic_v1"
+            op["toolpaths"] = paths
             flat_paths.extend(paths)
             
         # Re-estimate total setup time
@@ -1390,6 +1486,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             "setup_metadata": result.get("setup_metadata", {}),
             "tools": tools,
             "operations": operations,
+            "toolpaths": flat_paths,
             "planned_cycle_time_seconds": result.get("planned_cycle_time_seconds", 0),
             "stats": result.get("stats", {})
         }
@@ -1416,24 +1513,10 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
         from app.services.cam.brep_feature_extractor import BRepFeatureExtractor
         
         # Build feature map — prioritize frontend-sent features (which already
-        # contain B-Rep-corrected centers from the /cam/analyze step).
         feature_map = {}
         
-        # 1. Primary source: features sent by the frontend (already B-Rep corrected)
-        raw_features = (
-            request.features
-            or request.parameters.get("camFeatures") 
-            or request.parameters.get("features") 
-            or request.parameters.get("cam_features") 
-            or []
-        )
-        if isinstance(raw_features, list):
-            for f in raw_features:
-                if isinstance(f, dict) and f.get("id"):
-                    feature_map[f["id"]] = f
-        
-        # 2. Fallback: if no frontend features, re-extract with B-Rep data
-        if not feature_map:
+        # 1. Primary source: Fresh parametric extraction from blueprint parameters & STEP B-Rep
+        if request.parameters:
             outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
             step_path = outputs_dir / f"cad_{request.session_id}.step"
             
@@ -1445,6 +1528,19 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
             extractor = ParametricFeatureExtractor()
             features = extractor.extract(request.parameters, setup=request.setup, brep_data=brep_data)
             feature_map = {f.get("id"): f for f in features if isinstance(f, dict) and f.get("id")}
+
+        # 2. Merge with any extra features sent by the frontend
+        raw_features = (
+            request.features
+            or request.parameters.get("camFeatures") 
+            or request.parameters.get("features") 
+            or request.parameters.get("cam_features") 
+            or []
+        )
+        if isinstance(raw_features, list):
+            for f in raw_features:
+                if isinstance(f, dict) and f.get("id") and f["id"] not in feature_map:
+                    feature_map[f["id"]] = f
         
         from app.services.cam.cycle_time_estimator import CycleTimeEstimator
         from app.models.schemas import ToolpathSegment
@@ -1476,7 +1572,17 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
             if op["safe_heights"].get("top") is None:
                 op["safe_heights"]["top"] = 0.0
             if op["safe_heights"].get("bottom") is None:
-                op["safe_heights"]["bottom"] = -abs(float(feature.get("depth", 10.0)))
+                feat_dims = feature.get("dimensions", {}) if isinstance(feature, dict) else {}
+                feat_d = float(
+                    feature.get("depth")
+                    or feat_dims.get("depth")
+                    or feat_dims.get("length")
+                    or feat_dims.get("height")
+                    or feature.get("height")
+                    or feature.get("length")
+                    or 10.0
+                )
+                op["safe_heights"]["bottom"] = -abs(feat_d)
 
             # Generate the paths directly from parametric math
             setup_id = op.get("setup_id") or op.get("setupId") or (request.setup.get("setupId") if isinstance(request.setup, dict) else None)
@@ -1492,23 +1598,27 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
             if setup_id:
                 for p in paths:
                     p["setupId"] = setup_id
+            is_valid = validation_result.get("valid", True) and len(paths) > 0
+            op["status"] = "generated" if is_valid else "blocked"
             op["toolpaths"] = paths
-            op["status"] = "generated" if validation_result.get("valid", True) else "blocked"
-            if not validation_result.get("valid", True):
-                op["validation_errors"] = validation_result.get("errors", [])
+            if not is_valid:
+                op["validation_errors"] = validation_result.get("errors", []) or ["Operation has no toolpath segments to generate."]
                 if not op.get("parameters"):
                     op["parameters"] = {}
-                op["parameters"]["errorReason"] = validation_result["errors"][0] if validation_result.get("errors") else "Toolpath generation failed."
+                op["parameters"]["errorReason"] = op["validation_errors"][0]
             op["toolpath_schema_version"] = "semantic_v1"
             try:
-                # Add toolpaths to operation so it's fully populated
-                path_segs = [ToolpathSegment(**p) for p in paths]
-                op_time = CycleTimeEstimator.estimate_operation_time(path_segs, machine)
-                op["estimated_time_s"] = op_time.total_seconds
-                op["estimated_breakdown"] = op_time.model_dump()
-                total_cycle_time += op_time.total_seconds
-            except Exception:
-                pass
+                feat_id = op.get("feature_id") or op.get("featureId")
+                feat = feature_map.get(feat_id, {})
+                setup_dict = request.setup if isinstance(request.setup, dict) else {}
+                breakdown = CycleTimeEstimator.estimate_operation_time_parametric(op, feat, setup_dict, machine)
+                op["estimated_time_s"] = breakdown.total_seconds
+                op["estimated_breakdown"] = breakdown.model_dump()
+                total_cycle_time += float(breakdown.total_seconds)
+            except Exception as e:
+                print(f"Error computing op cycle time: {e}")
+                if "estimated_time_s" not in op:
+                    op["estimated_time_s"] = 0.0
                 
             flat_paths.extend(paths)
             
@@ -1565,13 +1675,26 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
         result["toolpath_schema_version"] = "semantic_v1"
         
         try:
-            from app.models.machine_profiles import get_machine_profile_by_id
-            machine = get_machine_profile_by_id(request.setup.get("machineProfileId")) if isinstance(request.setup, dict) else None
+            from app.models.manufacturing import MachineProfile
+            setup_dict = request.setup if isinstance(request.setup, dict) else {}
+            m_id = setup_dict.get("machineProfile") or setup_dict.get("machine") or setup_dict.get("machine_id") or "m1"
+            m_type = setup_dict.get("machineType") or setup_dict.get("machine_type") or "3_axis_mill"
+            machine_profile = MachineProfile(
+                machine_id=m_id,
+                machine_name=str(setup_dict.get("machineName") or "Selected Machine"),
+                machine_type=m_type,
+                axis_count=5 if "5X" in str(m_type) or "5_axis" in str(m_type) else (4 if "4X" in str(m_type) or "4_axis" in str(m_type) else 3),
+                rapid_feedrate=float(setup_dict.get("rapid_feedrate", 5000.0)),
+                tool_change_time=float(setup_dict.get("tool_change_time", 15.0))
+            )
+            feature_map = {}
+            if hasattr(request, "features") and request.features:
+                feature_map = {f.get("id"): f for f in request.features}
             setup_time_details = CycleTimeEstimator.estimate_setup_time(
                 operations, 
-                machine, 
-                features_dict={}, 
-                setup=request.setup if isinstance(request.setup, dict) else {}
+                machine_profile, 
+                features_dict=feature_map, 
+                setup=setup_dict
             )
             result["setup_time_details"] = setup_time_details
             if setup_time_details.get("total_setup_time_seconds"):
@@ -1648,7 +1771,11 @@ async def cam_generate_gcode(request: CamGCodeRequest):
                 pass
                 
     if request.setup_id:
-        operations = [op for op in operations if op.get("setup_id") == request.setup_id or op.get("setupId") == request.setup_id]
+        req_norm = request.setup_id.strip().lower().replace("-", "_")
+        operations = [
+            op for op in operations 
+            if (str(op.get("setup_id") or op.get("setupId") or "")).strip().lower().replace("-", "_") == req_norm
+        ]
         
     if request.selected_operation_ids is not None:
         operations = [op for op in operations if op.get("id") in request.selected_operation_ids]
@@ -1688,7 +1815,17 @@ async def cam_generate_gcode(request: CamGCodeRequest):
     
     machine_type = engine_setup.get("machineType", "MILL_3X_VMC")
     machine_profile = engine_setup.get("machineProfile", "haas_vf2")
-    controller = engine_setup.get("controller", "FANUC_0I_MF")
+    controller = engine_setup.get("controller")
+    if not controller:
+        from app.services.cam.profile_loader import ProfileLoader
+        p_loader = ProfileLoader()
+        m_entry = p_loader.get_machine_matrix_entry(machine_profile)
+        if m_entry and m_entry.get("defaultController"):
+            controller = m_entry["defaultController"]
+        elif "haas" in str(machine_profile).lower():
+            controller = "HAAS_NGC"
+        else:
+            controller = "FANUC_0I_MF"
     post_processor_req = engine_setup.get("postProcessor", "AUTO")
     
     is_valid, err_msg, resolved_post = validate_full_setup(machine_type, machine_profile, controller, post_processor_req)
@@ -1754,8 +1891,8 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         tool = tools_by_id.get(tool_id, {})
         op["tool"] = tool
         
-        # Skip operations that are blocked or unsupported in this setup
-        if op.get("status") in ("unsupported", "blocked"):
+        # Skip operations that are blocked, unsupported, or have no toolpath segments in this setup
+        if op.get("status") in ("unsupported", "blocked") or not op["toolpaths"]:
             continue
             
         # 1. Capability Validation
@@ -2014,7 +2151,7 @@ async def recommend_machine(req: MachineRecommendationRequest) -> Dict[str, Any]
 @router.post("/assistant/compare-and-prompt", response_model=CADPromptAssistantResponse)
 async def assistant_compare_and_prompt(req: CADPromptAssistantRequest):
     """
-    Multimodal CAD Prompt Co-Pilot: Compares reference 2D blueprint with live 3D canvas snapshot,
+    Multimodal CAD Prompt Assistant: Compares reference 2D blueprint with live 3D canvas snapshot,
     pinpoints geometric discrepancies, and constructs precision build123d prompts.
     """
     try:

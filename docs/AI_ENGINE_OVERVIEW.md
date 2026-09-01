@@ -1,8 +1,8 @@
-# CAD Copilot AI Engine - Complete Overview
+# VΞXCAD AI Engine - Complete Overview
 
 ## Executive Summary
 
-The CAD Copilot AI Engine is a Python backend service that converts engineering drawings (PDF/images) into precise 3D CAD models using Google's Gemini AI and the build123d library.
+The VΞXCAD AI Engine is a Python backend service that converts engineering drawings (PDF/images) into precise 3D CAD models using Google's Gemini AI and the build123d library.
 
 ### Core Capabilities
 

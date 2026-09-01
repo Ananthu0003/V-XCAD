@@ -33,19 +33,34 @@ class BasePostProcessor:
         self.current_tool_num = None
         self.current_rpm = None
         
-        post_units = (setup_plan or {}).get("postOutputUnits", "mm")
+        active_plan = dict(setup_plan) if isinstance(setup_plan, dict) else {}
+        if operations and operations[0].get("wcs"):
+            active_plan["workCoordinateSystem"] = operations[0]["wcs"]
+            active_plan["wcs"] = operations[0]["wcs"]
+            
+        post_units = active_plan.get("postOutputUnits", "mm")
         self.converter = PostUnitConverter(post_units)
+        self._job_bounds = self._compute_job_bounds(operations)
         
-        self.program_start(setup_plan)
+        self.program_start(active_plan)
         
         current_setup_id = None
+        emitted_wcs = active_plan.get("workCoordinateSystem", active_plan.get("wcs", "G54"))
         
         for op in operations:
-            # --- Setup Change Detection ---
+            # --- Setup / WCS Change Detection ---
             op_setup_id = op.get('setup_id')
+            op_wcs = op.get('wcs')
             if op_setup_id and current_setup_id and op_setup_id != current_setup_id:
                 # A new setup is starting — emit safe retract, operator stop, and new WCS
                 self._emit_setup_change(op, setup_plan)
+                if op_wcs:
+                    emitted_wcs = op_wcs
+            elif op_wcs and op_wcs != emitted_wcs and current_setup_id is None:
+                # First operation is on a different WCS than the program header;
+                # emit the correct WCS without a retract/M00.
+                self.output.append(op_wcs)
+                emitted_wcs = op_wcs
             if op_setup_id:
                 current_setup_id = op_setup_id
             
@@ -138,8 +153,42 @@ class BasePostProcessor:
     def linear(self, x: float = None, y: float = None, z: float = None, a: float = None, b: float = None, c: float = None, feed: float = None):
         pass
         
+    def arc(self, cw: bool, x: float = None, y: float = None, z: float = None,
+            i: float = None, j: float = None, k: float = None, r: float = None,
+            a: float = None, b: float = None, c: float = None, feed: float = None):
+        """
+        Circular/helical interpolation. Defaults to a linear chord when no arc
+        center/radius is supplied so geometry is never dropped. Subclasses
+        (e.g. FanucPostProcessor) override this to emit G2/G3 with I/J/K/R.
+        """
+        self.linear(x=x, y=y, z=z, a=a, b=b, c=c, feed=feed)
+
     def drilling_cycle(self, x: float, y: float, z: float, r: float, feed: float, clearance: float = 15.0):
         pass
+
+    def _compute_job_bounds(self, operations: List[Dict[str, Any]]):
+        """Derives the bounding box of all toolpath endpoints to drive
+        stock-aware output (e.g. Heidenhain BLK FORM) instead of hardcoded values."""
+        mins = [None, None, None]
+        maxs = [None, None, None]
+        for op in operations or []:
+            for seg in op.get('toolpaths', []) or []:
+                if not isinstance(seg, dict):
+                    continue
+                pt = seg.get('end') or seg.get('start')
+                if not isinstance(pt, dict):
+                    continue
+                for idx, key in enumerate(('x', 'y', 'z')):
+                    v = pt.get(key)
+                    if v is None:
+                        continue
+                    if mins[idx] is None or v < mins[idx]:
+                        mins[idx] = v
+                    if maxs[idx] is None or v > maxs[idx]:
+                        maxs[idx] = v
+        if mins[0] is None:
+            return None
+        return tuple(mins + maxs)
         
     def peck_drilling_cycle(self, x: float, y: float, z: float, r: float, q: float, feed: float, clearance: float = 15.0):
         pass
@@ -210,6 +259,10 @@ class BasePostProcessor:
         if self.current_rpm != rpm:
             self.start_spindle(rpm)
             self.current_rpm = rpm
+
+        # Spindle rotation direction (cw=clockwise/M03, ccw=counter-clockwise/M04)
+        # is operation-defined and must not be hardcoded to a single direction.
+        self._spindle_direction = op.get('parameters', {}).get('spindle_direction', 'cw')
 
         offset_num = tool.get('length_offset_number', tool_num)
         safe_heights = op.get('safe_heights', {})
@@ -295,21 +348,33 @@ class BasePostProcessor:
             elif move_type == 'plunge':
                 if x is not None and y is not None:
                     self.ensure_xy(x, y)
-                self.linear(z=z, a=a, b=b, c=c, feed=feed_plunge)
-                current_z = z if z is not None else current_z
-                
+                plunge_feed = seg.get('feedrate') or feed_plunge
+                self.linear(z=z, a=a, b=b, c=c, feed=plunge_feed)
+                self.current_z = z if z is not None else self.current_z
+
             elif move_type in ['cut', 'arc_cw', 'arc_ccw']:
-                # G2/G3 are not modeled in base linear method perfectly, 
-                # but for now we fallback to linear as standard if arcs are not implemented in generator,
-                # or use a specialized method if it existed.
-                # Assuming `self.linear` works as the basic cut endpoint:
                 role = seg.get('segmentRole')
-                actual_feed = feed_cut
-                if role in ['lead_in', 'lead_out']:
+                # Prefer per-segment feedrate if set, fallback to operation default
+                seg_feed = seg.get('feedrate')
+                if seg_feed and seg_feed > 0:
+                    actual_feed = seg_feed
+                elif role in ['lead_in', 'lead_out']:
                     actual_feed = op.get('parameters', {}).get('feed_lead', feed_cut * 0.5)
-                    
-                self.linear(x=x, y=y, z=z, a=a, b=b, c=c, feed=actual_feed)
-                current_z = z if z is not None else current_z
+                else:
+                    actual_feed = feed_cut
+
+                if move_type in ['arc_cw', 'arc_ccw']:
+                    # Emit a true circular interpolation move (G2/G3) when arc
+                    # center/radius data is present; otherwise fall back to a
+                    # linear chord so the geometry is never silently dropped.
+                    self.arc(
+                        cw=(move_type == 'arc_cw'),
+                        x=x, y=y, z=z, a=a, b=b, c=c, feed=actual_feed,
+                        i=seg.get('i'), j=seg.get('j'), k=seg.get('k'), r=seg.get('radius'),
+                    )
+                else:
+                    self.linear(x=x, y=y, z=z, a=a, b=b, c=c, feed=actual_feed)
+                self.current_z = z if z is not None else self.current_z
 
         if is_tcpc:
             self.tcpc_off()
@@ -325,8 +390,9 @@ class FanucPostProcessor(BasePostProcessor):
     """Standard ISO/Fanuc compatible G-Code output."""
     def program_start(self, setup_plan: Dict[str, Any] = None):
         unit_gcode = "G20" if self.converter.is_inch else "G21"
+        program_number = (setup_plan or {}).get("programNumber") or (setup_plan or {}).get("program_number") or "O1001"
         self.output.append("%")
-        self.output.append("O1001 (VEXCAD GENERATED)")
+        self.output.append(f"{program_number} (VEXCAD GENERATED)")
         self.output.append(f"{unit_gcode} G90 G17 G40 G49 G80")
         wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
         self.output.append(wcs)
@@ -349,7 +415,9 @@ class FanucPostProcessor(BasePostProcessor):
         self.output.append(f"T{tool_num} M06")
         
     def start_spindle(self, rpm: int):
-        self.output.append(f"S{rpm} M03")
+        direction = getattr(self, '_spindle_direction', 'cw')
+        mcode = "M04" if direction == "ccw" else "M03"
+        self.output.append(f"S{rpm} {mcode}")
         
     def spindle_stop(self):
         self.output.append("M05")
@@ -365,7 +433,7 @@ class FanucPostProcessor(BasePostProcessor):
             self.coolant_active = False
         
     def apply_tool_length_offset(self, offset_num: int, safe_z: float):
-        self.output.append(f"G0 G43 H{offset_num} Z{safe_z:.3f}")
+        self.output.append(f"G0 G43 H{offset_num} Z{self._fmt(safe_z)}")
         self.current_z = safe_z
         
     def tcpc_on(self):
@@ -430,6 +498,37 @@ class FanucPostProcessor(BasePostProcessor):
         if feed is not None: cmd += f" F{self.converter.format_feed(feed)}"
         if cmd != "G1":
             self.output.append(cmd)
+
+    def arc(self, cw: bool, x: float = None, y: float = None, z: float = None,
+            i: float = None, j: float = None, k: float = None, r: float = None,
+            a: float = None, b: float = None, c: float = None, feed: float = None):
+        # Without center/radius info we cannot synthesize a valid G2/G3, so we
+        # fall back to a linear chord rather than emitting an incomplete arc.
+        if r is None and i is None and j is None and k is None:
+            self.linear(x=x, y=y, z=z, a=a, b=b, c=c, feed=feed)
+            return
+
+        cmd = "G2" if cw else "G3"
+        if x is not None:
+            cmd += f" X{self._fmt(x)}"
+            self.current_x = x
+        if y is not None:
+            cmd += f" Y{self._fmt(y)}"
+            self.current_y = y
+        if z is not None:
+            cmd += f" Z{self._fmt(z)}"
+            self.current_z = z
+        if r is not None:
+            cmd += f" R{self._fmt(r)}"
+        else:
+            if i is not None: cmd += f" I{self._fmt(i)}"
+            if j is not None: cmd += f" J{self._fmt(j)}"
+            if k is not None: cmd += f" K{self._fmt(k)}"
+        if a is not None: cmd += f" A{a:.3f}"
+        if b is not None: cmd += f" B{b:.3f}"
+        if c is not None: cmd += f" C{c:.3f}"
+        if feed is not None: cmd += f" F{self.converter.format_feed(feed)}"
+        self.output.append(cmd)
             
     def safe_tool_retract(self):
         self.coolant_off()
@@ -455,8 +554,9 @@ class SiemensPostProcessor(FanucPostProcessor):
     """Siemens SINUMERIK compatible G-Code output."""
     def program_start(self, setup_plan: Dict[str, Any] = None):
         unit_gcode = "G70" if self.converter.is_inch else "G71"
+        program_number = (setup_plan or {}).get("programNumber") or (setup_plan or {}).get("program_number") or "O1001"
         self.output.append("%")
-        self.output.append("; VEXCAD GENERATED - SIEMENS 840D/828D")
+        self.output.append(f"; {program_number} VEXCAD GENERATED - SIEMENS 840D/828D")
         self.output.append(f"{unit_gcode} G90 G17 G40")
         wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
         self.output.append(wcs)
@@ -467,8 +567,14 @@ class SiemensPostProcessor(FanucPostProcessor):
         self.output.append("SUPA G0 Z0 D0")
         self.output.append("M30")
         
+    def start_spindle(self, rpm: int):
+        direction = getattr(self, '_spindle_direction', 'cw')
+        mcode = "M04" if direction == "ccw" else "M03"
+        self.output.append(f"S{rpm} {mcode}")
+
     def apply_tool_length_offset(self, offset_num: int, safe_z: float):
-        self.output.append(f"G0 Z{safe_z:.3f} D1")
+        # Siemens uses the D-word (length offset number), not a hardcoded D1.
+        self.output.append(f"G0 Z{self._fmt(safe_z)} D{offset_num}")
         self.current_z = safe_z
         
     def tcpc_on(self):
@@ -488,12 +594,27 @@ class SiemensPostProcessor(FanucPostProcessor):
         self.spindle_stop()
         self.output.append("SUPA G0 Z0 D0")
 
+    def drilling_cycle(self, x: float, y: float, z: float, r: float, feed: float, clearance: float = 15.0):
+        # Siemens does not use Fanuc G81; emit the native CYCLE81 call.
+        self.ensure_safe_z(r)
+        self.ensure_xy(x, y)
+        self.output.append(f"F{self.converter.format_feed(feed)}")
+        self.output.append(f"CYCLE81({self._fmt(r)},0.0,0.0,{self._fmt(z)},0.0,0.0)")
+
+    def peck_drilling_cycle(self, x: float, y: float, z: float, r: float, q: float, feed: float, clearance: float = 15.0):
+        # Siemens peck drilling uses CYCLE83 (RTP,RFP,SDIS,DP,DPR,FDEP,FDPR,DAM,DTB,...)
+        self.ensure_safe_z(r)
+        self.ensure_xy(x, y)
+        self.output.append(f"F{self.converter.format_feed(feed)}")
+        self.output.append(f"CYCLE83({self._fmt(r)},0.0,0.0,{self._fmt(z)},0.0,0.0,{self._fmt(q)},0.0,0.0,1.0,1.0,1)")
+
 class HaasPostProcessor(FanucPostProcessor):
     """Haas-specific dialect."""
     def program_start(self, setup_plan: Dict[str, Any] = None):
         unit_gcode = "G20" if self.converter.is_inch else "G21"
+        program_number = (setup_plan or {}).get("programNumber") or (setup_plan or {}).get("program_number") or "O1001"
         self.output.append("%")
-        self.output.append("O1001 (HAAS VEXCAD GENERATED)")
+        self.output.append(f"{program_number} (HAAS VEXCAD GENERATED)")
         self.output.append(f"{unit_gcode} G90 G17 G40 G49 G80")
         wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
         self.output.append(wcs)
@@ -502,8 +623,9 @@ class HeidenhainISOPostProcessor(FanucPostProcessor):
     """Heidenhain ISO compatible G-Code output."""
     def program_start(self, setup_plan: Dict[str, Any] = None):
         unit_gcode = "G20" if self.converter.is_inch else "G21"
+        program_number = (setup_plan or {}).get("programNumber") or (setup_plan or {}).get("program_number") or "O1001"
         self.output.append("%")
-        self.output.append("O1001 (HEIDENHAIN ISO VEXCAD GENERATED)")
+        self.output.append(f"{program_number} (HEIDENHAIN ISO VEXCAD GENERATED)")
         self.output.append(f"{unit_gcode} G90 G17 G40 G49 G80")
         wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
         self.output.append(wcs)
@@ -513,18 +635,44 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
     def format_comment(self, text: str) -> str:
         return f"; {text}"
 
+    def _kfmt(self, val: float) -> str:
+        """Klartext length formatter: positive values prefixed with '+',
+        negatives shown with their sign, routed through the unit converter."""
+        c = self.converter.convert_length(val)
+        if c is None:
+            return "0.000"
+        return f"+{c:.3f}" if c >= 0 else f"{c:.3f}"
+
+    def _kfeed(self, feed: float) -> str:
+        f = self.converter.convert_feed(feed)
+        if f is None:
+            return ""
+        return f"{f:.0f}"
+
     def program_start(self, setup_plan: Dict[str, Any] = None):
         unit_str = "INCH" if self.converter.is_inch else "MM"
-        self.output.append(f"BEGIN PGM 1001 {unit_str}")
+        raw_pn = (setup_plan or {}).get("programNumber") or (setup_plan or {}).get("program_number") or "1001"
+        program_number = str(raw_pn).lstrip("Oo")
+        self.output.append(f"BEGIN PGM {program_number} {unit_str}")
         self.output.append("; VEXCAD GENERATED KLARTEXT")
         self.output.append("; SETUP NOTE:")
         self.output.append("; Z0 = STOCK TOP")
         self.output.append("; XY ZERO = SETUP ORIGIN FROM VEXCAD")
         self.output.append("; OPERATOR MUST CONFIRM ACTIVE HEIDENHAIN PRESET BEFORE RUNNING")
-        
-        # Klartext requires scaling the BLK FORM directly if it's dynamic, but for now we hardcode generic block format unless derived from stock
-        self.output.append("BLK FORM 0.1 Z X-100 Y-100 Z-50")
-        self.output.append("BLK FORM 0.2 X+100 Y+100 Z+0")
+
+        # BLK FORM must reflect the actual job envelope, not a hardcoded box.
+        bounds = getattr(self, '_job_bounds', None)
+        if bounds:
+            minx, miny, minz, maxx, maxy, maxz = bounds
+            margin = 5.0
+            self.output.append(
+                f"BLK FORM 0.1 Z X{self._kfmt(minx - margin)} Y{self._kfmt(miny - margin)} Z{self._kfmt(minz - margin)}"
+            )
+            self.output.append(
+                f"BLK FORM 0.2 X+{self.converter.convert_length(maxx + margin):.3f} "
+                f"Y+{self.converter.convert_length(maxy + margin):.3f} "
+                f"Z+{self.converter.convert_length(maxz + margin):.3f}"
+            )
         
     def program_end(self, setup_plan: Dict[str, Any] = None):
         self.coolant_off()
@@ -541,12 +689,14 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
         self.output.append(f"TOOL CALL {tool_num} Z")
         
     def start_spindle(self, rpm: int):
+        direction = getattr(self, '_spindle_direction', 'cw')
+        mcode = "M4" if direction == "ccw" else "M3"
         last_line = self.output[-1] if self.output else ""
         if last_line.startswith("TOOL CALL ") and " S" not in last_line:
             self.output[-1] = f"{last_line} S{rpm}"
         else:
             self.output.append(f"TOOL CALL Z S{rpm}")
-        self.output.append("M3")
+        self.output.append(mcode)
         
     def spindle_stop(self):
         self.output.append("M5")
@@ -562,7 +712,7 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
             self.coolant_active = False
         
     def apply_tool_length_offset(self, offset_num: int, safe_z: float):
-        self.output.append(f"L Z+{safe_z:.3f} R0 FMAX")
+        self.output.append(f"L Z{self._kfmt(safe_z)} R0 FMAX")
         self.current_z = safe_z
         
     def tcpc_on(self):
@@ -580,16 +730,16 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
     def rapid(self, x: float = None, y: float = None, z: float = None, a: float = None, b: float = None, c: float = None):
         cmd = "L"
         changed = False
-        if x is not None and (self.current_x is None or round(x, 3) != round(self.current_x, 3)):
-            cmd += f" X+{x:.3f}" if x >= 0 else f" X{x:.3f}"
+        if x is not None and (self.current_x is None or round(self.converter.convert_length(x) or 0.0, 3) != round(self.converter.convert_length(self.current_x) or 0.0, 3)):
+            cmd += f" X{self._kfmt(x)}"
             self.current_x = x
             changed = True
-        if y is not None and (self.current_y is None or round(y, 3) != round(self.current_y, 3)):
-            cmd += f" Y+{y:.3f}" if y >= 0 else f" Y{y:.3f}"
+        if y is not None and (self.current_y is None or round(self.converter.convert_length(y) or 0.0, 3) != round(self.converter.convert_length(self.current_y) or 0.0, 3)):
+            cmd += f" Y{self._kfmt(y)}"
             self.current_y = y
             changed = True
-        if z is not None and (self.current_z is None or round(z, 3) != round(self.current_z, 3)):
-            cmd += f" Z+{z:.3f}" if z >= 0 else f" Z{z:.3f}"
+        if z is not None and (self.current_z is None or round(self.converter.convert_length(z) or 0.0, 3) != round(self.converter.convert_length(self.current_z) or 0.0, 3)):
+            cmd += f" Z{self._kfmt(z)}"
             self.current_z = z
             changed = True
         if a is not None and (self.current_a is None or round(a, 3) != round(self.current_a, 3)):
@@ -606,25 +756,23 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
             changed = True
             
         if changed or getattr(self, 'current_feed', None) != "MAX":
-            if cmd == "L":
-                pass
             cmd += " R0 FMAX"
             self.current_feed = "MAX"
-            self.output.append(cmd.replace("L I", "L"))
+            self.output.append(cmd)
             
     def linear(self, x: float = None, y: float = None, z: float = None, a: float = None, b: float = None, c: float = None, feed: float = None):
         cmd = "L"
         changed = False
-        if x is not None and (self.current_x is None or round(x, 3) != round(self.current_x, 3)):
-            cmd += f" X+{x:.3f}" if x >= 0 else f" X{x:.3f}"
+        if x is not None and (self.current_x is None or round(self.converter.convert_length(x) or 0.0, 3) != round(self.converter.convert_length(self.current_x) or 0.0, 3)):
+            cmd += f" X{self._kfmt(x)}"
             self.current_x = x
             changed = True
-        if y is not None and (self.current_y is None or round(y, 3) != round(self.current_y, 3)):
-            cmd += f" Y+{y:.3f}" if y >= 0 else f" Y{y:.3f}"
+        if y is not None and (self.current_y is None or round(self.converter.convert_length(y) or 0.0, 3) != round(self.converter.convert_length(self.current_y) or 0.0, 3)):
+            cmd += f" Y{self._kfmt(y)}"
             self.current_y = y
             changed = True
-        if z is not None and (self.current_z is None or round(z, 3) != round(self.current_z, 3)):
-            cmd += f" Z+{z:.3f}" if z >= 0 else f" Z{z:.3f}"
+        if z is not None and (self.current_z is None or round(self.converter.convert_length(z) or 0.0, 3) != round(self.converter.convert_length(self.current_z) or 0.0, 3)):
+            cmd += f" Z{self._kfmt(z)}"
             self.current_z = z
             changed = True
         if a is not None and (self.current_a is None or round(a, 3) != round(self.current_a, 3)):
@@ -646,7 +794,7 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
             if cmd != "L":
                 cmd += " R0"
             if feed_changed: 
-                cmd += f" F{feed:.0f}"
+                cmd += f" F{self._kfeed(feed)}"
                 self.current_feed = feed
             
             if cmd != "L":
@@ -695,14 +843,16 @@ class FanucLathePostProcessor(FanucPostProcessor):
     """ISO/Fanuc compatible G-Code output for Lathes."""
     def program_start(self, setup_plan: Dict[str, Any] = None):
         unit_gcode = "G20" if self.converter.is_inch else "G21"
+        program_number = (setup_plan or {}).get("programNumber") or (setup_plan or {}).get("program_number") or "O1002"
         self.output.append("%")
-        self.output.append("O1002 (VEXCAD LATHE GENERATED)")
-        # G18 for XZ plane on Lathe. G99 for feed per rev if typical, but we'll use G98 feed per min or leave it.
-        # Assuming G40 tool nose rad comp cancel, G80 canned cycle cancel, G18 XZ plane
-        self.output.append(f"{unit_gcode} G18 G40 G80")
+        self.output.append(f"{program_number} (VEXCAD LATHE GENERATED)")
+        # G18 for XZ plane, G40 comp cancel, G80 cycle cancel, G90 absolute, G94 feed/min.
+        # Absolute mode (G90) is mandatory so a leftover G91 from a prior program
+        # cannot turn coordinates incremental and crash the machine.
+        self.output.append(f"{unit_gcode} G18 G40 G80 G90 G94")
         wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
         self.output.append(wcs)
-        
+
     def program_end(self, setup_plan: Dict[str, Any] = None):
         self.coolant_off()
         self.output.append("M05")
@@ -718,24 +868,26 @@ class FanucLathePostProcessor(FanucPostProcessor):
 
     def apply_tool_length_offset(self, offset_num: int, safe_z: float):
         # Lathe tool offset is usually applied with the T command.
-        # We just do a rapid approach.
-        self.output.append(f"G0 Z{safe_z:.3f}")
+        # We just do a rapid approach, routed through the unit converter.
+        self.output.append(f"G0 Z{self.converter.format_length(safe_z)}")
         self.current_z = safe_z
 
     def start_spindle(self, rpm: int):
-        # By default we can use constant rpm (G97) for safe generic lathe code.
-        self.output.append(f"G97 S{rpm} M03")
+        direction = getattr(self, '_spindle_direction', 'cw')
+        mcode = "M04" if direction == "ccw" else "M03"
+        # G97 = constant RPM for safe generic lathe code.
+        self.output.append(f"G97 S{rpm} {mcode}")
 
     # Overriding rapid and linear to ignore Y axis for typical 2-axis lathe operations
     def rapid(self, x: float = None, y: float = None, z: float = None, a: float = None, b: float = None, c: float = None):
         cmd = "G0"
         changed = False
-        if x is not None and (self.current_x is None or round(x, 3) != round(self.current_x, 3)):
-            cmd += f" X{x:.3f}"
+        if x is not None and (self.current_x is None or round(self.converter.convert_length(x) or 0.0, 3) != round(self.converter.convert_length(self.current_x) or 0.0, 3)):
+            cmd += f" X{self.converter.format_length(x)}"
             self.current_x = x
             changed = True
-        if z is not None and (self.current_z is None or round(z, 3) != round(self.current_z, 3)):
-            cmd += f" Z{z:.3f}"
+        if z is not None and (self.current_z is None or round(self.converter.convert_length(z) or 0.0, 3) != round(self.converter.convert_length(self.current_z) or 0.0, 3)):
+            cmd += f" Z{self.converter.format_length(z)}"
             self.current_z = z
             changed = True
         
@@ -745,18 +897,18 @@ class FanucLathePostProcessor(FanucPostProcessor):
     def linear(self, x: float = None, y: float = None, z: float = None, a: float = None, b: float = None, c: float = None, feed: float = None):
         cmd = "G1"
         changed = False
-        if x is not None and (self.current_x is None or round(x, 3) != round(self.current_x, 3)):
-            cmd += f" X{x:.3f}"
+        if x is not None and (self.current_x is None or round(self.converter.convert_length(x) or 0.0, 3) != round(self.converter.convert_length(self.current_x) or 0.0, 3)):
+            cmd += f" X{self.converter.format_length(x)}"
             self.current_x = x
             changed = True
-        if z is not None and (self.current_z is None or round(z, 3) != round(self.current_z, 3)):
-            cmd += f" Z{z:.3f}"
+        if z is not None and (self.current_z is None or round(self.converter.convert_length(z) or 0.0, 3) != round(self.converter.convert_length(self.current_z) or 0.0, 3)):
+            cmd += f" Z{self.converter.format_length(z)}"
             self.current_z = z
             changed = True
             
         if changed:
             if feed is not None and (self.current_feed is None or round(feed, 1) != round(self.current_feed, 1)):
-                cmd += f" F{feed:.1f}"
+                cmd += f" F{self.converter.format_feed(feed)}"
                 self.current_feed = feed
             self.output.append(cmd)
 

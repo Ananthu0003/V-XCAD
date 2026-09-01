@@ -51,16 +51,22 @@ class CamOperationPlanner:
             if op:
                 operations.append(op)
                 
-        # Optional: Apply strategic sorting 
-        # (e.g. Facing first -> Spot Drilling -> Drilling -> Pocketing -> Contouring)
+        # Strategic sorting for logical manufacturing workflow
+        # Facing -> OD Turning -> OD Finishing -> Center Drill/Drilling -> ID Boring -> Grooving -> Parting -> 2.5D Milling
         sort_order = {
             "3d_waterline_roughing": 0,
             "facing": 1,
-            "drilling": 2,
-            "pocketing": 3,
-            "2d_contour": 4,
-            "chamfer_milling": 5,
-            "od_turning": 1
+            "facing_turning": 1,
+            "od_turning": 2,
+            "od_finish_turning": 3,
+            "drilling": 4,
+            "id_boring": 5,
+            "grooving": 6,
+            "parting_off": 7,
+            "pocketing": 8,
+            "boss_clearing": 9,
+            "2d_contour": 10,
+            "chamfer_milling": 11,
         }
         
         operations.sort(key=lambda op: sort_order.get(op.type, 99))
@@ -74,12 +80,12 @@ class CamOperationPlanner:
         
         # If the feature is known to be blocked/unmachinable in current setup, 
         # still create an operation for UI visibility but mark it as blocked.
-        if not feature.get('machinable_in_current_setup', True) or machining_status != 'valid':
-            op = CamOperation("blocked", feat_id)
-            op.parameters['error'] = blocked_reason or "Feature is not machinable in current setup."
-            op.machining_strategy = "blocked"
-            # It will fail validation and generate 0 segments
-            return op
+        if not feature.get('machinable_in_current_setup', True) or machining_status not in ('valid', 'recognized'):
+            if machining_status != 'valid':
+                op = CamOperation("blocked", feat_id)
+                op.parameters['error'] = blocked_reason or "Feature is not machinable in current setup."
+                op.machining_strategy = "blocked"
+                return op
             
         if feat_type in ['hole', 'blind_hole', 'through_hole']:
             op = CamOperation("drilling", feat_id)
@@ -120,15 +126,20 @@ class CamOperationPlanner:
             op = CamOperation("boss_clearing", feat_id)
             op.safe_heights['top'] = feature.get('z_top', 0.0)
             op.safe_heights['bottom'] = feature.get('z_bottom', -abs(feature.get('height', 10.0)))
-            
-            # Select strategy dynamically:
-            # Complex bosses or default could use 'offset_clearing'.
-            # A future optimization might use 'adaptive_clearing'.
             op.machining_strategy = feature.get('preferred_strategy', 'offset_clearing')
             
-        elif feat_type in TURNING_FEATURE_TYPES:
-            # If it got here and is valid, it implies we are in a turning setup (since milling_3axis blocks it)
-            op = CamOperation("turning", feat_id)
+        elif feat_type in TURNING_FEATURE_TYPES or feat_type in ['external_cylinder', 'shaft', 'turned_od', 'turned_profile']:
+            op = CamOperation("od_turning", feat_id)
+            machining_region = feature.get('machiningRegion', {})
+            z_top = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
+            height = feature.get('dimensions', {}).get('height', feature.get('dimensions', {}).get('depth', 10.0))
+            z_bottom = machining_region.get('bottomZ', z_top - abs(height))
+            op.safe_heights['top'] = z_top
+            op.safe_heights['bottom'] = z_bottom
+            op.machining_strategy = 'lathe_roughing'
+            if 'dimensions' in feature:
+                op.parameters['diameter'] = feature['dimensions'].get('diameter', 0.0)
+                op.parameters['length'] = height
             
         elif feat_type == 'step':
             op = CamOperation("2d_contour", feat_id)

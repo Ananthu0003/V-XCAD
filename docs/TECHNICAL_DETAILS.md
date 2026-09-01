@@ -1,6 +1,6 @@
 # Technical Details
 
-This document captures implementation-level behavior for CAD Copilot.
+This document captures implementation-level behavior for VΞXCAD.
 
 ## 1. System Boundaries
 

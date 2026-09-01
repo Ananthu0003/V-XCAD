@@ -9,7 +9,7 @@ type ParameterInputProps = {
 };
 
 export function ParameterInput({ label, value, onChange, isActive = false, description }: ParameterInputProps) {
-	const inputBase = "w-full rounded-lg border border-border dark:border-white/10 bg-input px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 focus:outline-none transition-all group-hover:border-blue-500/30";
+	const inputBase = "w-full rounded-lg border border-slate-300 dark:border-white/10 bg-white dark:bg-[#18181b] px-3 py-2 text-sm text-slate-900 dark:text-foreground font-mono font-medium placeholder:text-slate-400 dark:placeholder:text-muted-foreground focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 focus:outline-none transition-all shadow-xs group-hover:border-blue-500/40";
 
 	const renderInput = () => {
 		if (typeof value === 'number') {

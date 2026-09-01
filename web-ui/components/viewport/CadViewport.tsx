@@ -12,6 +12,7 @@ import { CameraRig } from '@/components/viewport/CameraRig';
 import { VolumetricStock } from '@/components/cam/VolumetricStock';
 import { BlueprintViewer } from '@/components/blueprint/BlueprintViewer';
 import { TargetPortion3DHighlight } from '@/components/viewport/TargetPortion3DHighlight';
+import { useTheme } from 'next-themes';
 import type { TargetPortion } from '@/components/chat/ChatPanel';
 import type { StlGeometryInfo } from '@/components/viewport/StlMesh';
 
@@ -36,10 +37,14 @@ function DynamicFloor({ targetRef, children }: { targetRef: React.RefObject<THRE
 	const floorRef = useRef<THREE.Group>(null);
 	useFrame(() => {
 		if (targetRef.current && floorRef.current) {
-			const box = new THREE.Box3().setFromObject(targetRef.current);
+			const box = new THREE.Box3();
+			targetRef.current.traverse((child) => {
+				if ((child as THREE.Mesh).isMesh && child.visible) {
+					box.expandByObject(child);
+				}
+			});
 			if (!box.isEmpty() && isFinite(box.min.y) && box.min.y > -10000) {
 				const targetY = box.min.y - 0.05;
-				// instantly snap if very far, else lerp
 				if (Math.abs(floorRef.current.position.y - targetY) > 50) {
 					floorRef.current.position.y = targetY;
 				} else {
@@ -137,13 +142,12 @@ type CadViewportProps = {
 function AnimatedSetupGroup({ setupToolAxis, children, isSetup, hasToolpaths }: { setupToolAxis?: [number, number, number], children: React.ReactNode, isSetup?: boolean, hasToolpaths?: boolean }) {
 	const groupRef = useRef<THREE.Group>(null);
 	const targetQuaternion = useMemo(() => {
-		// By default, map CAD Z (0,0,1) to Three.js Y (0,1,0) so the spindle is always UP
-		// If setupToolAxis is provided, map that axis to Three.js Y.
-		const axis = setupToolAxis ? new THREE.Vector3(...setupToolAxis).normalize() : new THREE.Vector3(0, 0, 1);
+		// Map CAD Z (0,0,1) to Three.js Y (0,1,0) so the spindle is always UP
+		// Setup reorientation is already handled in modelToSetupTransform.
+		const defaultCadZ = new THREE.Vector3(0, 0, 1);
 		const defaultUp = new THREE.Vector3(0, 1, 0);
-		const q = new THREE.Quaternion().setFromUnitVectors(axis, defaultUp);
-		return q;
-	}, [setupToolAxis]);
+		return new THREE.Quaternion().setFromUnitVectors(defaultCadZ, defaultUp);
+	}, []);
 
 	useFrame((_, delta) => {
 		if (groupRef.current) {
@@ -216,6 +220,8 @@ export function CadViewport({
 	onToggleBlueprintPIP,
 	onAttachBlueprint,
 }: CadViewportProps) {
+	const { theme, resolvedTheme } = useTheme();
+	const isDark = (resolvedTheme || theme) !== 'light';
 	const groupRef = useRef<THREE.Group>(null);
 	const exportRef = useRef<HTMLDivElement>(null);
 	const [exportOpen, setExportOpen] = useState(false);
@@ -272,9 +278,12 @@ export function CadViewport({
 		let defaultBoxSize: [number, number, number] = [10, 10, 10];
 		let inSetupSpace = false;
 
-		if (setupMetadata?.resolvedStock?.center) {
+		if (setupMetadata?.resolvedStock?.center && (setupMetadata?.version || setupMetadata?.matrixLayout)) {
 			center = setupMetadata.resolvedStock.center as [number, number, number];
 			inSetupSpace = true;
+		} else if (setupMetadata?.resolvedStock?.center) {
+			center = setupMetadata.resolvedStock.center as [number, number, number];
+			inSetupSpace = false;
 		} else if (geometryInfo?.bounding_box) {
 			const min = geometryInfo.bounding_box.min;
 			const max = geometryInfo.bounding_box.max;
@@ -283,6 +292,7 @@ export function CadViewport({
 			const cz = (min[2] + max[2]) / 2;
 			center = [cx, cy, cz];
 			defaultBoxSize = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+			inSetupSpace = false;
 		}
 
 		const currentStockType = String(camSetup?.stockType || setupMetadata?.stockType || setupMetadata?.resolvedStock?.type || 'box').toLowerCase();
@@ -322,7 +332,9 @@ export function CadViewport({
 			} else if (setupMetadata?.resolvedStock?.dimensions) {
 				dims = setupMetadata.resolvedStock.dimensions as [number, number, number];
 			} else {
-				dims = [defaultBoxSize[0] + 2, defaultBoxSize[1] + 2, defaultBoxSize[2] + 2];
+				const maxDim = Math.max(defaultBoxSize[0], defaultBoxSize[1], defaultBoxSize[2]);
+				const margin = Math.max(0.1, Math.min(2.0, maxDim * 0.08));
+				dims = [defaultBoxSize[0] + margin, defaultBoxSize[1] + margin, defaultBoxSize[2] + margin];
 			}
 
 			return {
@@ -335,6 +347,47 @@ export function CadViewport({
 			};
 		}
 	}, [geometryInfo, setupMetadata, camSetup]);
+
+	const setupMatrix = useMemo(() => {
+		let mat: THREE.Matrix4;
+		if (setupMetadata?.modelToSetupTransform) {
+			const raw = Array.isArray(setupMetadata.modelToSetupTransform[0]) 
+				? setupMetadata.modelToSetupTransform.flat() 
+				: setupMetadata.modelToSetupTransform;
+			mat = new THREE.Matrix4().fromArray(raw).transpose();
+		} else {
+			mat = new THREE.Matrix4();
+		}
+
+		// Ensure lateral (X, Y) centering is active even on legacy sessions
+		if (geometryInfo?.bounding_box) {
+			const min = geometryInfo.bounding_box.min;
+			const max = geometryInfo.bounding_box.max;
+			const cx = (min[0] + max[0]) / 2;
+			const cy = (min[1] + max[1]) / 2;
+			const topZ = max[2];
+
+			if (Math.abs(mat.elements[12]) < 0.001 && Math.abs(cx) > 0.01) {
+				mat.elements[12] = -cx;
+			}
+			if (Math.abs(mat.elements[13]) < 0.001 && Math.abs(cy) > 0.01) {
+				mat.elements[13] = -cy;
+			}
+			if (Math.abs(mat.elements[14]) < 0.001 && Math.abs(topZ) > 0.01) {
+				mat.elements[14] = -topZ;
+			}
+		}
+
+		return mat;
+	}, [setupMetadata?.modelToSetupTransform, geometryInfo]);
+
+	const { modelPos, modelQuat, modelScale } = useMemo(() => {
+		const pos = new THREE.Vector3();
+		const quat = new THREE.Quaternion();
+		const scale = new THREE.Vector3();
+		setupMatrix.decompose(pos, quat, scale);
+		return { modelPos: pos, modelQuat: quat, modelScale: scale };
+	}, [setupMatrix]);
 
 	const dynamicSize = useMemo(() => {
 		let size = 50; 
@@ -441,8 +494,43 @@ export function CadViewport({
 
 			const targetGroup = groups[targetGroupName] || groups.other;
 			if (seg.start && seg.end) {
-			    targetGroup.push(new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z));
-			    targetGroup.push(new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z));
+				if ((type === 'arc' || type === 'arc_cw' || type === 'arc_ccw') && seg.center && (seg.radius || seg.radiusMm)) {
+					const cx = typeof seg.center.x === 'number' ? seg.center.x : 0;
+					const cy = typeof seg.center.y === 'number' ? seg.center.y : 0;
+					const r = seg.radius || seg.radiusMm || Math.hypot(seg.start.x - cx, seg.start.y - cy);
+					const startAngle = Math.atan2(seg.start.y - cy, seg.start.x - cx);
+					let endAngle = Math.atan2(seg.end.y - cy, seg.end.x - cx);
+					const isCw = type === 'arc_cw' || seg.clockwise === true;
+					
+					if (isCw) {
+						while (endAngle > startAngle) endAngle -= Math.PI * 2;
+					} else {
+						while (endAngle < startAngle) endAngle += Math.PI * 2;
+					}
+					
+					const steps = 16;
+					let prevX = seg.start.x;
+					let prevY = seg.start.y;
+					let prevZ = seg.start.z;
+					
+					for (let s = 1; s <= steps; s++) {
+						const t = s / steps;
+						const curAngle = startAngle + (endAngle - startAngle) * t;
+						const curX = cx + r * Math.cos(curAngle);
+						const curY = cy + r * Math.sin(curAngle);
+						const curZ = seg.start.z + (seg.end.z - seg.start.z) * t;
+						
+						targetGroup.push(new THREE.Vector3(prevX, prevY, prevZ));
+						targetGroup.push(new THREE.Vector3(curX, curY, curZ));
+						
+						prevX = curX;
+						prevY = curY;
+						prevZ = curZ;
+					}
+				} else {
+					targetGroup.push(new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z));
+					targetGroup.push(new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z));
+				}
 			}
 		});
 
@@ -498,7 +586,7 @@ export function CadViewport({
 	}, [simulationState]);
 
 	return (
-		<section className="relative flex h-full w-full flex-col overflow-hidden bg-background font-sans">
+		<section className="relative flex h-full w-full flex-col overflow-hidden bg-slate-100 dark:bg-[#070b14] font-sans">
 			{debugMode && featureDebug && (
 				<div className="absolute top-20 right-4 bg-black/80 text-green-400 text-[10px] font-mono p-3 rounded border border-green-500/30 whitespace-nowrap backdrop-blur-sm shadow-xl pointer-events-none select-none max-w-[350px] overflow-hidden z-[100]">
 					<div className="font-bold text-foreground mb-1 border-b border-green-500/30 pb-1">FEATURE DEBUG</div>
@@ -541,20 +629,20 @@ export function CadViewport({
 				</div>
 			)}
 
-			<header className="flex h-12 items-center justify-between border-b border-border/40 bg-background/50 backdrop-blur-2xl px-3 sm:px-4 z-30 gap-2">
+			<header className="flex h-12 items-center justify-between border-b border-slate-200/80 dark:border-border/40 bg-white/80 dark:bg-background/50 backdrop-blur-2xl px-3 sm:px-4 z-30 gap-2">
 				<div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
 					{projectName && (
 						<button
 							type="button"
 							onClick={onOpenProjects}
-							className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-black/40 border border-white/10 hover:border-cyan-500/40 text-muted-foreground hover:text-cyan-300 text-[11px] font-semibold transition-all shadow-sm group cursor-pointer shrink-0"
+							className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/10 hover:border-blue-500/50 dark:hover:border-cyan-500/40 text-slate-700 dark:text-muted-foreground hover:text-blue-600 dark:hover:text-cyan-300 text-[11px] font-semibold transition-all shadow-xs group cursor-pointer shrink-0"
 							title={`Current Project: ${projectName}\nClick to view sessions & switch projects`}
 						>
-							<Folder className="size-3 text-cyan-400 group-hover:scale-110 transition-transform shrink-0" />
-							<span className="max-w-[110px] sm:max-w-[150px] truncate font-medium text-white/90">
+							<Folder className="size-3 text-blue-600 dark:text-cyan-400 group-hover:scale-110 transition-transform shrink-0" />
+							<span className="max-w-[110px] sm:max-w-[150px] truncate font-medium text-slate-800 dark:text-white/90">
 								{projectName.replace(/^#\d+_/, '')}
 							</span>
-							<ChevronDown className="size-2.5 text-muted-foreground group-hover:text-cyan-300 shrink-0" />
+							<ChevronDown className="size-2.5 text-slate-400 dark:text-muted-foreground group-hover:text-blue-600 dark:group-hover:text-cyan-300 shrink-0" />
 						</button>
 					)}
 
@@ -565,15 +653,15 @@ export function CadViewport({
 					>
 						{isRecompiling || statusText.includes('Extracting') || statusText.includes('Generating') || statusText.includes('Syncing') ? (
 							<>
-								<Loader2 className="size-3 animate-spin text-cyan-400 shrink-0" />
-								<span className="text-cyan-300 font-mono text-[10.5px] truncate animate-pulse">
+								<Loader2 className="size-3 animate-spin text-blue-600 dark:text-cyan-400 shrink-0" />
+								<span className="text-blue-700 dark:text-cyan-300 font-mono text-[10.5px] truncate font-semibold animate-pulse">
 									{statusText.replace('Geometry ', '')}
 								</span>
 							</>
 						) : (
-							<div className="flex items-center gap-1.5 text-muted-foreground/70">
-								<span className={`size-1.5 rounded-full shrink-0 ${hasStl ? 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]' : 'bg-muted-foreground/40'}`} />
-								<span className="text-[10px] font-mono uppercase tracking-wider hidden md:inline text-muted-foreground/60">
+							<div className="flex items-center gap-1.5 text-slate-500 dark:text-muted-foreground/70">
+								<span className={`size-1.5 rounded-full shrink-0 ${hasStl ? 'bg-emerald-500 dark:bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]' : 'bg-slate-300 dark:bg-muted-foreground/40'}`} />
+								<span className="text-[10px] font-mono uppercase tracking-wider hidden md:inline text-slate-500 dark:text-muted-foreground/60">
 									Ready
 								</span>
 							</div>
@@ -588,10 +676,10 @@ export function CadViewport({
 						<button
 							onClick={onShare}
 							disabled={isSharing}
-							className="flex h-8 items-center gap-1.5 rounded-xl border border-white/10 bg-black/30 hover:bg-white/10 px-3 text-[11px] font-semibold text-muted-foreground hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+							className="flex h-8 items-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-black/30 hover:bg-slate-200 dark:hover:bg-white/10 px-3 text-[11px] font-semibold text-slate-700 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-xs"
 							title="Share 3D Model link"
 						>
-							{isSharing ? <Loader2 className="size-3 animate-spin text-cyan-400" /> : <Share2 className="size-3" />}
+							{isSharing ? <Loader2 className="size-3 animate-spin text-blue-600 dark:text-cyan-400" /> : <Share2 className="size-3" />}
 							<span className="hidden sm:inline">Share</span>
 						</button>
 					)}
@@ -600,14 +688,14 @@ export function CadViewport({
 						<div className="relative" ref={exportRef}>
 							<button
 								onClick={() => setExportOpen(!exportOpen)}
-								className="flex h-8 items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 px-3 text-[11px] font-extrabold text-black transition-all shadow-[0_0_12px_rgba(34,211,238,0.25)] cursor-pointer"
+								className="flex h-8 items-center gap-1.5 rounded-xl bg-blue-600 dark:bg-gradient-to-r dark:from-cyan-400 dark:to-blue-500 hover:bg-blue-500 dark:hover:from-cyan-300 dark:hover:to-blue-400 px-3 text-[11px] font-extrabold text-white dark:text-black transition-all shadow-sm dark:shadow-[0_0_12px_rgba(34,211,238,0.25)] cursor-pointer"
 							>
 								<Download className="size-3" />
 								<span>Export</span>
 								<ChevronDown className={`size-2.5 transition-transform ${exportOpen ? 'rotate-180' : ''}`} />
 							</button>
 							{exportOpen && (
-								<div className="absolute right-0 mt-2 w-52 rounded-xl border border-transparent bg-background/95 backdrop-blur-md shadow-xl overflow-hidden z-50 py-1">
+								<div className="absolute right-0 mt-2 w-52 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-background/95 text-slate-800 dark:text-foreground backdrop-blur-md shadow-xl overflow-hidden z-50 py-1">
 									{hasStl && (
 										<button
 											onClick={() => { setExportOpen(false); onDownloadStl(); }}
@@ -779,7 +867,14 @@ export function CadViewport({
 					</div>
 				)}
 
-				<Canvas id="cad-three-canvas" shadows dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }} className="relative z-10" onPointerMissed={onClearSelection}>
+				<Canvas 
+					id="cad-three-canvas" 
+					shadows={{ type: THREE.PCFShadowMap }} 
+					dpr={[1, 2]} 
+					gl={{ preserveDrawingBuffer: true }} 
+					className="relative z-10" 
+					onPointerMissed={onClearSelection}
+				>
 					<CanvasBridge />
 					<ViewportController 
 						modelGroupRef={groupRef}
@@ -802,194 +897,153 @@ export function CadViewport({
 						<Environment files="/potsdamer_platz_1k.hdr" />
 						
 						{/* Professional CAD Lighting */}
-						<hemisphereLight intensity={0.4} groundColor="#1e293b" color="#f8fafc" />
-						<directionalLight castShadow intensity={0.8} position={[10, 20, 10]} shadow-mapSize={[2048, 2048]}>
+						<ambientLight intensity={isDark ? 0.3 : 0.65} />
+						<hemisphereLight intensity={isDark ? 0.4 : 0.6} groundColor={isDark ? "#1e293b" : "#cbd5e1"} color={isDark ? "#f8fafc" : "#ffffff"} />
+						<directionalLight castShadow intensity={isDark ? 0.8 : 1.1} position={[10, 20, 10]} shadow-mapSize={[2048, 2048]}>
 							<orthographicCamera attach="shadow-camera" args={[-20, 20, 20, -20, 0.1, 100]} />
 						</directionalLight>
-						<directionalLight intensity={0.3} position={[-10, -10, -10]} color="#94a3b8" />
+						<directionalLight intensity={0.4} position={[-10, -10, -10]} color="#94a3b8" />
 						
 						<DynamicFloor targetRef={groupRef}>
 							{/* Contact Shadows at bounding box bottom */}
-							<ContactShadows resolution={1024} scale={50} blur={2} opacity={0.4} far={10} color="#000000" />
+							<ContactShadows resolution={1024} scale={50} blur={2} opacity={isDark ? 0.4 : 0.25} far={10} color={isDark ? "#000000" : "#334155"} />
 							
-							<Grid infiniteGrid fadeDistance={gridFade} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={gridCell} sectionSize={gridSection} />
+							<Grid infiniteGrid fadeDistance={gridFade} sectionColor={isDark ? "#1e3a8a" : "#94a3b8"} cellColor={isDark ? "#0f172a" : "#cbd5e1"} cellSize={gridCell} sectionSize={gridSection} />
 						</DynamicFloor>
 						
 						<AnimatedSetupGroup setupToolAxis={setupToolAxis} isSetup={workflowStage === 'cam' || workflowStage === 'gcode'} hasToolpaths={hasValidToolpaths}>
 							<group ref={groupRef}>
-								{/* The CAD model MUST be transformed to setup space using modelToSetupTransform */}
-									{(() => {
-										const m = setupMetadata?.modelToSetupTransform 
-											? new THREE.Matrix4().fromArray(
-												Array.isArray(setupMetadata.modelToSetupTransform[0]) 
-													? setupMetadata.modelToSetupTransform.flat() 
-													: setupMetadata.modelToSetupTransform
-											).transpose() 
-											: new THREE.Matrix4();
-										
-										const pos = new THREE.Vector3();
-										const quat = new THREE.Quaternion();
-										const scale = new THREE.Vector3();
-										m.decompose(pos, quat, scale);
-
-										const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
-										
-										let simOffsetX = 0;
-										let simOffsetY = 0;
-										
-										const simOffset = new THREE.Vector3(simOffsetX, simOffsetY, 0);
-										const cadOffset = new THREE.Vector3(0, 0, 0);
-										const combinedPos = new THREE.Vector3().copy(pos).add(cadOffset);
-										
-										return (
-											<>
-												<group position={combinedPos} quaternion={quat} scale={scale}>
-													{isSolidVisible && children}
-													
-                                                    {/* Overlays - placed next to children so they inherit the exact same transforms */}
-                                                    {geometryInfo && annotations && (
-                                                        <DimensionOverlay
-                                                            annotations={annotations}
-                                                            activeParameter={(activeParameter || activeFeatureId) as string | null}
-                                                            hoveredParameter={hoveredParameter}
-                                                            targetPortion={targetPortion}
-                                                            geometryScale={geometryInfo.scale}
-                                                            geometryCenter={geometryInfo.center}
-                                                            onSelectParameter={onSelectParameter}
-                                                            onHoverParameter={onHoverParameter}
-                                                        />
-                                                    )}
-
-                                                    {/* 3D Target Portion Highlight (Glowing halo + HUD Beacon) */}
-                                                    {targetPortion && geometryInfo && (
-                                                        <TargetPortion3DHighlight
-                                                            targetPortion={targetPortion}
-                                                            geometryInfo={geometryInfo}
-                                                            annotations={annotations}
-                                                            onClear={() => onSelectPortion?.(null)}
-                                                        />
-                                                    )}
-                                                </group>
-
-												{isWireframeVisible && (
-													<group
-														scale={1}
-														position={simOffset}
-													>
-														{/* Render CAM Toolpaths using optimized buffer geometry */}
-														{groupedToolpaths}
-
-														{/* Active feature indicators have been removed in favor of cam_debug_overlay.json */}
-
-														{/* Render Active Tool for Simulation INSIDE the setup space group */}
-														{showToolpaths && simulationState?.showTool !== false && simulationState?.segments && simulationState.activeSegmentIndex !== undefined && camTools && (
-															(() => {
-																const activeSegment = simulationState.segments[simulationState.activeSegmentIndex];
-																if (!activeSegment) return null;
-																const toolId = activeSegment.toolId || activeSegment.tool_id;
-																const activeTool = camTools.find(t => t.id === toolId || t.tool_name === toolId);
-																if (!activeTool) return null;
-
-																const internalUnits = setupMetadata?.internalUnits || 'mm';
-																const rawDiameter = activeTool.diameter || activeTool.diameter_mm || 6;
-																const toolDiameter = internalUnits === 'in' ? rawDiameter / 25.4 : rawDiameter;
-																const radius = toolDiameter / 2;
-																const isFaceMill = activeTool.type === 'face_mill';
-																
-																// Calculate purely proportional realistic proportions (no hardcoded absolute caps)
-																const defaultCuttingLength = isFaceMill ? radius * 0.5 : radius * 3;
-																const rawCuttingLength = activeTool.cutting_length || activeTool.flute_length || (defaultCuttingLength * (internalUnits === 'in' ? 25.4 : 1));
-																const cuttingLength = internalUnits === 'in' ? rawCuttingLength / 25.4 : rawCuttingLength;
-																const shaftRadius = isFaceMill ? radius * 0.4 : radius;
-																const defaultStickout = isFaceMill ? cuttingLength + radius * 2 : radius * 5;
-																const rawStickout = activeTool.length_mm || activeTool.stickout || (defaultStickout * (internalUnits === 'in' ? 25.4 : 1));
-																const stickout = internalUnits === 'in' ? rawStickout / 25.4 : rawStickout;
-
-																const colletRadiusBase = shaftRadius * 1.5;
-																const holderTopRad = colletRadiusBase * 1.5;
-																const holderBotRad = colletRadiusBase * 1.2;
-																const holderHeight = shaftRadius * 4;
-
-																const i = activeSegment.end_i ?? 0;
-																const j = activeSegment.end_j ?? 0;
-																let k = activeSegment.end_k ?? -1;
-																if (i === 0 && j === 0 && k === 0) k = -1;
-
-																const targetVec = new THREE.Vector3(-i, -j, -k).normalize();
-																const upVec = new THREE.Vector3(0, 1, 0);
-																const quaternion = new THREE.Quaternion().setFromUnitVectors(upVec, targetVec);
-
-																const x = activeSegment.end?.x ?? activeSegment.end_x ?? 0;
-																const y = activeSegment.end?.y ?? activeSegment.end_y ?? 0;
-																const z = activeSegment.end?.z ?? activeSegment.end_z ?? 0;
-
-																let toolVisScale = 1;
-																if (actualStock) {
-																	const maxStockDim = Math.max(actualStock.dimensions[0], actualStock.dimensions[1]);
-																	const maxToolVisualSize = maxStockDim * 1.5; 
-																	const currentToolVisualSize = Math.max(toolDiameter, stickout);
-																	
-																	if (currentToolVisualSize > maxToolVisualSize && currentToolVisualSize > 0) {
-																		toolVisScale = maxToolVisualSize / currentToolVisualSize;
-																	}
-																}
-
-																return (
-																	<group position={[x, y, z]} quaternion={quaternion} scale={toolVisScale}>
-																		{/* Cutting Tool / End Mill */}
-																		<mesh position={[0, stickout / 2, 0]}>
-																			<cylinderGeometry
-																				args={[shaftRadius, shaftRadius, stickout, 32]}
-																				ref={(geom) => {
-																					if (geom) {
-																						geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
-																						geom.boundingBox = new THREE.Box3();
-																					}
-																				}}
-																			/>
-																			<meshStandardMaterial color="#cbd5e1" metalness={0.8} roughness={0.2} transparent opacity={0.9} />
-																		</mesh>
-
-																		{/* CNC Spindle / Tool Holder (scaled dynamically) */}
-																		<mesh position={[0, stickout + holderHeight / 2, 0]}>
-																			<cylinderGeometry
-																				args={[holderBotRad, holderTopRad, holderHeight, 32]}
-																				ref={(geom) => {
-																					if (geom) {
-																						geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
-																						geom.boundingBox = new THREE.Box3();
-																					}
-																				}}
-																			/>
-																			<meshStandardMaterial color="#334155" metalness={0.9} roughness={0.3} />
-																		</mesh>
-																	</group>
-																);
-															})()
-														)}
-													</group>
+								{/* CAD Model transformed to Setup Space */}
+								<group position={modelPos} quaternion={modelQuat} scale={modelScale}>
+									{isSolidVisible && children}
+												
+												{/* Overlays - placed next to children so they inherit the exact same transforms */}
+												{geometryInfo && annotations && (
+													<DimensionOverlay
+														annotations={annotations}
+														activeParameter={(activeParameter || activeFeatureId) as string | null}
+														hoveredParameter={hoveredParameter}
+														targetPortion={targetPortion}
+														geometryScale={geometryInfo.scale}
+														geometryCenter={geometryInfo.center}
+														onSelectParameter={onSelectParameter}
+														onHoverParameter={onHoverParameter}
+													/>
 												)}
-											</>
-										);
-									})()
-								}
+
+												{/* 3D Target Portion Highlight (Glowing halo + HUD Beacon) */}
+												{targetPortion && geometryInfo && (
+													<TargetPortion3DHighlight
+														targetPortion={targetPortion}
+														geometryInfo={geometryInfo}
+														annotations={annotations}
+														onClear={() => onSelectPortion?.(null)}
+													/>
+												)}
+											</group>
+
+											{/* Toolpaths and Active Simulation Tool - rendered directly in setup space */}
+											{isWireframeVisible && (
+												<group>
+													{/* Render CAM Toolpaths using optimized buffer geometry */}
+													{groupedToolpaths}
+
+													{/* Render Active Tool for Simulation */}
+													{showToolpaths && simulationState?.showTool !== false && simulationState?.segments && simulationState.activeSegmentIndex !== undefined && camTools && (
+														(() => {
+															const activeSegment = simulationState.segments[simulationState.activeSegmentIndex];
+															if (!activeSegment) return null;
+															const toolId = activeSegment.toolId || activeSegment.tool_id;
+															const activeTool = camTools.find((t: any) => t.id === toolId || t.tool_name === toolId);
+															if (!activeTool) return null;
+
+															const internalUnits = setupMetadata?.internalUnits || 'mm';
+															const rawDiameter = activeTool.diameter || activeTool.diameter_mm || 6;
+															const toolDiameter = internalUnits === 'in' ? rawDiameter / 25.4 : rawDiameter;
+															const radius = toolDiameter / 2;
+															const isFaceMill = activeTool.type === 'face_mill';
+															
+															const defaultCuttingLength = isFaceMill ? radius * 0.5 : radius * 3;
+															const rawCuttingLength = activeTool.cutting_length || activeTool.flute_length || (defaultCuttingLength * (internalUnits === 'in' ? 25.4 : 1));
+															const cuttingLength = internalUnits === 'in' ? rawCuttingLength / 25.4 : rawCuttingLength;
+															const shaftRadius = isFaceMill ? radius * 0.4 : radius;
+															const defaultStickout = isFaceMill ? cuttingLength + radius * 2 : radius * 5;
+															const rawStickout = activeTool.length_mm || activeTool.stickout || (defaultStickout * (internalUnits === 'in' ? 25.4 : 1));
+															const stickout = internalUnits === 'in' ? rawStickout / 25.4 : rawStickout;
+
+															const colletRadiusBase = shaftRadius * 1.5;
+															const holderTopRad = colletRadiusBase * 1.5;
+															const holderBotRad = colletRadiusBase * 1.2;
+															const holderHeight = shaftRadius * 4;
+
+															const i = activeSegment.end_i ?? 0;
+															const j = activeSegment.end_j ?? 0;
+															let k = activeSegment.end_k ?? -1;
+															if (i === 0 && j === 0 && k === 0) k = -1;
+
+															const targetVec = new THREE.Vector3(-i, -j, -k).normalize();
+															const upVec = new THREE.Vector3(0, 1, 0);
+															const quaternion = new THREE.Quaternion().setFromUnitVectors(upVec, targetVec);
+
+															const x = activeSegment.end?.x ?? activeSegment.end_x ?? 0;
+															const y = activeSegment.end?.y ?? activeSegment.end_y ?? 0;
+															const z = activeSegment.end?.z ?? activeSegment.end_z ?? 0;
+
+															let toolVisScale = 1;
+															if (actualStock) {
+																const maxStockDim = Math.max(actualStock.dimensions[0], actualStock.dimensions[1]);
+																const maxToolVisualSize = maxStockDim * 1.5; 
+																const currentToolVisualSize = Math.max(toolDiameter, stickout);
+																
+																if (currentToolVisualSize > maxToolVisualSize && currentToolVisualSize > 0) {
+																	toolVisScale = maxToolVisualSize / currentToolVisualSize;
+																}
+															}
+
+															return (
+																<group position={[x, y, z]} quaternion={quaternion} scale={toolVisScale}>
+																	{/* Cutting Tool / End Mill */}
+																	<mesh position={[0, stickout / 2, 0]}>
+																		<cylinderGeometry
+																			args={[shaftRadius, shaftRadius, stickout, 32]}
+																			ref={(geom) => {
+																				if (geom) {
+																					geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
+																					geom.boundingBox = new THREE.Box3();
+																				}
+																			}}
+																		/>
+																		<meshStandardMaterial color="#cbd5e1" metalness={0.8} roughness={0.2} transparent opacity={0.9} />
+																	</mesh>
+
+																	{/* CNC Spindle / Tool Holder */}
+																	<mesh position={[0, stickout + holderHeight / 2, 0]}>
+																		<cylinderGeometry
+																			args={[holderBotRad, holderTopRad, holderHeight, 32]}
+																			ref={(geom) => {
+																				if (geom) {
+																					geom.computeBoundingBox = () => { geom.boundingBox = new THREE.Box3(); };
+																					geom.boundingBox = new THREE.Box3();
+																				}
+																			}}
+																		/>
+																		<meshStandardMaterial color="#334155" metalness={0.9} roughness={0.3} />
+																	</mesh>
+																</group>
+															);
+														})()
+													)}
+												</group>
+											)}
 								
 								{/* Stock Boundaries and Machine Table */}
 								{(() => {
 									const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
 									if (!actualStock) return null;
 									
-									const m = setupMetadata?.modelToSetupTransform 
-										? new THREE.Matrix4().fromArray(
-											Array.isArray(setupMetadata.modelToSetupTransform[0]) 
-												? setupMetadata.modelToSetupTransform.flat() 
-												: setupMetadata.modelToSetupTransform
-										).transpose() 
-										: new THREE.Matrix4();
-									
 									const transformedCenter = isStockCenterInSetupSpace 
 										? new THREE.Vector3(...(actualStock.center as [number, number, number]))
-										: new THREE.Vector3(...(actualStock.center as [number, number, number])).applyMatrix4(m);
+										: new THREE.Vector3(...(actualStock.center as [number, number, number])).applyMatrix4(setupMatrix);
 									const transformedCenterArr: [number, number, number] = [transformedCenter.x, transformedCenter.y, transformedCenter.z];
 
 									const offsetAmount = 0;
@@ -1011,60 +1065,68 @@ export function CadViewport({
 											
 											{/* Machine Table / Vise Environment */}
 											{isCamStage && simulationState?.showMachine !== false && (() => {
-												// Determine scale factor based on stock size to prevent tiny models
-												// Reference default stock is 100mm, so we scale relative to that
-												const maxDim = Math.max(actualStock.dimensions[0], actualStock.dimensions[1], 10);
-												const s = maxDim / 100;
+												// Scale table and vise proportionally to the stock dimensions
+												const maxDim = Math.max(actualStock.dimensions[0], actualStock.dimensions[1], actualStock.dimensions[2], 0.5);
 												
 												const axis = setupToolAxis ? new THREE.Vector3(...setupToolAxis).normalize() : new THREE.Vector3(0, 0, 1);
 												const tableQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), axis);
 												
-												// We must dynamically pick the thickness of the stock along the tool axis
+												// Thickness of the stock along the tool axis
 												let stockThickness = actualStock.dimensions[2];
 												let stockGrip = actualStock.dimensions[1];
 												if (Math.abs(axis.x) > 0.9) { stockThickness = actualStock.dimensions[0]; stockGrip = actualStock.dimensions[1]; }
 												else if (Math.abs(axis.y) > 0.9) { stockThickness = actualStock.dimensions[1]; stockGrip = actualStock.dimensions[0]; }
 
+												const tableW = maxDim * 3.5;
+												const tableL = maxDim * 2.8;
+												const tableH = Math.max(maxDim * 0.3, 0.4);
+												const viseW = maxDim * 1.6;
+												const viseL = maxDim * 2.0;
+												const viseH = Math.max(maxDim * 0.25, 0.3);
+												const jawW = maxDim * 1.4;
+												const jawT = Math.max(maxDim * 0.3, 0.25);
+												const jawH = Math.max(maxDim * 0.35, 0.3);
+
 												return (
-												<group position={transformedCenterArr} quaternion={tableQuat}>
-													<group position={[0, 0, -stockThickness / 2 - 30 * s]}>
-														{/* Machine Table */}
-														<mesh position={[0, 0, -25 * s]}>
-															<boxGeometry args={[800 * s, 500 * s, 50 * s]} />
-															<meshStandardMaterial color="#1e293b" metalness={0.7} roughness={0.4} />
-														</mesh>
-														{/* Vise Base */}
-														<mesh position={[0, 0, 10 * s]}>
-															<boxGeometry args={[150 * s, 250 * s, 20 * s]} />
-															<meshStandardMaterial color="#475569" metalness={0.6} roughness={0.5} />
-														</mesh>
-														{/* Fixed Jaw */}
-														<mesh position={[0, -stockGrip / 2 - 15 * s, 35 * s]}>
-															<boxGeometry args={[140 * s, 30 * s, 30 * s]} />
-															<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
-														</mesh>
-														{/* Moving Jaw */}
-														<mesh position={[0, stockGrip / 2 + 15 * s, 35 * s]}>
-															<boxGeometry args={[140 * s, 30 * s, 30 * s]} />
-															<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
-														</mesh>
+													<group position={transformedCenterArr} quaternion={tableQuat}>
+														<group position={[0, 0, -stockThickness / 2 - jawH]}>
+															{/* Machine Table */}
+															<mesh position={[0, 0, -tableH / 2 - viseH]}>
+																<boxGeometry args={[tableW, tableL, tableH]} />
+																<meshStandardMaterial color="#1e293b" metalness={0.7} roughness={0.4} />
+															</mesh>
+															{/* Vise Base */}
+															<mesh position={[0, 0, -viseH / 2]}>
+																<boxGeometry args={[viseW, viseL, viseH]} />
+																<meshStandardMaterial color="#475569" metalness={0.6} roughness={0.5} />
+															</mesh>
+															{/* Fixed Jaw */}
+															<mesh position={[0, -stockGrip / 2 - jawT / 2, jawH / 2]}>
+																<boxGeometry args={[jawW, jawT, jawH]} />
+																<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
+															</mesh>
+															{/* Moving Jaw */}
+															<mesh position={[0, stockGrip / 2 + jawT / 2, jawH / 2]}>
+																<boxGeometry args={[jawW, jawT, jawH]} />
+																<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
+															</mesh>
+														</group>
 													</group>
-												</group>
 												);
 											})()}
 										</group>
 									);
 								})()}
-								</group>
+							</group>
 						</AnimatedSetupGroup>
 
 						<GizmoHelper alignment="top-right" margin={[60, 60]}>
 							<GizmoViewcube 
-								color="#1e293b" 
-								strokeColor="#475569" 
-								hoverColor="#3b82f6" 
-								textColor="#f8fafc"
-								opacity={0.75} 
+								color={isDark ? "#1e293b" : "#ffffff"} 
+								strokeColor={isDark ? "#475569" : "#cbd5e1"} 
+								hoverColor="#2563eb" 
+								textColor={isDark ? "#f8fafc" : "#0f172a"} 
+								opacity={isDark ? 0.75 : 0.9} 
 							/>
 						</GizmoHelper>
 					</Suspense>
@@ -1148,7 +1210,7 @@ export function CadViewport({
 
 
 				{/* Global Safety Note */}
-				<div className={`absolute left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-24' : 'bottom-6'}`}>
+				<div className={`absolute left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-12' : 'bottom-4'}`}>
 					{toolpaths && toolpaths.length > 0 && !hasValidToolpaths && (
 						<div className="flex items-center gap-2 rounded-full border border-orange-500/30 bg-background/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
 							<svg className="size-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">

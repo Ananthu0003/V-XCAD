@@ -15,12 +15,18 @@ type OperationTreeSectionProps = {
     onReorder?: (sourceIndex: number, destIndex: number) => void;
 };
 
-const opTypeLabels: Record<OperationType, string> = {
+const opTypeLabels: Record<string, string> = {
     'facing': 'Facing',
+    'facing_turning': 'Face Turning',
     'pocket': '2D Pocket',
     '2d_contour': '2D Contour',
     'drilling': 'Drilling',
     'chamfer': 'Chamfer',
+    'od_turning': 'OD Rough Turning',
+    'od_finish_turning': 'OD Finish Turning',
+    'id_boring': 'ID Boring',
+    'grooving': 'Grooving',
+    'parting_off': 'Parting Off',
 };
 
 export function OperationTreeSection({ 

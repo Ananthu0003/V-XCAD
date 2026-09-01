@@ -53,6 +53,8 @@ export function TargetPortion3DHighlight({
 
 		// Check if annotations match target portion
 		let matchedPts: [number, number, number][] = [];
+		let matchedAxis: [number, number, number] | null = null;
+		let matchedRadius: number | null = null;
 		const portionId = targetPortion.id.toLowerCase();
 
 		if (annotations) {
@@ -79,6 +81,10 @@ export function TargetPortion3DHighlight({
 					if (ann.center) matchedPts.push(ann.center);
 					if (ann.p1) matchedPts.push(ann.p1);
 					if (ann.p2) matchedPts.push(ann.p2);
+					if (ann.axis) matchedAxis = ann.axis;
+					if (ann.value && (ann.type === 'diameter' || lkey.includes('dia'))) {
+						matchedRadius = (ann.value / 2) * 1.08;
+					}
 				}
 			}
 		}
@@ -87,7 +93,7 @@ export function TargetPortion3DHighlight({
 		let cy = (minY + maxY) / 2;
 		let cz = (minZ + maxZ) / 2;
 		let computedSpan = maxLen * 0.22;
-		let computedRad = outerRad * 1.08;
+		let computedRad = matchedRadius ?? outerRad * 1.08;
 
 		if (matchedPts.length > 0) {
 			// Center derived from matched annotations
@@ -142,15 +148,19 @@ export function TargetPortion3DHighlight({
 		}
 
 		// Calculate alignment quaternion
-		const targetVec = primaryAxis === 'x' 
-			? new THREE.Vector3(1, 0, 0)
-			: primaryAxis === 'y'
-				? new THREE.Vector3(0, 1, 0)
-				: new THREE.Vector3(0, 0, 1);
-
-		// Three.js CylinderGeometry is oriented along Y by default (height along Y)
 		const upVec = new THREE.Vector3(0, 1, 0);
-		const quat = new THREE.Quaternion().setFromUnitVectors(upVec, targetVec);
+		const targetVec = matchedAxis 
+			? new THREE.Vector3(...matchedAxis).normalize()
+			: primaryAxis === 'x' 
+				? new THREE.Vector3(1, 0, 0)
+				: primaryAxis === 'y'
+					? new THREE.Vector3(0, 1, 0)
+					: new THREE.Vector3(0, 0, 1);
+
+		const quat = new THREE.Quaternion();
+		if (targetVec.lengthSq() > 1e-6) {
+			quat.setFromUnitVectors(upVec, targetVec);
+		}
 
 		return {
 			center: [cx, cy, cz] as [number, number, number],

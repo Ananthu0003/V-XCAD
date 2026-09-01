@@ -290,14 +290,17 @@ def _compute_parametric_annotations(shape, params):
                 if not radius or radius <= 0:
                     continue
                 gcs = face.geom_adaptor().Cylinder()
-                ax = gcs.Axis().Direction()
+                axis_obj = gcs.Axis()
+                ax = axis_obj.Direction()
+                loc = axis_obj.Location()
                 axis_vec = (ax.X(), ax.Y(), ax.Z())
                 axis_len = _math.sqrt(sum(c * c for c in axis_vec))
                 if axis_len < 1e-9:
                     continue
                 axis_unit = tuple(c / axis_len for c in axis_vec)
+                loc_pt = (loc.X(), loc.Y(), loc.Z())
 
-                # axial extent from the AABB corners projected onto the axis
+                # axial extent from the AABB corners projected onto the axis from loc_pt
                 fbb = face.bounding_box()
                 corners = (
                     (fbb.min.X, fbb.min.Y, fbb.min.Z),
@@ -310,18 +313,19 @@ def _compute_parametric_annotations(shape, params):
                     (fbb.max.X, fbb.max.Y, fbb.max.Z),
                 )
                 projs = [
-                    c[0] * axis_unit[0] + c[1] * axis_unit[1] + c[2] * axis_unit[2]
+                    (c[0] - loc_pt[0]) * axis_unit[0] + (c[1] - loc_pt[1]) * axis_unit[1] + (c[2] - loc_pt[2]) * axis_unit[2]
                     for c in corners
                 ]
                 axial_min = min(projs)
                 axial_max = max(projs)
-                axial_extent = axial_max - axial_min
+                axial_extent = max(0.01, axial_max - axial_min)
+                mid_proj = (axial_min + axial_max) / 2.0
 
-                # face center = bbox center (on-axis for axis-aligned cylinders)
+                # True center on cylinder axis line
                 center = (
-                    (fbb.min.X + fbb.max.X) / 2,
-                    (fbb.min.Y + fbb.max.Y) / 2,
-                    (fbb.min.Z + fbb.max.Z) / 2,
+                    loc_pt[0] + axis_unit[0] * mid_proj,
+                    loc_pt[1] + axis_unit[1] * mid_proj,
+                    loc_pt[2] + axis_unit[2] * mid_proj,
                 )
 
                 cylinders.append({
@@ -454,13 +458,25 @@ def _compute_parametric_annotations(shape, params):
             best_cyl = None
             best_diff = None
             best_dia = None
-            for expected_dia in (v, v * 2.0, v / 2.0):
+            
+            # Prioritize matching exact diameter first
+            # Then consider radius parameter (v * 2) or radius value (v / 2)
+            dia_candidates = [v]
+            if "radius" in name or "r_" in name:
+                dia_candidates = [v * 2.0, v]
+            else:
+                dia_candidates = [v, v * 2.0, v / 2.0]
+            
+            for expected_dia in dia_candidates:
                 for c in cylinders:
                     d = abs(c["diameter"] - expected_dia)
                     if d <= tol and (best_diff is None or d < best_diff):
                         best_diff = d
                         best_cyl = c
                         best_dia = c["diameter"]
+                if best_cyl is not None:
+                    break
+
             if best_cyl is not None:
                 u = _perp_dir(best_cyl["axis"])
                 cx, cy, cz = best_cyl["center"]

@@ -104,6 +104,11 @@ class OperationStrategyPlanner:
                 op.tool_id = decision.selected_tool.get("tool_id", "")
                 op.parameters["tool_selection_reason"] = decision.tool_selection_reason
                 op.parameters["tool_diameter"] = decision.selected_tool.get("diameter", 0.0)
+                # Attach the full tool dict so downstream toolpath engines can read
+                # operation["tool"]["diameter"] (ParametricToolpathEngine contract) and
+                # the response serialiser can resolve the assigned tool.
+                op.tool = decision.selected_tool
+                op.selected_tool = decision.selected_tool
                 
             if decision.feeds_and_speeds:
                 op.parameters["feeds_and_speeds"] = decision.feeds_and_speeds

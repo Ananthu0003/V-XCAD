@@ -14,6 +14,11 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
 	title: 'VΞXCAD Tactical Workspace',
 	description: 'Generate and refine CAD from documents with HITL controls.',
+	icons: {
+		icon: '/logo.png',
+		shortcut: '/logo.png',
+		apple: '/logo.png',
+	},
 };
 
 export default function RootLayout({

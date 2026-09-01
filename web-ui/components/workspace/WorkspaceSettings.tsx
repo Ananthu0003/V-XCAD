@@ -48,19 +48,19 @@ export function WorkspaceSettings({
   
   return (
     <div className="flex flex-col font-sans h-full w-full bg-transparent">
-      <div className="flex-1 overflow-y-auto p-5 custom-scrollbar space-y-8">
+      <div className="flex-1 overflow-y-auto p-5 pb-28 custom-scrollbar space-y-8">
         
         {/* Extracted Parameters */}
         <div className="space-y-4 animate-in fade-in duration-300">
           <div className="flex items-center gap-2">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80 mb-1">
+            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-600 dark:text-muted-foreground/80 mb-1">
               EXTRACTED PARAMETERS
             </h4>
-            <div className="flex-1 h-px bg-muted/50" />
+            <div className="flex-1 h-px bg-slate-200 dark:bg-muted/50" />
             {Object.keys(parameters).length > 0 && (
               <button
                 onClick={handleCopyParameters}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/30 hover:bg-muted/50 border border-border/50 text-muted-foreground hover:text-foreground transition-all text-[9px] font-bold uppercase tracking-wider"
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-100 dark:bg-muted/30 hover:bg-slate-200 dark:hover:bg-muted/50 border border-slate-200 dark:border-border/50 text-slate-700 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-foreground transition-all text-[9px] font-bold uppercase tracking-wider cursor-pointer"
                 title="Copy all parameters"
               >
                 {copied ? <Check className="size-3 text-green-500" /> : <Copy className="size-3" />}
@@ -69,7 +69,7 @@ export function WorkspaceSettings({
             )}
           </div>
           {Object.keys(parameters).length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border bg-muted/50 p-6 text-center text-xs text-muted-foreground font-mono">
+            <div className="rounded-xl border border-dashed border-slate-300 dark:border-border bg-slate-100/70 dark:bg-muted/50 p-6 text-center text-xs text-slate-500 dark:text-muted-foreground font-mono font-medium">
               NO PARAMETERS EXTRACTED
             </div>
           ) : (
@@ -94,14 +94,14 @@ export function WorkspaceSettings({
         {/* CAD Script */}
         <div className="space-y-4 animate-in fade-in duration-300">
           <div className="flex items-center gap-2">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80 mb-1">
+            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-600 dark:text-muted-foreground/80 mb-1">
               CAD SCRIPT (BUILD123D)
             </h4>
-            <div className="flex-1 h-px bg-muted/50" />
+            <div className="flex-1 h-px bg-slate-200 dark:bg-muted/50" />
             {pythonScript && (
               <button
                 onClick={handleCopyScript}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/30 hover:bg-muted/50 border border-border/50 text-muted-foreground hover:text-foreground transition-all text-[9px] font-bold uppercase tracking-wider"
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-100 dark:bg-muted/30 hover:bg-slate-200 dark:hover:bg-muted/50 border border-slate-200 dark:border-border/50 text-slate-700 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-foreground transition-all text-[9px] font-bold uppercase tracking-wider cursor-pointer"
                 title="Copy script"
               >
                 {copiedScript ? <Check className="size-3 text-green-500" /> : <Copy className="size-3" />}
@@ -110,7 +110,7 @@ export function WorkspaceSettings({
             )}
           </div>
           {!pythonScript ? (
-            <div className="rounded-xl border border-dashed border-border bg-muted/50 p-6 text-center text-xs text-muted-foreground font-mono">
+            <div className="rounded-xl border border-dashed border-slate-300 dark:border-border bg-slate-100/70 dark:bg-muted/50 p-6 text-center text-xs text-slate-500 dark:text-muted-foreground font-mono font-medium">
               NO SCRIPT GENERATED
             </div>
           ) : (

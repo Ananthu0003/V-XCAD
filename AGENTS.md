@@ -4,7 +4,7 @@
 
 This checklist must be used by AI assistants whenever they are asked to review code. Ensure the code is evaluated against the following categories:
 
-#### 1. Functional Quality
+#### 1. Functional Quality 
 - Functional correctness and business logic validation
 - Edge cases and boundary conditions
 - Exception and null handling

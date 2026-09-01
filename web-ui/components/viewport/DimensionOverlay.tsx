@@ -55,13 +55,12 @@ const toWorld = (
 
 const getAlignmentQuaternion = (dir: Vector3): Quaternion => {
     const up = new Vector3(0, 1, 0);
-    const axis = new Vector3().crossVectors(up, dir).normalize();
-    const dot = Math.min(1, Math.max(-1, up.dot(dir)));
-    const radians = Math.acos(dot);
-    if (axis.lengthSq() < 1e-10) {
-        return dot > 0 ? new Quaternion() : new Quaternion(1, 0, 0, 0);
+    const target = dir.clone().normalize();
+    const q = new Quaternion();
+    if (target.lengthSq() > 1e-6) {
+        q.setFromUnitVectors(up, target);
     }
-    return new Quaternion().setFromAxisAngle(axis, radians);
+    return q;
 };
 
 function isRenderable(a: AnnotationEntry): boolean {

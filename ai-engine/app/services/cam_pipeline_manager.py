@@ -160,10 +160,8 @@ class CamPipelineManager:
         """
         Production-Grade Auto Generate Operations Pipeline.
         """
-        # 1. Feature Recognition (Moved up to detect machine type)
-        if machine_config.get("features"):
-            features = machine_config["features"]
-        elif parameters:
+        # 1. Feature Recognition (Prioritize fresh extraction from blueprint parameters)
+        if parameters:
             from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
             from app.services.cam.brep_feature_extractor import BRepFeatureExtractor
             
@@ -188,6 +186,8 @@ class CamPipelineManager:
             features = ParametricFeatureExtractor().extract(
                 parameters, setup=machine_config.get("setup", {}), brep_data=brep_data
             )
+        elif machine_config.get("features"):
+            features = machine_config["features"]
         else:
             features = []
 
@@ -425,7 +425,7 @@ class CamPipelineManager:
                 
                 # 3c. Tool Selection & Feeds/Speeds (ONLY if capable)
                 pref_tool_id = feature.get("toolId") or feature.get("tool_id")
-                tool, t_status, t_reason, feeds = tool_engine.recommend_tool(strategy, feature, machine, material, setup=setup_metadata, preferred_tool_id=pref_tool_id)
+                tool, t_status, t_reason, feeds = tool_engine.recommend_tool(strategy, feature, machine, material, setup=setup_obj, preferred_tool_id=pref_tool_id)
                 if not tool:
                     decision.status = "blocked"
                     decision.reason = t_reason
@@ -450,6 +450,7 @@ class CamPipelineManager:
             # 3d. Operation Planning (Ordering and Generation)
             ops = self.operation_strategy_planner.plan_operations(setup_decisions, setup_id)
             for op in ops:
+                op.wcs = sp.workCoordinateSystem
                 # Attach the local feature directly to the operation
                 local_feat_dict = next((d.parameters.get("setup_local_feature") for d in setup_decisions if d.feature_id == op.feature_id), None)
                 if local_feat_dict:
@@ -460,6 +461,7 @@ class CamPipelineManager:
                     op.traceability = {}
                 op.traceability["stock_provenance"] = planning_context.get_stock_geometry().get("provenance")
                 op.traceability["setup_id"] = setup_id
+                op.traceability["wcs"] = sp.workCoordinateSystem
                 
                 all_operations.append(op.to_dict())
                 
@@ -1078,6 +1080,20 @@ class CamPipelineManager:
             if tool_id_ref and tool_id_ref in tool_dict:
                 op['tool'] = tool_dict[tool_id_ref]
 
+        # Propagate the work coordinate system (WCS) onto each operation so the
+        # post-processor emits the correct G54/G55/... per setup. Without this,
+        # every setup would be machined at the same WCS and collide.
+        setup_wcs_map = {}
+        for s in (setups or []):
+            sid = s.get("setupId") or s.get("setup_id")
+            wcs = s.get("workCoordinateSystem") or s.get("wcs")
+            if sid and wcs:
+                setup_wcs_map[sid] = wcs
+        default_wcs = (setup or {}).get("workCoordinateSystem") or (setup or {}).get("wcs") or "G54"
+        for op in operations:
+            op_sid = op.get("setupId") or op.get("setup_id")
+            op["wcs"] = setup_wcs_map.get(op_sid, default_wcs)
+
         # Output toolpath engine input debug
         job_dir = Path(__file__).resolve().parents[3] / "storage" / "jobs" / job_id / "cam"
         job_dir.mkdir(parents=True, exist_ok=True)
@@ -1129,57 +1145,6 @@ class CamPipelineManager:
             machiningRegion = op.get("machiningRegion")
             tool = op.get("tool", {})
             try:
-                # Transform machiningRegion to Setup Space
-                transform = setup.get("modelToSetupTransform") if setup else None
-                if transform and machiningRegion and machiningRegion.get("valid"):
-                    import copy
-                    machiningRegion = copy.deepcopy(machiningRegion)
-                    
-                    def transform_pt(pt):
-                        x, y, z = pt[0], pt[1], pt[2] if len(pt) > 2 else 0.0
-                        
-                        # Flatten transform to handle both 1D and 2D arrays
-                        if transform and isinstance(transform[0], list):
-                            e = [item for sublist in transform for item in sublist]
-                        else:
-                            e = transform or [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]
-                            
-                        if len(e) == 16:
-                            # The matrix is row-major (from setup_coordinate_resolver.py)
-                            # e = [m11, m12, m13, tx,  m21, m22, m23, ty,  m31, m32, m33, tz,  0, 0, 0, 1]
-                            nx = e[0]*x + e[1]*y + e[2]*z + e[3]
-                            ny = e[4]*x + e[5]*y + e[6]*z + e[7]
-                            nz = e[8]*x + e[9]*y + e[10]*z + e[11]
-                        else:
-                            nx, ny, nz = x, y, z
-                            
-                        return [nx, ny, nz] if len(pt) > 2 else [nx, ny]
-
-                    if "boundary" in machiningRegion and machiningRegion["boundary"]:
-                        machiningRegion["boundary"] = [transform_pt(p) for p in machiningRegion["boundary"]]
-                    if "islands" in machiningRegion and machiningRegion["islands"]:
-                        machiningRegion["islands"] = [[transform_pt(p) for p in isl] for isl in machiningRegion["islands"]]
-                    if "center" in machiningRegion and machiningRegion["center"]:
-                        machiningRegion["center"] = transform_pt(machiningRegion["center"])
-                    if machiningRegion.get("topZ") is not None:
-                        e = [item for sublist in transform for item in sublist] if (transform and isinstance(transform[0], list)) else (transform or [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1])
-                        machiningRegion["topZ"] = (e[10] * machiningRegion["topZ"]) + e[14]
-                    if machiningRegion.get("bottomZ") is not None:
-                        e = [item for sublist in transform for item in sublist] if (transform and isinstance(transform[0], list)) else (transform or [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1])
-                        machiningRegion["bottomZ"] = (e[10] * machiningRegion["bottomZ"]) + e[14]
-                    if "axis" in machiningRegion and machiningRegion["axis"]:
-                        x, y, z = machiningRegion["axis"]
-                        e = [item for sublist in transform for item in sublist] if (transform and isinstance(transform[0], list)) else (transform or [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1])
-                        if len(e) == 16:
-                            nx = e[0]*x + e[4]*y + e[8]*z
-                            ny = e[1]*x + e[5]*y + e[9]*z
-                            nz = e[2]*x + e[6]*y + e[10]*z
-                        else:
-                            nx, ny, nz = x, y, z
-                        mag = (nx**2 + ny**2 + nz**2)**0.5
-                        if mag > 0:
-                            machiningRegion["axis"] = [nx/mag, ny/mag, nz/mag]
-
                 commands = motion_planner.generate_commands(op, machiningRegion, tool, setup)
                 segments = toolpath_engine.generate_toolpaths_from_commands(op, commands)
                 if segments:

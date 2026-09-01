@@ -223,12 +223,17 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                                         if (!val) return;
                                                                         const options: Record<string, string> = {
                                                                             "facing": "Facing",
+                                                                            "facing_turning": "Face Turning",
                                                                             "pocketing": "Pocketing",
                                                                             "drilling": "Drilling",
                                                                             "2d_contour_outer": "Contouring",
                                                                             "chamfer_milling": "Chamfering",
                                                                             "boss_clearing": "Boss Clearing",
-                                                                            "od_turning": "Turning (OD)",
+                                                                            "od_turning": "OD Rough Turning",
+                                                                            "od_finish_turning": "OD Finish Turning",
+                                                                            "id_boring": "ID Boring",
+                                                                            "grooving": "Grooving",
+                                                                            "parting_off": "Parting Off",
                                                                             "rotary_milling": "Rotary Milling",
                                                                             "indexed_4axis_milling": "Indexed 4-Axis"
                                                                         };
@@ -241,15 +246,20 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                                     </SelectTrigger>
                                                                     <SelectContent>
                                                                         <SelectItem value="facing">Facing</SelectItem>
-                                                                        <SelectItem value="pocketing">Pocketing</SelectItem>
+                                                                        <SelectItem value="facing_turning">Face Turning</SelectItem>
+                                                                        <SelectItem value="od_turning">OD Rough Turning</SelectItem>
+                                                                        <SelectItem value="od_finish_turning">OD Finish Turning</SelectItem>
                                                                         <SelectItem value="drilling">Drilling</SelectItem>
+                                                                        <SelectItem value="id_boring">ID Boring</SelectItem>
+                                                                        <SelectItem value="grooving">Grooving</SelectItem>
+                                                                        <SelectItem value="parting_off">Parting Off</SelectItem>
+                                                                        <SelectItem value="pocketing">Pocketing</SelectItem>
                                                                         <SelectItem value="2d_contour_outer">Contouring</SelectItem>
                                                                         <SelectItem value="chamfer_milling">Chamfering</SelectItem>
                                                                         <SelectItem value="boss_clearing">Boss Clearing</SelectItem>
-                                                                        <SelectItem value="od_turning">Turning (OD)</SelectItem>
                                                                         <SelectItem value="rotary_milling">Rotary Milling</SelectItem>
                                                                         <SelectItem value="indexed_4axis_milling">Indexed 4-Axis</SelectItem>
-                                                                        {!["facing", "pocketing", "drilling", "2d_contour_outer", "chamfer_milling", "boss_clearing", "od_turning", "rotary_milling", "indexed_4axis_milling"].includes(op.type) && (
+                                                                        {!["facing", "facing_turning", "od_turning", "od_finish_turning", "drilling", "id_boring", "grooving", "parting_off", "pocketing", "2d_contour_outer", "chamfer_milling", "boss_clearing", "rotary_milling", "indexed_4axis_milling"].includes(op.type) && (
                                                                             <SelectItem value={op.type}>{op.name || op.type}</SelectItem>
                                                                         )}
                                                                     </SelectContent>

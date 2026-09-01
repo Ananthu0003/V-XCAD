@@ -107,18 +107,29 @@ class OperationPlanner:
                     feature["geometry_status"] = "error"
                 else:
                     operations.append(op)
+                    if op.type == "od_turning":
+                        finish_op = CamOperation("od_finish_turning", feat_id, setup_id=op.setup_id)
+                        finish_op.name = "OD Finish Turning"
+                        finish_op.tool_id = "tool_lathe_finish_1"
+                        finish_op.safe_heights = dict(op.safe_heights)
+                        finish_op.machining_strategy = "lathe_finishing"
+                        finish_op.geometry = getattr(op, 'geometry', {})
+                        finish_op.feature_center = getattr(op, 'feature_center', [0, 0, 0])
+                        operations.append(finish_op)
                 
         # Apply strategic sorting 
         sort_order = {
             "facing": 1,
-            "facing_turning": 2,
-            "drilling": 3,
-            "od_turning": 4,
+            "facing_turning": 1,
+            "od_turning": 2,
+            "od_finish_turning": 3,
+            "drilling": 4,
             "id_boring": 5,
             "grooving": 6,
-            "pocketing": 7,
-            "boss_clearing": 8,
-            "2d_contour": 9,
+            "parting_off": 7,
+            "pocketing": 8,
+            "boss_clearing": 9,
+            "2d_contour": 10,
         }
         
         operations.sort(key=lambda op: sort_order.get(op.type, 99))
@@ -201,17 +212,21 @@ class OperationPlanner:
             op.safe_heights['bottom'] = machining_region.get('bottomZ', feature.get('dimensions', {}).get('z_bottom', -10.0))
             op.machining_strategy = 'outside_climb'
             
-        elif op_type in ["od_turning", "id_boring", "grooving", "facing_turning"]:
+        elif op_type in ["od_turning", "od_finish_turning", "id_boring", "grooving", "facing_turning", "parting_off"]:
             op.tool_id = "tool_lathe_turn_1"
             if op_type == "id_boring":
                 op.tool_id = "tool_boring_bar_1"
             elif op_type == "grooving":
                 op.tool_id = "tool_groove_1"
+            elif op_type == "od_finish_turning":
+                op.tool_id = "tool_lathe_finish_1"
+            elif op_type == "parting_off":
+                op.tool_id = "tool_parting_1"
                 
             machining_region = feature.get('machiningRegion', {})
             op.safe_heights['top'] = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
             op.safe_heights['bottom'] = machining_region.get('bottomZ', feature.get('dimensions', {}).get('z_bottom', -10.0))
-            op.machining_strategy = 'lathe_roughing'
+            op.machining_strategy = 'lathe_finishing' if op_type == "od_finish_turning" else ('parting' if op_type == "parting_off" else 'lathe_roughing')
         
         if op:
             z_top = op.safe_heights.get('top', 0.0)

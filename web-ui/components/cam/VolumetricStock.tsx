@@ -229,7 +229,7 @@ export function VolumetricStock({
                         <cylinderGeometry args={[stockDimensions[0] / 2, stockDimensions[0] / 2, stockDimensions[2], 64, 1, true]} />
                         <meshStandardMaterial color="#94a3b8" metalness={0.6} roughness={0.4} side={THREE.DoubleSide} />
                     </mesh>
-                    <mesh position={[0, -stockDimensions[2] / 2, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                    <mesh position={[0, 0, -stockDimensions[2] / 2]}>
                         <circleGeometry args={[stockDimensions[0] / 2, 64]} />
                         <meshStandardMaterial color="#94a3b8" metalness={0.6} roughness={0.4} side={THREE.DoubleSide} />
                     </mesh>

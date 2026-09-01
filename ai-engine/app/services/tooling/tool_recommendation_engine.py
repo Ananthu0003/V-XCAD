@@ -66,7 +66,7 @@ class ToolRecommendationEngine:
             stock_size = feat_size
 
         # Dynamic maximum tool diameter thresholds calculated from physical stock scale
-        max_facing_dia = (stock_size * 1.5) if stock_size > 0.0 else 100.0
+        max_facing_dia = max(stock_size * 2.0, feat_size * 2.5, 12.0) if (stock_size > 0.0 or feat_size > 0.0) else 100.0
         max_milling_dia = (stock_size * 1.25) if stock_size > 0.0 else (feat_size * 1.5 if feat_size > 0.0 else 100.0)
 
         # Determine required tool type
@@ -156,9 +156,16 @@ class ToolRecommendationEngine:
                             rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) too small for bore ({target_dia}mm) — less than 10% ratio")
                             continue
 
-                if operation_type == "facing" and stock_size > 0.0:
+                if operation_type in ("facing", "facing_turning") and stock_size > 0.0:
                     if t.diameter > max_facing_dia:
                         rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) exceeds facing scale threshold ({round(max_facing_dia, 2)}mm) for stock size ({stock_size}mm)")
+                        continue
+
+                if operation_type in ("od_turning", "turning", "facing_turning") and stock_size > 0.0:
+                    # For small turned parts (stock < 15mm), avoid massive 25mm+ heavy roughing tools if smaller tools exist
+                    max_turned_tool_dia = max(stock_size * 2.0, 12.0)
+                    if t.diameter > max_turned_tool_dia:
+                        rejections.append(f"{t.name}: tool size ({t.diameter}mm) too large for micro/small turned stock ({stock_size}mm)")
                         continue
                 
                 if operation_type in ("pocketing", "pocket_milling", "slot_milling", "cavity", "boss_clearing", "2d_contour", "2d_contour_outer"):
@@ -209,14 +216,21 @@ class ToolRecommendationEngine:
                     if operation_type in ("drilling", "peck_drilling"):
                         score -= abs(target_dia - t.diameter) * 10
                     elif operation_type == "helical_bore_milling":
-                        # Prefer largest end mill that fits inside the bore
-                        # Ideal ratio is ~70% of bore diameter
                         ideal_dia = target_dia * 0.7
                         score -= abs(ideal_dia - t.diameter) * 5
-                        score += t.diameter  # slightly prefer larger
-                    elif operation_type == "facing":
-                        # For facing, we want the largest valid tool up to the machine/stock scale limit
-                        score += t.diameter * 2.0
+                        score += t.diameter
+                    elif operation_type in ("facing", "facing_turning"):
+                        if stock_size > 0 and stock_size < 15:
+                            ideal_dia = max(stock_size * 0.8, 2.0)
+                            score -= abs(ideal_dia - t.diameter) * 2.0
+                        else:
+                            score += t.diameter * 2.0
+                    elif operation_type in ("od_turning", "turning"):
+                        if stock_size > 0 and stock_size < 15:
+                            ideal_dia = max(stock_size * 0.6, 1.5)
+                            score -= abs(ideal_dia - t.diameter) * 2.0
+                        else:
+                            score -= abs(target_dia - t.diameter) if target_dia > 0 else 0.0
                     else:
                         score += t.diameter
                         
@@ -228,9 +242,61 @@ class ToolRecommendationEngine:
                 candidate_tools.sort(key=_score_tool, reverse=True)
                 best_tool = candidate_tools[0]
 
-        # Strict Library Selection: if no tool fits geometrically, block the operation
+        # If no library tool fits geometrically, auto-synthesize the recommended tool based on feature physics
         if not best_tool:
-            return None, "blocked", f"No tool found in library for operation '{operation_type}'. Target Dia: {target_dia}mm, Depth: {target_depth}mm", None
+            if operation_type in ("drilling", "peck_drilling"):
+                synth_dia = target_dia if target_dia > 0 else 3.0
+                best_tool = ToolProfile(
+                    tool_id=f"tool_drill_{int(synth_dia*100)}",
+                    name=f"{synth_dia}mm Micro Twist Drill",
+                    type="drill",
+                    diameter=synth_dia,
+                    flute_count=2,
+                    cutting_length=max(target_depth * 1.5, 10.0),
+                    stickout=max(target_depth * 2.5, 25.0),
+                    compatible_materials=["all"],
+                    supported_machines=["all"]
+                )
+            elif operation_type in ("od_turning", "turning", "facing_turning"):
+                best_tool = ToolProfile(
+                    tool_id="tool_od_turn_auto",
+                    name="Micro OD Turning Tool",
+                    type="turning_tool",
+                    diameter=max(min(stock_size, 6.0), 1.0) if stock_size > 0 else 4.0,
+                    flute_count=1,
+                    cutting_length=max(target_depth * 1.5, 10.0),
+                    stickout=25.0,
+                    compatible_materials=["all"],
+                    supported_machines=["all"]
+                )
+            elif operation_type in ("facing", "face_milling"):
+                synth_dia = min(stock_size * 0.8, 12.0) if stock_size > 0 else 6.0
+                synth_dia = max(synth_dia, 1.0)
+                best_tool = ToolProfile(
+                    tool_id=f"tool_face_mill_{int(synth_dia*10)}",
+                    name=f"{synth_dia}mm Face Mill",
+                    type="face_mill",
+                    diameter=synth_dia,
+                    flute_count=4,
+                    cutting_length=15.0,
+                    stickout=30.0,
+                    compatible_materials=["all"],
+                    supported_machines=["all"]
+                )
+            else:
+                synth_dia = min(feat_size * 0.6, 6.0) if feat_size > 0 else 3.0
+                synth_dia = max(synth_dia, 0.5)
+                best_tool = ToolProfile(
+                    tool_id=f"tool_end_mill_{int(synth_dia*10)}",
+                    name=f"{synth_dia}mm Flat End Mill",
+                    type="flat_end_mill",
+                    diameter=synth_dia,
+                    flute_count=2,
+                    cutting_length=max(target_depth * 1.5, 10.0),
+                    stickout=30.0,
+                    compatible_materials=["all"],
+                    supported_machines=["all"]
+                )
 
         reason = f"Chosen {best_tool.name} (Dia {best_tool.diameter}mm) as it supports material and feature dimensions."
         if preferred_tool_id:

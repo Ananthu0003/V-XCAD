@@ -85,6 +85,7 @@ export type SetupSettings = {
     wcs?: WorkCoordinateSystem;
     originPosition?: OriginPosition;
     tolerance?: number;
+    smoothingTolerance?: number;
     stockOffset?: number;
     stockOffsetXY?: number;
     stockOffsetTop?: number;

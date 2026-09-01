@@ -183,3 +183,19 @@ def test_deterministic_no_invention():
     b = engine.estimate(_ctx(cycle_time_s=1800.0, setup_time_s=1800.0,
                              machine_profile={"hourly_rate": 60.0, "setup_rate": 40.0}, quantity=5))
     assert a.model_dump() == b.model_dump()
+
+def test_cylindrical_stock_material_cost():
+    engine = CostEstimationEngine()
+    # Test 2-element dims [dia, length]
+    res_2d = engine.estimate(_ctx(setup={"stockType": "cylinder", "stockDimensions": [20, 100]}))
+    expected_vol = math.pi * (10.0 ** 2) * 100.0
+    assert abs(res_2d.material.stock_volume_mm3 - expected_vol) < 0.1
+
+    # Test explicit cylinderDiameter and cylinderLength
+    res_explicit = engine.estimate(_ctx(setup={"stockType": "fixed_cylinder", "cylinderDiameter": 20, "cylinderLength": 100}))
+    assert abs(res_explicit.material.stock_volume_mm3 - expected_vol) < 0.1
+
+    # Test X-axis cylindrical orientation [length, dia, dia]
+    res_xaxis = engine.estimate(_ctx(setup={"stockType": "fixed_cylinder", "stockDimensions": [100, 20, 20], "stockAxis": "x"}))
+    assert abs(res_xaxis.material.stock_volume_mm3 - expected_vol) < 0.1
+

@@ -66,8 +66,8 @@ class ParametricFeatureExtractor:
                 groups.setdefault(normalized_key, {})[("value")] = value
                 
         # --- Phase 2: Extract overall part dimensions from parameters ---
-        part_length = self._infer_part_dimension(groups, ["overall_length", "total_length", "part_length", "body_length", "length"])
-        part_od = self._infer_part_dimension(groups, ["outer_diameter", "od", "outside_diameter", "body_diameter", "outer_dia", "body_dia"])
+        part_length = self._infer_part_dimension(groups, ["overall_length", "total_length", "part_length", "body_length", "length"], raw_parameters=parameters)
+        part_od = self._infer_part_dimension(groups, ["outer_diameter", "od", "outside_diameter", "body_diameter", "outer_dia", "body_dia"], raw_parameters=parameters)
         
         part_width = None
         part_length_y = None
@@ -188,19 +188,37 @@ class ParametricFeatureExtractor:
         
         # --- Phase 4: Add overall part features (OD and Facing) ---
         if part_od and part_od > 0:
+            import hashlib
+            eff_len = part_length if part_length and part_length > 0 else 10.0
+            feat_id = f"feat_od_{hashlib.md5(f'od_{part_od}_{eff_len}'.encode()).hexdigest()[:8]}"
             features.insert(0, {
-                "id": f"feat_{uuid.uuid4().hex[:8]}",
+                "id": feat_id,
                 "type": "external_cylinder",
-                "name": "Outer Diameter",
+                "subtype": "turned_od",
+                "name": "Body Outer Diameter",
                 "dimensions": {
                     "diameter": part_od,
-                    "length": part_length if part_length and part_length > 0 else 10.0
+                    "length": eff_len,
+                    "height": eff_len
                 },
-                "center": part_center,
+                "center": [0.0, 0.0, 0.0],
                 "axis": _PRIMARY_AXIS,
                 "machinable_in_current_setup": True,
                 "status": "machinable",
-                "geometry": {"status": "synthetic"}
+                "recommendedOperation": "od_turning",
+                "recommendedToolType": "turning_tool",
+                "geometry": {"status": "synthetic"},
+                "machiningRegion": {
+                    "valid": True,
+                    "regionId": feat_id,
+                    "regionType": "turning_region",
+                    "center": [0.0, 0.0, 0.0],
+                    "axis": _PRIMARY_AXIS,
+                    "topZ": stock_top_z,
+                    "bottomZ": stock_top_z - eff_len,
+                    "diameter": part_od,
+                    "source": "parametric"
+                }
             })
         elif part_width and part_width > 0 and part_length_y and part_length_y > 0:
             features.insert(0, {
@@ -213,7 +231,7 @@ class ParametricFeatureExtractor:
                     "length": part_length_y,
                     "depth": part_length if part_length and part_length > 0 else 10.0
                 },
-                "center": part_center,
+                "center": [0.0, 0.0, 0.0],
                 "axis": _PRIMARY_AXIS,
                 "status": "machinable",
                 "geometry": {"status": "synthetic"},
@@ -221,7 +239,7 @@ class ParametricFeatureExtractor:
                     "valid": True,
                     "regionId": f"feat_{uuid.uuid4().hex[:8]}",
                     "regionType": "contour_region",
-                    "center": part_center,
+                    "center": [0.0, 0.0, 0.0],
                     "axis": _PRIMARY_AXIS,
                     "depth": part_length if part_length and part_length > 0 else 10.0,
                     "topZ": stock_top_z,
@@ -238,8 +256,28 @@ class ParametricFeatureExtractor:
         )
         if has_primary_features or not features:
             features.append(self._create_face_feature("Top Face (Setup 1)", _PRIMARY_AXIS, stock_top_z, part_od=part_od, part_length=part_length, part_center=part_center))
+
+        # Deduplicate features by type and geometry (e.g. redundant tokens like 'base' vs 'base_thickness')
+        deduped: List[Dict[str, Any]] = []
+        for f in features:
+            f_type = f.get("type")
+            f_dia = f.get("dimensions", {}).get("diameter") or f.get("diameter")
+            f_top = f.get("machiningRegion", {}).get("topZ")
+            is_dup = False
+            for existing in deduped:
+                if existing.get("type") == f_type and f_dia and f_dia > 0:
+                    ex_dia = existing.get("dimensions", {}).get("diameter") or existing.get("diameter")
+                    if ex_dia and abs(ex_dia - f_dia) < 0.05:
+                        ex_top = existing.get("machiningRegion", {}).get("topZ")
+                        if ex_top is not None and f_top is not None and abs(ex_top - f_top) < 0.5:
+                            is_dup = True
+                            if (f.get("dimensions", {}).get("height", 0) > existing.get("dimensions", {}).get("height", 0)):
+                                existing.update(f)
+                            break
+            if not is_dup:
+                deduped.append(f)
                 
-        return features
+        return deduped
     
     # -------------------------------------------------------------------------
     # Side / Orientation Detection
@@ -282,44 +320,49 @@ class ParametricFeatureExtractor:
         if diameter <= 0:
             return None
             
-        depth = float(dims.get("depth", dims.get("length", 0)))
+        depth = float(dims.get("depth") or dims.get("length") or dims.get("height") or dims.get("len") or 0.0)
         if depth <= 0 and part_length:
             depth = part_length
         # Try to get depth from B-Rep data if parametric depth is still zero
         if depth <= 0 and brep_data and brep_data.get("status") == "success":
-            # Use the stock height as fallback for through-holes
             bounds = brep_data.get("bounds", {})
             if bounds.get("height") and bounds["height"] > 0:
-                depth = bounds["height"]
+                depth = float(bounds["height"])
         if depth <= 0:
             return None
         
-        # Compute center position based on side
-        center = self._compute_center_for_side(axis, part_length)
+        # Center in setup space
+        center = [0.0, 0.0, 0.0]
+        if "x_center" in dims:
+            center[0] = float(dims["x_center"])
+        if "y_center" in dims:
+            center[1] = float(dims["y_center"])
         if "offset" in dims:
-            # If there's an offset (like cross hole offset), apply it to Z
             center[2] = float(dims["offset"])
+        elif axis != _PRIMARY_AXIS and axis != _OPPOSITE_AXIS:
+            center = self._compute_center_for_side(axis, part_length)
             
         # --- B-Rep Topological Coordination ---
-        # Match the parametric hole to the closest B-Rep cylinder by diameter.
-        # Use the B-Rep XY center for positioning, but keep center Z at the
-        # stock top (Z=0 in CAM coordinates) so the toolpath engine starts
-        # the cut from the correct height.
         if brep_data and brep_data.get("status") == "success" and brep_data.get("holes"):
             best_match = None
             min_err = float('inf')
             for h in brep_data["holes"]:
                 err = abs(h["diameter"] - diameter)
-                if err < 1.0 and err < min_err:
+                if err < 0.1 and err < min_err:
                     min_err = err
                     best_match = h
             if best_match:
-                # Only take XY from B-Rep; Z stays at 0 (stock top)
-                center[0] = best_match["center"][0]
-                center[1] = best_match["center"][1]
-                # Update depth from the B-Rep measured extent
-                if best_match.get("depth") and best_match["depth"] > 0:
-                    depth = best_match["depth"]
+                if depth <= 0 and best_match.get("depth"):
+                    depth = float(best_match["depth"])
+                # For off-axis cross holes, compute radial offsets
+                if axis != _PRIMARY_AXIS and axis != _OPPOSITE_AXIS:
+                    if best_match.get("center") and part_center:
+                        rel_x = best_match["center"][0] - part_center[0]
+                        rel_y = best_match["center"][1] - part_center[1]
+                        if abs(rel_x) > 0.01:
+                            center[0] = round(rel_x, 4)
+                        if abs(rel_y) > 0.01:
+                            center[1] = round(rel_y, 4)
                 
         # Compute topZ/bottomZ in the feature's local frame
         # For primary side: tool enters from stock_top_z downward
@@ -367,9 +410,8 @@ class ParametricFeatureExtractor:
         if width <= 0 or length <= 0 or depth <= 0:
             return None
             
-        # Parse explicit center coordinates if provided by AI parameters, 
-        # or fallback to bounding box center if we don't have B-Rep planar mapping yet.
-        center = part_center[:] if part_center else [0.0, 0.0, 0.0]
+        # Center in setup-local space
+        center = [0.0, 0.0, 0.0]
         if "x_center" in dims:
             center[0] = float(dims["x_center"])
         elif "x_offset" in dims:
@@ -392,9 +434,10 @@ class ParametricFeatureExtractor:
                     min_err = err
                     best_match = p
             if best_match:
-                # Use XY from B-Rep
-                center[0] = best_match["center"][0]
-                center[1] = best_match["center"][1]
+                # For off-center pockets, use relative XY in setup space
+                if best_match.get("center") and part_center:
+                    center[0] = round(best_match["center"][0] - part_center[0], 4)
+                    center[1] = round(best_match["center"][1] - part_center[1], 4)
                 if best_match.get("depth_from_top") and best_match["depth_from_top"] > 0:
                     depth = best_match["depth_from_top"]
         
@@ -448,16 +491,34 @@ class ParametricFeatureExtractor:
         if height <= 0:
             return None
             
-        # Parse explicit center coordinates if provided
-        center = part_center[:] if part_center else [0.0, 0.0, 0.0]
+        # Parse explicit center coordinates in setup-local space
+        center = [0.0, 0.0, 0.0]
         if "x_center" in dims:
             center[0] = float(dims["x_center"])
         if "y_center" in dims:
             center[1] = float(dims["y_center"])
-            
-        # Determine center based on side (front/back) if no explicit center is found
-        if "x_center" not in dims and "y_center" not in dims:
-            center = self._compute_center_for_side(axis, part_length, part_center)
+        elif axis != _PRIMARY_AXIS and axis != _OPPOSITE_AXIS:
+            center = self._compute_center_for_side(axis, part_length)
+
+        top_z = stock_top_z
+        bottom_z = stock_top_z - height
+        
+        # B-Rep coordination for turned cylinders / steps
+        if brep_data and brep_data.get("external_cylinders") and diameter > 0:
+            best_match = None
+            min_err = float('inf')
+            for c in brep_data["external_cylinders"]:
+                err = abs(c.get("diameter", 0.0) - diameter)
+                if err < 0.1 and err < min_err:
+                    min_err = err
+                    best_match = c
+            if best_match:
+                if "z_min" in best_match and "z_max" in best_match:
+                    top_z = float(best_match["z_max"])
+                    bottom_z = float(best_match["z_min"])
+                    height = abs(top_z - bottom_z)
+                    if "length" in dims and height <= 0:
+                        height = float(dims["length"])
         
         import hashlib
         feat_id = f"feat_{hashlib.md5(prefix.encode()).hexdigest()[:8]}"
@@ -470,7 +531,8 @@ class ParametricFeatureExtractor:
                 "diameter": diameter,
                 "width": width,
                 "length": length,
-                "height": height
+                "height": height,
+                "depth": height
             },
             "center": center,
             "axis": axis,
@@ -481,11 +543,12 @@ class ParametricFeatureExtractor:
                 "valid": True,
                 "regionId": feat_id,
                 "regionType": "boss_region",
-                "center": [0, 0, 0],
+                "center": center,
                 "axis": axis,
                 "height": height,
-                "topZ": stock_top_z,
-                "bottomZ": stock_top_z - height,
+                "depth": height,
+                "topZ": top_z,
+                "bottomZ": bottom_z,
                 "diameter": diameter,
                 "width": width,
                 "length": length,
@@ -508,7 +571,7 @@ class ParametricFeatureExtractor:
             "id": feat_id,
             "type": "face",
             "name": name,
-            "center": part_center[:] if part_center else [0.0, 0.0, 0.0],
+            "center": [0.0, 0.0, 0.0],
             "depth": 1.0,
             "diameter": part_od if part_od and part_od > 0 else None,
             "dimensions": dims,
@@ -527,40 +590,68 @@ class ParametricFeatureExtractor:
     
     def _compute_center_for_side(self, axis: List[float], part_length: Optional[float], part_center: List[float] = None) -> List[float]:
         """
-        For the primary side, center is at the part bounding box center.
-        For the opposite side, center is offset along -Z by the part length
-        (this positions the feature at the far end of the part).
+        Returns the center coordinates for the feature in setup-local space.
         """
-        cx, cy, cz = part_center if part_center else [0.0, 0.0, 0.0]
-        if axis == _OPPOSITE_AXIS and part_length and part_length > 0:
-            return [cx, cy, cz - part_length]
-        return [cx, cy, cz]
+        return [0.0, 0.0, 0.0]
     
-    def _infer_part_dimension(self, groups: Dict[str, Dict], candidate_keys: List[str]) -> Optional[float]:
+    def _infer_part_dimension(self, groups: Dict[str, Dict], candidate_keys: List[str], raw_parameters: Optional[Dict[str, Any]] = None) -> Optional[float]:
         """
-        Searches the parameter groups for known overall-dimension keys.
-        Handles both forms:
+        Searches parameter groups and raw parameters for known overall-dimension keys.
+        Handles:
           - Exact group key match: e.g., groups["overall_length"]["value"]
-          - Prefix + suffix match: e.g., groups["overall"]["length"] (from "OVERALL LENGTH")
+          - Prefix + suffix match: e.g., groups["overall"]["length"]
+          - Flexible token matching on groups (e.g. "body_main_outer" with "dia", "body_main_total" with "length")
+          - Direct parameter dictionary inspection
         Returns the value if found, None otherwise.
         """
         for ckey in candidate_keys:
             # 1. Exact match on group key
             if ckey in groups:
-                val = groups[ckey].get("value") or groups[ckey].get("length") or groups[ckey].get("depth") or groups[ckey].get("dia")
+                val = groups[ckey].get("value") or groups[ckey].get("length") or groups[ckey].get("depth") or groups[ckey].get("dia") or groups[ckey].get("diameter") or groups[ckey].get("radius")
                 if val and isinstance(val, (int, float)) and val > 0:
                     return float(val)
             
-            # 2. Prefix + suffix match: split candidate key and look for prefix group with suffix dim
+            # 2. Prefix + suffix match
             parts = ckey.rsplit("_", 1)
             if len(parts) == 2:
                 prefix, suffix = parts
                 if prefix in groups:
-                    # Normalize suffix: "diameter" → "dia"
                     norm_suffix = "dia" if suffix == "diameter" else suffix
                     val = groups[prefix].get(norm_suffix) or groups[prefix].get(suffix)
                     if val and isinstance(val, (int, float)) and val > 0:
                         return float(val)
+                        
+        is_length_query = any(any(t in ("length", "len", "depth", "height") for t in c.split("_")) for c in candidate_keys)
+        is_od_query = any(any(t in ("outer", "od", "outside", "diameter", "dia") for t in c.split("_")) for c in candidate_keys)
+        
+        # 3. Flexible group token matching
+        for prefix, dims in groups.items():
+            p_tokens = set(prefix.lower().split("_"))
+            if is_od_query:
+                if "outer" in p_tokens or "od" in p_tokens or "outside" in p_tokens or ("body" in p_tokens and "outer" in p_tokens) or "major" in p_tokens:
+                    val = dims.get("dia") or dims.get("diameter") or (dims.get("radius", 0) * 2 if "radius" in dims else None) or dims.get("value")
+                    if val and isinstance(val, (int, float)) and val > 0:
+                        return float(val)
+            elif is_length_query:
+                if "total" in p_tokens or "overall" in p_tokens or ("body" in p_tokens and "total" in p_tokens) or ("part" in p_tokens and "total" in p_tokens) or ("main" in p_tokens and "length" in p_tokens) or "length" in p_tokens:
+                    val = dims.get("length") or dims.get("depth") or dims.get("height") or dims.get("value")
+                    if val and isinstance(val, (int, float)) and val > 0:
+                        return float(val)
+                        
+        # 4. Direct inspection on raw_parameters
+        if raw_parameters:
+            for k, v in raw_parameters.items():
+                if not isinstance(v, (int, float)) or v <= 0:
+                    continue
+                k_tokens = set(str(k).lower().replace(" ", "_").split("_"))
+                if is_od_query:
+                    if ("outer" in k_tokens or "od" in k_tokens or "outside" in k_tokens) and ("diameter" in k_tokens or "dia" in k_tokens or "radius" in k_tokens or "od" in k_tokens):
+                        return float(v * 2 if "radius" in k_tokens else v)
+                    if "body" in k_tokens and ("diameter" in k_tokens or "dia" in k_tokens):
+                        return float(v)
+                elif is_length_query:
+                    if ("total" in k_tokens or "overall" in k_tokens or "part" in k_tokens or "body" in k_tokens) and ("length" in k_tokens or "len" in k_tokens):
+                        return float(v)
         return None
     
     def _is_part_dimension_group(self, prefix: str) -> bool:
@@ -568,13 +659,18 @@ class ParametricFeatureExtractor:
         Returns True if the prefix represents an overall part dimension
         rather than a machinable feature.
         """
+        p_tokens = set(prefix.lower().split("_"))
+        if ("outer" in p_tokens or "od" in p_tokens or "outside" in p_tokens) and ("dia" in p_tokens or "diameter" in p_tokens or "body" in p_tokens):
+            return True
+        if ("total" in p_tokens or "overall" in p_tokens or "length" in p_tokens) and ("length" in p_tokens or "body" in p_tokens or "part" in p_tokens):
+            return True
         part_dim_tokens = {
             "overall_length", "total_length", "part_length", "body_length",
             "outer_diameter", "od", "outside_diameter", "body_diameter",
             "outer_dia", "body_dia", "overall", "total", "mass", "weight",
-            "material", "scale"
+            "material", "scale", "body_main_outer", "body_main_total"
         }
-        return prefix in part_dim_tokens
+        return prefix in part_dim_tokens or bool(p_tokens.intersection({"overall", "total", "mass", "weight"}))
     
     def _matches_any(self, tokens: set, keywords: set) -> bool:
         """Returns True if any token in the prefix matches a feature keyword."""

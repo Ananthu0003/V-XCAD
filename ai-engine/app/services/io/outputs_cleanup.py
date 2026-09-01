@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger("cad_copilot.outputs_cleanup")
+logger = logging.getLogger("vexcad.outputs_cleanup")
 
 def perform_cleanup(
     outputs_dir: Path,

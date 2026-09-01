@@ -150,22 +150,22 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
   return (
     <div className="flex h-full w-full flex-col bg-transparent font-sans relative">
       {/* Tabs Header */}
-      <div className="flex h-14 shrink-0 items-center justify-between px-4 bg-transparent border-b border-white/5 gap-2">
+      <div className="flex h-14 shrink-0 items-center justify-between px-4 bg-transparent border-b border-slate-200 dark:border-white/5 gap-2">
         <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar py-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as TabType)}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 group whitespace-nowrap",
+                "flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 group whitespace-nowrap cursor-pointer",
                 activeTab === tab.id
-                  ? "bg-gradient-primary text-white shadow-[0_0_15px_rgba(59,130,246,0.4)]"
-                  : "text-muted-foreground/60 hover:text-white hover:bg-white/5"
+                  ? "bg-blue-600 dark:bg-gradient-primary text-white shadow-sm dark:shadow-[0_0_15px_rgba(59,130,246,0.4)] font-bold"
+                  : "text-slate-600 dark:text-muted-foreground/60 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-white/5"
               )}
             >
               <div className={cn(
                 "[&>svg]:size-3.5 transition-colors",
-                activeTab === tab.id ? "text-white" : "text-muted-foreground/60 group-hover:text-white"
+                activeTab === tab.id ? "text-white" : "text-slate-500 dark:text-muted-foreground/60 group-hover:text-slate-900 dark:group-hover:text-white"
               )}>
                 {tab.icon}
               </div>
@@ -179,7 +179,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
         {props.onMinimize && (
           <button
             onClick={props.onMinimize}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-muted-foreground hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-all shrink-0 cursor-pointer shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 transition-all shrink-0 cursor-pointer shadow-xs"
             title="Minimize CAM Studio"
           >
             <ChevronDown className="size-3.5" />
@@ -189,7 +189,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto bg-transparent custom-scrollbar p-6">
+      <div className="flex-1 overflow-y-auto bg-transparent custom-scrollbar p-6 pb-28">
         <div className="max-w-7xl mx-auto grid gap-6 animate-in fade-in duration-300">
           {activeTab === 'setup' && (
             <div className="w-full">

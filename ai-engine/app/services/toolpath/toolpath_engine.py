@@ -189,9 +189,12 @@ class ToolpathEngine:
                             norm_x, norm_y = ny, -nx # Right
                             
                     lead_dist = tool_diameter
-                    # fallback to 0.5D if segment is small
+                    # Scale lead distance based on segment length relative to tool size
+                    # Use 1.5D for normal segments, 0.8D minimum for small segments
                     if length < tool_diameter * 1.5:
-                        lead_dist = tool_diameter * 0.5
+                        lead_dist = max(tool_diameter * 0.8, length * 0.5)
+                    # Allow operation to override lead distance for specific material/tool combos
+                    lead_dist = op.get("parameters", {}).get("leadDistance", lead_dist)
                         
                     allow_lead_outside = op.get("parameters", {}).get("allowLeadOutsideBlank", True)
                     

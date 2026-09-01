@@ -148,7 +148,7 @@ Note:
 ### 1) Start PostgreSQL
 
 From repo root:
-
+ 
 ```bash
 docker compose up -d
 ```

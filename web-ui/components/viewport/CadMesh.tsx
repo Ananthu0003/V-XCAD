@@ -1,7 +1,4 @@
-'use client';
-
-import { useMemo } from 'react';
-import { useLoader } from '@react-three/fiber';
+import React, { Component, ErrorInfo, ReactNode, useMemo, useState, useEffect } from 'react';
 import { STLLoader, mergeVertices } from 'three-stdlib';
 import { Box3, BufferGeometry, Color, MeshPhysicalMaterial, Vector3 } from 'three';
 
@@ -35,10 +32,59 @@ const MATERIAL_PRESETS: Record<string, any> = {
 	'acrylic': { color: '#ffffff', metalness: 0.1, roughness: 0.1, clearcoat: 1.0, transmission: 0.9, transparent: true },
 };
 
-export function CadMesh({ url, workpieceMaterial, onGeometryReady, onMeshClick, onHover }: StlMeshProps) {
-	const geometry = useLoader(STLLoader, url);
+class CadMeshErrorBoundary extends Component<{ children: ReactNode; fallback?: ReactNode }, { hasError: boolean }> {
+	constructor(props: { children: ReactNode; fallback?: ReactNode }) {
+		super(props);
+		this.state = { hasError: false };
+	}
 
-	const { centeredGeometry, scale, center } = useMemo(() => {
+	static getDerivedStateFromError() {
+		return { hasError: true };
+	}
+
+	componentDidCatch(error: Error) {
+		console.warn('CadMesh loader caught error:', error.message);
+	}
+
+	render() {
+		if (this.state.hasError) return this.props.fallback || null;
+		return this.props.children;
+	}
+}
+
+function InnerCadMesh({ url, workpieceMaterial, onGeometryReady, onMeshClick, onHover }: StlMeshProps) {
+	const [geometry, setGeometry] = useState<BufferGeometry | null>(null);
+
+	useEffect(() => {
+		let isMounted = true;
+		if (!url) {
+			setGeometry(null);
+			return;
+		}
+
+		fetch(url)
+			.then((res) => {
+				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				return res.arrayBuffer();
+			})
+			.then((buffer) => {
+				if (!isMounted) return;
+				const loader = new STLLoader();
+				const parsed = loader.parse(buffer);
+				setGeometry(parsed);
+			})
+			.catch((err) => {
+				if (!isMounted) return;
+				setGeometry(null);
+			});
+
+		return () => {
+			isMounted = false;
+		};
+	}, [url]);
+
+	const processed = useMemo(() => {
+		if (!geometry) return null;
 		let cloned = geometry.clone() as BufferGeometry;
 		
 		try {
@@ -91,11 +137,13 @@ export function CadMesh({ url, workpieceMaterial, onGeometryReady, onMeshClick, 
 		});
 	}, [workpieceMaterial]);
 
+	if (!processed?.centeredGeometry) return null;
+
 	return (
 		<mesh
-			geometry={centeredGeometry}
+			geometry={processed.centeredGeometry}
 			material={material}
-			scale={scale}
+			scale={processed.scale}
 			castShadow
 			receiveShadow
 			onPointerDown={(e) => {
@@ -114,5 +162,13 @@ export function CadMesh({ url, workpieceMaterial, onGeometryReady, onMeshClick, 
 				onHover?.(false);
 			}}
 		/>
+	);
+}
+
+export function CadMesh(props: StlMeshProps) {
+	return (
+		<CadMeshErrorBoundary key={props.url}>
+			<InnerCadMesh {...props} />
+		</CadMeshErrorBoundary>
 	);
 }

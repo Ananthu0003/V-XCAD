@@ -6,7 +6,7 @@ This module exists to remove hardcoded shape, stock, and feature type strings
 All modules should reference these constants instead of embedding raw string
 tuples or numeric literals in business logic.
 """
-from typing import FrozenSet
+from typing import Dict, FrozenSet
 
 # ---------------------------------------------------------------------------
 # Stock geometry type identifiers
@@ -88,3 +88,33 @@ DEFAULT_BASE_HEIGHT: float = 10.0
 DEFAULT_BASE_DEPTH: float = 10.0
 DEFAULT_HOLE_DIAMETER: float = 5.0
 DEFAULT_HOLE_DEPTH: float = 10.0
+
+# ---------------------------------------------------------------------------
+# Default CAM process parameters (centralized so no service hardcodes magic
+# numbers in business logic). These are ONLY used when an operation or feature
+# does not supply an explicit, profile-derived value. In production, the tool
+# library / feeds-and-speeds engine should always provide the real values.
+# ---------------------------------------------------------------------------
+DEFAULT_CAM_PARAMS: Dict[str, float] = {
+    # Safe-height fallbacks (mm, in setup units)
+    "safe_clearance_mm": 10.0,
+    "retract_offset_mm": 5.0,
+    # Feed / speed fallbacks (mm/min and rpm)
+    "default_feedrate_mm_min": 1000.0,
+    "default_plunge_feedrate_mm_min": 300.0,
+    "default_spindle_rpm": 10000.0,
+    # Stepdown planning bounds
+    "max_stepdown_cap_mm": 10.0,
+    "min_stepdown_mm": 2.0,
+    # Facing overhang heuristic (tool_radius * factor, capped at cap_mm)
+    "facing_overhang_factor": 0.55,
+    "facing_overhang_cap_mm": 2.0,
+    # Fallback feature dimensions when neither feature nor stock provides them
+    "default_feature_width_mm": 20.0,
+    "default_feature_length_mm": 20.0,
+    "default_depth_mm": 10.0,
+    # Minimum feature radius used to clamp non-positive offsets
+    "min_feature_radius_mm": 0.1,
+    # Contour default extent expressed as a multiple of the tool diameter
+    "contour_width_factor": 5.0,
+}

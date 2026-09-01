@@ -66,16 +66,16 @@ class SetupPlanner:
             default_name = "Setup 1 (Top)"
 
         base_setup_key = f"{default_stype}:{base_axis_key}:top"
-        
         bounds = topology_info.get("bounds", [0, 0, 0, 100, 100, 20]) if topology_info else [0, 0, 0, 100, 100, 20]
+        ox = (bounds[0] + bounds[3]) / 2.0
+        oy = (bounds[1] + bounds[4]) / 2.0
         stock_top_z = bounds[5]
         stock_bottom_z = bounds[2]
 
-        # For top_z orientation, the transform is just a Z shift
-        # so that Z_setup = Z_model - stockTopZ
+        # For top_z orientation, transform centers X/Y and places top at Z=0
         transform = [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, -ox],
+            [0.0, 1.0, 0.0, -oy],
             [0.0, 0.0, 1.0, -stock_top_z],
             [0.0, 0.0, 0.0, 1.0]
         ]
@@ -138,18 +138,30 @@ class SetupPlanner:
                 setup_counter += 1
                 new_setup_id = f"setup_{uuid.uuid4().hex[:8]}"
                 
-                # For side setups, the transform would involve rotation, but we simplify for now
+                # Compute setup-specific transform so each setup aligns its target face at Z=0
+                if required_axis_key == "-z" or (isinstance(required_axis, (list, tuple)) and list(required_axis) == [0.0, 0.0, -1.0]):
+                    setup_transform = [
+                        [1.0,  0.0,  0.0, -ox],
+                        [0.0, -1.0,  0.0,  oy],
+                        [0.0,  0.0, -1.0,  stock_bottom_z],
+                        [0.0,  0.0,  0.0,  1.0]
+                    ]
+                else:
+                    setup_transform = transform
+
                 setups[setup_key] = CamSetupPlan(
                     setupId=new_setup_id,
                     setupName=f"Setup {setup_counter} ({self._get_axis_name(required_axis)})",
                     setupType=stype,
                     toolAxis=required_axis,
-                    workCoordinateSystem=base_wcs,
+                    # Each setup must get its OWN work coordinate system so the
+                    # post-processor does not collide multiple setups on G54.
+                    workCoordinateSystem=self._increment_wcs(base_wcs, setup_counter - 1),
                     requiresManualReclamp=stype in ("milling_3axis", "turning") and required_axis_key != base_axis_key,
                     requires4AxisIndexing=stype == "indexed_4axis",
                     stockTopZ=stock_top_z,
                     stockBottomZ=stock_bottom_z,
-                    modelToSetupTransform=transform
+                    modelToSetupTransform=setup_transform
                 )
                 
             # Machinable statuses → assignedFeatureIds

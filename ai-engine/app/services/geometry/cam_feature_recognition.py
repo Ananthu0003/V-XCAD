@@ -284,12 +284,19 @@ class CamFeatureRecognition:
             subtype = "through_hole"
             if has_planar_bottom or has_conical_bottom:
                 subtype = "blind_hole"
+            elif len(possible_entry_faces) >= 2:
+                # Entry faces at both ends => the feature passes all the way through.
+                subtype = "through_hole"
 
-            # Depth estimate from bounding box Z extent
+            # Depth estimate ALONG the hole AXIS (not just the Z extent), so holes
+            # oriented along X / Y / arbitrary tool axes are measured correctly.
             depth = 10.0
             try:
                 bb = face["bbox"]
-                depth = round(abs(bb["max"][2] - bb["min"][2]), 6)
+                lo, hi = bb["min"], bb["max"]
+                half = [(hi[i] - lo[i]) / 2.0 for i in range(3)]
+                axis_extent = abs(hole_axis[0]) * half[0] + abs(hole_axis[1]) * half[1] + abs(hole_axis[2]) * half[2]
+                depth = round(2.0 * axis_extent, 6)
             except Exception:
                 pass
 
@@ -351,14 +358,15 @@ class CamFeatureRecognition:
             face = self.extractor.faces[fid]
             radius = face.get("radius", 0)
 
-            # Height estimate from bounding box
+            # Height estimate ALONG the cylinder AXIS (not just the Z extent),
+            # so shafts/bosses oriented along X / Y / arbitrary axes are correct.
             height = 10.0
             try:
                 bb = face["bbox"]
-                dx = abs(bb["max"][0] - bb["min"][0])
-                dy = abs(bb["max"][1] - bb["min"][1])
-                dz = abs(bb["max"][2] - bb["min"][2])
-                height = round(max(dx, dy, dz), 6)
+                lo, hi = bb["min"], bb["max"]
+                half = [(hi[i] - lo[i]) / 2.0 for i in range(3)]
+                axis_extent = abs(axis[0]) * half[0] + abs(axis[1]) * half[1] + abs(axis[2]) * half[2]
+                height = round(2.0 * axis_extent, 6)
             except Exception:
                 pass
 
@@ -658,7 +666,7 @@ class CamFeatureRecognition:
             total_length = sum(f.dimensions.get("height", f.dimensions.get("depth", 0)) for f in group)
             avg_radius = sum(f.dimensions.get("diameter", 0) / 2 for f in group) / len(group)
             
-            if total_area < 5.0 or total_length < 0.5 or avg_radius < 0.1:
+            if total_area < 0.05 or total_length < 0.05 or avg_radius < 0.01:
                 continue
                 
             # Merge fields
@@ -687,20 +695,21 @@ class CamFeatureRecognition:
             
             if is_hole:
                 rep.type = "hole"
-            elif not is_hole:
+                rep.machiningStatus = "valid"
+                rep.machinable_in_current_setup = True
+                rep.recommendedOperation = "drilling"
+                rep.recommendedToolType = "drill_bit"
+            else:
                 # Floor detection for external cylinders
                 floor_face_id = None
                 
                 if is_z_aligned:
                     # Find maximum Z of the cylinder to ensure floor is below it
-                    # We compute Z levels along the machining direction
                     cyl_z_levels = []
                     for fid in rep.face_ids:
                         f_info = self.extractor.faces.get(fid, {})
                         if "bbox" in f_info:
                             bb = f_info["bbox"]
-                            # Convert bounding box to machining direction (dot product roughly matches Z if 0,0,1)
-                            # Actually, dot product with machining_direction gives the height.
                             cyl_z_levels.append(bb["min"][2])
                             cyl_z_levels.append(bb["max"][2])
                     
@@ -712,17 +721,12 @@ class CamFeatureRecognition:
                             adj_f = self.extractor.faces.get(a["adjacent_face"], {})
                             if adj_f.get("type") == "plane":
                                 n = adj_f.get("normal", (0, 0, 1))
-                                # Convert candidate floor face normal into setup coordinates (dot product)
                                 n_dot = sum(x * y for x, y in zip(n, self.machining_direction))
                                 if abs(n_dot) > 0.98:
-                                    # Convert candidate floor face Z-level into setup coordinates
-                                    # For a simple plane, Z is essentially the bounding box Z
                                     pz_min = adj_f.get("bbox", {}).get("min", [0,0,0])[2]
                                     pz_max = adj_f.get("bbox", {}).get("max", [0,0,0])[2]
                                     pz = (pz_min + pz_max) / 2.0
                                     
-                                    # Use dot product to see if it's below top
-                                    # Since we usually assume machining_direction is +Z, pz < cyl_top_z
                                     if pz < cyl_top_z - 1e-3:
                                         floor_face_id = a["adjacent_face"]
                                         break
@@ -734,17 +738,18 @@ class CamFeatureRecognition:
                     rep.subtype = "cylindrical_boss"
                     rep.floor_face_id = floor_face_id
                     rep.parent_face_id_for_boss = floor_face_id
+                    rep.machiningStatus = "valid"
+                    rep.machinable_in_current_setup = True
+                    rep.recommendedOperation = "boss_clearing"
+                    rep.recommendedToolType = "flat_end_mill"
                 else:
-                    rep.type = "external_cylinder"
+                    rep.type = "turned_od" if is_z_aligned else "side_protrusion"
                     rep.subtype = "shaft" if is_z_aligned else "side_protrusion"
-                rep.machiningStatus = "recognized_but_requires_turning_or_special_strategy"
-                rep.blocked_reason = "Vertical shaft requires turning or special multi-axis strategy"
-                rep.machinable_in_current_setup = False
-            else:
-                rep.type = "side_protrusion"
-                rep.machiningStatus = "requires_secondary_setup_or_4axis"
-                rep.blocked_reason = "Side protrusion requires 4-axis or secondary setup"
-                rep.machinable_in_current_setup = False
+                    rep.machiningStatus = "valid"
+                    rep.machinable_in_current_setup = True
+                    rep.blocked_reason = None
+                    rep.recommendedOperation = "od_turning" if is_z_aligned else "rotary_milling"
+                    rep.recommendedToolType = "lathe_tool" if is_z_aligned else "flat_end_mill"
                 
             cleaned.append(rep)
             

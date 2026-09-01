@@ -1,4 +1,4 @@
-# CAD Copilot AI Engine - Backend Architecture
+# VΞXCAD AI Engine - Backend Architecture
 
 ## Overview
 

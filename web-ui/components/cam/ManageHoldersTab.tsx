@@ -11,11 +11,11 @@ export function ManageHoldersTab() {
   const fetchHolders = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/cam/holders');
+      const res = await fetch('/api/holders');
       const data = await res.json();
-      setHolders(data.holders || []);
+      setHolders(Array.isArray(data) ? data : (data.holders || []));
     } catch (e) {
-      console.error(e);
+      console.error('Failed to fetch holders:', e);
     } finally {
       setLoading(false);
     }

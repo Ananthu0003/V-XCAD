@@ -188,10 +188,10 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in duration-300">
             {/* Left Column: Machine Configuration */}
-            <div className="flex flex-col gap-6 bg-muted/5 border border-border/40 rounded-2xl p-6 shadow-sm relative overflow-hidden">
+            <div className="flex flex-col gap-6 bg-slate-50/80 dark:bg-muted/5 border border-slate-200/90 dark:border-border/40 rounded-2xl p-6 shadow-xs dark:shadow-sm relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500/50 to-cyan-500/50 opacity-50" />
                 
-                <h3 className="text-[11px] font-bold uppercase tracking-widest text-primary border-b border-border/40 pb-3 flex items-center gap-2">
+                <h3 className="text-[11px] font-bold uppercase tracking-widest text-primary border-b border-slate-200/80 dark:border-border/40 pb-3 flex items-center gap-2">
                     Machine Configuration
                 </h3>
                 
@@ -285,7 +285,7 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                                     update('units', val as 'mm' | 'in');
                                 }}
                             >
-                                <SelectTrigger className="w-full h-auto px-4 py-3 bg-background/50 border-border/50 rounded-xl text-xs text-foreground focus:border-primary/50 focus:ring-1 focus:ring-primary/20 shadow-sm data-[placeholder]:text-muted-foreground/70">
+                                <SelectTrigger className="w-full h-auto px-4 py-3 bg-white dark:bg-background/50 border-slate-200 dark:border-border/50 rounded-xl text-xs text-foreground focus:border-primary/50 focus:ring-1 focus:ring-primary/20 shadow-xs dark:shadow-sm data-[placeholder]:text-muted-foreground/70">
                                     <SelectValue placeholder="Select Units" />
                                 </SelectTrigger>
                                 <SelectContent className="z-50 max-h-64">
@@ -300,7 +300,7 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                                 value={setup.postOutputUnits || setup.units || ""}
                                 onValueChange={(val) => update('postOutputUnits', val as 'mm' | 'in')}
                             >
-                                <SelectTrigger className="w-full h-auto px-4 py-3 bg-background/50 border-border/50 rounded-xl text-xs text-foreground focus:border-primary/50 focus:ring-1 focus:ring-primary/20 shadow-sm data-[placeholder]:text-muted-foreground/70">
+                                <SelectTrigger className="w-full h-auto px-4 py-3 bg-white dark:bg-background/50 border-slate-200 dark:border-border/50 rounded-xl text-xs text-foreground focus:border-primary/50 focus:ring-1 focus:ring-primary/20 shadow-xs dark:shadow-sm data-[placeholder]:text-muted-foreground/70">
                                     <SelectValue placeholder="Select Output Units" />
                                 </SelectTrigger>
                                 <SelectContent className="z-50 max-h-64">
@@ -318,14 +318,24 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                             step={isInch ? "0.0001" : "0.001"}
                             value={toDisplay(setup.tolerance)}
                             onChange={(e) => update('tolerance', fromDisplay(parseFloat(e.target.value) || 0))}
-                            className="w-full bg-background/50 border border-border/50 rounded-xl px-4 py-3 text-xs font-mono text-foreground focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none transition-all shadow-sm"
+                            className="w-full px-4 py-3 bg-white dark:bg-background/50 border border-slate-200 dark:border-border/50 rounded-xl text-xs text-foreground font-mono focus:border-primary/50 focus:ring-1 focus:ring-primary/20 shadow-xs dark:shadow-sm"
                         />
-                        <span className="text-[10px] text-muted-foreground/60 pl-1">Tighter accuracy takes longer to generate. Default (0.01) is fine for most jobs.</span>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                        <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/80 pl-1">Smoothing Tolerance {isInch ? "(in)" : "(mm)"}</label>
+                        <input
+                            type="number"
+                            step={isInch ? "0.0001" : "0.001"}
+                            value={toDisplay(setup.smoothingTolerance || 0.005)}
+                            onChange={(e) => update('smoothingTolerance', fromDisplay(parseFloat(e.target.value) || 0))}
+                            className="w-full px-4 py-3 bg-white dark:bg-background/50 border border-slate-200 dark:border-border/50 rounded-xl text-xs text-foreground font-mono focus:border-primary/50 focus:ring-1 focus:ring-primary/20 shadow-xs dark:shadow-sm"
+                        />
                     </div>
 
                     {showHobbyWarning && (
                         <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-amber-500/90 text-[11px] flex items-start gap-3 mt-2 shadow-sm">
-                            <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                            <Info className="size-4 shrink-0 mt-0.5" />
                             <div className="flex flex-col gap-1">
                                 <strong className="font-bold uppercase tracking-wider text-[10px]">Warning: Hobby Controller</strong>
                                 <span className="leading-relaxed">This controller is normally used for hobby/prototype machines. G-code generated may not be safe for industrial machining.</span>
@@ -346,10 +356,10 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
             </div>
 
             {/* Right Column: Workpiece & Setup */}
-            <div className="flex flex-col gap-5 bg-muted/5 border border-border/40 rounded-2xl p-5 shadow-sm relative overflow-hidden">
+            <div className="flex flex-col gap-5 bg-slate-50/80 dark:bg-muted/5 border border-slate-200/90 dark:border-border/40 rounded-2xl p-5 shadow-xs dark:shadow-sm relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500/50 to-green-500/50 opacity-50" />
 
-                <h3 className="text-[11px] font-bold uppercase tracking-widest text-primary border-b border-border/40 pb-2.5 flex items-center gap-2">
+                <h3 className="text-[11px] font-bold uppercase tracking-widest text-primary border-b border-slate-200/80 dark:border-border/40 pb-2.5 flex items-center gap-2">
                     Workpiece & Zero Location
                 </h3>
 
@@ -392,20 +402,20 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                                             stockDimensions: [autoX, autoY, autoZ]
                                         });
                                     }}
-                                    className={`flex flex-col p-3 rounded-xl border text-left transition-all ${
+                                    className={`flex flex-col p-3 rounded-xl border text-left transition-all cursor-pointer ${
                                         isSelected 
-                                            ? 'bg-blue-500/15 border-blue-500 shadow-md shadow-blue-500/20 text-foreground' 
-                                            : 'bg-background/40 border-border/40 text-muted-foreground hover:bg-background/80 hover:border-border'
+                                            ? 'bg-blue-50 dark:bg-blue-500/15 border-blue-500 shadow-xs dark:shadow-md dark:shadow-blue-500/20 text-blue-900 dark:text-foreground' 
+                                            : 'bg-white dark:bg-background/40 border-slate-200 dark:border-border/40 text-slate-600 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-background/80 hover:border-slate-300 dark:hover:border-border shadow-xs dark:shadow-none'
                                     }`}
                                 >
                                     <div className="flex items-center justify-between w-full mb-1">
                                         <div className="flex items-center gap-2">
-                                            <Box className={`size-4 ${isSelected ? 'text-blue-400' : 'text-muted-foreground'}`} />
-                                            <span className="text-xs font-bold text-foreground">Rectangular Box</span>
+                                            <Box className={`size-4 ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-muted-foreground'}`} />
+                                            <span className="text-xs font-bold text-slate-900 dark:text-foreground">Rectangular Box</span>
                                         </div>
                                         {isSelected && <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />}
                                     </div>
-                                    <span className={`text-[10px] font-mono mt-0.5 ${isSelected ? 'text-blue-400 font-bold' : 'text-muted-foreground'}`}>{dimStr}</span>
+                                    <span className={`text-[10px] font-mono mt-0.5 ${isSelected ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-slate-500 dark:text-muted-foreground'}`}>{dimStr}</span>
                                 </button>
                             );
                         })()}
@@ -449,20 +459,20 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                                             stockDimensions: [autoDia, autoDia, autoLen]
                                         });
                                     }}
-                                    className={`flex flex-col p-3 rounded-xl border text-left transition-all ${
+                                    className={`flex flex-col p-3 rounded-xl border text-left transition-all cursor-pointer ${
                                         isSelected 
-                                            ? 'bg-cyan-500/15 border-cyan-500 shadow-md shadow-cyan-500/20 text-foreground' 
-                                            : 'bg-background/40 border-border/40 text-muted-foreground hover:bg-background/80 hover:border-border'
+                                            ? 'bg-cyan-50 dark:bg-cyan-500/15 border-cyan-500 shadow-xs dark:shadow-md dark:shadow-cyan-500/20 text-cyan-900 dark:text-foreground' 
+                                            : 'bg-white dark:bg-background/40 border-slate-200 dark:border-border/40 text-slate-600 dark:text-muted-foreground hover:bg-slate-50 dark:hover:bg-background/80 hover:border-slate-300 dark:hover:border-border shadow-xs dark:shadow-none'
                                     }`}
                                 >
                                     <div className="flex items-center justify-between w-full mb-1">
                                         <div className="flex items-center gap-2">
-                                            <Cylinder className={`size-4 ${isSelected ? 'text-cyan-400' : 'text-muted-foreground'}`} />
-                                            <span className="text-xs font-bold text-foreground">Cylindrical Bar</span>
+                                            <Cylinder className={`size-4 ${isSelected ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-500 dark:text-muted-foreground'}`} />
+                                            <span className="text-xs font-bold text-slate-900 dark:text-foreground">Cylindrical Bar</span>
                                         </div>
                                         {isSelected && <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />}
                                     </div>
-                                    <span className={`text-[10px] font-mono mt-0.5 ${isSelected ? 'text-cyan-400 font-bold' : 'text-muted-foreground'}`}>{dimStr}</span>
+                                    <span className={`text-[10px] font-mono mt-0.5 ${isSelected ? 'text-cyan-600 dark:text-cyan-400 font-bold' : 'text-slate-500 dark:text-muted-foreground'}`}>{dimStr}</span>
                                 </button>
                             );
                         })()}

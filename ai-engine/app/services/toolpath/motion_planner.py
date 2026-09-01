@@ -30,6 +30,29 @@ def _douglas_peucker(points: List[Tuple[float, float]], epsilon: float) -> List[
     else:
         return [points[0], points[end_idx]]
 
+# Maps the operation-type vocabulary emitted by the planning layer
+# (OperationStrategyPlanner / FeatureDecision) to the concrete types this
+# motion planner implements, keeping planning and toolpath generation in sync.
+_OPERATION_TYPE_ALIASES = {
+    "pocket_milling": "pocketing",
+    "slot_milling": "2d_contour",
+    "peck_drilling": "drilling",
+    "helical_bore_milling": "drilling",
+    "bore_milling": "drilling",
+    "tapping": "drilling",
+    "thread_milling": "2d_contour",
+    "chamfer_milling": "2d_contour",
+    "chamfer_milling_2d": "2d_contour",
+    "turning_required": "od_turning",
+    "unknown_strategy": "2d_contour",
+    "2d_contour_outer": "2d_contour",
+    "face_milling": "facing",
+    "facing_turning": "od_turning",
+    "id_boring": "od_turning",
+    "grooving": "od_turning",
+    "parting_off": "od_turning",
+}
+
 class MotionPlanner:
     """
     Translates MachiningRegion boundaries into raw machine MotionCommands.
@@ -46,7 +69,16 @@ class MotionPlanner:
             return []
 
         op_type = op.get("type")
-        raw_tool_diameter = tool.get("diameter") or tool.get("diameter_mm") or 2.0 if tool else 2.0
+        # Normalize planning-layer operation types to implemented types so
+        # toolpath generation stays in sync with operation planning.
+        if op_type in _OPERATION_TYPE_ALIASES:
+            op_type = _OPERATION_TYPE_ALIASES[op_type]
+            op["type"] = op_type
+        if not tool:
+            raise ValueError("No tool defined for operation; cannot generate toolpath")
+        raw_tool_diameter = tool.get("diameter") or tool.get("diameter_mm")
+        if raw_tool_diameter is None or float(raw_tool_diameter) <= 0:
+            raise ValueError("Tool diameter is missing or invalid; cannot generate toolpath")
         internal_units = setup.get("internalUnits", "mm") if setup else "mm"
         
         # Heuristic: If the model is tiny (<= 15 units) and the tool is massively larger (> 3x),
@@ -141,7 +173,9 @@ class MotionPlanner:
         elif op_type in ("indexed_4axis_milling", "rotary_milling", "multi_axis_surface_milling"):
             self._generate_indexed_4axis_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
         else:
-            raise NotImplementedError(f"Motion generation not implemented for {op_type}")
+            op["status"] = "error"
+            op.setdefault("parameters", {})["error"] = f"Unsupported operation type: {op_type}"
+            return []
 
         return commands
 
@@ -165,11 +199,16 @@ class MotionPlanner:
             raise ValueError("Invalid drill center: X or Y is not finite")
         
         retract_z = op.get("safe_heights", {}).get("retract", clearance)
-        
-        # Calculate correct bottom Z
-        if machiningRegion.get("bottomZ") is None:
-            depth = machiningRegion.get("depth", op.get("parameters", {}).get("depth", 10.0))
-            bottom = top - depth
+
+        # Drill depth must come from the feature's own depth, never from the
+        # stock-floor safe height (which would turn a blind hole into a through
+        # hole). Fall back to the operation depth parameter in setup units.
+        internal_units = setup.get("internalUnits", "mm") if setup else "mm"
+        unit_scale = 1.0 / 25.4 if internal_units == "in" else 1.0
+        feature_depth = machiningRegion.get("depth")
+        if feature_depth is None:
+            feature_depth = op.get("parameters", {}).get("depth", 10.0 * unit_scale)
+        bottom = top - abs(feature_depth)
 
         # Output safe approach segments for the hole
         add_cmd(ToolpathSegmentType.RAPID_CLEARANCE,
@@ -413,9 +452,11 @@ class MotionPlanner:
         feeds = params.get("feeds_and_speeds") or {}
         
         tool = op.get("tool") or {}
-        tool_diameter = tool.get("geometry", {}).get("DC", 10.0)
-        # default_stepdown is in mm, scale it if units are inches
-        default_stepdown = (tool_diameter * 0.5) * unit_scale
+        tool_diameter = (tool.get("geometry") or {}).get("DC") or tool.get("diameter") or tool.get("diameter_mm")
+        if tool_diameter is None or float(tool_diameter) <= 0:
+            raise ValueError("Tool diameter unavailable; cannot compute default stepdown")
+        # default_stepdown is in setup units, scale it if units are inches
+        default_stepdown = (float(tool_diameter) * 0.5) * unit_scale
         
         depth_cuts_enabled = params.get("depthCutsEnabled", True)
         rough_stepdown = params.get("maxStepdown", params.get("stepdown", feeds.get("stepdown", default_stepdown)))
@@ -432,10 +473,10 @@ class MotionPlanner:
         if finish_stepdown <= 0:
             finish_stepdown = rough_stepdown
 
-        if rough_stepdown != default_stepdown:
-            rough_stepdown *= unit_scale
-        if finish_stepdown != default_stepdown and finish_stepdown != rough_stepdown:
-            finish_stepdown *= unit_scale
+        # NOTE: maxStepdown / finishStepdown are supplied by the caller in the
+        # setup's native units, exactly like `top`/`bottom`. Re-scaling them by
+        # unit_scale here double-converted inch jobs (stepdown ~25x too small,
+        # exploding pass counts). They are used as-is.
 
         z_passes = []
         target_rough_z = bottom

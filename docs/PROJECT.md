@@ -14,7 +14,7 @@
 This keeps your frontend, backend, and database orchestration in one place, making it incredibly easy to present and deploy.
 
 ```text
-cad_copilot/
+vexcad/
 ├── docker-compose.yml           # Spins up PostgreSQL instantly
 ├── web-ui/                      # ⚛️ Next.js App (Frontend & Proxy)
 │   ├── prisma/

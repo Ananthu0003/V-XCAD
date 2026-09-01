@@ -56,7 +56,7 @@ export function ValueGrid() {
               SEAMLESS MANUFACTURING
             </div>
             <h2 className="text-3xl md:text-5xl font-bold text-zinc-900 dark:text-white mb-4 tracking-tight">
-              Eliminate the friction between<br/>
+              Eliminate the friction between<br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
                 design and production.
               </span>
@@ -75,11 +75,11 @@ export function ValueGrid() {
               >
                 {/* Glow effect on hover */}
                 <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent dark:from-white/[0.02] dark:to-transparent rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                
+
                 <div className={`flex-shrink-0 w-14 h-14 rounded-2xl ${value.bg} ${value.border} border flex items-center justify-center group-hover:scale-110 transition-transform duration-300`}>
                   <value.icon className={`w-6 h-6 ${value.color}`} />
                 </div>
-                
+
                 <div>
                   <h3 className="text-zinc-900 dark:text-white font-bold text-xl mb-2">{value.title}</h3>
                   <p className="text-zinc-600 dark:text-gray-400 text-base leading-relaxed">

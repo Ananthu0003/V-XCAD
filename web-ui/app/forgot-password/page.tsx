@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Cuboid, Loader2 } from 'lucide-react';
+import { ArrowRight, Loader2 } from 'lucide-react';
+import { Logo } from '@/components/shared/Logo';
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
@@ -53,12 +54,9 @@ export default function ForgotPasswordPage() {
 
       <div className="relative z-10 w-full max-w-md">
         <div className="flex flex-col items-center mb-10">
-          <Link href="/" className="flex items-center gap-2 group mb-8">
-            <div className="relative w-12 h-12 flex items-center justify-center">
-              <div className="absolute inset-0 bg-blue-500 rounded-xl transform rotate-45 opacity-20 group-hover:opacity-30 transition-opacity"></div>
-              <Cuboid className="w-7 h-7 text-blue-400 relative z-10" />
-            </div>
-            <span className="text-3xl font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-500 dark:from-gray-100 dark:to-gray-500">
+          <Link href="/" className="flex items-center gap-3 group mb-8">
+            <Logo size={48} showGlow />
+            <span className="text-3xl font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-500 dark:from-gray-100 dark:to-gray-500 font-sans">
               VΞXCAD
             </span>
           </Link>

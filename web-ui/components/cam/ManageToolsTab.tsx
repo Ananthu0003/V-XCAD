@@ -11,9 +11,9 @@ export function ManageToolsTab() {
   const fetchTools = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/cam/tools');
+      const res = await fetch('/api/tools');
       const data = await res.json();
-      setTools(data.tools || []);
+      setTools(Array.isArray(data) ? data : (data.tools || []));
     } catch (e) {
       console.error(e);
     } finally {

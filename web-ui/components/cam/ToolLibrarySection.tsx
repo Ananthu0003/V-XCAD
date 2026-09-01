@@ -67,11 +67,10 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 	const fetchTools = async () => {
 		setLoading(true);
 		try {
-			const res = await fetch(`/api/cam/tools`);
+			const res = await fetch(`/api/tools`);
 			const data = await res.json();
-			if (data.tools) {
-				setDbTools(data.tools);
-			}
+			const list = Array.isArray(data) ? data : (data.tools || []);
+			setDbTools(list);
 		} catch (e) {
 			console.error(e);
 		} finally {
@@ -82,11 +81,10 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 	const fetchHolders = async () => {
 		setLoadingHolders(true);
 		try {
-			const res = await fetch(`/api/cam/holders`);
+			const res = await fetch(`/api/holders`);
 			const data = await res.json();
-			if (data.holders) {
-				setDbHolders(data.holders);
-			}
+			const list = Array.isArray(data) ? data : (data.holders || []);
+			setDbHolders(list);
 		} catch (e) {
 			console.error(e);
 		} finally {
@@ -194,12 +192,11 @@ export function ToolLibrarySection({ tools: selectedTools, onChange, workpieceMa
 			if (!dbTool) {
 				setLoading(true);
 				try {
-					const res = await fetch(`/api/cam/tools`);
+					const res = await fetch(`/api/tools`);
 					const data = await res.json();
-					if (data.tools) {
-						setDbTools(data.tools);
-						dbTool = data.tools.find((t: any) => t.id === tool.dbId);
-					}
+					const list = Array.isArray(data) ? data : (data.tools || []);
+					setDbTools(list);
+					dbTool = list.find((t: any) => t.id === tool.dbId);
 				} catch(e) {}
 				setLoading(false);
 			}

@@ -1,6 +1,6 @@
 from typing import Dict, Any, List, Optional
 import math
-from shapely.geometry import Polygon, MultiPolygon, box
+from shapely.geometry import Polygon, MultiPolygon, box, Point
 from shapely.ops import unary_union
 from app.constants import CYLINDRICAL_STOCK_TYPES
 
@@ -31,7 +31,8 @@ class PlanningContext:
         Validates the overall context. If invalid, returns a dict with 'valid'=False and 'errors'.
         """
         errors = []
-        if not self.stock or not self.stock.get("bounds"):
+        raw_poly = self._get_raw_stock_polygon()
+        if raw_poly is None or raw_poly.is_empty:
             errors.append("No valid stock geometry or boundaries defined in the setup.")
         
         # Verify transforms
@@ -46,25 +47,92 @@ class PlanningContext:
             
         return {"valid": len(errors) == 0, "errors": errors}
         
+    def _extract_dimension_from_params(self, param_dict: Dict[str, Any], candidate_tokens: List[str]) -> Optional[float]:
+        """Generalized helper to extract a dimension by token matching from arbitrary parameter keys."""
+        if not param_dict or not isinstance(param_dict, dict):
+            return None
+        for k, v in param_dict.items():
+            if not isinstance(v, (int, float)) or float(v) <= 0:
+                continue
+            norm_k = str(k).strip().lower().replace(" ", "_").replace("-", "_")
+            parts = norm_k.split("_")
+            for token in candidate_tokens:
+                if token in parts or norm_k.endswith(token) or norm_k == token:
+                    return float(v)
+        return None
+
     def _get_raw_stock_polygon(self) -> Polygon:
         """Internal helper to generate the 2D bounding stock geometry in Setup space."""
         if self._stock_polygon is not None:
             return self._stock_polygon
             
-        bounds = self.stock.get("bounds")
+        bounds = self.stock.get("bounds") or (self.stock.get("resolvedStock", {}).get("bounds") if isinstance(self.stock.get("resolvedStock"), dict) else None)
         if bounds and "min" in bounds and "max" in bounds:
-            s_min_x, s_min_y = bounds["min"][0], bounds["min"][1]
-            s_max_x, s_max_y = bounds["max"][0], bounds["max"][1]
+            s_min_x, s_min_y = float(bounds["min"][0]), float(bounds["min"][1])
+            s_max_x, s_max_y = float(bounds["max"][0]), float(bounds["max"][1])
         else:
-            # Fallback to stockDimensions if bounds are not explicitly provided
-            dims = self.stock.get("stockDimensions", [100.0, 100.0, 100.0])
-            stock_w, stock_l = float(dims[0]), float(dims[1])
-            s_min_x, s_max_x = -stock_w / 2.0, stock_w / 2.0
-            s_min_y, s_max_y = -stock_l / 2.0, stock_l / 2.0
+            dims = self.stock.get("stockDimensions") or self.setup.get("stockDimensions")
+            
+            # Derive bounding envelope from actual features if available
+            feat_min_x, feat_max_x = [], []
+            feat_min_y, feat_max_y = [], []
+            if self.features:
+                for f in self.features.values():
+                    if not isinstance(f, dict):
+                        continue
+                    c = f.get("center", [0, 0, 0])
+                    d = f.get("dimensions", {})
+                    w = float(f.get("width") or d.get("width") or f.get("diameter") or d.get("diameter") or 0.0)
+                    l = float(f.get("length") or d.get("length") or f.get("diameter") or d.get("diameter") or 0.0)
+                    cx = float(c[0]) if len(c) > 0 else 0.0
+                    cy = float(c[1]) if len(c) > 1 else 0.0
+                    if w > 0 and l > 0:
+                        feat_min_x.append(cx - w / 2.0)
+                        feat_max_x.append(cx + w / 2.0)
+                        feat_min_y.append(cy - l / 2.0)
+                        feat_max_y.append(cy + l / 2.0)
+                    elif cx != 0.0 or cy != 0.0:
+                        feat_min_x.append(cx - 5.0)
+                        feat_max_x.append(cx + 5.0)
+                        feat_min_y.append(cy - 5.0)
+                        feat_max_y.append(cy + 5.0)
+
+            # Try extracting from parameters if dimensions missing
+            raw_params = self.setup.get("parameters") or {}
+            param_dia = self._extract_dimension_from_params(raw_params, ["outer_diameter", "diameter", "dia", "od", "radius"])
+            param_len = self._extract_dimension_from_params(raw_params, ["total_length", "overall_length", "length", "len", "height"])
+            param_width = self._extract_dimension_from_params(raw_params, ["width", "w"])
+
+            if dims and len(dims) >= 2 and float(dims[0]) > 0 and float(dims[1]) > 0:
+                stock_w, stock_l = float(dims[0]), float(dims[1])
+                # In Setup Space, the stock envelope is centered at (0.0, 0.0) in XY
+                s_min_x, s_max_x = -stock_w / 2.0, stock_w / 2.0
+                s_min_y, s_max_y = -stock_l / 2.0, stock_l / 2.0
+            elif param_dia and param_dia > 0:
+                stock_w = param_dia
+                stock_l = param_dia
+                s_min_x, s_max_x = -stock_w / 2.0, stock_w / 2.0
+                s_min_y, s_max_y = -stock_l / 2.0, stock_l / 2.0
+            elif param_width and param_len and param_width > 0 and param_len > 0:
+                stock_w, stock_l = param_width, param_len
+                s_min_x, s_max_x = -stock_w / 2.0, stock_w / 2.0
+                s_min_y, s_max_y = -stock_l / 2.0, stock_l / 2.0
+            elif feat_min_x and feat_min_y:
+                # Add tight 2mm margin around part features
+                s_min_x = min(feat_min_x) - 2.0
+                s_max_x = max(feat_max_x) + 2.0
+                s_min_y = min(feat_min_y) - 2.0
+                s_max_y = max(feat_max_y) + 2.0
+            else:
+                stock_w, stock_l = 30.0, 30.0
+                s_min_x, s_max_x = -stock_w / 2.0, stock_w / 2.0
+                s_min_y, s_max_y = -stock_l / 2.0, stock_l / 2.0
         
-        stock_type = str(self.stock.get("stockType", "")).lower()
+        stock_type = str(self.stock.get("stockType") or self.setup.get("stockType", "")).lower()
+        m_type = str(self.machine_profile.get("machine_type", "")).lower()
+        is_cylindrical = stock_type in CYLINDRICAL_STOCK_TYPES or any(t in m_type for t in ("lathe", "turning", "mill_turn", "swiss"))
         
-        if stock_type in CYLINDRICAL_STOCK_TYPES:
+        if is_cylindrical:
             cx = (s_min_x + s_max_x) / 2.0
             cy = (s_min_y + s_max_y) / 2.0
             radius = min(s_max_x - s_min_x, s_max_y - s_min_y) / 2.0
@@ -104,12 +172,21 @@ class PlanningContext:
         center = feat.get("center", [0, 0, 0])
         cx, cy = center[0], center[1]
         dims = feat.get("dimensions", {})
+        feat_type = str(feat.get("type", "")).lower()
         
-        w = float(feat.get("width") or dims.get("width") or feat.get("diameter") or dims.get("diameter") or 0.0)
-        l = float(feat.get("length") or dims.get("length") or feat.get("diameter") or dims.get("diameter") or 0.0)
+        dia = float(feat.get("diameter") or dims.get("diameter") or 0.0)
+        if dia > 0 and (feat_type in ("external_cylinder", "cylinder", "hole", "bore", "boss") or "dia" in dims or "diameter" in dims):
+            w = dia
+            l = dia
+        else:
+            w = float(feat.get("width") or dims.get("width") or dia or 0.0)
+            l = float(feat.get("length") or dims.get("length") or dia or 0.0)
         
         if w > 0 and l > 0:
-            poly = box(cx - w/2, cy - l/2, cx + w/2, cy + l/2)
+            if dia > 0 and (feat_type in ("external_cylinder", "cylinder", "hole", "bore", "boss") or "dia" in dims or "diameter" in dims):
+                poly = Point(cx, cy).buffer(dia / 2.0, resolution=32)
+            else:
+                poly = box(cx - w/2, cy - l/2, cx + w/2, cy + l/2)
         else:
             poly = Polygon() # Empty
             

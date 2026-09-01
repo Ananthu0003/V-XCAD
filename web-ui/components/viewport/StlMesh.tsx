@@ -1,7 +1,4 @@
-'use client';
-
-import { useMemo } from 'react';
-import { useLoader } from '@react-three/fiber';
+import React, { Component, ErrorInfo, ReactNode, useMemo, useState, useEffect } from 'react';
 import { STLLoader, mergeVertices } from 'three-stdlib';
 import { Box3, BufferGeometry, Color, DoubleSide, FrontSide, MeshPhysicalMaterial, Vector3 } from 'three';
 
@@ -37,10 +34,71 @@ const MATERIAL_PRESETS: Record<string, any> = {
 	'acrylic': { color: '#ffffff', metalness: 0.1, roughness: 0.1, clearcoat: 1.0, transmission: 0.9, transparent: true },
 };
 
-export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false, onGeometryReady, onMeshClick, onHover }: StlMeshProps) {
-	const geometry = useLoader(STLLoader, url);
+interface ErrorBoundaryProps {
+	children: ReactNode;
+	fallback?: ReactNode;
+}
 
-	const { centeredGeometry, scale, center } = useMemo(() => {
+interface ErrorBoundaryState {
+	hasError: boolean;
+	errorMessage?: string;
+}
+
+class MeshErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+	constructor(props: ErrorBoundaryProps) {
+		super(props);
+		this.state = { hasError: false };
+	}
+
+	static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+		return { hasError: true, errorMessage: error?.message || 'Failed to load 3D mesh' };
+	}
+
+	componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+		console.warn('3D Mesh loader caught error:', error.message);
+	}
+
+	render() {
+		if (this.state.hasError) {
+			return this.props.fallback || null;
+		}
+		return this.props.children;
+	}
+}
+
+function InnerStlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false, onGeometryReady, onMeshClick, onHover }: StlMeshProps) {
+	const [geometry, setGeometry] = useState<BufferGeometry | null>(null);
+
+	useEffect(() => {
+		let isMounted = true;
+		if (!url) {
+			setGeometry(null);
+			return;
+		}
+
+		fetch(url)
+			.then((res) => {
+				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				return res.arrayBuffer();
+			})
+			.then((buffer) => {
+				if (!isMounted) return;
+				const loader = new STLLoader();
+				const parsed = loader.parse(buffer);
+				setGeometry(parsed);
+			})
+			.catch((err) => {
+				if (!isMounted) return;
+				setGeometry(null);
+			});
+
+		return () => {
+			isMounted = false;
+		};
+	}, [url]);
+
+	const processed = useMemo(() => {
+		if (!geometry) return null;
 		let cloned = geometry.clone() as BufferGeometry;
 		
 		try {
@@ -59,13 +117,11 @@ export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false
 		const maxDim = Math.max(size.x, size.y, size.z);
 
 		let safeScale = 1.0;
-		// Auto-detect inch vs mm mismatch
+		// Auto-detect inch vs mm mismatch (scale inches up to mm)
 		if (expectedSize && maxDim > 0) {
 			const ratio = expectedSize / maxDim;
 			if (ratio > 15 && ratio < 35) {
 				safeScale = 25.4; // Auto-scale inches to mm
-			} else if (ratio < 0.06 && ratio > 0.02) {
-				safeScale = 1 / 25.4; // Auto-scale mm to inches
 			}
 		}
 
@@ -128,11 +184,13 @@ export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false
 		});
 	}, [workpieceMaterial, xRayMode]);
 
+	if (!processed?.centeredGeometry) return null;
+
 	return (
 		<mesh
-			geometry={centeredGeometry}
+			geometry={processed.centeredGeometry}
 			material={material}
-			scale={scale}
+			scale={processed.scale}
 			castShadow={!xRayMode}
 			receiveShadow={!xRayMode}
 			renderOrder={xRayMode ? 1 : 0}
@@ -152,5 +210,13 @@ export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false
 				onHover?.(false);
 			}}
 		/>
+	);
+}
+
+export function StlMesh(props: StlMeshProps) {
+	return (
+		<MeshErrorBoundary key={props.url}>
+			<InnerStlMesh {...props} />
+		</MeshErrorBoundary>
 	);
 }

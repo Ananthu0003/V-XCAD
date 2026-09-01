@@ -1,7 +1,7 @@
 import math
 from typing import Dict, Any, Tuple, Optional, List
 import build123d as bd
-from app.constants import RECOGNIZED_STOCK_TYPES
+from app.constants import RECOGNIZED_STOCK_TYPES, CYLINDRICAL_STOCK_TYPES
 
 class SetupCoordinateResolver:
     """
@@ -28,29 +28,71 @@ class SetupCoordinateResolver:
         min_y, max_y = bb.min.Y, bb.max.Y
         min_z, max_z = bb.min.Z, bb.max.Z
 
-        stock_type = self.setup_config.get("stockType", "box")
-        offset = float(self.setup_config.get("stockOffset", 0.0))
+        stock_type = str(self.setup_config.get("stockType", "box")).lower()
+        offset = float(self.setup_config.get("stockOffset", 0.0) or 0.0)
         stock_dims = self.setup_config.get("stockDimensions")
 
-        if stock_type in RECOGNIZED_STOCK_TYPES:
+        is_cylindrical = stock_type in CYLINDRICAL_STOCK_TYPES
+        is_relative = "relative" in stock_type
+
+        if is_cylindrical:
+            # Cylindrical / round stock: ONE diameter (in the plane perpendicular
+            # to its axis) and a length along that axis. The axial direction is
+            # user-selectable via `stockAxis` (default "z" = the turning /
+            # vertical-mill convention) and is NEVER hardcoded here.
+            axis = str(self.setup_config.get("stockAxis") or self.setup_config.get("axis") or "z").lower()
+            if axis not in ("x", "y", "z"):
+                axis = "z"
+            radial_axes = [a for a in ("x", "y", "z") if a != axis]
+
+            ext = {"x": max_x - min_x, "y": max_y - min_y, "z": max_z - min_z}
+            center = {"x": (min_x + max_x) / 2.0, "y": (min_y + max_y) / 2.0, "z": (min_z + max_z) / 2.0}
+            top = {"x": max_x, "y": max_y, "z": max_z}
+
+            model_dia = max(ext[r] for r in radial_axes)
+            model_len = ext[axis]
+
+            if is_relative or not (stock_dims and len(stock_dims) >= 2):
+                # Relative sizing: stock envelope derived from the part bounds
+                # plus a uniform margin (offset) on every side.
+                stock_dia = model_dia + 2.0 * offset
+                stock_len = model_len + 2.0 * offset
+                axial_top = top[axis] + offset
+            else:
+                # Fixed sizing: explicit dimensions. Cylinder stock may be given
+                # as [diameter, length] (2 elements) or [diameter, diameter,
+                # length] (3 elements). Length is always the axial size.
+                stock_dia = float(stock_dims[0])
+                stock_len = float(stock_dims[1]) if len(stock_dims) < 3 else float(stock_dims[2])
+                axial_top = top[axis]
+
+            new_min = {"x": min_x, "y": min_y, "z": min_z}
+            new_max = {"x": max_x, "y": max_y, "z": max_z}
+            new_min[axis] = axial_top - stock_len
+            new_max[axis] = axial_top
+            for r in radial_axes:
+                new_min[r] = center[r] - stock_dia / 2.0
+                new_max[r] = center[r] + stock_dia / 2.0
+            min_x, max_x = new_min["x"], new_max["x"]
+            min_y, max_y = new_min["y"], new_max["y"]
+            min_z, max_z = new_min["z"], new_max["z"]
+        else:
+            # Prismatic stock (box / block): length(X), width(Y), height(Z)
             if stock_dims and len(stock_dims) >= 3:
-                # Use explicit stock dimensions from UI
                 length, width, height = float(stock_dims[0]), float(stock_dims[1]), float(stock_dims[2])
-                
-                # Center in X and Y
-                center_x = (min_x + max_x) / 2
-                center_y = (min_y + max_y) / 2
-                
-                min_x = center_x - length / 2
-                max_x = center_x + length / 2
-                min_y = center_y - width / 2
-                max_y = center_y + width / 2
-                
-                # Apply offset to top, let the rest hang down
-                max_z += offset
+                center_x = (min_x + max_x) / 2.0
+                center_y = (min_y + max_y) / 2.0
+                # In relative mode the offset is a top clearance; in fixed mode the
+                # explicit height is used as-is from the part top down.
+                top_z = max_z + (offset if is_relative else 0.0)
+                min_x = center_x - length / 2.0
+                max_x = center_x + length / 2.0
+                min_y = center_y - width / 2.0
+                max_y = center_y + width / 2.0
+                max_z = top_z
                 min_z = max_z - height
             else:
-                # Auto-calculate from model + offset
+                # Auto / relative sizing from the model bounding box + offset
                 min_x -= offset
                 max_x += offset
                 min_y -= offset

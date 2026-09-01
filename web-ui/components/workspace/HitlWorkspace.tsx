@@ -21,7 +21,7 @@ import { SessionBrowserModal } from '@/components/workspace/SessionBrowserModal'
 import { PromptAssistantWidget } from '@/components/assistant/PromptAssistantWidget';
 import { ThemeToggle } from '@/components/shared/theme-toggle';
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { History, Cuboid, RotateCcw, IndianRupee, Plus, FolderKanban, Sparkles } from 'lucide-react';
+import { History, Cuboid, RotateCcw, IndianRupee, Plus, FolderKanban, Sparkles, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, CamFeature, PostProcessor, OperationType, ToolType, ToolMaterial, CoolantType, CamSetupPlan } from '@/types/cam';
 
 
@@ -53,20 +53,20 @@ type ChatMessage = {
 };
 
 export function extractChangeLog(
-	script: string, 
-	newParams: Record<string, any>, 
+	script: string,
+	newParams: Record<string, any>,
 	oldParams: Record<string, any> = {},
 	targetPortion?: string
 ): IterationChangeLog {
 	// 1. Calculate parameter diff
 	const parameterDiff: ParameterDiff[] = [];
 	const allKeys = new Set([...Object.keys(newParams || {}), ...Object.keys(oldParams || {})]);
-	
+
 	for (const key of allKeys) {
 		if (key.startsWith('_')) continue;
 		const oldVal = oldParams[key];
 		const newVal = newParams[key];
-		
+
 		if (oldVal === undefined && newVal !== undefined) {
 			parameterDiff.push({ name: key, newValue: newVal, type: 'added' });
 		} else if (oldVal !== undefined && newVal === undefined) {
@@ -87,7 +87,7 @@ export function extractChangeLog(
 		if (summaryMatch) {
 			summary = summaryMatch[1].trim();
 		}
-		
+
 		const lines = block.split('\n');
 		for (const line of lines) {
 			const trimmed = line.trim().replace(/^#\s*/, '');
@@ -132,7 +132,7 @@ type RenderPayload = {
 
 	status?: string;
 	job_id?: string;
-    repaired_script?: string;
+	repaired_script?: string;
 	error?: {
 		message?: string;
 		hint?: string;
@@ -478,6 +478,8 @@ export default function HitlWorkspace() {
 	const [selectionContext, setSelectionContext] = useState<[number, number, number] | null>(null);
 	const [targetPortion, setTargetPortion] = useState<TargetPortion | null>(null);
 	const [showBlueprintPIP, setShowBlueprintPIP] = useState(false);
+	const [profitMargin, setProfitMargin] = useState<number>(15);
+	const [isCamHudCollapsed, setIsCamHudCollapsed] = useState(false);
 
 	const blueprintUrl = useMemo(() => {
 		if (selectedFile) {
@@ -516,7 +518,7 @@ export default function HitlWorkspace() {
 		if ((camFeatures && camFeatures.length > 0) || (parameters && Object.keys(parameters).length > 0) || geometryInfo) {
 			const backendUrl = process.env.NEXT_PUBLIC_FASTAPI_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
 			const apiUrl = backendUrl.endsWith('/api/v1') ? `${backendUrl}/cam/recommend-machine` : `${backendUrl}/api/v1/cam/recommend-machine`;
-			
+
 			const dims = camSetup.stockDimensions || (geometryInfo?.bounding_box ? [
 				geometryInfo.bounding_box.max[0] - geometryInfo.bounding_box.min[0],
 				geometryInfo.bounding_box.max[1] - geometryInfo.bounding_box.min[1],
@@ -535,29 +537,29 @@ export default function HitlWorkspace() {
 				})
 
 			})
-			.then(r => r.ok ? r.json() : null)
-			.then(data => {
-				if (data?.primaryRecommendation) {
-					setCamRecommendation(data);
-					const primary = data.primaryRecommendation;
-					const prof = MACHINE_MATRIX.machineProfiles.find(p => p.id === primary.profileId);
-					if (prof) {
-						setCamSetup(prev => {
-							if (prev.machineProfile !== prof.id) {
-								return {
-									...prev,
-									machineType: prof.machineType,
-									machineProfile: prof.id,
-									controller: prof.defaultController,
-									postProcessor: 'AUTO'
-								};
-							}
-							return prev;
-						});
+				.then(r => r.ok ? r.json() : null)
+				.then(data => {
+					if (data?.primaryRecommendation) {
+						setCamRecommendation(data);
+						const primary = data.primaryRecommendation;
+						const prof = MACHINE_MATRIX.machineProfiles.find(p => p.id === primary.profileId);
+						if (prof) {
+							setCamSetup(prev => {
+								if (prev.machineProfile !== prof.id) {
+									return {
+										...prev,
+										machineType: prof.machineType,
+										machineProfile: prof.id,
+										controller: prof.defaultController,
+										postProcessor: 'AUTO'
+									};
+								}
+								return prev;
+							});
+						}
 					}
-				}
-			})
-			.catch(() => null);
+				})
+				.catch(() => null);
 		}
 	}, [camFeatures, parameters, defaultSetupMetadata, geometryInfo]);
 
@@ -1047,10 +1049,10 @@ export default function HitlWorkspace() {
 				setActiveDrawerTab('code');
 				setStatusText('Script generated. Compiling 3D model...');
 
-				const revTitle = activeTargetName 
+				const revTitle = activeTargetName
 					? `Targeted: ${activeTargetName}`
-					: submittedPrompt.length > 36 
-						? submittedPrompt.slice(0, 36) + '...' 
+					: submittedPrompt.length > 36
+						? submittedPrompt.slice(0, 36) + '...'
 						: submittedPrompt;
 
 				// Automatically trigger sync after generation
@@ -1085,8 +1087,8 @@ export default function HitlWorkspace() {
 	}
 
 	async function performSync(
-		script: string, 
-		params: Record<string, any>, 
+		script: string,
+		params: Record<string, any>,
 		session: string,
 		revisionContext?: {
 			title: string;
@@ -1129,12 +1131,12 @@ export default function HitlWorkspace() {
 			}
 
 			const payload = (await response.json()) as RenderPayload;
-            
-            if (payload.repaired_script) {
-                updatePythonScript(payload.repaired_script);
-                toast.info('Script was auto-healed during rendering');
-            }
-            
+
+			if (payload.repaired_script) {
+				updatePythonScript(payload.repaired_script);
+				toast.info('Script was auto-healed during rendering');
+			}
+
 			let finalStlUrl: string | null = null;
 			let finalStepUrl: string | null = null;
 			let finalDxfUrl: string | null = null;
@@ -1144,7 +1146,7 @@ export default function HitlWorkspace() {
 				finalStlUrl = resolveModelUrl(payload.artifacts.stl_url, Date.now().toString());
 				setStlUrl(finalStlUrl);
 				setWorkflowStage(prev => (prev === 'blueprint' || prev === 'extraction' ? 'cad' : prev));
-				
+
 				// Clear CAM state on new CAD model
 				setCamModelHash(null);
 				setCadModelHash(payload.artifacts?.model_hash || null);
@@ -1157,7 +1159,7 @@ export default function HitlWorkspace() {
 				setPlannedCycleTimeSeconds(0);
 				setGcodeContent(null);
 				setGcodeUrl(null);
-				
+
 				// Extract Setup Metadata correctly from the artifacts
 				setupMeta = (payload.artifacts as any)?.setupMetadata || (payload.artifacts as any)?.setup_metadata;
 				if (setupMeta) {
@@ -1167,10 +1169,10 @@ export default function HitlWorkspace() {
 				}
 
 				// Auto-select CNC Machine from AI recommendation
-				const rec = (payload.artifacts as any)?.machine_recommendation || 
-							(payload.artifacts as any)?.machineRecommendation || 
-							setupMeta?.machine_recommendation || 
-							setupMeta?.machineRecommendation;
+				const rec = (payload.artifacts as any)?.machine_recommendation ||
+					(payload.artifacts as any)?.machineRecommendation ||
+					setupMeta?.machine_recommendation ||
+					setupMeta?.machineRecommendation;
 				if (rec) {
 					setCamRecommendation(rec);
 					if (rec.primaryRecommendation?.profileId) {
@@ -1317,7 +1319,7 @@ export default function HitlWorkspace() {
 					session_id: sessionId,
 					job_id: sessionId,
 					cam_run_id: latestCamRunId.current || '',
-					setup_id: selectedOperationIds.size > 0 ? null : (activeSetupId || null),
+					setup_id: activeSetupId || (camSetups.length > 0 ? camSetups[0]?.setupId : null),
 					selected_operation_ids: selectedOperationIds.size > 0 ? Array.from(selectedOperationIds) : undefined,
 				}),
 			});
@@ -1335,7 +1337,7 @@ export default function HitlWorkspace() {
 				setGcodeErrors([]);
 				setStatusText('G-Code generated successfully.');
 				toast.success('G-Code generated with full CAM configuration');
-				
+
 				if (payload.planned_cycle_time_seconds) {
 					setPlannedCycleTimeSeconds(payload.planned_cycle_time_seconds);
 				}
@@ -1354,26 +1356,26 @@ export default function HitlWorkspace() {
 				setGcodeContent(null);
 				setKlartextContent(null);
 				setGcodeErrors(payload.errors || []);
-				const errMsg = payload.errors && payload.errors.length > 0 
-					? payload.errors.map((e: any) => e.message || e.code).join(' | ') 
+				const errMsg = payload.errors && payload.errors.length > 0
+					? payload.errors.map((e: any) => e.message || e.code).join(' | ')
 					: 'Safety/validation errors.';
 				setStatusText(`G-Code generation failed: ${errMsg}`);
 				toast.error('G-Code generation failed', { description: errMsg });
 			}
 
 			if (payload.operation_statuses && Array.isArray(payload.operation_statuses)) {
-			    setCamOperations((prevOps: any[]) => prevOps.map(op => {
-			        const override = payload.operation_statuses.find((s: any) => s.operation_id === op.id);
-			        if (override) {
-			            return { 
-							...op, 
-							status: override.status, 
+				setCamOperations((prevOps: any[]) => prevOps.map(op => {
+					const override = payload.operation_statuses.find((s: any) => s.operation_id === op.id);
+					if (override) {
+						return {
+							...op,
+							status: override.status,
 							errorReason: override.blocked_reason,
 							parameters: { ...(op.parameters || {}), error: override.blocked_reason }
 						};
-			        }
-			        return op;
-			    }));
+					}
+					return op;
+				}));
 			}
 
 			setWorkflowStage('gcode');
@@ -1401,7 +1403,7 @@ export default function HitlWorkspace() {
 
 		try {
 			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
-			const opsToSend = selectedOperationIds.size > 0 
+			const opsToSend = selectedOperationIds.size > 0
 				? camOperations.filter(op => selectedOperationIds.has(op.id))
 				: camOperations;
 
@@ -1410,8 +1412,8 @@ export default function HitlWorkspace() {
 			const geometryScale = geometryInfo?.scale || 1.0;
 			let featuresToSend = camFeatures;
 			let scaledOpsToSend = opsToSend;
-			
-			if (geometryScale !== 1.0) {
+
+			if (geometryScale > 1.01) {
 				featuresToSend = camFeatures.map(f => {
 					if (!f || !f.dimensions) return f;
 					const newDims = { ...f.dimensions };
@@ -1422,7 +1424,7 @@ export default function HitlWorkspace() {
 					});
 					return { ...f, dimensions: newDims };
 				});
-				
+
 				scaledOpsToSend = opsToSend.map(op => {
 					if (!op) return op;
 					const newOp = { ...op };
@@ -1435,6 +1437,32 @@ export default function HitlWorkspace() {
 				});
 			}
 
+			// Ensure setup has actual stock dimensions derived from the CAD model
+			let effectiveCamSetup: any = { ...camSetup };
+			const isStockDefault = !effectiveCamSetup.stockDimensions || (Array.isArray(effectiveCamSetup.stockDimensions) && effectiveCamSetup.stockDimensions.every((v: number) => v === 100));
+			if (isStockDefault && geometryInfo?.bounding_box) {
+				const min = geometryInfo.bounding_box.min;
+				const max = geometryInfo.bounding_box.max;
+				const dx = Math.abs(max[0] - min[0]);
+				const dy = Math.abs(max[1] - min[1]);
+				const dz = Math.abs(max[2] - min[2]);
+				effectiveCamSetup.stockDimensions = [
+					Math.round((dx + 2) * 100) / 100,
+					Math.round((dy + 2) * 100) / 100,
+					Math.round((dz + 1) * 100) / 100
+				];
+				effectiveCamSetup.stockCenter = [0, 0, -dz / 2];
+				effectiveCamSetup.resolvedStock = {
+					type: effectiveCamSetup.stockType || 'box',
+					dimensions: effectiveCamSetup.stockDimensions,
+					center: [0, 0, -dz / 2],
+					bounds: {
+						min: [-dx / 2 - 1, -dy / 2 - 1, -dz - 1],
+						max: [dx / 2 + 1, dy / 2 + 1, 0]
+					}
+				};
+			}
+
 			const res = await fetch(`${backendUrl}/api/v1/cam/toolpaths`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -1442,8 +1470,8 @@ export default function HitlWorkspace() {
 					session_id: sessionId,
 					job_id: sessionId,
 					cam_run_id: runId,
-					setup: camSetup,
-					setups: camSetups,
+					setup: effectiveCamSetup,
+					setups: camSetups.map(s => s.setupId === activeSetupId ? { ...s, ...effectiveCamSetup } : s),
 					tools: camTools,
 					operations: scaledOpsToSend,
 					features: featuresToSend,
@@ -1463,7 +1491,7 @@ export default function HitlWorkspace() {
 				setGcodeErrors([]);
 				setGcodeContent(null);
 				// (Assuming validationErrors is cleared if applicable, we clear gcode errors here)
-				
+
 				const fetchedToolpaths = data.toolpaths || [];
 				setToolpaths(fetchedToolpaths);
 				setCamSimulation(prev => ({
@@ -1499,13 +1527,13 @@ export default function HitlWorkspace() {
 				if (data.camModelHash) {
 					setCamModelHash(data.camModelHash);
 				}
-				
+
 				if (data.cam_readiness_score !== undefined) setCamReadinessScore(data.cam_readiness_score);
 				if (data.cam_status !== undefined) setCamStatus(data.cam_status);
 				if (data.can_generate_gcode !== undefined) setCanGenerateGcode(data.can_generate_gcode);
 				if (data.planned_cycle_time_seconds !== undefined) setPlannedCycleTimeSeconds(data.planned_cycle_time_seconds);
 				if (data.stats !== undefined) setCamStats(data.stats);
-				
+
 				if (!data.toolpaths || data.toolpaths.length === 0) {
 					setStatusText('No toolpaths were generated.');
 					toast.warning('No toolpath moves generated for these operations.');
@@ -1537,10 +1565,10 @@ export default function HitlWorkspace() {
 			toast.error('No 3D model available to analyze.');
 			return;
 		}
-		
+
 		setIsGenerating(true);
 		setStatusText('Analyzing 3D geometry for features...');
-		
+
 		try {
 			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 			const res = await fetch(`${backendUrl}/api/v1/cam/analyze`, {
@@ -1548,12 +1576,12 @@ export default function HitlWorkspace() {
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ session_id: sessionId, parameters: parameters })
 			});
-			
+
 			if (!res.ok) {
 				const errorMsg = await readErrorFromResponse(res, 'Feature analysis failed.');
 				throw new Error(errorMsg);
 			}
-			
+
 			const data = await res.json();
 			setCamFeatures(data.features || []);
 			if (data.machine_recommendation) {
@@ -1641,12 +1669,13 @@ export default function HitlWorkspace() {
 			// Fetch the full global tool library so the AI picks from existing tools instead of inventing them.
 			let globalTools = [...camTools];
 			try {
-				const toolsRes = await fetch('/api/cam/tools');
+				const toolsRes = await fetch('/api/tools');
 				if (toolsRes.ok) {
 					const data = await toolsRes.json();
-					if (data.tools && data.tools.length > 0) {
+					const list = Array.isArray(data) ? data : (data.tools || []);
+					if (list.length > 0) {
 						// Merge local and remote tools, preferring local ones if there's a conflict
-						const remoteTools = data.tools.filter((rt: any) => !globalTools.some(lt => lt.id === rt.id));
+						const remoteTools = list.filter((rt: any) => !globalTools.some(lt => lt.id === rt.id));
 						globalTools = [...globalTools, ...remoteTools];
 					}
 				}
@@ -1692,21 +1721,21 @@ export default function HitlWorkspace() {
 			}
 
 			const data = await res.json();
-			
+
 			if (data.features) setCamFeatures(data.features);
 			if (data.setups && data.setups.length > 0) {
 				setCamSetups(data.setups);
 				setActiveSetupId(data.setups[0].setupId);
 			}
-			
+
 			if (data.planned_cycle_time_seconds !== undefined) {
 				setPlannedCycleTimeSeconds(data.planned_cycle_time_seconds);
 			}
-			
+
 			if (data.stats !== undefined) {
 				setCamStats(data.stats);
 			}
-			
+
 			if (data.tools || data.operations) {
 				// Gather all backend tools from data.tools AND inline op.tool / op.selected_tool
 				const toolsMap = new Map<string, any>();
@@ -1738,7 +1767,7 @@ export default function HitlWorkspace() {
 				const newTools = allAssignedBackendTools.map((t: any, i: number) => ({
 					id: t.tool_id || t.id,
 					dbId: t.tool_id || t.id,
-					name: t.name || `Auto Tool ${i+1}`,
+					name: t.name || `Auto Tool ${i + 1}`,
 					number: `T`, // Will be assigned sequentially below
 					type: (t.type === 'end_mill' ? 'flat_end_mill' : t.type === 'ball_mill' ? 'ball_nose' : t.type) as ToolType,
 					diameter: t.diameter || 3.175,
@@ -1765,17 +1794,17 @@ export default function HitlWorkspace() {
 						};
 					})()
 				}));
-				
+
 				setCamTools(prev => {
 					// Add only tools that don't exist yet
 					const existingIds = new Set(prev.map(p => p.id));
 					const toAdd = newTools.filter((nt: any) => !existingIds.has(nt.id));
-					
+
 					// Assign sequential T-numbers to the newly added tools
 					toAdd.forEach((nt: any, idx: number) => {
 						nt.number = `T${prev.length + idx + 1}`;
 					});
-					
+
 					return [...prev, ...toAdd];
 				});
 			}
@@ -1809,11 +1838,22 @@ export default function HitlWorkspace() {
 					};
 				});
 				setCamOperations(newOps);
-				
+
 				if (data.setups && data.setups.length > 0) {
 					setCamSetups(data.setups);
 				}
-				
+
+				if (data.toolpaths && data.toolpaths.length > 0) {
+					setToolpaths(data.toolpaths);
+					setCamSimulation(prev => ({
+						...prev,
+						segments: data.toolpaths,
+						progress: 0,
+						activeSegmentIndex: 0,
+						isPlaying: false
+					}));
+				}
+
 				setSelectedOperationIds(new Set(newOps.filter(op => op.status !== 'unsupported' && op.status !== 'blocked').map(op => op.id)));
 				if (newOps.length > 0) setActiveOperationId(newOps[0].id);
 				toast.success(`Generated ${newOps.length} operations across ${data.setups?.length || 1} setup(s)`);
@@ -1853,12 +1893,12 @@ export default function HitlWorkspace() {
 			const link = document.createElement('a');
 			link.href = objectUrl;
 			let filename = url.split('/').pop()?.split('?')[0] || `model.${label}`;
-			
+
 			if (sourceFilename) {
 				const baseName = sourceFilename.substring(0, sourceFilename.lastIndexOf('.')) || sourceFilename;
 				filename = `${baseName}.${label}`;
 			}
-			
+
 			link.download = filename;
 			document.body.appendChild(link);
 			link.click();
@@ -1959,7 +1999,19 @@ export default function HitlWorkspace() {
 
 		updatePythonScript(activeScript);
 		setParameters(activeParams);
-		if (activeStl) setStlUrl(activeStl);
+		if (activeStl) {
+			setStlUrl(activeStl);
+			// Auto-heal: If transient STL file on disk is 404, re-sync from activeScript
+			fetch(activeStl, { method: 'HEAD' }).then((res) => {
+				if (!res.ok && activeScript && typeof activeScript === 'string' && activeScript.trim()) {
+					void performSync(activeScript, activeParams, session.id);
+				}
+			}).catch(() => {
+				if (activeScript && typeof activeScript === 'string' && activeScript.trim()) {
+					void performSync(activeScript, activeParams, session.id);
+				}
+			});
+		}
 		if (activeStep) setStepUrl(activeStep);
 		if (activeDxf) setDxfUrl(activeDxf);
 
@@ -1970,9 +2022,9 @@ export default function HitlWorkspace() {
 			setMessages(reconstructedMessages);
 		} else {
 			setMessages([
-				{ 
-					id: makeId('assistant'), 
-					role: 'assistant', 
+				{
+					id: makeId('assistant'),
+					role: 'assistant',
 					content: `Restored session: **${session.prompt || 'Untitled project'}**`,
 					fileName: session.fileName || undefined
 				}
@@ -2071,7 +2123,7 @@ export default function HitlWorkspace() {
 	};
 
 	useEffect(() => {
-		const handleModelRotate = (e: CustomEvent<{axis: 'x'|'y'|'z', degrees: number}>) => {
+		const handleModelRotate = (e: CustomEvent<{ axis: 'x' | 'y' | 'z', degrees: number }>) => {
 			if (workflowStage !== 'cad' || !pythonScript) return;
 			const { axis, degrees } = e.detail;
 			const paramKey = `_model_rotation_${axis}`;
@@ -2089,8 +2141,8 @@ export default function HitlWorkspace() {
 	return (
 		<div className="h-screen w-full bg-background text-foreground overflow-hidden flex flex-col p-3">
 			<main className="flex-1 flex overflow-hidden w-full gap-0 relative">
-				<PanelGroup 
-					id="workspace-layout-root" 
+				<PanelGroup
+					id="workspace-layout-root"
 					orientation="vertical"
 					className="h-full w-full flex flex-col"
 				>
@@ -2139,7 +2191,7 @@ export default function HitlWorkspace() {
 
 									{/* Center: CAD/CAM Viewport */}
 									<Panel defaultSize="70%" minSize="35%">
-										<div 
+										<div
 											className="h-full w-full bg-card rounded-xl border border-border shadow-2xl overflow-hidden relative"
 										>
 											{workflowStage === 'blueprint' ? (
@@ -2154,9 +2206,9 @@ export default function HitlWorkspace() {
 												>
 													<div className="absolute inset-0 bg-[url('/grid.svg')] opacity-5" />
 
-													{/* Faint Hexagon Watermark */}
-													<div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-5 flex items-center justify-center">
-														<svg width="600" height="600" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="0.5" strokeLinecap="round" strokeLinejoin="round">
+													{/* Faint Hexagon Watermark - visible in both themes */}
+													<div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-[0.07] dark:opacity-5 flex items-center justify-center">
+														<svg width="600" height="600" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="text-slate-900 dark:text-white" strokeWidth="0.6" strokeLinecap="round" strokeLinejoin="round">
 															<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
 															<polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
 															<line x1="12" y1="22.08" x2="12" y2="12"></line>
@@ -2168,7 +2220,7 @@ export default function HitlWorkspace() {
 													<div className="z-10 flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-500">
 														<div className="flex items-center gap-3 mb-4">
 															<div className="size-2 rounded-full bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.5)]" />
-															<h2 className="text-[11px] font-bold uppercase tracking-[0.3em] text-blue-400">NO BLUEPRINT LOADED</h2>
+															<h2 className="text-[11px] font-bold uppercase tracking-[0.3em] text-blue-600 dark:text-blue-400">NO BLUEPRINT LOADED</h2>
 														</div>
 
 														<div className="flex flex-col gap-3 w-[320px]">
@@ -2177,34 +2229,34 @@ export default function HitlWorkspace() {
 																	setIsChatOpen(true);
 																	setTimeout(() => fileUploadRef.current?.click(), 100);
 																}}
-																className="flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/50 hover:bg-muted hover:border-blue-500/30 transition-all text-left group"
+																className="flex items-center gap-4 p-4 rounded-xl border border-slate-200/80 dark:border-border bg-white/90 dark:bg-muted/50 hover:bg-slate-50 dark:hover:bg-muted hover:border-blue-500/40 shadow-sm dark:shadow-none transition-all text-left group cursor-pointer"
 															>
-																<div className="size-8 rounded-lg bg-black/50 dark:bg-black/50 border border-border flex items-center justify-center shrink-0">
-																	<svg className="size-4 text-muted-foreground group-hover:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																<div className="size-9 rounded-lg bg-slate-100 dark:bg-black/50 border border-slate-200 dark:border-border flex items-center justify-center shrink-0">
+																	<svg className="size-4 text-slate-600 dark:text-muted-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 																		<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
 																	</svg>
 																</div>
 																<div>
-																	<div className="text-sm font-bold text-foreground group-hover:text-blue-400 transition-colors">Upload Blueprint</div>
-																	<div className="text-[10px] text-muted-foreground">PDF, PNG, JPG</div>
+																	<div className="text-sm font-bold text-slate-800 dark:text-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Upload Blueprint</div>
+																	<div className="text-[10px] text-slate-500 dark:text-muted-foreground">PDF, PNG, JPG</div>
 																</div>
 															</button>
 
 															<button
 																onClick={() => setIsSessionBrowserOpen(true)}
-																className="flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/50 hover:bg-muted hover:border-blue-500/30 transition-all text-left group"
+																className="flex items-center gap-4 p-4 rounded-xl border border-slate-200/80 dark:border-border bg-white/90 dark:bg-muted/50 hover:bg-slate-50 dark:hover:bg-muted hover:border-blue-500/40 shadow-sm dark:shadow-none transition-all text-left group cursor-pointer"
 															>
-																<div className="size-8 rounded-lg bg-black/50 dark:bg-black/50 border border-border flex items-center justify-center shrink-0">
-																	<History className="size-4 text-muted-foreground group-hover:text-blue-400" />
+																<div className="size-9 rounded-lg bg-slate-100 dark:bg-black/50 border border-slate-200 dark:border-border flex items-center justify-center shrink-0">
+																	<History className="size-4 text-slate-600 dark:text-muted-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" />
 																</div>
 																<div>
-																	<div className="text-sm font-bold text-foreground group-hover:text-blue-400 transition-colors">Recent Projects</div>
-																	<div className="text-[10px] text-muted-foreground">Resume work</div>
+																	<div className="text-sm font-bold text-slate-800 dark:text-foreground group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Recent Projects</div>
+																	<div className="text-[10px] text-slate-500 dark:text-muted-foreground">Resume work</div>
 																</div>
 															</button>
 														</div>
 													</div>
-													
+
 												</div>
 											) : (
 												<CadViewport
@@ -2282,7 +2334,7 @@ export default function HitlWorkspace() {
 															{/* Setup Selector (CAM Mode) */}
 															{camSetups.length > 1 && (
 																<Select value={activeSetupId || ''} onValueChange={(val: string | null) => val && setActiveSetupId(val)}>
-																	<SelectTrigger 
+																	<SelectTrigger
 																		className="h-8 rounded-xl border-white/10 bg-black/40 text-foreground text-[10px] font-bold uppercase tracking-wider hover:bg-white/5 transition-all"
 																		title="Switch active setup to view its toolpaths"
 																	>
@@ -2323,126 +2375,118 @@ export default function HitlWorkspace() {
 											)}
 											{/* Bottom Overlay with CAM Metrics */}
 											<div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none z-30 flex flex-col items-center">
-												{/* CAM Metrics Pill */}
 												{(workflowStage === 'cam' || workflowStage === 'gcode') && (
-													<div className="flex items-center justify-center pointer-events-auto mt-2">
-														<div className="relative group">
-															{/* Glowing blue underline */}
-															<div className="absolute -bottom-[1px] left-8 right-8 h-[2px] bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,1)] z-10" />
-
-															<div className="flex flex-col gap-3 bg-[#09090b]/80 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] relative z-0 w-fit mx-auto pointer-events-auto">
-																{/* Setup Details Row */}
-																<div className="flex items-center gap-6 pb-3 border-b border-white/10">
-																	<div className="flex items-center gap-2.5 min-w-[140px]">
-																		<div className="p-1.5 bg-blue-500/20 rounded-md">
-																			<svg className="size-4 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg>
-																		</div>
-																		<div className="flex flex-col">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Material</span>
-																			<span className="text-[12px] font-bold text-foreground capitalize truncate max-w-[130px]" title={camSetup.material?.replace(/_/g, ' ') || 'Unknown'}>
-																				{camSetup.material?.replace(/_/g, ' ') || 'Unknown'}
-																			</span>
-																		</div>
-																	</div>
-
-																	<div className="w-px h-8 bg-white/10" />
-
-																	<div className="flex items-center gap-2.5 min-w-[140px]">
-																		<div className="p-1.5 bg-purple-500/20 rounded-md">
-																			<svg className="size-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
-																		</div>
-																		<div className="flex flex-col">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
-																				Machine
-																				{camRecommendation?.primaryRecommendation?.profileId === camSetup.machineProfile && (
-																					<span className="text-[8px] text-emerald-400 font-bold bg-emerald-500/20 px-1 py-0.2 rounded inline-flex items-center gap-0.5">
-																						<Sparkles className="size-2" /> AI
-																					</span>
-																				)}
-																			</span>
-																			<span className="text-[12px] font-bold text-foreground capitalize truncate max-w-[140px]" title={MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Generic VMC'}>
-																				{MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Generic VMC'}
-																			</span>
-																		</div>
-
-																	</div>
-
-																	<div className="w-px h-8 bg-white/10" />
-
-																	<div className="flex items-center gap-2.5 min-w-[140px]">
-																		<div className="p-1.5 bg-emerald-500/20 rounded-md">
-																			<svg className="size-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
-																		</div>
-																		<div className="flex flex-col">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Controller</span>
-																			<span className="text-[12px] font-bold text-foreground capitalize truncate max-w-[140px]" title={MACHINE_MATRIX.controllers[(camSetup.controller as ControllerId) || 'FANUC_0I_MF']?.label || camSetup.controller || 'FANUC'}>
-																				{MACHINE_MATRIX.controllers[(camSetup.controller as ControllerId) || 'FANUC_0I_MF']?.label || camSetup.controller || 'FANUC'}
-																			</span>
-																		</div>
-																	</div>
+													<div className="flex items-center justify-center pointer-events-auto">
+														{isCamHudCollapsed ? (
+															<button
+																onClick={() => setIsCamHudCollapsed(false)}
+																className="flex items-center gap-2 bg-white/95 dark:bg-[#09090b]/85 backdrop-blur-xl border border-slate-200 dark:border-white/10 px-3.5 py-1.5 rounded-full shadow-lg text-[10px] font-bold text-foreground hover:border-blue-500/40 transition-all pointer-events-auto cursor-pointer"
+																title="Expand CAM Setup HUD"
+															>
+																<span className="size-2 rounded-full bg-blue-500" />
+																<span className="font-semibold">{camSetup.material?.replace(/_/g, ' ') || 'Setup'}</span>
+																<span className="text-emerald-500 font-mono">
+																	{(() => {
+																		const mfgCost = camStats?.costEstimate?.manufacturing_cost?.per_part ?? 0;
+																		const decimal = (profitMargin || 15) / 100;
+																		const sp = decimal < 1 && mfgCost > 0
+																			? mfgCost / (1 - decimal)
+																			: (camStats?.costEstimate?.selling_price?.per_unit ?? mfgCost * (1 + decimal));
+																		return sp > 0 ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: camStats?.costEstimate?.currency || 'INR', maximumFractionDigits: 0 }).format(sp) : '---';
+																	})()}
+																</span>
+																<ChevronUp className="size-3 text-muted-foreground ml-0.5" />
+															</button>
+														) : (
+															<div className="flex items-center gap-3 bg-white/95 dark:bg-[#09090b]/85 backdrop-blur-xl border border-slate-200 dark:border-white/10 px-4 py-1.5 rounded-full shadow-lg dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)] text-[11px] w-fit mx-auto pointer-events-auto transition-all">
+																{/* Material */}
+																<div className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-gray-200">
+																	<span className="size-2 rounded-full bg-blue-500 shrink-0" />
+																	<span className="font-bold text-slate-900 dark:text-white capitalize truncate max-w-[120px]" title={camSetup.material?.replace(/_/g, ' ') || 'Stock'}>
+																		{camSetup.material?.replace(/_/g, ' ') || 'Stock'}
+																	</span>
 																</div>
 
-																{/* Metrics Row */}
-																<div className="flex items-center justify-between gap-6 px-1">
-																	<div className="flex items-center gap-5">
-																		<div className="flex flex-col items-center">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Features</span>
-																			<span className="text-[13px] font-black text-cyan-400">{camFeatures.length}</span>
-																		</div>
-																		<div className="flex flex-col items-center">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Tools</span>
-																			<span className="text-[13px] font-black text-emerald-400">{camTools.length}</span>
-																		</div>
-																		<div className="flex flex-col items-center">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Ops</span>
-																			<span className="text-[13px] font-black text-purple-400">{camOperations.length}</span>
-																		</div>
+																<div className="w-px h-3.5 bg-slate-200 dark:bg-white/10 shrink-0" />
 
-																		<div className="w-px h-6 bg-white/10 mx-2" />
-
-																		<div className="flex items-center gap-2">
-																			<svg className="size-3.5 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-																			<span className="text-[12px] font-bold text-yellow-500 tracking-wide">
-																				{(() => {
-																					const opsTime = camOperations.reduce((acc, op) => acc + (op.estimated_time_s || op.statistics?.cycleTimeSeconds || 0), 0);
-																					const totalCycleTimeSeconds = plannedCycleTimeSeconds > opsTime ? plannedCycleTimeSeconds : (opsTime || plannedCycleTimeSeconds);
-																					if (!totalCycleTimeSeconds) return '00s';
-																					const h = Math.floor(totalCycleTimeSeconds / 3600);
-																					const m = Math.floor((totalCycleTimeSeconds % 3600) / 60);
-																					const s = Math.floor(totalCycleTimeSeconds % 60);
-																					if (h > 0) return `${h}h ${m}m ${s}s`;
-																					if (m > 0) return `${m}m ${s}s`;
-																					return `${s}s`;
-																				})()}
-																			</span>
-																		</div>
-																		
-																		<div className="flex items-center gap-2 ml-2">
-																			<IndianRupee className="size-3.5 text-green-400" />
-																			<span className="text-[12px] font-bold text-green-400 tracking-wide">
-																				{(() => {
-																					const sp = camStats?.costEstimate?.selling_price?.per_unit ?? camStats?.costEstimate?.manufacturing_cost?.per_part;
-																					return sp != null ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: camStats.costEstimate.currency || 'INR', maximumFractionDigits: 0 }).format(sp).replace('₹', '') : '---';
-																				})()}
-																			</span>
-																		</div>
-																	</div>
-
-																	<div className="flex items-center gap-4 border-l border-white/10 pl-5">
-																		<div className="flex flex-col items-center">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Removal</span>
-																			<span className="text-[12px] font-bold text-foreground">82%</span>
-																		</div>
-																		<button className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 hover:border-emerald-500/60 transition-all font-semibold shadow-[0_0_10px_rgba(16,185,129,0.1)]">
-																			<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
-																				<polyline points="20 6 9 17 4 12" />
-																			</svg>
-																			READY
-																		</button>
-																	</div>
+																{/* Machine Profile */}
+																<div className="flex items-center gap-1 text-slate-600 dark:text-gray-300">
+																	<span className="font-medium truncate max-w-[130px]" title={MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Machine'}>
+																		{MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Machine'}
+																	</span>
+																	{camRecommendation?.primaryRecommendation?.profileId === camSetup.machineProfile && (
+																		<span className="text-[8px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-500/20 px-1 py-0.2 rounded inline-flex items-center gap-0.5">
+																			<Sparkles className="size-2" /> AI
+																		</span>
+																	)}
 																</div>
+
+																<div className="w-px h-3.5 bg-slate-200 dark:bg-white/10 shrink-0" />
+
+																{/* Features • Tools • Ops */}
+																<div className="flex items-center gap-1.5 text-slate-600 dark:text-gray-300 font-mono text-[10px]">
+																	<span><b className="text-cyan-500">{camFeatures.length}</b> feats</span>
+																	<span>•</span>
+																	<span><b className="text-emerald-500">{camTools.length}</b> tools</span>
+																	<span>•</span>
+																	<span><b className="text-purple-500">{camOperations.length}</b> ops</span>
+																</div>
+
+																<div className="w-px h-3.5 bg-slate-200 dark:bg-white/10 shrink-0" />
+
+																{/* Cycle Time */}
+																<div className="flex items-center gap-1 font-mono text-yellow-500 font-bold text-[11px]">
+																	<svg className="size-3 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+																	<span>
+																		{(() => {
+																			const opsTime = camOperations.reduce((acc, op) => acc + (op.estimated_time_s || op.statistics?.cycleTimeSeconds || 0), 0);
+																			const totalCycleTimeSeconds = plannedCycleTimeSeconds > opsTime ? plannedCycleTimeSeconds : (opsTime || plannedCycleTimeSeconds);
+																			if (!totalCycleTimeSeconds) return '00s';
+																			const h = Math.floor(totalCycleTimeSeconds / 3600);
+																			const m = Math.floor((totalCycleTimeSeconds % 3600) / 60);
+																			const s = Math.floor(totalCycleTimeSeconds % 60);
+																			if (h > 0) return `${h}h ${m}m ${s}s`;
+																			if (m > 0) return `${m}m ${s}s`;
+																			return `${s}s`;
+																		})()}
+																	</span>
+																</div>
+
+																<div className="w-px h-3.5 bg-slate-200 dark:bg-white/10 shrink-0" />
+
+																{/* Dynamic Total Price */}
+																<div className="flex items-center gap-0.5 font-mono text-green-400 font-bold text-[11px]">
+																	<IndianRupee className="size-3 text-green-400" />
+																	<span>
+																		{(() => {
+																			const mfgCost = camStats?.costEstimate?.manufacturing_cost?.per_part ?? 0;
+																			const decimal = (profitMargin || 15) / 100;
+																			const sp = decimal < 1 && mfgCost > 0
+																				? mfgCost / (1 - decimal)
+																				: (camStats?.costEstimate?.selling_price?.per_unit ?? mfgCost * (1 + decimal));
+																			return sp > 0 ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: camStats?.costEstimate?.currency || 'INR', maximumFractionDigits: 0 }).format(sp).replace('₹', '').trim() : '---';
+																		})()}
+																	</span>
+																</div>
+
+																<div className="w-px h-3.5 bg-slate-200 dark:bg-white/10 shrink-0" />
+
+																{/* Status Badge */}
+																<div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 font-bold text-[9px] tracking-wider">
+																	<Check className="size-2.5" />
+																	READY
+																</div>
+
+																{/* Minimize button */}
+																<button
+																	onClick={() => setIsCamHudCollapsed(true)}
+																	className="p-0.5 hover:bg-slate-100 dark:hover:bg-white/10 rounded-full text-muted-foreground hover:text-foreground transition-all cursor-pointer ml-1"
+																	title="Collapse HUD"
+																>
+																	<ChevronDown className="size-3" />
+																</button>
 															</div>
-														</div>
+														)}
 													</div>
 												)}
 											</div>
@@ -2461,17 +2505,16 @@ export default function HitlWorkspace() {
 										<div className="h-full w-full glass-panel bg-card/40 rounded-xl overflow-hidden relative flex flex-col">
 											{/* Segmented Control Header */}
 											<div className="flex h-14 shrink-0 items-center justify-center px-4 border-b border-border/50 bg-background/50 dark:bg-background/20 backdrop-blur-md">
-												<div className="flex bg-black/5 dark:bg-black/40 p-1 rounded-lg border border-black/5 dark:border-white/5 w-full max-w-[280px]">
+												<div className="flex bg-slate-100 dark:bg-black/40 p-1 rounded-lg border border-slate-200/80 dark:border-white/5 w-full max-w-[280px]">
 													<button
 														onClick={() => {
 															setActiveRightTab('cad');
 															setIsCamDrawerOpen(false);
 														}}
-														className={`flex-1 py-1.5 px-3 text-[11px] font-bold tracking-widest uppercase rounded-md transition-all duration-200 ${
-															activeRightTab === 'cad'
-																? 'bg-blue-100/50 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(59,130,246,0.15)]'
-																: 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
-														}`}
+														className={`flex-1 py-1.5 px-3 text-[11px] font-bold tracking-widest uppercase rounded-md transition-all duration-200 cursor-pointer ${activeRightTab === 'cad'
+																? 'bg-white dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-slate-200 dark:border-blue-500/30 shadow-xs dark:shadow-[0_0_15px_rgba(59,130,246,0.15)]'
+																: 'text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-foreground hover:bg-slate-200/60 dark:hover:bg-white/5 border border-transparent'
+															}`}
 													>
 														📐 CAD Design
 													</button>
@@ -2480,11 +2523,10 @@ export default function HitlWorkspace() {
 															setActiveRightTab('cam');
 															setIsCamDrawerOpen(true);
 														}}
-														className={`flex-1 py-1.5 px-3 text-[11px] font-bold tracking-widest uppercase rounded-md transition-all duration-200 ${
-															activeRightTab === 'cam'
-																? 'bg-amber-100/50 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(245,158,11,0.15)]'
-																: 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
-														}`}
+														className={`flex-1 py-1.5 px-3 text-[11px] font-bold tracking-widest uppercase rounded-md transition-all duration-200 cursor-pointer ${activeRightTab === 'cam'
+																? 'bg-white dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-slate-200 dark:border-amber-500/30 shadow-xs dark:shadow-[0_0_15px_rgba(245,158,11,0.15)]'
+																: 'text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-foreground hover:bg-slate-200/60 dark:hover:bg-white/5 border border-transparent'
+															}`}
 													>
 														⚙️ CAM Setup
 													</button>
@@ -2515,15 +2557,17 @@ export default function HitlWorkspace() {
 
 												{activeRightTab === 'cam' && (
 													<div className="p-5">
-														<CamSummaryPanel 
-															setup={camSetup as any} 
+														<CamSummaryPanel
+															setup={camSetup as any}
 															setups={camSetups}
-															tools={camTools} 
+															tools={camTools}
 															operations={camOperations}
 															features={camFeatures}
 															coordValidation={coordValidation}
 															costEstimate={camStats?.costEstimate}
-															onClickSection={() => {}}
+															profitMargin={profitMargin}
+															onProfitMarginChange={setProfitMargin}
+															onClickSection={() => { }}
 														/>
 													</div>
 												)}
@@ -2549,7 +2593,6 @@ export default function HitlWorkspace() {
 										workflowStage={workflowStage}
 										onMinimize={() => {
 											setIsCamDrawerOpen(false);
-											setActiveRightTab('cad');
 										}}
 										camSetup={camSetup}
 										camSetups={camSetups}
