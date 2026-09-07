@@ -31,6 +31,87 @@ def _coerce_jsonable(value: Any) -> Any:
     return value
 
 
+# ---------------------------------------------------------------------------
+# Sandbox Environment Isolation (VEX-2A-001)
+# ---------------------------------------------------------------------------
+# Build123d / OCP / CAD execution requires very little of the parent env.
+# Expose ONLY variables needed for correct Python/library operation and CAD
+# parameter passing.  Application secrets (GOOGLE_API_KEY, DATABASE_URL,
+# JWT_SECRET, OPENROUTER_API_KEY, etc.) are deliberately excluded.
+
+# Variables that ARE needed for CAD subprocess execution:
+_REQUIRED_ENV_KEYS = frozenset({
+    # Python runtime essentials
+    "PATH",
+    "PYTHONPATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    # System library paths (OCP/OpenCASCADE needs these on some distros)
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "LIBGL_ALWAYS_SOFTWARE",
+    "XDG_RUNTIME_DIR",
+    "DISPLAY",
+    # Locale / encoding
+    "PYTHONIOENCODING",
+    "PYTHONLEGACYWINDOWSSTDIO",
+})
+
+# Application-set variables that are safe to forward (non-secret CAD config):
+_SAFE_APP_KEYS = frozenset({
+    "RENDER_TIMEOUT_SECONDS",
+    "RENDER_MAX_RETRIES",
+    "OPENSCAD_FN_CAP",
+    "CSG_EPS",
+    "BLUEPRINT_DXF_VIEW_SPACING",
+})
+
+
+def _build_sandbox_env(
+    extra: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """Construct a minimal, safe environment for CAD subprocess execution.
+
+    This replaces ``os.environ.copy()`` to prevent untrusted generated Python
+    scripts from accessing application secrets (API keys, database credentials,
+    JWT tokens, etc.) via ``os.environ``.
+
+    Only a curated allowlist of system and CAD-relevant variables is forwarded
+    from the parent environment.  Additional key/value pairs required for a
+    specific invocation (e.g. ``CAD_PARAMETERS_JSON``) can be passed via
+    *extra*.
+    """
+    safe_env: Dict[str, str] = {}
+
+    # Forward required system/library keys
+    for key in _REQUIRED_ENV_KEYS:
+        val = os.environ.get(key)
+        if val is not None:
+            safe_env[key] = val
+
+    # Forward explicitly allowed application config keys
+    for key in _SAFE_APP_KEYS:
+        val = os.environ.get(key)
+        if val is not None:
+            safe_env[key] = val
+
+    # Ensure a usable PATH even if the parent has none
+    if "PATH" not in safe_env:
+        safe_env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
+
+    # Merge caller-supplied extra variables (these are always set by the
+    # caller, e.g. CAD_PARAMETERS_JSON, OUTPUT_DIR, etc.)
+    if extra:
+        safe_env.update(extra)
+
+    return safe_env
+
+
 RENDER_HARNESS_TEMPLATE = r"""
 import json
 import os
@@ -1490,12 +1571,13 @@ class ParameterRenderService:
             (tmp / "user_script.py").write_text(script, encoding="utf-8")
             (tmp / "harness.py").write_text(RENDER_HARNESS_TEMPLATE, encoding="utf-8")
 
-            env = os.environ.copy()
-            env["CAD_PARAMETERS_JSON"] = json.dumps(parameters, ensure_ascii=True)
-            env["CAD_CAM_PARAMETERS_JSON"] = json.dumps({}, ensure_ascii=True)
-            env["OUTPUT_DIR"] = str(tmp)   # temp dir — no real outputs written
-            env["OUTPUT_BASENAME"] = "val_check"
-            env["VALIDATION_MODE"] = "1"   # ← key: activate strict geometry checking
+            env = _build_sandbox_env(extra={
+                "CAD_PARAMETERS_JSON": json.dumps(parameters, ensure_ascii=True),
+                "CAD_CAM_PARAMETERS_JSON": json.dumps({}, ensure_ascii=True),
+                "OUTPUT_DIR": str(tmp),   # temp dir — no real outputs written
+                "OUTPUT_BASENAME": "val_check",
+                "VALIDATION_MODE": "1",   # ← key: activate strict geometry checking
+            })
 
             project_root = Path(__file__).resolve().parents[3]
             python_exe = sys.executable
@@ -1609,11 +1691,12 @@ class ParameterRenderService:
                 (tmp / "user_script.py").write_text(script, encoding="utf-8")
                 (tmp / "harness.py").write_text(RENDER_HARNESS_TEMPLATE, encoding="utf-8")
 
-                env = os.environ.copy()
-                env["CAD_PARAMETERS_JSON"] = json.dumps(parameters, ensure_ascii=True)
-                env["CAD_CAM_PARAMETERS_JSON"] = json.dumps(cam_parameters or {}, ensure_ascii=True)
-                env["OUTPUT_DIR"] = str(self.outputs_dir)
-                env["OUTPUT_BASENAME"] = output_basename
+                env = _build_sandbox_env(extra={
+                    "CAD_PARAMETERS_JSON": json.dumps(parameters, ensure_ascii=True),
+                    "CAD_CAM_PARAMETERS_JSON": json.dumps(cam_parameters or {}, ensure_ascii=True),
+                    "OUTPUT_DIR": str(self.outputs_dir),
+                    "OUTPUT_BASENAME": output_basename,
+                })
 
                 project_root = Path(__file__).resolve().parents[3]
                 python_exe = sys.executable
@@ -1854,19 +1937,87 @@ def validate_script_syntax(script: str) -> tuple[bool, Optional[str]]:
 
 
 def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
+    """AST-based defense-in-depth check for generated CAD scripts.
+
+    This validator is NOT a security sandbox.  It catches obviously dangerous
+    patterns as a first line of defence, but is not relied upon as the
+    primary security boundary.
+
+    Actual protections in place for generated-code execution:
+    - Subprocesses run as a non-root user (caduser), not root.
+    - Subprocesses receive a curated minimal environment via
+      _build_sandbox_env(); application secrets (API keys, database
+      credentials, JWT tokens) are NOT forwarded.
+    - Execution uses controlled temporary working directories
+      (tempfile.TemporaryDirectory) that are cleaned up automatically.
+
+    Protections that are NOT currently enforced:
+    - Complete filesystem isolation is NOT enforced; the subprocess has
+      read access to the container filesystem and write access to the
+      outputs volume and its own temporary directory.
+    - Network isolation is NOT enforced; the subprocess inherits the
+      container's network namespace.
+
+    Limitations acknowledged (VEX-2A-001):
+    - AST filtering cannot reliably sandbox Python; attribute-based
+      re-exports through allowed modules can bypass static analysis.
+    - The process-level controls (non-root user, curated environment)
+      are the authoritative security boundary, not this AST validator.
+    """
     try:
         import ast
 
         tree = ast.parse(script)
-        
-        # Whitelisted top-level modules
-        ALLOWED_MODULES = {"build123d", "math", "re", "ocp_vscode", "typing", "sys", "enum", "bd_warehouse"}
-        
-        # Blacklisted built-ins that could be used for execution or system access
-        FORBIDDEN_FUNCTIONS = {
-            "eval", "exec", "open", "compile", "globals", "locals", "__import__",
-            "getattr", "setattr", "delattr", "input", "breakpoint"
-        }
+
+        # Whitelisted top-level modules.
+        # NOTE: 'sys' and 'enum' are deliberately excluded because they
+        # re-export dangerous modules via attributes (e.g. typing.sys,
+        # enum.sys, build123d.os).  Removing them eliminates the most
+        # obvious bypass path while still allowing all legitimate CAD
+        # operations.
+        ALLOWED_MODULES = {"build123d", "math", "re", "ocp_vscode", "typing", "bd_warehouse"}
+
+        # Attribute names that are dangerous when accessed on any object,
+        # regardless of whether the module is whitelisted.  These enable
+        # module re-export / sandbox escape (VEX-2A-001).
+        FORBIDDEN_ATTRIBUTES = frozenset({
+            # Module re-export bypasses (the core VEX-2A-001 vectors)
+            "modules",        # sys.modules → access to all loaded modules
+            "environ",        # os.environ → environment secrets
+            "sys",            # typing.sys, enum.sys → re-export of sys module
+            # OS-level command execution via any module re-export
+            "system",         # os.system("command")
+            "popen",          # os.popen("command")
+            "execv",          # os.execv(...)
+            "execve",         # os.execve(...)
+            "execvp",         # os.execvp(...)
+            "fork",           # os.fork()
+            "spawn",          # os.spawn*
+            # Dangerous Python object introspection
+            "__builtins__",   # access to all builtins
+            "__import__",     # dynamic import
+            "__class__",      # type introspection for sandbox escape
+            "__subclasses__", # MRO walking for privilege escalation
+            "__globals__",    # function global scope access
+            "__code__",       # code object introspection
+        })
+
+        # Functions that are dangerous when called bare (ast.Name), but are
+        # safe when called as methods on whitelisted modules (e.g. re.compile).
+        FORBIDDEN_BARE_FUNCTIONS = frozenset({
+            "eval", "exec", "open", "compile", "globals", "locals",
+            "__import__", "getattr", "setattr", "delattr", "input",
+            "breakpoint", "help", "exit", "quit",
+        })
+
+        # Functions that are always forbidden, even as method calls.
+        FORBIDDEN_ANYWHERE_FUNCTIONS = frozenset({
+            "eval", "exec", "__import__",
+        })
+
+        # Substrings that make an attribute name dangerous (catches
+        # dynamically constructed names like '__class__' etc.)
+        FORBIDDEN_ATTR_SUBSTRINGS = ("__",)
 
         for node in ast.walk(tree):
             # 1. Enforce Module Import Whitelist
@@ -1875,28 +2026,50 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
                     base_module = alias.name.split('.')[0]
                     if base_module not in ALLOWED_MODULES:
                         return False, f"Security Violation: Import of module '{alias.name}' is forbidden. Only {ALLOWED_MODULES} imports are permitted."
-            
+
             elif isinstance(node, ast.ImportFrom):
                 if not node.module:
                     return False, "Security Violation: Relative imports are forbidden."
                 base_module = node.module.split('.')[0]
                 if base_module not in ALLOWED_MODULES:
                     return False, f"Security Violation: Import from module '{node.module}' is forbidden. Only {ALLOWED_MODULES} imports are permitted."
-            
-            # 2. Block dunder attribute access to prevent sandbox escapes
+
+            # 2. Block dangerous attribute access patterns
             elif isinstance(node, ast.Attribute):
-                if "__" in node.attr:
-                    return False, f"Security Violation: Access to attribute '{node.attr}' is forbidden."
-            
-            # 3. Block forbidden built-in calls and dynamic dunder accesses via functions
+                attr_name = node.attr
+                # Block dunder access (sandbox escape)
+                if any(sub in attr_name for sub in FORBIDDEN_ATTR_SUBSTRINGS):
+                    return False, f"Security Violation: Access to attribute '{attr_name}' is forbidden."
+                # Block known-dangerous attributes (VEX-2A-001 bypass vectors)
+                if attr_name in FORBIDDEN_ATTRIBUTES:
+                    return False, f"Security Violation: Access to attribute '{attr_name}' is forbidden."
+
+            # 3. Block forbidden built-in calls
             elif isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Name):
-                    if node.func.id in FORBIDDEN_FUNCTIONS:
+                    if node.func.id in FORBIDDEN_BARE_FUNCTIONS:
                         return False, f"Security Violation: Call to built-in function '{node.func.id}' is forbidden."
                 elif isinstance(node.func, ast.Attribute):
-                    if "__" in node.func.attr:
-                        return False, f"Security Violation: Access to attribute '{node.func.attr}' is forbidden."
-                    
+                    func_attr = node.func.attr
+                    if any(sub in func_attr for sub in FORBIDDEN_ATTR_SUBSTRINGS):
+                        return False, f"Security Violation: Access to attribute '{func_attr}' is forbidden."
+                    if func_attr in FORBIDDEN_ATTRIBUTES:
+                        return False, f"Security Violation: Access to attribute '{func_attr}' is forbidden."
+                    if func_attr in FORBIDDEN_ANYWHERE_FUNCTIONS:
+                        return False, f"Security Violation: Call to function '{func_attr}' is forbidden."
+
+            # 4. Block Subscript access to dangerous targets (e.g. sys.modules['os'])
+            elif isinstance(node, ast.Subscript):
+                # This catches `sys.modules['os']`, `os.environ['SECRET']`, etc.
+                # when used as a subscript target on any attribute access.
+                if isinstance(node.value, ast.Attribute):
+                    base_attr = node.value.attr
+                    if base_attr in ("modules", "environ"):
+                        return False, f"Security Violation: Subscript access on '{base_attr}' is forbidden."
+
+        return True, None
+    except SyntaxError:
+        # Let validate_script_syntax handle syntax errors
         return True, None
     except Exception as exc:
         return False, f"Security validation failed: {str(exc)}"

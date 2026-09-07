@@ -28,6 +28,9 @@ services:
       context: ./ai-engine
       dockerfile: Dockerfile
     container_name: vexcad_ai_engine
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -55,10 +58,14 @@ services:
     build:
       context: ./web-ui
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_FASTAPI_URL: http://localhost:8000/api/v1
     container_name: vexcad_web_ui
     restart: unless-stopped
     ports:
       - "3000:3000"
+    volumes:
+      - cad_outputs:/app/outputs
     environment:
       # Point to the ai-engine service by its container name
       FASTAPI_URL: http://ai-engine:8000/api/v1
