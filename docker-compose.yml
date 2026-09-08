@@ -32,8 +32,7 @@ services:
       - 8.8.8.8
       - 1.1.1.1
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    # VEX-006: ai-engine is Docker-internal only — no host port published.
     environment:
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       GENAI_MODEL: ${GENAI_MODEL:-gemini-2.0-flash-lite}
@@ -58,8 +57,6 @@ services:
     build:
       context: ./web-ui
       dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_FASTAPI_URL: http://localhost:8000/api/v1
     container_name: vexcad_web_ui
     restart: unless-stopped
     ports:
@@ -67,9 +64,8 @@ services:
     volumes:
       - cad_outputs:/app/outputs
     environment:
-      # Point to the ai-engine service by its container name
+      # Point to the ai-engine service by its container name (Docker-internal only)
       FASTAPI_URL: http://ai-engine:8000/api/v1
-      NEXT_PUBLIC_FASTAPI_URL: http://localhost:8000/api/v1
       # PostgreSQL connection (Prisma)
       DATABASE_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
       DIRECT_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db

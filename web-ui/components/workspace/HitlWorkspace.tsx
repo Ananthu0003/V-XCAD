@@ -173,17 +173,16 @@ function makeId(prefix: string): string {
 	return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function stripApiSuffix(url: string): string {
-	return url.replace(/\/api\/v1\/?$/, '');
-}
-
 function resolveModelUrl(rawUrl: string, cacheBust?: string): string {
 	let resolvedUrl = rawUrl;
 
+	// VEX-006: Route output file requests through the BFF /api/outputs route
+	// instead of directly to the ai-engine host.
 	if (!(rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))) {
-		const apiBase = process.env.NEXT_PUBLIC_FASTAPI_URL?.trim();
-		if (apiBase && rawUrl.startsWith('/')) {
-			resolvedUrl = `${stripApiSuffix(apiBase)}${rawUrl}`;
+		if (rawUrl.startsWith('/outputs/')) {
+			resolvedUrl = `/api/outputs${rawUrl.slice('/outputs'.length)}`;
+		} else if (rawUrl.startsWith('/')) {
+			resolvedUrl = rawUrl;
 		}
 	}
 
@@ -514,8 +513,7 @@ export default function HitlWorkspace() {
 	// Automatically fetch machine recommendation and auto-select optimal machine
 	useEffect(() => {
 		if ((camFeatures && camFeatures.length > 0) || (parameters && Object.keys(parameters).length > 0) || geometryInfo) {
-			const backendUrl = process.env.NEXT_PUBLIC_FASTAPI_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api/v1';
-			const apiUrl = backendUrl.endsWith('/api/v1') ? `${backendUrl}/cam/recommend-machine` : `${backendUrl}/api/v1/cam/recommend-machine`;
+			const apiUrl = '/api/cam/recommend-machine';
 			
 			const dims = camSetup.stockDimensions || (geometryInfo?.bounding_box ? [
 				geometryInfo.bounding_box.max[0] - geometryInfo.bounding_box.min[0],
@@ -1309,8 +1307,8 @@ export default function HitlWorkspace() {
 		setStatusText('Generating G-Code with CAM parameters...');
 
 		try {
-			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
-			const response = await fetch(`${backendUrl}/api/v1/cam/gcode`, {
+			const backendUrl = '/api/cam';
+			const response = await fetch(`${backendUrl}/gcode`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -1400,7 +1398,7 @@ export default function HitlWorkspace() {
 		latestCamRunId.current = runId;
 
 		try {
-			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+			const backendUrl = '/api/cam';
 			const opsToSend = selectedOperationIds.size > 0 
 				? camOperations.filter(op => selectedOperationIds.has(op.id))
 				: camOperations;
@@ -1435,7 +1433,7 @@ export default function HitlWorkspace() {
 				});
 			}
 
-			const res = await fetch(`${backendUrl}/api/v1/cam/toolpaths`, {
+			const res = await fetch(`${backendUrl}/toolpaths`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -1542,8 +1540,8 @@ export default function HitlWorkspace() {
 		setStatusText('Analyzing 3D geometry for features...');
 		
 		try {
-			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
-			const res = await fetch(`${backendUrl}/api/v1/cam/analyze`, {
+			const backendUrl = '/api/cam';
+			const res = await fetch(`${backendUrl}/analyze`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ session_id: sessionId, parameters: parameters })
@@ -1654,8 +1652,8 @@ export default function HitlWorkspace() {
 				console.warn('Could not fetch global tool library for AI planning', e);
 			}
 
-			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
-			const res = await fetch(`${backendUrl}/api/v1/cam/auto_plan`, {
+			const backendUrl = '/api/cam';
+			const res = await fetch(`${backendUrl}/auto-plan`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({

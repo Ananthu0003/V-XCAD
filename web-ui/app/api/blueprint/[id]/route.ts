@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getSession } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+
 function getFastApiUrl(): string {
 	const value = process.env.FASTAPI_URL?.trim() || process.env.AI_ENGINE_URL?.trim() || 'http://127.0.0.1:8001/api/v1';
 	return value.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
@@ -12,6 +15,22 @@ export async function GET(
 	request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> }
 ) {
+	// VEX-006: Require authenticated session
+	const authSession = await getSession();
+	if (!authSession?.userId) {
+		return NextResponse.json(
+			{ error: { message: 'Authentication required.', hint: 'Log in to access blueprints.' } },
+			{ status: 401 }
+		);
+	}
+	const userExists = await prisma.user.findUnique({ where: { id: authSession.userId } });
+	if (!userExists) {
+		return NextResponse.json(
+			{ error: { message: 'Authentication required.', hint: 'Log in to access blueprints.' } },
+			{ status: 401 }
+		);
+	}
+
 	const { id } = await params;
 	if (!id) {
 		return new NextResponse('Session ID required', { status: 400 });
@@ -30,7 +49,7 @@ export async function GET(
 		return new NextResponse(blob, {
 			headers: {
 				'Content-Type': 'image/png',
-				'Cache-Control': 'public, max-age=3600',
+				'Cache-Control': 'private, no-store',
 			},
 		});
 	} catch (e) {

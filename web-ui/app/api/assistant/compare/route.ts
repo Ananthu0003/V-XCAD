@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+import { getSession } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +12,22 @@ function getFastApiUrl(): string {
 }
 
 export async function POST(request: Request): Promise<Response> {
+	// VEX-006: Require authenticated session
+	const authSession = await getSession();
+	if (!authSession?.userId) {
+		return NextResponse.json(
+			{ error: { message: 'Authentication required.', hint: 'Log in to use the assistant.' } },
+			{ status: 401 }
+		);
+	}
+	const userExists = await prisma.user.findUnique({ where: { id: authSession.userId } });
+	if (!userExists) {
+		return NextResponse.json(
+			{ error: { message: 'Authentication required.', hint: 'Log in to use the assistant.' } },
+			{ status: 401 }
+		);
+	}
+
 	try {
 		const body = await request.json();
 		const fastApiUrl = `${getFastApiUrl()}/assistant/compare-and-prompt`;

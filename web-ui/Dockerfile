@@ -24,9 +24,6 @@ ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholde
 ENV DIRECT_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 ENV JWT_SECRET="build_time_jwt_secret_placeholder_replace_at_runtime"
 
-ARG NEXT_PUBLIC_FASTAPI_URL
-ENV NEXT_PUBLIC_FASTAPI_URL=$NEXT_PUBLIC_FASTAPI_URL
-
 RUN npx prisma generate
 RUN npm run build
 

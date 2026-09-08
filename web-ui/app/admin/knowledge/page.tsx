@@ -16,7 +16,8 @@ import {
   Layers,
 } from "lucide-react";
 
-const FASTAPI_URL = process.env.NEXT_PUBLIC_FASTAPI_URL || "http://127.0.0.1:8001/api/v1";
+// VEX-006: All knowledge operations now route through authenticated BFF proxy.
+const KNOWLEDGE_API = '/api/knowledge';
 
 export default function KnowledgeAdminPage() {
   const [documents, setDocuments] = useState<any[]>([]);
@@ -27,7 +28,7 @@ export default function KnowledgeAdminPage() {
 
   const fetchDocuments = async () => {
     try {
-      const res = await fetch(`${FASTAPI_URL}/knowledge/documents`);
+      const res = await fetch(`${KNOWLEDGE_API}/documents`);
       const data = await res.json();
       if (data.documents) {
         setDocuments(data.documents);
@@ -53,7 +54,7 @@ export default function KnowledgeAdminPage() {
     formData.append("file", file);
 
     try {
-      await fetch(`${FASTAPI_URL}/knowledge/documents/ingest`, {
+      await fetch(`${KNOWLEDGE_API}/documents/ingest`, {
         method: "POST",
         body: formData,
       });
@@ -71,7 +72,7 @@ export default function KnowledgeAdminPage() {
     if (!testQuery.trim()) return;
     setIsSearching(true);
     try {
-      const res = await fetch(`${FASTAPI_URL}/knowledge/retrieve`, {
+      const res = await fetch(`${KNOWLEDGE_API}/retrieve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -87,7 +88,7 @@ export default function KnowledgeAdminPage() {
 
   const handleDelete = async (docId: string) => {
     try {
-      await fetch(`${FASTAPI_URL}/knowledge/documents/${docId}`, {
+      await fetch(`${KNOWLEDGE_API}/documents/${docId}`, {
         method: "DELETE",
       });
       fetchDocuments();
@@ -125,7 +126,7 @@ export default function KnowledgeAdminPage() {
 
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/60 border border-border text-xs text-muted-foreground">
             <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>FastAPI Engine: {FASTAPI_URL}</span>
+            <span>FastAPI Engine: Docker-internal</span>
           </div>
         </div>
 

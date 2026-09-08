@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,22 @@ export async function POST(
 	request: Request,
 	{ params }: { params: Promise<{ jobId: string }> }
 ): Promise<Response> {
+	// VEX-006: Require authenticated session
+	const authSession = await getSession();
+	if (!authSession?.userId) {
+		return NextResponse.json(
+			{ error: { message: 'Authentication required.', hint: 'Log in to use simulation.' } },
+			{ status: 401 }
+		);
+	}
+	const userExists = await prisma.user.findUnique({ where: { id: authSession.userId } });
+	if (!userExists) {
+		return NextResponse.json(
+			{ error: { message: 'Authentication required.', hint: 'Log in to use simulation.' } },
+			{ status: 401 }
+		);
+	}
+
 	const { jobId } = await params;
 	if (!jobId) {
 		return NextResponse.json({ error: { message: 'Missing jobId' } }, { status: 400 });
