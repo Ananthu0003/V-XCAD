@@ -80,13 +80,17 @@ export async function GET() {
         await autoSyncDiskSessions();
 
         const authSession = await getSession();
-        const userId = authSession?.userId || null;
+        if (!authSession?.userId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
 
+        // VEX-009: Return only the authenticated user's sessions and intentionally
+        // shared sessions.  Null-user (unowned) sessions are excluded.
         const sessions = await prisma.cadSession.findMany({
             where: {
                 OR: [
-                    { userId: userId },
-                    { userId: null }
+                    { userId: authSession.userId },
+                    { isShared: true }
                 ]
             },
             orderBy: {
