@@ -61,7 +61,9 @@ export async function DELETE(request: Request, context: any) {
 	try {
 		const { id } = await context.params;
 		const authSession = await getSession();
-		const userId = authSession?.userId || null;
+		if (!authSession?.userId) {
+			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+		}
 		const { searchParams } = new URL(request.url);
 		const iterationId = searchParams.get('iterationId');
 		const version = searchParams.get('version');
@@ -79,8 +81,10 @@ export async function DELETE(request: Request, context: any) {
 			return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 		}
 
-		if (session.userId !== userId && session.userId !== null) {
-			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+		// VEX-2A-005: Only the owner may delete iterations from their session.
+		// Null-user sessions and shared sessions do not grant deletion rights.
+		if (session.userId !== authSession.userId) {
+			return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 		}
 
 		// 1. Delete matching CadIteration record by either ID or Version

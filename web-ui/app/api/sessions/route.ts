@@ -140,14 +140,16 @@ export async function GET() {
 export async function DELETE() {
     try {
         const authSession = await getSession();
-        const userId = authSession?.userId || null;
+        if (!authSession?.userId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
 
+        // VEX-2A-005: Only delete sessions owned by the authenticated user.
+        // The previous { userId: null } clause allowed mass-deletion of all
+        // unowned sessions by any user (authenticated or not).
         await prisma.cadSession.deleteMany({
             where: {
-                OR: [
-                    { userId: userId },
-                    { userId: null }
-                ]
+                userId: authSession.userId
             }
         });
         return NextResponse.json({ message: 'History cleared' });

@@ -33,18 +33,23 @@ export async function DELETE(request: Request, context: any) {
 	try {
 		const { id } = await context.params;
 		const authSession = await getSession();
-		const userId = authSession?.userId || null;
+		if (!authSession?.userId) {
+			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+		}
 
 		const session = await prisma.cadSession.findUnique({
 			where: { id },
+			select: { userId: true },
 		});
 
 		if (!session) {
 			return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 		}
 
-		if (session.userId !== userId && !session.isShared && session.userId !== null) {
-			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+		// VEX-2A-005: Only the owner may delete their session.
+		// Shared status and null-user sessions do not grant deletion rights.
+		if (session.userId !== authSession.userId) {
+			return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 		}
 
 		await prisma.cadSession.delete({
