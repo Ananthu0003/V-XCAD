@@ -11,6 +11,60 @@ function getFastApiUrl(): string {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * VEX-2A-004: Verify the caller is authorized to access this session's blueprint.
+ * Returns the CadSession if authorized, or a NextResponse error if not.
+ */
+async function authorizeSessionAccess(
+	sessionId: string,
+	userId: string
+): Promise<{ session: { userId: string | null; isShared: boolean } } | { error: NextResponse }> {
+	const session = await prisma.cadSession.findUnique({
+		where: { id: sessionId },
+		select: { userId: true, isShared: true },
+	});
+
+	if (!session) {
+		return {
+			error: NextResponse.json(
+				{ error: { message: 'Session not found.' } },
+				{ status: 404 }
+			),
+		};
+	}
+
+	// Owner can always access their own session.
+	if (session.userId === userId) {
+		return { session };
+	}
+
+	// Shared sessions are accessible to any authenticated user.
+	if (session.isShared) {
+		return { session };
+	}
+
+	// Null-user (anonymous) sessions: access denied to other authenticated users.
+	// This prevents an authenticated user from reading another user's anonymous session
+	// by claiming ownership.  Anonymous sessions should have been claimed via render/generate
+	// with a valid userId; if they haven't, they remain inaccessible to other authenticated users.
+	if (session.userId === null) {
+		return {
+			error: NextResponse.json(
+				{ error: { message: 'Forbidden' } },
+				{ status: 403 }
+			),
+		};
+	}
+
+	// All other cases: different owner, not shared.
+	return {
+		error: NextResponse.json(
+			{ error: { message: 'Forbidden' } },
+			{ status: 403 }
+		),
+	};
+}
+
 export async function GET(
 	request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> }
@@ -34,6 +88,12 @@ export async function GET(
 	const { id } = await params;
 	if (!id) {
 		return new NextResponse('Session ID required', { status: 400 });
+	}
+
+	// VEX-2A-004: Enforce ownership before proxying to ai-engine
+	const accessCheck = await authorizeSessionAccess(id, authSession.userId);
+	if ('error' in accessCheck) {
+		return accessCheck.error;
 	}
 
 	try {

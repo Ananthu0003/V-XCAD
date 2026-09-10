@@ -96,9 +96,11 @@ jest.mock('@/lib/auth', () => ({
 }));
 
 const mockUserFindUnique = jest.fn();
+const mockCadSessionFindUnique = jest.fn();
 jest.mock('@/lib/prisma', () => ({
   prisma: {
     user: { findUnique: (...args: unknown[]) => mockUserFindUnique(...args) },
+    cadSession: { findUnique: (...args: unknown[]) => mockCadSessionFindUnique(...args) },
   },
 }));
 
@@ -335,6 +337,8 @@ describe('VEX-006 — BFF authentication boundary', () => {
     it('/api/blueprint/[id] preserves binary response', async () => {
       mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@test.com' });
       mockUserFindUnique.mockResolvedValue({ id: 'user-123' });
+      // VEX-2A-004: blueprint route now checks session ownership before proxying
+      mockCadSessionFindUnique.mockResolvedValue({ userId: 'user-123', isShared: false });
 
       const fakePng = Buffer.from([0x89, 0x50, 0x4E, 0x47]);
       const upstreamResponse = new Response(fakePng, {
