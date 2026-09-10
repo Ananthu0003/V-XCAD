@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireSession } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 
@@ -7,6 +8,10 @@ export async function GET(
 	request: Request,
 	{ params }: { params: Promise<{ jobId: string; simulationRunId: string }> }
 ) {
+	// VEX-2A-003: Require authenticated session
+	if (!(await requireSession())) {
+		return NextResponse.json({ error: { message: 'Authentication required.' } }, { status: 401 });
+	}
 	try {
 		const { simulationRunId: runId } = await params;
 		if (!runId) {

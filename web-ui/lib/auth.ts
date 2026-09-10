@@ -34,3 +34,21 @@ export async function getSession() {
   if (!token) return null;
   return await verifyToken(token);
 }
+
+/**
+ * VEX-2A-003: Require an authenticated session with a valid user in the database.
+ * Returns the userId if valid, or null if authentication fails.
+ * Callers should return 401 when this returns null.
+ */
+export async function requireSession(): Promise<string | null> {
+  const session = await getSession();
+  if (!session?.userId) return null;
+
+  // Dynamic import to avoid circular deps and keep this file lightweight.
+  // The prisma client is a singleton so the import cost is negligible.
+  const { prisma } = await import('@/lib/prisma');
+  const user = await prisma.user.findUnique({ where: { id: session.userId } });
+  if (!user) return null;
+
+  return session.userId;
+}

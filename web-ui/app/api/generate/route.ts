@@ -80,6 +80,22 @@ function getFastApiUrl(): string {
 }
 
 export async function POST(request: Request): Promise<Response> {
+	// VEX-2A-003: Require authenticated session (hard gate)
+	const authGate = await getSession();
+	if (!authGate?.userId) {
+		return NextResponse.json(
+			buildError('Authentication required.', 'Log in to use the generate endpoint.'),
+			{ status: 401 }
+		);
+	}
+	const gateUser = await prisma.user.findUnique({ where: { id: authGate.userId } });
+	if (!gateUser) {
+		return NextResponse.json(
+			buildError('Authentication required.', 'Log in to use the generate endpoint.'),
+			{ status: 401 }
+		);
+	}
+
 	let formData: FormData;
 	try {
 		formData = await request.clone().formData();
@@ -119,16 +135,8 @@ export async function POST(request: Request): Promise<Response> {
 		}
 	}
 
-	const authSession = await getSession();
-	let validUserId: string | null = null;
-	if (authSession?.userId) {
-		const userExists = await prisma.user.findUnique({
-			where: { id: authSession.userId }
-		});
-		if (userExists) {
-			validUserId = authSession.userId;
-		}
-	}
+	// Auth already validated by hard gate above — use the confirmed userId.
+	const validUserId = authGate.userId;
 
 	const rawSessionId = formData.get('session_id');
 	let sessionId: string;

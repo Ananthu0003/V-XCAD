@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+    // VEX-2A-003: Require authenticated session
+    if (!(await requireSession())) {
+        return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+    }
     const searchParams = request.nextUrl.searchParams;
     const type = searchParams.get('type');
     const material_code = searchParams.get('material');

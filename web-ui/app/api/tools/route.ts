@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTools, createTool } from '@/lib/db/tools';
 import { toolSchema } from '@/lib/validation/toolSchema';
 import { Prisma } from '@prisma/client';
+import { requireSession } from '@/lib/auth';
 
 export async function GET() {
+  // VEX-2A-003: Require authenticated session
+  if (!(await requireSession())) {
+    return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+  }
   try {
     const tools = await getTools();
     return NextResponse.json(tools);
@@ -14,6 +19,10 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  // VEX-2A-003: Require authenticated session
+  if (!(await requireSession())) {
+    return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+  }
   try {
     const body = await request.json();
     
