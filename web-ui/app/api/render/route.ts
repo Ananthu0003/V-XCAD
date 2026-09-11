@@ -178,6 +178,24 @@ export async function POST(request: Request): Promise<Response> {
 		);
 	}
 
+	// VEX-2A-012: Ownership check — verify the authenticated user owns the target session
+	// before calling the ai-engine or allowing the upsert to overwrite existing session data.
+	try {
+		const existingSession = await prisma.cadSession.findUnique({
+			where: { id: mappedPayload.session_id },
+			select: { userId: true },
+		});
+
+		if (existingSession && existingSession.userId !== authenticatedUserId) {
+			return NextResponse.json(
+				buildError('Forbidden', 'You do not own this session.'),
+				{ status: 403 }
+			);
+		}
+	} catch (e) {
+		console.warn('Could not verify session ownership for VEX-2A-012:', e);
+	}
+
 	// Determine next version for this session
 	let nextVersion = 1;
 	try {
