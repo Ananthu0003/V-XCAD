@@ -123,6 +123,7 @@ jest.mock('@/lib/prisma', () => ({
       findMany: (...args: unknown[]) => mockFindMany(...args),
     },
     cadSession: {
+      findUnique: (...args: unknown[]) => mockFindUnique(...args),
       create: (...args: unknown[]) => mockCreate(...args),
     },
     user: {
@@ -373,7 +374,11 @@ describe('VEX-2A-003 — Authentication Coverage', () => {
 
     it('GET proceeds when authenticated', async () => {
       mockRequireSession.mockResolvedValue('user-123');
-      mockFindUnique.mockResolvedValue({ id: 'run-1', setup: {}, segments: [] });
+      // VEX-2A-014: simulationRun.findUnique must return job_id matching the supplied jobId,
+      // then cadSession.findUnique for ownership check
+      mockFindUnique
+        .mockResolvedValueOnce({ id: 'run-1', job_id: 'job-1', setup: {}, segments: [] })
+        .mockResolvedValueOnce({ userId: 'user-123', isShared: false });
       const { GET } = require('@/app/api/cam/[jobId]/simulation/[simulationRunId]/route');
       const req = makeGetRequest('http://localhost:3000/api/cam/job-1/simulation/run-1');
       const res = await GET(req, { params: Promise.resolve({ jobId: 'job-1', simulationRunId: 'run-1' }) });
@@ -391,6 +396,9 @@ describe('VEX-2A-003 — Authentication Coverage', () => {
 
     it('GET proceeds when authenticated', async () => {
       mockRequireSession.mockResolvedValue('user-123');
+      mockFindUnique
+        .mockResolvedValueOnce({ id: 'run-1', job_id: 'job-1' })
+        .mockResolvedValueOnce({ userId: 'user-123', isShared: false });
       mockFindMany.mockResolvedValue([]);
       mockFindFirst.mockResolvedValue(0);
       const { GET } = require('@/app/api/cam/[jobId]/simulation/[simulationRunId]/segments/route');
@@ -410,6 +418,9 @@ describe('VEX-2A-003 — Authentication Coverage', () => {
 
     it('GET proceeds when authenticated', async () => {
       mockRequireSession.mockResolvedValue('user-123');
+      mockFindUnique
+        .mockResolvedValueOnce({ id: 'run-1', job_id: 'job-1' })
+        .mockResolvedValueOnce({ userId: 'user-123', isShared: false });
       mockFindMany.mockResolvedValue([]);
       const { GET } = require('@/app/api/cam/[jobId]/simulation/[simulationRunId]/timeline/route');
       const req = makeGetRequest('http://localhost:3000/api/cam/job-1/simulation/run-1/timeline');

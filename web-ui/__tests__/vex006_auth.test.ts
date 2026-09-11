@@ -236,6 +236,10 @@ describe('VEX-006 — BFF authentication boundary', () => {
       it(`${route.method} ${route.name} with valid session → forwards to ai-engine`, async () => {
         mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@test.com' });
         mockUserFindUnique.mockResolvedValue({ id: 'user-123' });
+        // VEX-2A-013b: simulate/prepare requires cadSession ownership check
+        if (route.url.includes('simulate/prepare')) {
+          mockCadSessionFindUnique.mockResolvedValue({ userId: 'user-123' });
+        }
 
         const upstreamResponse = new Response(JSON.stringify({ status: 'ok' }), {
           status: 200,
