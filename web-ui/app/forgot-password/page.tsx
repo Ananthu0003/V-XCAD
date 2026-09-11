@@ -2,12 +2,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { ArrowRight, Cuboid, Loader2 } from 'lucide-react';
 
 export default function ForgotPasswordPage() {
-  const router = useRouter();
-  const [formData, setFormData] = useState({ email: '', newPassword: '', confirmPassword: '' });
+  const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -17,31 +15,23 @@ export default function ForgotPasswordPage() {
     setError('');
     setSuccess(false);
 
-    if (formData.newPassword !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
     setLoading(true);
 
     try {
       const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ email }),
       });
       const data = await res.json();
-      
+
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to reset password');
+        throw new Error(data.error || 'Failed to submit request');
       }
-      
+
       setSuccess(true);
-      setTimeout(() => {
-        router.push('/login');
-      }, 2000);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to submit request');
     } finally {
       setLoading(false);
     }
@@ -64,20 +54,28 @@ export default function ForgotPasswordPage() {
           </Link>
           
           <h1 className="text-2xl font-semibold mb-2">Reset Password</h1>
-          <p className="text-muted-foreground text-center">Enter your email and a new password.</p>
+          <p className="text-muted-foreground text-center">Enter your email to request a password reset.</p>
         </div>
 
         <div className="bg-card border border-border rounded-3xl p-8 backdrop-blur-xl shadow-2xl">
           {success ? (
             <div className="text-center py-6">
-              <div className="w-16 h-16 bg-green-500/10 text-green-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-500/20">
+              <div className="w-16 h-16 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-blue-500/20">
                 <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-medium mb-2">Password Reset</h3>
-              <p className="text-muted-foreground mb-6">Your password has been successfully updated.</p>
-              <p className="text-sm text-muted-foreground">Redirecting to login...</p>
+              <h3 className="text-xl font-medium mb-2">Request Submitted</h3>
+              <p className="text-muted-foreground mb-6">
+                Your password reset request has been submitted for administrator approval. You will be notified once it is reviewed.
+              </p>
+              <Link
+                href="/login"
+                className="inline-flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 font-medium transition-colors"
+              >
+                Return to Login
+                <ArrowRight className="w-4 h-4" />
+              </Link>
             </div>
           ) : (
             <form className="space-y-6" onSubmit={handleSubmit}>
@@ -94,34 +92,8 @@ export default function ForgotPasswordPage() {
                   placeholder="you@example.com"
                   className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-foreground placeholder:text-muted-foreground"
                   required
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">New Password</label>
-                <input 
-                  type="password" 
-                  placeholder="••••••••"
-                  className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-foreground placeholder:text-muted-foreground"
-                  required
-                  minLength={6}
-                  value={formData.newPassword}
-                  onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">Confirm Password</label>
-                <input 
-                  type="password" 
-                  placeholder="••••••••"
-                  className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-foreground placeholder:text-muted-foreground"
-                  required
-                  minLength={6}
-                  value={formData.confirmPassword}
-                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                 />
               </div>
 
@@ -134,7 +106,7 @@ export default function ForgotPasswordPage() {
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
                   <>
-                    Reset Password
+                    Submit Request
                     <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
                   </>
                 )}

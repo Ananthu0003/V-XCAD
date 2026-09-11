@@ -129,6 +129,10 @@ jest.mock('@/lib/prisma', () => ({
     user: {
       findUnique: (...args: unknown[]) => mockFindUnique(...args),
     },
+    passwordResetRequest: {
+      findFirst: (...args: unknown[]) => mockFindFirst(...args),
+      create: (...args: unknown[]) => mockCreate(...args),
+    },
   },
 }));
 

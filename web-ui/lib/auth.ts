@@ -11,7 +11,7 @@ if (!process.env.JWT_SECRET) {
 }
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
 
-export async function signToken(payload: { userId: string; email: string }) {
+export async function signToken(payload: { userId: string; email: string; tokenVersion: number }) {
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -22,8 +22,8 @@ export async function signToken(payload: { userId: string; email: string }) {
 export async function verifyToken(token: string) {
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET);
-    return payload as { userId: string; email: string };
-  } catch (error) {
+    return payload as { userId: string; email: string; tokenVersion: number };
+  } catch {
     return null;
   }
 }
@@ -37,6 +37,7 @@ export async function getSession() {
 
 /**
  * VEX-2A-003: Require an authenticated session with a valid user in the database.
+ * VEX-2A-011: Also validates tokenVersion to invalidate old tokens after password reset.
  * Returns the userId if valid, or null if authentication fails.
  * Callers should return 401 when this returns null.
  */
@@ -45,10 +46,36 @@ export async function requireSession(): Promise<string | null> {
   if (!session?.userId) return null;
 
   // Dynamic import to avoid circular deps and keep this file lightweight.
-  // The prisma client is a singleton so the import cost is negligible.
   const { prisma } = await import('@/lib/prisma');
-  const user = await prisma.user.findUnique({ where: { id: session.userId } });
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { id: true, tokenVersion: true },
+  });
   if (!user) return null;
 
+  // VEX-2A-011: Invalidate tokens issued before a password reset.
+  // Existing JWTs without tokenVersion (from before this fix) are rejected
+  // because they don't match the DB tokenVersion (0 vs undefined).
+  if (user.tokenVersion !== session.tokenVersion) return null;
+
   return session.userId;
+}
+
+/**
+ * VEX-2A-011: Require an authenticated admin session.
+ * Returns the userId if the user is an admin, or null otherwise.
+ * Callers should return 403 when this returns null.
+ */
+export async function requireAdmin(): Promise<string | null> {
+  const userId = await requireSession();
+  if (!userId) return null;
+
+  const { prisma } = await import('@/lib/prisma');
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isAdmin: true },
+  });
+  if (!user?.isAdmin) return null;
+
+  return userId;
 }
