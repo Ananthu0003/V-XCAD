@@ -43,6 +43,27 @@ export async function POST(
 		return NextResponse.json({ error: { message: 'Missing setup or operations in body' } }, { status: 400 });
 	}
 
+	// VEX-2A-013b: Ownership check — verify the authenticated user owns the target session
+	// before calling the ai-engine or creating any CAM records.
+	const targetSession = await prisma.cadSession.findUnique({
+		where: { id: jobId },
+		select: { userId: true },
+	});
+
+	if (!targetSession) {
+		return NextResponse.json(
+			{ error: { message: 'Session not found.' } },
+			{ status: 404 }
+		);
+	}
+
+	if (targetSession.userId !== authSession.userId) {
+		return NextResponse.json(
+			{ error: { message: 'Forbidden', hint: 'You do not own this session.' } },
+			{ status: 403 }
+		);
+	}
+
 	let upstream: Response;
 	try {
 		upstream = await fetch(`${getFastApiUrl()}/cam/simulate/prepare`, {
