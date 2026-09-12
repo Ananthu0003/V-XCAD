@@ -70,7 +70,7 @@ services:
       DATABASE_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
       DIRECT_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
       # JWT secret for auth
-      JWT_SECRET: ${JWT_SECRET:-change_me_in_production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env or environment}
       NODE_ENV: production
     depends_on:
       postgres:
