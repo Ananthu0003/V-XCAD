@@ -73,40 +73,44 @@ export async function GET(
 		return NextResponse.json({ error: { message: 'Invalid file path.' } }, { status: 400 });
 	}
 
-	// VEX-2A-004: For session-derived artifacts, verify ownership before reading.
+	// VEX-NEW-01/02: Only allow access to session-derived artifacts with valid ownership.
+	// Non-session files (no cad_ prefix) are denied. Orphaned files (session deleted from
+	// DB) are denied to prevent data leakage from stale disk artifacts.
 	const sessionId = extractSessionIdFromFilename(filePath);
-	if (sessionId) {
-		const session = await prisma.cadSession.findUnique({
-			where: { id: sessionId },
-			select: { userId: true, isShared: true },
-		});
+	if (!sessionId) {
+		return NextResponse.json(
+			{ error: { message: 'Forbidden' } },
+			{ status: 403 }
+		);
+	}
 
-		if (session) {
-			const isOwner = session.userId === authSession.userId;
-			const isShared = session.isShared;
-			const isNullUser = session.userId === null;
+	const session = await prisma.cadSession.findUnique({
+		where: { id: sessionId },
+		select: { userId: true, isShared: true },
+	});
 
-			// Owner: allowed. Shared: allowed. Null-user: denied to other authenticated users.
-			// Other users' private sessions: denied.
-			if (!isOwner && !isShared && !isNullUser) {
-				return NextResponse.json(
-					{ error: { message: 'Forbidden' } },
-					{ status: 403 }
-				);
-			}
-			// Null-user sessions: deny access to authenticated users who don't own them.
-			// Null-user sessions have no owner; we treat them as inaccessible to authenticated
-			// users to prevent data leakage.  This is consistent with the blueprint route policy.
-			if (isNullUser && !isOwner) {
-				return NextResponse.json(
-					{ error: { message: 'Forbidden' } },
-					{ status: 403 }
-				);
-			}
-		}
-		// If session doesn't exist in DB, the file may be orphaned on disk.
-		// We allow the read to proceed — the file exists but has no DB record.
-		// This handles legacy disk-synced files that haven't been claimed yet.
+	if (!session) {
+		return NextResponse.json(
+			{ error: { message: 'Forbidden' } },
+			{ status: 403 }
+		);
+	}
+
+	const isOwner = session.userId === authSession.userId;
+	const isShared = session.isShared;
+	const isNullUser = session.userId === null;
+
+	if (!isOwner && !isShared && !isNullUser) {
+		return NextResponse.json(
+			{ error: { message: 'Forbidden' } },
+			{ status: 403 }
+		);
+	}
+	if (isNullUser && !isOwner) {
+		return NextResponse.json(
+			{ error: { message: 'Forbidden' } },
+			{ status: 403 }
+		);
 	}
 
 	const fullPath = join(OUTPUTS_DIR, filePath);

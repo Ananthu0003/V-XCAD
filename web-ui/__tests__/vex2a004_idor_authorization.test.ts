@@ -9,7 +9,8 @@
  * 5. Authenticated owner can access their own output artifacts
  * 6. Authenticated non-owner is denied access to another user's output artifacts (403)
  * 7. Path traversal remains blocked
- * 8. Non-session-derived output files are accessible
+ * 8. Non-session-derived output files are denied (VEX-NEW-02)
+ * 9. Orphaned files (session deleted from DB) are denied (VEX-NEW-01)
  */
 
 // Polyfill Request/Response/Headers BEFORE any imports
@@ -302,7 +303,7 @@ describe('VEX-2A-004 — /api/outputs/[...path] authorization', () => {
     expect(mockReadFile).not.toHaveBeenCalled();
   });
 
-  it('allows non-session-derived files (no ownership check)', async () => {
+  it('denies non-session-derived files (VEX-NEW-02)', async () => {
     mockFindUnique
       .mockResolvedValueOnce({ id: 'user-owner' }); // auth gate only
 
@@ -310,7 +311,7 @@ describe('VEX-2A-004 — /api/outputs/[...path] authorization', () => {
     const req = makeGetRequest('http://localhost:3000/api/outputs/random-file.txt');
     const res = await GET(req, { params: Promise.resolve({ path: ['random-file.txt'] }) });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
     expect(mockFindUnique).toHaveBeenCalledTimes(1);
   });
 
@@ -347,7 +348,7 @@ describe('VEX-2A-004 — /api/outputs/[...path] authorization', () => {
     expect(res.status).toBe(200);
   });
 
-  it('allows orphaned files (session not in DB)', async () => {
+  it('denies orphaned files (session deleted from DB, VEX-NEW-01)', async () => {
     mockFindUnique
       .mockResolvedValueOnce({ id: 'user-owner' }) // auth gate
       .mockResolvedValueOnce(null); // session not in DB (orphaned)
@@ -356,6 +357,7 @@ describe('VEX-2A-004 — /api/outputs/[...path] authorization', () => {
     const req = makeGetRequest('http://localhost:3000/api/outputs/cad_orphan.stl');
     const res = await GET(req, { params: Promise.resolve({ path: ['cad_orphan.stl'] }) });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(mockReadFile).not.toHaveBeenCalled();
   });
 });
