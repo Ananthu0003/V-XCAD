@@ -1012,7 +1012,13 @@ async def legacy_upload(file: UploadFile = File(...)):
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     
-    file_path = job_dir / file.filename
+    safe_name = os.path.basename(file.filename) if file.filename else ""
+    if not safe_name:
+        safe_name = "upload"
+    file_path = (job_dir / safe_name).resolve()
+    if not file_path.is_relative_to(job_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
     with open(file_path, "wb") as buffer:
         buffer.write(await file.read())
         
@@ -1924,7 +1930,12 @@ async def ingest_knowledge_document(file: UploadFile = File(...)):
         
         temp_dir = Path(tempfile.gettempdir()) / "vexcad_knowledge"
         temp_dir.mkdir(parents=True, exist_ok=True)
-        temp_file = temp_dir / file.filename
+        safe_name = os.path.basename(file.filename) if file.filename else ""
+        if not safe_name:
+            safe_name = "upload"
+        temp_file = (temp_dir / safe_name).resolve()
+        if not temp_file.is_relative_to(temp_dir.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid filename")
 
         content = await file.read()
         temp_file.write_bytes(content)
