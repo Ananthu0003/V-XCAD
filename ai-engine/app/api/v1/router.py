@@ -41,6 +41,25 @@ CSG_EPS = float(os.getenv("CSG_EPS", "0.02"))
 # Horizontal/vertical spacing (mm) between the four views in a blueprint DXF export.
 BLUEPRINT_DXF_VIEW_SPACING = float(os.getenv("BLUEPRINT_DXF_VIEW_SPACING", "120.0"))
 
+# VEX-AUDIT-012: Allowlist for session_id / job_id values used in filesystem paths.
+# All legitimate IDs in this application (CUIDs, UUIDs, job_ prefixed IDs) match this.
+_SAFE_ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+
+
+def _validate_id(value: str, field_name: str = "id") -> str:
+    """Reject identifiers that could escape their intended directory.
+
+    Valid IDs contain only alphanumeric characters, hyphens, and underscores.
+    Traversal sequences (../, ..\\, /, etc.) are all rejected outright.
+    Raises HTTP 400 on invalid input — never sanitises or rewrites.
+    """
+    if not value or not _SAFE_ID_RE.match(value):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {field_name}: must contain only letters, digits, hyphens, or underscores.",
+        )
+    return value
+
 
 import ast
 import time
@@ -314,6 +333,7 @@ BLUEPRINTS_DIR.mkdir(parents=True, exist_ok=True)
 @router.get("/blueprint/{session_id}")
 async def get_session_blueprint(session_id: str):
     """Return the cached blueprint PNG image for a given session."""
+    _validate_id(session_id, "session_id")
     bp_file = BLUEPRINTS_DIR / f"{session_id}.png"
     if not bp_file.exists():
         raise HTTPException(status_code=404, detail="Blueprint not found for this session")
@@ -429,6 +449,9 @@ async def generate(
       - Initial Turn: Full Blueprint Audit (Stage 1) -> build123d Codegen (Stage 2)
       - Iteration Turn: Targeted Blueprint Feature Inspection -> Surgical Script Refinement
     """
+    # VEX-AUDIT-012: Validate session_id before any filesystem access.
+    if session_id:
+        _validate_id(session_id, "session_id")
     # ── Validate & read uploaded file or retrieve cached session blueprint ───
     image_bytes: bytes | None = None
     mime_type: str | None = None
@@ -803,6 +826,7 @@ async def render(
     STL / STEP / DXF / G-code artifacts. Returns URLs the browser can fetch.
     """
     session_id = request.session_id or uuid.uuid4().hex
+    _validate_id(session_id, "session_id")
     version = request.version
     if version:
         output_basename = f"cad_{session_id}_v{version}"
@@ -1026,6 +1050,7 @@ async def legacy_upload(file: UploadFile = File(...)):
 
 @router.post("/generate/{job_id}")
 async def legacy_generate(job_id: str):
+    _validate_id(job_id, "job_id")
     job_dir = JOBS_DIR / job_id
     if not job_dir.exists():
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1087,6 +1112,7 @@ class CamAnalyzeRequest(BaseModel):
 
 @router.post("/cam/analyze")
 async def cam_analyze(request: CamAnalyzeRequest):
+    _validate_id(request.session_id, "session_id")
     outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
     step_path = outputs_dir / f"cad_{request.session_id}.step"
     
@@ -1128,6 +1154,8 @@ class CamAutoPlanRequest(BaseModel):
 
 @router.post("/cam/auto_plan")
 async def cam_auto_plan(request: CamAutoPlanRequest):
+    _validate_id(request.session_id, "session_id")
+    _validate_id(request.job_id, "job_id")
     try:
         # Inject stock dimensions from parameters into setup if missing
         setup = request.machine_config.get("setup", {})
@@ -1416,6 +1444,8 @@ class CamGenerateToolpathsRequest(BaseModel):
 
 @router.post("/cam/toolpaths")
 async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
+    _validate_id(request.session_id, "session_id")
+    _validate_id(request.job_id, "job_id")
     try:
         from app.services.toolpath.parametric_toolpath_engine import ParametricToolpathEngine
         from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
@@ -1611,6 +1641,8 @@ class CamGCodeRequest(BaseModel):
 
 @router.post("/cam/gcode")
 async def cam_generate_gcode(request: CamGCodeRequest):
+    _validate_id(request.session_id, "session_id")
+    _validate_id(request.job_id, "job_id")
     job_dir = Path(__file__).resolve().parents[4] / "storage" / "jobs" / request.job_id / "cam"
     toolpaths_file = job_dir / "cam_toolpaths.json"
     hashes_file = job_dir / "cam_hashes.json"
