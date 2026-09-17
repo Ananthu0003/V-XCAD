@@ -743,13 +743,39 @@ class CamFeatureRecognition:
                     rep.recommendedOperation = "boss_clearing"
                     rep.recommendedToolType = "flat_end_mill"
                 else:
-                    rep.type = "turned_od" if is_z_aligned else "side_protrusion"
-                    rep.subtype = "shaft" if is_z_aligned else "side_protrusion"
-                    rep.machiningStatus = "valid"
-                    rep.machinable_in_current_setup = True
-                    rep.blocked_reason = None
-                    rep.recommendedOperation = "od_turning" if is_z_aligned else "rotary_milling"
-                    rep.recommendedToolType = "lathe_tool" if is_z_aligned else "flat_end_mill"
+                    # Check overall shape bounds in the orthogonal plane to verify if part is axisymmetric
+                    is_part_rotational = True
+                    try:
+                        bb = self.extractor.shape.bounding_box()
+                        dx = abs(bb.max.X - bb.min.X)
+                        dy = abs(bb.max.Y - bb.min.Y)
+                        dz = abs(bb.max.Z - bb.min.Z)
+                        cyl_dia = float(rep.dimensions.get("diameter", 0.0))
+                        if is_z_aligned and cyl_dia > 0:
+                            # If part cross-section extends significantly beyond cylinder diameter or is asymmetric
+                            if max(dx, dy) > cyl_dia * 1.08 or (max(dx, dy) > 0 and abs(dx - dy) / max(dx, dy) > 0.08):
+                                is_part_rotational = False
+                        elif not is_z_aligned:
+                            is_part_rotational = False
+                    except Exception:
+                        pass
+
+                    if is_z_aligned and is_part_rotational:
+                        rep.type = "turned_od"
+                        rep.subtype = "shaft"
+                        rep.machiningStatus = "valid"
+                        rep.machinable_in_current_setup = True
+                        rep.blocked_reason = None
+                        rep.recommendedOperation = "od_turning"
+                        rep.recommendedToolType = "lathe_tool"
+                    else:
+                        rep.type = "boss"
+                        rep.subtype = "cylindrical_boss"
+                        rep.machiningStatus = "valid"
+                        rep.machinable_in_current_setup = True
+                        rep.blocked_reason = None
+                        rep.recommendedOperation = "boss_clearing"
+                        rep.recommendedToolType = "flat_end_mill"
                 
             cleaned.append(rep)
             

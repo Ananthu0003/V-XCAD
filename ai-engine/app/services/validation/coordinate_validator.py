@@ -6,7 +6,7 @@ Validates:
   - Toolpath coordinates align with the STEP model frame
   - No viewer centering/normalization affects the actual coordinates
 """
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 
 class CoordinateValidator:
@@ -22,108 +22,76 @@ class CoordinateValidator:
             raise ValueError(f"STEP file must be in mm, got {unit}")
 
     def validate_toolpath_in_model_frame(
-        self, toolpath_segments: List[Dict[str, Any]], model_bbox: Dict[str, Any]
+        self, toolpath_segments: List[Dict[str, Any]], model_bbox: Dict[str, Any], stock_bbox: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Verify toolpath coordinates fall within reasonable bounds of the model
-        bounding box (with stock offset allowance).  Catches viewer centering
-        or normalization bugs.
+        Verify toolpath coordinates fall within the physical stock/model envelope in Setup Space.
+        Distinguishes between cutting moves (must engage within stock volume) and rapid clearance moves.
         """
-        report = {"status": "ok", "warnings": [], "errors": []}
+        report = {"status": "ok", "warnings": [], "errors": [], "diagnostics": {}}
 
         if not toolpath_segments:
             return report
 
         try:
-            min_x = model_bbox["min"][0]
-            min_y = model_bbox["min"][1]
-            min_z = model_bbox["min"][2]
-            max_x = model_bbox["max"][0]
-            max_y = model_bbox["max"][1]
-            max_z = model_bbox["max"][2]
-        except KeyError:
-            report["warnings"].append("Missing model bounding box for validation")
+            m_min_x, m_min_y, m_min_z = model_bbox["min"]
+            m_max_x, m_max_y, m_max_z = model_bbox["max"]
+        except (KeyError, TypeError, IndexError):
+            report["warnings"].append("Missing model bounding box for coordinate validation")
             return report
 
-        # Allow paths to go 50mm outside model (for rapids, clearance, etc)
-        margin = 50.0
-        allowed_min_x = min_x - margin
-        allowed_max_x = max_x + margin
-        allowed_min_y = min_y - margin
-        allowed_max_y = max_y + margin
-        # Z can go higher for clearance, but shouldn't go significantly below
-        # the model bottom unless drilling deep holes.
-        allowed_min_z = min_z - margin
-        allowed_max_z = max_z + 200.0
+        st_min_x, st_min_y, st_min_z = (stock_bbox.get("min", [m_min_x, m_min_y, m_min_z]) if stock_bbox else [m_min_x, m_min_y, m_min_z])
+        st_max_x, st_max_y, st_max_z = (stock_bbox.get("max", [m_max_x, m_max_y, m_max_z]) if stock_bbox else [m_max_x, m_max_y, m_max_z])
 
-        out_of_bounds_count = 0
-        extreme_point = None
-
-        for seg in toolpath_segments:
-            end_pt = seg.get("end", {})
-            x = end_pt.get("x")
-            y = end_pt.get("y")
-            z = end_pt.get("z")
-
-            if x is None or y is None or z is None:
-                continue
-
-            if (
-                x < allowed_min_x or x > allowed_max_x or
-                y < allowed_min_y or y > allowed_max_y or
-                z < allowed_min_z or z > allowed_max_z
-            ):
-                out_of_bounds_count += 1
-                if extreme_point is None:
-                    extreme_point = (x, y, z)
-
-        if out_of_bounds_count > 0:
-            msg = (
-                f"{out_of_bounds_count} toolpath points are out of bounds. "
-                f"Model bounds: X[{min_x:.1f}, {max_x:.1f}], Y[{min_y:.1f}, {max_y:.1f}], Z[{min_z:.1f}, {max_z:.1f}]. "
-                f"Extreme point: {extreme_point}"
-            )
-            report["status"] = "warning"
-            report["warnings"].append(msg)
-            # If it's wildly out of bounds, it might be a centering bug
-            if out_of_bounds_count > len(toolpath_segments) * 0.1:  # >10% of path
-                 report["status"] = "error"
-                 report["errors"].append(msg + " (Possible coordinate frame mismatch)")
-
-        # Compute Toolpath Bounding Box
+        # Compute Toolpath Bounding Box and check individual segment types
         tp_min_x, tp_min_y, tp_min_z = 1e9, 1e9, 1e9
         tp_max_x, tp_max_y, tp_max_z = -1e9, -1e9, -1e9
+        cutting_out_of_bounds = []
+
+        # Margin for tool radius and lead-in/out
+        radial_margin = 25.0
+        depth_margin = 1.0  # slight numerical tolerance on bottom floor
 
         for seg in toolpath_segments:
             s_pt = seg.get("start", {})
             e_pt = seg.get("end", {})
+            m_type = str(seg.get("move_type") or seg.get("commandType") or "").lower()
+            is_cut = ("cut" in m_type or "arc" in m_type or "plunge" in m_type or "drill" in m_type)
+
             for pt in (s_pt, e_pt):
                 px, py, pz = pt.get("x"), pt.get("y"), pt.get("z")
-                if px is not None:
+                if px is not None and py is not None and pz is not None:
                     tp_min_x, tp_max_x = min(tp_min_x, px), max(tp_max_x, px)
                     tp_min_y, tp_max_y = min(tp_min_y, py), max(tp_max_y, py)
                     tp_min_z, tp_max_z = min(tp_min_z, pz), max(tp_max_z, pz)
 
-        if tp_min_x < 1e8:
-            tp_center_x = (tp_min_x + tp_max_x) / 2.0
-            tp_center_y = (tp_min_y + tp_max_y) / 2.0
-            tp_center_z = (tp_min_z + tp_max_z) / 2.0
+                    if is_cut:
+                        # Cutting moves must stay within stock XY bounds (plus tool margin) and not plunge below stock bottom
+                        if (
+                            px < st_min_x - radial_margin or px > st_max_x + radial_margin or
+                            py < st_min_y - radial_margin or py > st_max_y + radial_margin or
+                            pz < st_min_z - depth_margin
+                        ):
+                            cutting_out_of_bounds.append((px, py, pz, m_type))
 
-            m_center_x = (min_x + max_x) / 2.0
-            m_center_y = (min_y + max_y) / 2.0
-            m_center_z = (min_z + max_z) / 2.0
-
-            dist = ((tp_center_x - m_center_x)**2 + (tp_center_y - m_center_y)**2 + (tp_center_z - m_center_z)**2)**0.5
-
-            report["diagnostics"] = {
-                "model_bbox": {"min": [min_x, min_y, min_z], "max": [max_x, max_y, max_z]},
-                "toolpath_bbox": {"min": [tp_min_x, tp_min_y, tp_min_z], "max": [tp_max_x, tp_max_y, tp_max_z]},
-                "coordinate_offset": [tp_center_x - m_center_x, tp_center_y - m_center_y, tp_center_z - m_center_z],
-                "offset_distance": dist
+        report["diagnostics"] = {
+            "coordinateSpace": "SETUP",
+            "units": "mm",
+            "model_bbox": {"min": [m_min_x, m_min_y, m_min_z], "max": [m_max_x, m_max_y, m_max_z]},
+            "stock_bbox": {"min": [st_min_x, st_min_y, st_min_z], "max": [st_max_x, st_max_y, st_max_z]},
+            "toolpath_bbox": {
+                "min": [round(tp_min_x, 4), round(tp_min_y, 4), round(tp_min_z, 4)] if tp_min_x < 1e8 else None,
+                "max": [round(tp_max_x, 4), round(tp_max_y, 4), round(tp_max_z, 4)] if tp_max_x > -1e8 else None
             }
+        }
 
-            if dist > 5.0:
-                report["status"] = "error"
-                report["errors"].append(f"Toolpath generation rejected: BBox center differs from model by {dist:.2f}mm (limit is 5mm). Coordinate System Failure.")
+        if cutting_out_of_bounds:
+            err_msg = (
+                f"{len(cutting_out_of_bounds)} cutting move points violate physical stock boundaries. "
+                f"Stock envelope: X[{st_min_x:.1f}, {st_max_x:.1f}], Y[{st_min_y:.1f}, {st_max_y:.1f}], Z[{st_min_z:.1f}, {st_max_z:.1f}]. "
+                f"First offending move: {cutting_out_of_bounds[0]}"
+            )
+            report["status"] = "error"
+            report["errors"].append(err_msg)
 
         return report

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
+import { getFastApiUrl, fetchWithTimeout } from '@/lib/api-config';
 
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
 import { getModelById } from '@/lib/models-registry';
 
 
@@ -74,22 +75,12 @@ function isSupportedUpload(upload: File): boolean {
 	return name.endsWith('.pdf') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png');
 }
 
-function getFastApiUrl(): string {
-	const value = process.env.FASTAPI_URL?.trim();
-	return (value || 'http://127.0.0.1:8001/api/v1').replace(/\/$/, '');
-}
+
 
 export async function POST(request: Request): Promise<Response> {
 	// VEX-2A-003: Require authenticated session (hard gate)
-	const authGate = await getSession();
-	if (!authGate?.userId) {
-		return NextResponse.json(
-			buildError('Authentication required.', 'Log in to use the generate endpoint.'),
-			{ status: 401 }
-		);
-	}
-	const gateUser = await prisma.user.findUnique({ where: { id: authGate.userId } });
-	if (!gateUser) {
+	const validUserId = await requireSession();
+	if (!validUserId) {
 		return NextResponse.json(
 			buildError('Authentication required.', 'Log in to use the generate endpoint.'),
 			{ status: 401 }
@@ -135,9 +126,6 @@ export async function POST(request: Request): Promise<Response> {
 		}
 	}
 
-	// Auth already validated by hard gate above — use the confirmed userId.
-	const validUserId = authGate.userId;
-
 	const rawSessionId = formData.get('session_id');
 	let sessionId: string;
 
@@ -162,22 +150,27 @@ export async function POST(request: Request): Promise<Response> {
 
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/generate`, {
-			method: 'POST',
-			body: formData,
-			headers: {
-				accept: 'text/event-stream',
+		upstream = await fetchWithTimeout(
+			`${getFastApiUrl()}/generate`,
+			{
+				method: 'POST',
+				body: formData,
+				headers: {
+					accept: 'text/event-stream',
+				},
+				cache: 'no-store',
 			},
-			cache: 'no-store',
-		});
-	} catch (error) {
+			180000
+		);
+	} catch (error: any) {
+		const isTimeout = error?.name === 'AbortError';
 		return NextResponse.json(
 			buildError(
-				'Unable to connect to AI engine.',
+				isTimeout ? 'AI engine generation timed out after 180 seconds.' : 'Unable to connect to AI engine.',
 				error instanceof Error ? error.message : undefined,
 				sessionId
 			),
-			{ status: 502 }
+			{ status: isTimeout ? 504 : 502 }
 		);
 	}
 

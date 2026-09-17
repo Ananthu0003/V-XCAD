@@ -1,6 +1,7 @@
 'use client';
 
-import { Suspense, useState, useRef, useEffect, useMemo } from 'react';
+import { Suspense, useState, useRef, useEffect, useMemo, Component } from 'react';
+import type { ReactNode } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewcube, Grid, Environment, ContactShadows } from '@react-three/drei';
@@ -15,6 +16,26 @@ import { TargetPortion3DHighlight } from '@/components/viewport/TargetPortion3DH
 import { useTheme } from 'next-themes';
 import type { TargetPortion } from '@/components/chat/ChatPanel';
 import type { StlGeometryInfo } from '@/components/viewport/StlMesh';
+
+class CanvasErrorBoundary extends Component<
+	{ children: ReactNode; fallback: ReactNode },
+	{ hasError: boolean }
+> {
+	constructor(props: any) {
+		super(props);
+		this.state = { hasError: false };
+	}
+	static getDerivedStateFromError() {
+		return { hasError: true };
+	}
+	componentDidCatch(error: Error) {
+		console.error('3D Canvas error:', error.message);
+	}
+	render() {
+		if (this.state.hasError) return this.props.fallback;
+		return this.props.children;
+	}
+}
 
 type AnnotationEntry = {
 	p1: [number, number, number];
@@ -35,9 +56,11 @@ function CanvasBridge() {
 
 function DynamicFloor({ targetRef, children }: { targetRef: React.RefObject<THREE.Group | null>, children: React.ReactNode }) {
 	const floorRef = useRef<THREE.Group>(null);
+	const boxRef = useRef(new THREE.Box3());
 	useFrame(() => {
 		if (targetRef.current && floorRef.current) {
-			const box = new THREE.Box3();
+			const box = boxRef.current;
+			box.makeEmpty();
 			targetRef.current.traverse((child) => {
 				if ((child as THREE.Mesh).isMesh && child.visible) {
 					box.expandByObject(child);
@@ -84,7 +107,6 @@ type CadViewportProps = {
 	hasStep: boolean;
 	hasDxf: boolean;
 	hasGcode?: boolean;
-	isDeveloper: boolean;
 	isDownloadingStl: boolean;
 	isDownloadingStep: boolean;
 	isDownloadingDxf: boolean;
@@ -170,7 +192,6 @@ export function CadViewport({
 	hasStep = false,
 	hasDxf = false,
 	hasGcode = false,
-	isDeveloper,
 	isDownloadingStl = false,
 	isDownloadingStep = false,
 	isDownloadingDxf = false,
@@ -224,6 +245,7 @@ export function CadViewport({
 	const isDark = (resolvedTheme || theme) !== 'light';
 	const groupRef = useRef<THREE.Group>(null);
 	const exportRef = useRef<HTMLDivElement>(null);
+	const prevToolpathsGroupRef = useRef<THREE.Group | null>(null);
 	const [exportOpen, setExportOpen] = useState(false);
 	const [viewMode, setViewMode] = useState<'both' | 'solid' | 'wireframe'>('both');
 	const [localShowPIP, setLocalShowPIP] = useState(false);
@@ -273,113 +295,86 @@ export function CadViewport({
 		return () => document.removeEventListener('mousedown', handleClickOutside);
 	}, []);
 
-	const { actualStock, isStockCenterInSetupSpace } = useMemo(() => {
-		let center: [number, number, number] = [0, 0, 0];
-		let defaultBoxSize: [number, number, number] = [10, 10, 10];
-		let inSetupSpace = false;
-
-		if (setupMetadata?.resolvedStock?.center && (setupMetadata?.version || setupMetadata?.matrixLayout)) {
-			center = setupMetadata.resolvedStock.center as [number, number, number];
-			inSetupSpace = true;
-		} else if (setupMetadata?.resolvedStock?.center) {
-			center = setupMetadata.resolvedStock.center as [number, number, number];
-			inSetupSpace = false;
-		} else if (geometryInfo?.bounding_box) {
-			const min = geometryInfo.bounding_box.min;
-			const max = geometryInfo.bounding_box.max;
-			const cx = (min[0] + max[0]) / 2;
-			const cy = (min[1] + max[1]) / 2;
-			const cz = (min[2] + max[2]) / 2;
-			center = [cx, cy, cz];
-			defaultBoxSize = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
-			inSetupSpace = false;
-		}
-
-		const currentStockType = String(camSetup?.stockType || setupMetadata?.stockType || setupMetadata?.resolvedStock?.type || 'box').toLowerCase();
-		const isCyl = currentStockType.includes('cylin') || currentStockType.includes('bar');
-
-		if (isCyl) {
-			let dia = camSetup?.cylinderDiameter;
-			let len = camSetup?.cylinderLength;
-
-			if ((!dia || dia <= 0) && camSetup?.stockDimensions && Array.isArray(camSetup.stockDimensions) && camSetup.stockDimensions.length >= 2) {
-				dia = Math.max(camSetup.stockDimensions[0], camSetup.stockDimensions[1]);
-			}
-			if ((!len || len <= 0) && camSetup?.stockDimensions && Array.isArray(camSetup.stockDimensions) && camSetup.stockDimensions.length >= 3) {
-				len = camSetup.stockDimensions[2];
-			}
-
-			if (!dia || dia <= 0) dia = Math.max(defaultBoxSize[0], defaultBoxSize[1]);
-			if (!len || len <= 0) len = defaultBoxSize[2];
-
-			return {
-				actualStock: {
-					center,
-					dimensions: [dia, dia, len],
-					stockType: currentStockType
-				},
-				isStockCenterInSetupSpace: inSetupSpace
-			};
-		} else {
-			let dims: [number, number, number] = [10, 10, 10];
-
-			if (camSetup?.stockDimensions && Array.isArray(camSetup.stockDimensions) && camSetup.stockDimensions.length >= 3) {
-				dims = [
-					Number(camSetup.stockDimensions[0]) || 10,
-					Number(camSetup.stockDimensions[1]) || 10,
-					Number(camSetup.stockDimensions[2]) || 10
-				];
-			} else if (setupMetadata?.resolvedStock?.dimensions) {
-				dims = setupMetadata.resolvedStock.dimensions as [number, number, number];
-			} else {
-				const maxDim = Math.max(defaultBoxSize[0], defaultBoxSize[1], defaultBoxSize[2]);
-				const margin = Math.max(0.1, Math.min(2.0, maxDim * 0.08));
-				dims = [defaultBoxSize[0] + margin, defaultBoxSize[1] + margin, defaultBoxSize[2] + margin];
-			}
-
-			return {
-				actualStock: {
-					center,
-					dimensions: dims,
-					stockType: currentStockType
-				},
-				isStockCenterInSetupSpace: inSetupSpace
-			};
-		}
-	}, [geometryInfo, setupMetadata, camSetup]);
-
 	const setupMatrix = useMemo(() => {
-		let mat: THREE.Matrix4;
+		const mat = new THREE.Matrix4();
 		if (setupMetadata?.modelToSetupTransform) {
 			const raw = Array.isArray(setupMetadata.modelToSetupTransform[0]) 
 				? setupMetadata.modelToSetupTransform.flat() 
 				: setupMetadata.modelToSetupTransform;
-			mat = new THREE.Matrix4().fromArray(raw).transpose();
-		} else {
-			mat = new THREE.Matrix4();
+			if (Array.isArray(raw) && raw.length === 16) {
+				mat.set(
+					raw[0], raw[1], raw[2], raw[3],
+					raw[4], raw[5], raw[6], raw[7],
+					raw[8], raw[9], raw[10], raw[11],
+					raw[12], raw[13], raw[14], raw[15]
+				);
+				return mat;
+			}
 		}
 
-		// Ensure lateral (X, Y) centering is active even on legacy sessions
+		// Fallback: Translate CAD top-center to (0,0,0) in setup space
 		if (geometryInfo?.bounding_box) {
 			const min = geometryInfo.bounding_box.min;
 			const max = geometryInfo.bounding_box.max;
 			const cx = (min[0] + max[0]) / 2;
 			const cy = (min[1] + max[1]) / 2;
 			const topZ = max[2];
-
-			if (Math.abs(mat.elements[12]) < 0.001 && Math.abs(cx) > 0.01) {
-				mat.elements[12] = -cx;
-			}
-			if (Math.abs(mat.elements[13]) < 0.001 && Math.abs(cy) > 0.01) {
-				mat.elements[13] = -cy;
-			}
-			if (Math.abs(mat.elements[14]) < 0.001 && Math.abs(topZ) > 0.01) {
-				mat.elements[14] = -topZ;
-			}
+			mat.makeTranslation(-cx, -cy, -topZ);
 		}
 
 		return mat;
 	}, [setupMetadata?.modelToSetupTransform, geometryInfo]);
+
+	const { actualStock, isStockCenterInSetupSpace } = useMemo(() => {
+		let center: [number, number, number] = [0, 0, 0];
+		let dims: [number, number, number] = [100, 100, 50];
+		const inSetupSpace = true;
+
+		// 1. Primary: Authoritative bounds from setup resolvedStock
+		if (setupMetadata?.resolvedStock?.bounds?.min && setupMetadata?.resolvedStock?.bounds?.max) {
+			const b = setupMetadata.resolvedStock.bounds;
+			const minX = Number(b.min[0]), minY = Number(b.min[1]), minZ = Number(b.min[2]);
+			const maxX = Number(b.max[0]), maxY = Number(b.max[1]), maxZ = Number(b.max[2]);
+			dims = [Math.abs(maxX - minX), Math.abs(maxY - minY), Math.abs(maxZ - minZ)];
+			center = [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
+		} else if (setupMetadata?.resolvedStock?.dimensions && setupMetadata?.resolvedStock?.center) {
+			dims = setupMetadata.resolvedStock.dimensions as [number, number, number];
+			center = setupMetadata.resolvedStock.center as [number, number, number];
+		} else if (geometryInfo?.bounding_box) {
+			// 2. Derive stock directly from CAD geometry bounding box + proportional stock margins
+			const min = geometryInfo.bounding_box.min;
+			const max = geometryInfo.bounding_box.max;
+			const cadDx = Math.max(max[0] - min[0], 1.0);
+			const cadDy = Math.max(max[1] - min[1], 1.0);
+			const cadDz = Math.max(max[2] - min[2], 1.0);
+			const marginX = Math.max(1.0, Math.min(4.0, cadDx * 0.04));
+			const marginY = Math.max(1.0, Math.min(4.0, cadDy * 0.04));
+			const marginZ = Math.max(1.0, Math.min(4.0, cadDz * 0.04));
+
+			dims = [cadDx + marginX * 2, cadDy + marginY * 2, cadDz + marginZ];
+			const cadCenter = new THREE.Vector3((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+			cadCenter.applyMatrix4(setupMatrix);
+			center = [cadCenter.x, cadCenter.y, cadCenter.z];
+		} else if (camSetup?.stockDimensions && Array.isArray(camSetup.stockDimensions) && camSetup.stockDimensions.length >= 3) {
+			dims = [
+				Number(camSetup.stockDimensions[0]) || 100,
+				Number(camSetup.stockDimensions[1]) || 100,
+				Number(camSetup.stockDimensions[2]) || 50
+			];
+			center = [0, 0, -dims[2] / 2];
+		}
+
+		const currentStockType = String(camSetup?.stockType || setupMetadata?.stockType || setupMetadata?.resolvedStock?.stockType || setupMetadata?.resolvedStock?.type || 'box').toLowerCase();
+
+		return {
+			actualStock: {
+				center,
+				dimensions: dims,
+				stockType: currentStockType
+			},
+			isStockCenterInSetupSpace: inSetupSpace
+		};
+	}, [geometryInfo, setupMetadata, camSetup, setupMatrix]);
 
 	const { modelPos, modelQuat, modelScale } = useMemo(() => {
 		const pos = new THREE.Vector3();
@@ -553,27 +548,63 @@ export function CadViewport({
 			return { groupedToolpaths: null, hasValidToolpaths: false, allRejected: true };
 		}
 
+		const segments: THREE.LineSegments[] = [];
+		Object.entries(groups).forEach(([type, points]) => {
+			if (points.length === 0) return;
+			const geometry = new THREE.BufferGeometry().setFromPoints(points);
+			const material = new THREE.LineBasicMaterial({
+				color: colors[type] || colors.other,
+				linewidth: 1,
+				opacity: type === 'rapid' ? 0.4 : 0.8,
+				transparent: true,
+				depthTest: true,
+			});
+			segments.push(new THREE.LineSegments(geometry, material));
+		});
+
+		const group = new THREE.Group();
+		segments.forEach(s => group.add(s));
+
+		// Dispose previous toolpaths
+		if (prevToolpathsGroupRef.current) {
+			prevToolpathsGroupRef.current.traverse((child) => {
+				const lineSeg = child as unknown as THREE.LineSegments;
+				if (lineSeg.isLineSegments) {
+					lineSeg.geometry?.dispose();
+					if (Array.isArray(lineSeg.material)) {
+						lineSeg.material.forEach((m: THREE.Material) => m.dispose());
+					} else {
+						lineSeg.material?.dispose();
+					}
+				}
+			});
+		}
+		prevToolpathsGroupRef.current = group;
+
 		return {
-			groupedToolpaths: (
-				<group>
-					{Object.entries(groups).map(([type, points]) => {
-						if (points.length === 0) return null;
-						const geometry = new THREE.BufferGeometry().setFromPoints(points);
-						const material = new THREE.LineBasicMaterial({
-							color: colors[type] || colors.other,
-							linewidth: ['feed', 'arc', 'roughing', 'smoothing'].includes(type) ? 2 : 1.5,
-							opacity: type === 'rapid' ? 0.4 : 0.8,
-							transparent: true,
-							depthTest: true,
-						});
-						return <primitive key={type} object={new THREE.LineSegments(geometry, material)} />;
-					})}
-				</group>
-			),
+			groupedToolpaths: <primitive object={group} />,
 			hasValidToolpaths: true,
 			allRejected: false
 		};
 	}, [toolpaths, debugMode, camOperations]);
+
+	useEffect(() => {
+		return () => {
+			if (prevToolpathsGroupRef.current) {
+				prevToolpathsGroupRef.current.traverse((child) => {
+					const lineSeg = child as unknown as THREE.LineSegments;
+					if (lineSeg.isLineSegments) {
+						lineSeg.geometry?.dispose();
+						if (Array.isArray(lineSeg.material)) {
+							lineSeg.material.forEach((m: THREE.Material) => m.dispose());
+						} else {
+							lineSeg.material?.dispose();
+						}
+					}
+				});
+			}
+		};
+	}, []);
 
 	const [hasSimulated, setHasSimulated] = useState(false);
 	const [featureDebug, setFeatureDebug] = useState<any>(null);
@@ -867,9 +898,19 @@ export function CadViewport({
 					</div>
 				)}
 
+				<CanvasErrorBoundary
+					fallback={
+						<div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground z-10">
+							<div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 text-center">
+								<p className="text-sm font-semibold text-destructive">3D rendering failed</p>
+								<p className="text-xs text-muted-foreground mt-1">Try refreshing the page or disabling hardware acceleration.</p>
+							</div>
+						</div>
+					}
+				>
 				<Canvas 
 					id="cad-three-canvas" 
-					shadows={{ type: THREE.PCFShadowMap }} 
+					shadows={{ type: THREE.PCFSoftShadowMap }}
 					dpr={[1, 2]} 
 					gl={{ preserveDrawingBuffer: true }} 
 					className="relative z-10" 
@@ -949,7 +990,7 @@ export function CadViewport({
 													{groupedToolpaths}
 
 													{/* Render Active Tool for Simulation */}
-													{showToolpaths && simulationState?.showTool !== false && simulationState?.segments && simulationState.activeSegmentIndex !== undefined && camTools && (
+													{hasValidToolpaths && (toolpaths?.length ?? 0) > 0 && showToolpaths && simulationState?.showTool !== false && simulationState?.segments && simulationState.segments.length > 0 && simulationState.activeSegmentIndex !== undefined && camTools && (
 														(() => {
 															const activeSegment = simulationState.segments[simulationState.activeSegmentIndex];
 															if (!activeSegment) return null;
@@ -1038,7 +1079,7 @@ export function CadViewport({
 								
 								{/* Stock Boundaries and Machine Table */}
 								{(() => {
-									const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
+									const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths && (toolpaths?.length ?? 0) > 0 && (simulationState?.segments?.length ?? 0) > 0;
 									if (!actualStock) return null;
 									
 									const transformedCenter = isStockCenterInSetupSpace 
@@ -1062,58 +1103,6 @@ export function CadViewport({
 													setupUnits={setupMetadata?.internalUnits || 'mm'}
 												/>
 											)}
-											
-											{/* Machine Table / Vise Environment */}
-											{isCamStage && simulationState?.showMachine !== false && (() => {
-												// Scale table and vise proportionally to the stock dimensions
-												const maxDim = Math.max(actualStock.dimensions[0], actualStock.dimensions[1], actualStock.dimensions[2], 0.5);
-												
-												const axis = setupToolAxis ? new THREE.Vector3(...setupToolAxis).normalize() : new THREE.Vector3(0, 0, 1);
-												const tableQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), axis);
-												
-												// Thickness of the stock along the tool axis
-												let stockThickness = actualStock.dimensions[2];
-												let stockGrip = actualStock.dimensions[1];
-												if (Math.abs(axis.x) > 0.9) { stockThickness = actualStock.dimensions[0]; stockGrip = actualStock.dimensions[1]; }
-												else if (Math.abs(axis.y) > 0.9) { stockThickness = actualStock.dimensions[1]; stockGrip = actualStock.dimensions[0]; }
-
-												const tableW = maxDim * 3.5;
-												const tableL = maxDim * 2.8;
-												const tableH = Math.max(maxDim * 0.3, 0.4);
-												const viseW = maxDim * 1.6;
-												const viseL = maxDim * 2.0;
-												const viseH = Math.max(maxDim * 0.25, 0.3);
-												const jawW = maxDim * 1.4;
-												const jawT = Math.max(maxDim * 0.3, 0.25);
-												const jawH = Math.max(maxDim * 0.35, 0.3);
-
-												return (
-													<group position={transformedCenterArr} quaternion={tableQuat}>
-														<group position={[0, 0, -stockThickness / 2 - jawH]}>
-															{/* Machine Table */}
-															<mesh position={[0, 0, -tableH / 2 - viseH]}>
-																<boxGeometry args={[tableW, tableL, tableH]} />
-																<meshStandardMaterial color="#1e293b" metalness={0.7} roughness={0.4} />
-															</mesh>
-															{/* Vise Base */}
-															<mesh position={[0, 0, -viseH / 2]}>
-																<boxGeometry args={[viseW, viseL, viseH]} />
-																<meshStandardMaterial color="#475569" metalness={0.6} roughness={0.5} />
-															</mesh>
-															{/* Fixed Jaw */}
-															<mesh position={[0, -stockGrip / 2 - jawT / 2, jawH / 2]}>
-																<boxGeometry args={[jawW, jawT, jawH]} />
-																<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
-															</mesh>
-															{/* Moving Jaw */}
-															<mesh position={[0, stockGrip / 2 + jawT / 2, jawH / 2]}>
-																<boxGeometry args={[jawW, jawT, jawH]} />
-																<meshStandardMaterial color="#94a3b8" metalness={0.5} roughness={0.4} />
-															</mesh>
-														</group>
-													</group>
-												);
-											})()}
 										</group>
 									);
 								})()}
@@ -1134,6 +1123,7 @@ export function CadViewport({
 					{/* Dimension overlay was moved inside Stage */}
 
 				</Canvas>
+				</CanvasErrorBoundary>
 
 				{!stlUrl && !isRecompiling && (
 					<div className="pointer-events-none absolute inset-0 flex items-center justify-center p-12 z-20">

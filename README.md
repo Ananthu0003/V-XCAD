@@ -135,9 +135,9 @@ Optional tuning:
 
 Required:
 
-- FASTAPI_URL=http://127.0.0.1:8000/api/v1
-- DATABASE_URL=postgresql://cad_user:cad_pass@localhost:5432/cad_db?schema=public
-- NEXT_PUBLIC_FASTAPI_URL=http://127.0.0.1:8000/api/v1
+- FASTAPI_URL=http://127.0.0.1:8001/api/v1
+- DATABASE_URL=postgresql://cad_user:cad_pass@localhost:5433/cad_db?schema=public
+- NEXT_PUBLIC_FASTAPI_URL=http://127.0.0.1:8001/api/v1
 
 Note:
 
@@ -150,7 +150,7 @@ Note:
 From repo root:
  
 ```bash
-docker compose up -d
+docker compose up -d postgres
 ```
 
 ### 2) Start ai-engine
@@ -164,13 +164,13 @@ python -m venv .venv
 # macOS/Linux
 # source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 Health check:
 
 ```bash
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8001/health
 ```
 
 ### 3) Start web-ui 
@@ -186,7 +186,8 @@ npm run dev
 
 Open:
 
-- http://localhost:3000
+- Docker Web UI: http://localhost:3001 (or Local Dev: http://localhost:3000)
+- Docker AI Engine: http://localhost:8001
 
 ## API Summary
 

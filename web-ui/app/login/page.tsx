@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Loader2 } from 'lucide-react';
 import { Logo } from '@/components/shared/Logo';
+import { PasswordInput } from '@/components/ui/password-input';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -77,14 +78,9 @@ export default function LoginPage() {
             </div>
             
             <div>
-              <div className="flex justify-between items-center mb-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-muted-foreground">Password</label>
-                <Link href="/forgot-password" className="text-xs font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400 transition-colors">Forgot?</Link>
-              </div>
-              <input 
-                type="password" 
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-muted-foreground mb-2">Password</label>
+              <PasswordInput 
                 placeholder="••••••••"
-                className="w-full px-4 py-3 bg-slate-50 dark:bg-[#111a2e] border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white dark:focus:bg-[#111a2e] transition-all text-slate-900 dark:text-foreground placeholder:text-slate-400 dark:placeholder:text-muted-foreground font-medium text-sm"
                 required
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}

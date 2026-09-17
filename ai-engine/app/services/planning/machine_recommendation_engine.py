@@ -162,19 +162,21 @@ class MachineRecommendationEngine:
                 if not is_orthogonal:
                     has_non_orthogonal_vector = True
 
-        # Geometric cross-section symmetry (aspect ratio check)
-        dims_sorted = sorted([dim_x, dim_y, dim_z])
+        # Geometric cross-section symmetry (aspect ratio check in principal planes)
         is_rotational_geometry = False
-        if dims_sorted[0] > 0.5:
-            ratio_small_dims = dims_sorted[1] / dims_sorted[0]
-            if (ratio_small_dims <= 1.10 or abs(dims_sorted[1] - dims_sorted[0]) <= 2.0) and (param_turning_count >= 1 or script_has_revolve or turning_feat_count > 0 or (stock_dimensions and len(stock_dimensions) == 2)):
-                is_rotational_geometry = True
+        xy_sym = dim_x > 0.5 and dim_y > 0.5 and (abs(dim_x - dim_y) / max(dim_x, dim_y) <= 0.08)
+        yz_sym = dim_y > 0.5 and dim_z > 0.5 and (abs(dim_y - dim_z) / max(dim_y, dim_z) <= 0.08)
+        xz_sym = dim_x > 0.5 and dim_z > 0.5 and (abs(dim_x - dim_z) / max(dim_x, dim_z) <= 0.08)
+        
+        has_symmetric_plane = xy_sym or yz_sym or xz_sym
+        if has_symmetric_plane and (param_turning_count >= 1 or script_has_revolve or turning_feat_count > 0 or (stock_dimensions and len(stock_dimensions) == 2)):
+            is_rotational_geometry = True
 
         is_axisymmetric = (
             topology_info.get("is_axisymmetric", False) or 
-            (turning_feat_count > 0 and milling_feat_count == 0) or
-            (param_turning_count >= 2 and param_milling_count == 0 and milling_feat_count == 0) or
-            (script_has_revolve and param_milling_count == 0 and milling_feat_count == 0) or
+            (turning_feat_count > 0 and milling_feat_count == 0 and is_rotational_geometry) or
+            (param_turning_count >= 2 and param_milling_count == 0 and milling_feat_count == 0 and is_rotational_geometry) or
+            (script_has_revolve and param_milling_count == 0 and milling_feat_count == 0 and is_rotational_geometry) or
             (is_rotational_geometry and param_milling_count == 0 and milling_feat_count == 0)
         )
         
@@ -184,7 +186,7 @@ class MachineRecommendationEngine:
             required_axes = 2
             recommended_machine_type = "CNC_LATHE"
             setup_count = 1 if len(unique_vectors) <= 1 else 2
-        elif (turning_feat_count > 0 or param_turning_count >= 2 or is_rotational_geometry or script_has_revolve) and (milling_feat_count > 0 or param_milling_count > 0):
+        elif (is_rotational_geometry or script_has_revolve or (stock_dimensions and len(stock_dimensions) == 2)) and (turning_feat_count > 0 or param_turning_count >= 1) and (milling_feat_count > 0 or param_milling_count > 0):
             part_type = "mill_turn"
             required_axes = 4
             recommended_machine_type = "MILL_TURN"

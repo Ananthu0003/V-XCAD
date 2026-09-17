@@ -44,14 +44,61 @@ def get_material_profile(material_id: Optional[str]) -> MaterialProfile:
             mat_data = m
             break
 
-    # 2. Substring match fallback (e.g. '6061', 'titanium', 'delrin', 'stainless')
+    # 2. Substring & Token matching
     if not mat_data:
+        # Check bidirectional substring
         for m in materials:
-            if material_id_lower in m["id"].lower() or material_id_lower in m["name"].lower():
+            m_id = m["id"].lower()
+            m_name = m["name"].lower()
+            if material_id_lower in m_id or material_id_lower in m_name or m_id in material_id_lower:
                 mat_data = m
                 break
 
-    # 3. Default fallback if still not found
+    # 3. Known Engineering Material Aliases & Callout Mappings
+    if not mat_data:
+        # Common blueprint callouts: HSS / HRC 58-60 / Tool Steel / Hardened
+        if any(kw in material_id_lower for kw in ("hss", "high speed steel", "m2", "m35", "m42")):
+            for m in materials:
+                if m["id"] in ("hss_m2", "hardened_steel", "tool_steel_d2"):
+                    mat_data = m
+                    break
+        elif any(kw in material_id_lower for kw in ("hrc", "hardened", "58-60", "58_60", "50-65")):
+            for m in materials:
+                if m["id"] in ("hardened_steel", "hss_m2"):
+                    mat_data = m
+                    break
+        elif "tool" in material_id_lower and "steel" in material_id_lower:
+            for m in materials:
+                if m["id"] in ("tool_steel_d2", "tool_steel_a2", "tool_steel_o1", "hss_m2"):
+                    mat_data = m
+                    break
+        elif any(kw in material_id_lower for kw in ("mild", "1018", "a36", "en8", "en9")):
+            for m in materials:
+                if m["id"] in ("mild_steel", "steel_1045"):
+                    mat_data = m
+                    break
+        elif any(kw in material_id_lower for kw in ("4140", "4340", "en19", "en24", "chromoly")):
+            for m in materials:
+                if m["id"] in ("alloy_steel_4140", "alloy_steel_4340"):
+                    mat_data = m
+                    break
+        elif any(kw in material_id_lower for kw in ("stainless", "ss304", "ss316", "304", "316", "17-4")):
+            for m in materials:
+                if "stainless" in m["id"]:
+                    mat_data = m
+                    break
+        elif any(kw in material_id_lower for kw in ("titanium", "ti-6al-4v", "gr5")):
+            for m in materials:
+                if "titanium" in m["id"]:
+                    mat_data = m
+                    break
+        elif any(kw in material_id_lower for kw in ("brass", "copper", "bronze")):
+            for m in materials:
+                if any(k in m["id"] for k in ("brass", "copper", "bronze")):
+                    mat_data = m
+                    break
+
+    # 4. Default fallback if still not found
     if not mat_data:
         mat_data = materials[0]  # aluminum_6061
 

@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 class CamOperation:
     """Represents a planned machining operation linked to a specific feature."""
@@ -9,9 +9,11 @@ class CamOperation:
         self.name = f"{operation_type} Operation"
         self.feature_id = feature_id
         self.setup_id = setup_id
+        self.setupId = setup_id
         self.tool_id = None
         self.machining_strategy = "default"
         self.status = "planned"
+        self.toolpath_schema_version = "semantic_v1"
         
         # Phase 3: Machinability Validation
         self.machinable_in_current_setup = True
@@ -50,15 +52,28 @@ class OperationPlanner:
         "hole": "drilling",
         "blind_hole": "drilling",
         "through_hole": "drilling",
+        "bore": "helical_bore_milling",
+        "counterbore": "helical_bore_milling",
         "boss": "boss_clearing",
         "pocket": "pocketing",
+        "pocketing": "pocketing",
+        "slot": "pocketing",
+        "slot_milling": "pocketing",
+        "cavity": "pocketing",
+        "recess": "pocketing",
+        "keyway": "pocketing",
         "contour": "2d_contour",
         "face": "facing",
+        "facing": "facing",
         "step": "2d_contour",
+        "chamfer": "2d_contour",
+        "chamfer_milling": "2d_contour",
         "external_cylinder": "od_turning",
         "shaft": "od_turning",
         "side_protrusion": "rotary_milling",
         "turned_od": "od_turning",
+        "groove": "grooving",
+        "parting": "parting_off",
     }
     
     def __init__(self):
@@ -161,8 +176,10 @@ class OperationPlanner:
         
         op = CamOperation(op_type, feat_id)
         
-        if op_type == "drilling":
-            op.tool_id = "tool_drill_1"
+        if op_type in ("drilling", "helical_bore_milling"):
+            op.tool_id = "tool_flat_end_mill_1" if op_type == "helical_bore_milling" else "tool_drill_1"
+            if op_type == "helical_bore_milling":
+                op.machining_strategy = "helical_bore_milling"
             
             machining_region = feature.get('machiningRegion', {})
             z_top = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
@@ -174,42 +191,71 @@ class OperationPlanner:
             op.parameters['cycle_type'] = 'G83' if depth > 10 else 'G81'
             if 'diameter' in feature.get('dimensions', {}):
                 op.parameters['hole_diameter'] = feature['dimensions']['diameter']
+            elif 'diameter' in feature:
+                op.parameters['hole_diameter'] = feature['diameter']
                 
             # Setup validation for drilling: check hole axis alignment
             geom = feature.get('geometry', {})
-            axis = geom.get('axis')
+            axis = geom.get('axis') or feature.get('axis')
             if axis and abs(axis[2]) < 0.1:
                 op.machinable_in_current_setup = False
                 op.requires_reorientation = True
                 op.status = "blocked_requires_reorientation"
             
-        elif op_type == "pocketing":
+        def _resolve_bottom_z(f: Dict[str, Any], tz: float) -> Optional[float]:
+            mr = f.get('machiningRegion', {})
+            if 'bottomZ' in mr and mr['bottomZ'] is not None:
+                return float(mr['bottomZ'])
+            d = f.get('dimensions', {})
+            if 'z_bottom' in d and d['z_bottom'] is not None:
+                return float(d['z_bottom'])
+            depth = float(d.get('depth') or d.get('height') or f.get('depth') or f.get('height') or 0.0)
+            if depth > 0:
+                return tz - depth
+            return None
+
+        if op_type == "pocketing":
             op.tool_id = "tool_flat_end_mill_1"
             machining_region = feature.get('machiningRegion', {})
-            op.safe_heights['top'] = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
-            op.safe_heights['bottom'] = machining_region.get('bottomZ', feature.get('dimensions', {}).get('z_bottom', -5.0))
+            z_top = float(machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0)))
+            z_bottom = _resolve_bottom_z(feature, z_top)
+            op.safe_heights['top'] = z_top
+            if z_bottom is not None:
+                op.safe_heights['bottom'] = z_bottom
+            else:
+                op.status = "blocked_missing_depth"
             op.machining_strategy = 'adaptive_clearing'
             
         elif op_type == "facing":
             op.tool_id = "tool_face_mill_1"
             machining_region = feature.get('machiningRegion', {})
-            z_level = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
+            z_level = float(machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0)))
             op.safe_heights['top'] = z_level
-            op.safe_heights['bottom'] = machining_region.get('bottomZ', z_level)
+            op.safe_heights['bottom'] = float(machining_region.get('bottomZ', z_level))
             op.machining_strategy = 'zigzag'
             
         elif op_type == "2d_contour":
             op.tool_id = "tool_flat_end_mill_1"
             machining_region = feature.get('machiningRegion', {})
-            op.safe_heights['top'] = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
-            op.safe_heights['bottom'] = machining_region.get('bottomZ', feature.get('dimensions', {}).get('z_bottom', -10.0))
+            z_top = float(machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0)))
+            z_bottom = _resolve_bottom_z(feature, z_top)
+            op.safe_heights['top'] = z_top
+            if z_bottom is not None:
+                op.safe_heights['bottom'] = z_bottom
+            else:
+                op.status = "blocked_missing_depth"
             op.machining_strategy = 'outside_climb'
             
         elif op_type == "boss_clearing":
             op.tool_id = "tool_flat_end_mill_1"
             machining_region = feature.get('machiningRegion', {})
-            op.safe_heights['top'] = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
-            op.safe_heights['bottom'] = machining_region.get('bottomZ', feature.get('dimensions', {}).get('z_bottom', -10.0))
+            z_top = float(machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0)))
+            z_bottom = _resolve_bottom_z(feature, z_top)
+            op.safe_heights['top'] = z_top
+            if z_bottom is not None:
+                op.safe_heights['bottom'] = z_bottom
+            else:
+                op.status = "blocked_missing_depth"
             op.machining_strategy = 'outside_climb'
             
         elif op_type in ["od_turning", "od_finish_turning", "id_boring", "grooving", "facing_turning", "parting_off"]:
@@ -224,8 +270,13 @@ class OperationPlanner:
                 op.tool_id = "tool_parting_1"
                 
             machining_region = feature.get('machiningRegion', {})
-            op.safe_heights['top'] = machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0))
-            op.safe_heights['bottom'] = machining_region.get('bottomZ', feature.get('dimensions', {}).get('z_bottom', -10.0))
+            z_top = float(machining_region.get('topZ', feature.get('dimensions', {}).get('z_top', 0.0)))
+            z_bottom = _resolve_bottom_z(feature, z_top)
+            op.safe_heights['top'] = z_top
+            if z_bottom is not None:
+                op.safe_heights['bottom'] = z_bottom
+            else:
+                op.status = "blocked_missing_depth"
             op.machining_strategy = 'lathe_finishing' if op_type == "od_finish_turning" else ('parting' if op_type == "parting_off" else 'lathe_roughing')
         
         if op:

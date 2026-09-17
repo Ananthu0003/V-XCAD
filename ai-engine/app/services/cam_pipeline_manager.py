@@ -15,6 +15,8 @@ from app.services.validation.toolpath_validator import ToolpathValidator
 from app.models.schemas import MachineCapability
 from app.models.manufacturing import MachineProfile, MaterialProfile, ToolProfile, FeatureDecision
 from app.services.cam.material_validation import get_material_profile
+from app.services.geometry.cam_feature_recognition import CamFeatureRecognition
+from app.services.cam.brep_feature_extractor import BRepFeatureExtractor
 from app.services.validation.manufacturing_capability_matrix import ManufacturingCapabilityMatrix
 from app.services.planning.manufacturing_strategy_planner import ManufacturingStrategyPlanner
 from app.services.gcode.gcode_generator import PostProcessorFactory
@@ -37,15 +39,32 @@ class CamPipelineManager:
         self.operation_planner = OperationPlanner()
         self.coord_validator = CoordinateValidator()
         self.machine_recommender = MachineRecommendationEngine()
+        self.feature_recognizer = CamFeatureRecognition()
 
         
     def analyze_features(self, parameters: Dict[str, Any], job_id: str, cam_run_id: str, setup: Dict[str, Any] = None) -> Dict[str, Any]:
         from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
+        from app.services.cam.brep_feature_extractor import BRepFeatureExtractor
         from app.services.validation.blueprint_validator import BlueprintValidator
         from app.models.evidence import EvidenceGraph
         
+        brep_data = None
+        outputs_dir = Path(__file__).resolve().parents[2] / "outputs"
+        step_path = outputs_dir / f"cad_{job_id}.step"
+        if not step_path.exists():
+            storage_path = Path(__file__).resolve().parents[4] / "storage" / "jobs" / job_id / f"cad_{job_id}.step"
+            if storage_path.exists():
+                step_path = storage_path
+        if step_path.exists():
+            try:
+                brep_ext = BRepFeatureExtractor(str(step_path))
+                brep_data = brep_ext.analyze()
+            except Exception as e:
+                print(f"[CAM analyze_features] B-Rep extraction warning: {e}")
+
         extractor = ParametricFeatureExtractor()
-        features = extractor.extract(parameters, setup=setup)
+        features = extractor.extract(parameters, setup=setup, brep_data=brep_data)
+        topology_info = brep_data if brep_data else {}
         
         # Validation Gate
         evidences_raw = parameters.get("evidences", [])
@@ -68,7 +87,7 @@ class CamPipelineManager:
             stock_orientation=setup.get("stockOrientation", "top_z") if setup else "top_z",
             base_wcs=base_wcs,
             default_tool_axis=setup.get("toolAxis", [0.0, 0.0, 1.0]) if setup else [0.0, 0.0, 1.0],
-            topology_info={}
+            topology_info=topology_info
         )
         
         for f in features:
@@ -284,15 +303,20 @@ class CamPipelineManager:
                 model_top_z = max(feature_tops)
                 
         stock_top_z = float(env["max_z"])
-        facing_allowance = float(setup_obj.get("facingAllowance", 0.0))
+        facing_allowance = float(
+            setup_obj.get("facingAllowance", 0.0)
+            or setup_obj.get("stockOffsetTop", 0.0)
+            or setup_obj.get("axialOffsetTop", 0.0)
+            or setup_obj.get("stockOffset", 0.0)
+        )
         facing_depth = stock_top_z - model_top_z
         
-        # Only generate facing if there's stock above the model or user explicitly requested an allowance
-        if not has_existing_face and (facing_depth > 0.01 or facing_allowance > 0):
+        # In standard CAM workflow, raw stock always requires a top facing pass to clean raw billet skin
+        if not has_existing_face and (facing_depth > 0.01 or facing_allowance > 0 or not has_existing_face):
             import uuid
             w = env["max_y"] - env["min_y"]
             l = env["max_x"] - env["min_x"]
-            actual_depth = facing_depth if facing_depth > 0.01 else facing_allowance
+            actual_depth = facing_depth if facing_depth > 0.01 else (facing_allowance if facing_allowance > 0 else 1.0)
             
             features.insert(0, {
                 "id": f"feat_synthetic_face_{uuid.uuid4().hex[:6]}",
@@ -351,29 +375,62 @@ class CamPipelineManager:
         # Ensure setup_obj has stockDimensions for cost estimation
         if sd and "stockDimensions" not in setup_obj:
             setup_obj["stockDimensions"] = sd
-            
-        topo = {"bounds": [-sd[0]/2, -sd[1]/2, -sd[2]/2, sd[0]/2, sd[1]/2, sd[2]/2]} if (sd and len(sd) >= 3) else {}
+
+        # Derive authoritative model and stock bounds in MODEL_SPACE
+        model_b = setup_obj.get("modelBounds") or machine_config.get("setup", {}).get("modelBounds") or setup_metadata.get("modelBounds")
+        topo = {}
+        if model_b and isinstance(model_b, dict) and "min" in model_b and "max" in model_b:
+            topo = {
+                "bounds": [
+                    float(model_b["min"][0]), float(model_b["min"][1]), float(model_b["min"][2]),
+                    float(model_b["max"][0]), float(model_b["max"][1]), float(model_b["max"][2])
+                ]
+            }
+        elif setup_obj.get("topology", {}).get("bounds"):
+            tb = setup_obj["topology"]["bounds"]
+            if len(tb) >= 6:
+                topo = {"bounds": [float(x) for x in tb[:6]]}
+        elif features:
+            f_centers_x = [f["center"][0] for f in features if "center" in f and isinstance(f["center"], (list, tuple)) and len(f["center"]) >= 3]
+            f_centers_y = [f["center"][1] for f in features if "center" in f and isinstance(f["center"], (list, tuple)) and len(f["center"]) >= 3]
+            f_centers_z = [f["center"][2] for f in features if "center" in f and isinstance(f["center"], (list, tuple)) and len(f["center"]) >= 3]
+            if f_centers_x and f_centers_y and f_centers_z:
+                margin_x = (sd[0] / 2.0) if (sd and len(sd) >= 1) else 25.0
+                margin_y = (sd[1] / 2.0) if (sd and len(sd) >= 2) else 25.0
+                margin_z = (sd[2] / 2.0) if (sd and len(sd) >= 3) else 25.0
+                topo = {
+                    "bounds": [
+                        min(f_centers_x) - margin_x, min(f_centers_y) - margin_y, min(f_centers_z) - margin_z,
+                        max(f_centers_x) + margin_x, max(f_centers_y) + margin_y, max(f_centers_z) + margin_z
+                    ]
+                }
+        elif sd and len(sd) >= 3:
+            topo = {"bounds": [-sd[0]/2, -sd[1]/2, -sd[2]/2, sd[0]/2, sd[1]/2, sd[2]/2]}
+
         setup_plans = self.setup_planner.plan_setups(
             features, caps, topology_info=topo, base_wcs=base_wcs
         )
         
-        # Override the planner's basic Z-shift with the precise coordinate resolver matrix
-        for sp in setup_plans:
-            flat_matrix = setup_metadata.get("modelToSetupTransform")
-            if flat_matrix and len(flat_matrix) == 16:
-                sp.modelToSetupTransform = [
-                    flat_matrix[0:4],
-                    flat_matrix[4:8],
-                    flat_matrix[8:12],
-                    flat_matrix[12:16]
-                ]
+        # Override only primary setup with user-specified setup_metadata transform if provided
+        for idx, sp in enumerate(setup_plans):
+            if idx == 0:
+                flat_matrix = setup_metadata.get("modelToSetupTransform")
+                if flat_matrix and len(flat_matrix) == 16:
+                    sp.modelToSetupTransform = [
+                        flat_matrix[0:4],
+                        flat_matrix[4:8],
+                        flat_matrix[8:12],
+                        flat_matrix[12:16]
+                    ]
 
         from app.services.planning.planning_context import PlanningContext
+        brep_data = machine_config.get("brep_data") or machine_config.get("topology_info") or {}
         planning_context = PlanningContext(
             setup=setup_obj,
             machine_profile=machine.model_dump(),
             material=material,
-            features=features
+            features=features,
+            brep_data=brep_data
         )
         val_result = planning_context.validate()
         if not val_result["valid"]:
@@ -451,6 +508,7 @@ class CamPipelineManager:
             ops = self.operation_strategy_planner.plan_operations(setup_decisions, setup_id)
             for op in ops:
                 op.wcs = sp.workCoordinateSystem
+                op.toolpath_schema_version = "semantic_v1"
                 # Attach the local feature directly to the operation
                 local_feat_dict = next((d.parameters.get("setup_local_feature") for d in setup_decisions if d.feature_id == op.feature_id), None)
                 if local_feat_dict:
@@ -1307,13 +1365,13 @@ class CamPipelineManager:
                 end = seg_dict.get("end", {})
                 dist = math.dist([start.get("x",0), start.get("y",0), start.get("z",0)], [end.get("x",0), end.get("y",0), end.get("z",0)])
                 total_path_length += dist
-                if mtype == "feed" or mtype == "arc":
+                if mtype in ("cut", "linear", "arc_cw", "arc_ccw"):
                     cut_distance += dist
-                elif mtype == "rapid":
+                elif mtype in ("rapid_xy", "rapid_clearance"):
                     rapid_distance += dist
                 elif mtype == "plunge":
                     plunge_count += 1
-                elif mtype == "retract":
+                elif mtype in ("retract_clearance", "approach_retract"):
                     retract_count += 1
 
             est_cycle_time = op.get("estimated_time_s", 0.0)
@@ -1530,7 +1588,6 @@ class CamPipelineManager:
                 
 
             import datetime
-            import datetime
             generated_at = datetime.datetime.now().isoformat()
             with open(job_dir / 'cam_toolpaths.json', 'w') as f:
                 all_tp = []
@@ -1660,27 +1717,32 @@ class CamPipelineManager:
 
     def _transform_feature_to_setup_local(self, feature: Dict[str, Any], setup_plan) -> Any:
         from app.models.schemas import SetupLocalFeature
+        from app.services.planning.planning_context import _apply_transform_3d
         
-        # Features were extracted from shape_in_setup, so they are ALREADY in setup space.
-        z_shift = 0.0
-        
+        matrix = getattr(setup_plan, "modelToSetupTransform", None) or (setup_plan.get("modelToSetupTransform") if isinstance(setup_plan, dict) else None)
         center = feature.get("center", [0, 0, 0])
         axis = feature.get("axis", [0, 0, 1])
         
-        local_center = [center[0], center[1], center[2] + z_shift]
+        local_center = _apply_transform_3d(center, matrix) if matrix else list(center)
         
         # Calculate local bounds from machiningRegion or dimensions
         region = feature.get("machiningRegion", {})
         dims = feature.get("dimensions", {})
         
         if "topZ" in region and "bottomZ" in region:
-            top_z = region.get("topZ", 0.0) + z_shift
-            bottom_z = region.get("bottomZ", -10.0) + z_shift
+            top_z = float(region["topZ"])
+            bottom_z = float(region["bottomZ"])
         else:
-            top_z = dims.get("z_top", 0.0) + z_shift
-            bottom_z = dims.get("z_bottom", -10.0) + z_shift
+            top_z = float(dims.get("z_top", local_center[2]))
+            depth_val = float(dims.get("depth") or dims.get("height") or feature.get("depth") or feature.get("height") or 0.0)
+            if depth_val > 0:
+                bottom_z = top_z - depth_val
+            elif "z_bottom" in dims and dims["z_bottom"] is not None:
+                bottom_z = float(dims["z_bottom"])
+            else:
+                bottom_z = top_z
             
-        depth = top_z - bottom_z
+        depth = abs(top_z - bottom_z)
         
         local_feat = SetupLocalFeature(
             featureId=feature.get("id", ""),
@@ -1698,18 +1760,15 @@ class CamPipelineManager:
         region = feature.get("machining_region", feature.get("machiningRegion", {}))
         local_region = dict(region) if region else {}
         
-        local_region["topZ"] = region.get("topZ", top_z - z_shift) + z_shift
-        local_region["bottomZ"] = region.get("bottomZ", bottom_z - z_shift) + z_shift
+        local_region["topZ"] = region.get("topZ", top_z)
+        local_region["bottomZ"] = region.get("bottomZ", bottom_z)
         if "center" in region:
             rc = region["center"]
-            local_region["center"] = [rc[0], rc[1], rc[2] + z_shift]
+            local_region["center"] = _apply_transform_3d(rc, matrix) if matrix else list(rc)
             
         # Add area dynamically if missing to prevent fallback to 2500mm^2 in estimator
         if "area" not in local_region:
             import math
-            import json
-            with open("storage/debug_feature.json", "a") as f:
-                f.write(json.dumps(feature) + "\n")
             diameter = dims.get("diameter") or feature.get("diameter") or 0.0
             if diameter > 0:
                 local_region["area"] = math.pi * (float(diameter) / 2.0) ** 2

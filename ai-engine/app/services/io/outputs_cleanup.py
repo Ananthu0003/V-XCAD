@@ -9,25 +9,36 @@ logger = logging.getLogger("vexcad.outputs_cleanup")
 
 def perform_cleanup(
     outputs_dir: Path,
+    logs_dir: Optional[Path] = None,
     max_age_seconds: int = 86400,  # 24 hours
     max_size_bytes: int = 2 * 1024 * 1024 * 1024,  # 2 GB
 ) -> None:
     """
-    Cleans up the outputs directory:
+    Cleans up the outputs and logs directories:
     1. Removes any files or subdirectories older than `max_age_seconds`.
-    2. If the total directory size exceeds `max_size_bytes`, prunes files starting from
+    2. Prunes validation failure log dumps in logs_dir older than `max_age_seconds`.
+    3. If the total directory size exceeds `max_size_bytes`, prunes files starting from
        the oldest (FIFO/LRU using last-modified time) until the size is under the threshold.
     """
+    import time
+    current_time = time.time()
+
+    # Clean up logs directory if provided
+    if logs_dir and logs_dir.exists():
+        for item in list(logs_dir.iterdir()):
+            try:
+                if item.is_file() and (item.name.startswith("validation_fail_") or item.name.endswith(".log")):
+                    age = current_time - item.stat().st_mtime
+                    if age > max_age_seconds:
+                        item.unlink()
+                        logger.info(f"Removed expired diagnostic log: {item.name}")
+            except Exception as exc:
+                logger.warning(f"Error checking/deleting log {item.name}: {exc}")
+
     if not outputs_dir.exists():
         return
 
     logger.info(f"Starting outputs directory cleanup for {outputs_dir}")
-
-    # 1. Clean up old files/directories based on age
-    now = asyncio.get_event_loop().time() if asyncio.get_event_loop().is_running() else os.path.getmtime(__file__)
-    # For safety, let's use standard time.time() for mtime comparisons
-    import time
-    current_time = time.time()
 
     for item in list(outputs_dir.iterdir()):
         try:
@@ -92,12 +103,13 @@ def perform_cleanup(
 
 async def start_cleanup_task(
     outputs_dir: Path,
+    logs_dir: Optional[Path] = None,
     interval_seconds: int = 3600,
     max_age_seconds: int = 86400,
     max_size_bytes: int = 2 * 1024 * 1024 * 1024,
 ) -> None:
     """
-    Asynchronous periodic task to clean up the outputs directory.
+    Asynchronous periodic task to clean up the outputs and logs directories.
     """
     logger.info(f"Starting background cleanup loop with interval {interval_seconds}s")
     while True:
@@ -106,6 +118,7 @@ async def start_cleanup_task(
             await asyncio.to_thread(
                 perform_cleanup,
                 outputs_dir=outputs_dir,
+                logs_dir=logs_dir,
                 max_age_seconds=max_age_seconds,
                 max_size_bytes=max_size_bytes,
             )

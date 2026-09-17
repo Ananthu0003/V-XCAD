@@ -40,8 +40,15 @@ class BasePostProcessor:
             
         post_units = active_plan.get("postOutputUnits", "mm")
         self.converter = PostUnitConverter(post_units)
+        self.setup_plan = active_plan
         self._job_bounds = self._compute_job_bounds(operations)
         
+        # Detect whether the first operation is live milling vs turning to select the initial modal plane
+        if operations and hasattr(self, "is_milling_mode"):
+            first_op_type = str(operations[0].get('type') or operations[0].get('machining_strategy') or '').lower()
+            is_turning = any(t in first_op_type for t in ('turning', 'lathe', 'facing_turning', 'od_turning', 'id_turning', 'grooving', 'parting'))
+            self.is_milling_mode = not is_turning
+
         self.program_start(active_plan)
         
         current_setup_id = None
@@ -200,8 +207,10 @@ class BasePostProcessor:
         if self.current_z is None or self.current_z < clearance_z:
             self.rapid(z=clearance_z)
 
-    def ensure_xy(self, x: float, y: float):
-        if self.current_x != x or self.current_y != y:
+    def ensure_xy(self, x: float = None, y: float = None):
+        if x is not None and (self.current_x is None or self.current_x != x):
+            self.rapid(x=x, y=y)
+        elif y is not None and (self.current_y is None or self.current_y != y):
             self.rapid(x=x, y=y)
 
     def emit_safe_approach(self, x: float, y: float, clearance_z: float, retract_z: float):
@@ -212,8 +221,17 @@ class BasePostProcessor:
 
     def emit_safe_retract(self, clearance_z: float):
         self.ensure_safe_z(clearance_z)
+    def start_operation(self, op: Dict[str, Any]):
+        pass
+
+    def end_operation(self, op: Dict[str, Any]):
+        pass
 
     def _write_operation(self, op: Dict[str, Any]):
+        segments = op.get('toolpaths', [])
+        if not segments:
+            return
+
         tool = op.get('tool', {})
         if not tool:
             return # Blocked earlier, but safe guard
@@ -238,35 +256,22 @@ class BasePostProcessor:
             self.current_x = None
             self.current_y = None
             self.current_z = None
+        self.start_operation(op)
 
-        rpm = op.get('parameters', {}).get('feeds_and_speeds', {}).get('spindle_rpm')
-        if not rpm:
-            rpm = op.get('parameters', {}).get('spindle_rpm')
-        if not rpm:
-            rpm = op.get('parameters', {}).get('spindleSpeed')
-        if not rpm or rpm <= 0:
-            tool_diameter = float(tool.get('diameter', 10.0))
-            import math
-            target_surface_speed = op.get('parameters', {}).get('surface_speed', 100) # m/min
-            if tool_diameter > 0:
-                calculated_rpm = int((target_surface_speed * 1000) / (math.pi * tool_diameter))
-            else:
-                calculated_rpm = 10000
-            rpm = min(12000, max(500, calculated_rpm))
-        else:
-            rpm = int(rpm)
-            
-        if self.current_rpm != rpm:
-            self.start_spindle(rpm)
+        # Reset feedrate modal tracking so each operation explicitly outputs F on its first linear cut
+        self.current_feed = None
+
+        rpm = op.get('parameters', {}).get('spindleSpeed', op.get('parameters', {}).get('spindle_speed', 1000))
+        spindle_active = getattr(self, "live_tool_running", False) if getattr(self, "is_milling_mode", False) else (self.current_rpm is not None)
+        if self.current_rpm != rpm or not spindle_active:
+            self.start_spindle(int(rpm))
             self.current_rpm = rpm
 
-        # Spindle rotation direction (cw=clockwise/M03, ccw=counter-clockwise/M04)
-        # is operation-defined and must not be hardcoded to a single direction.
-        self._spindle_direction = op.get('parameters', {}).get('spindle_direction', 'cw')
+        offset_num = tool.get('offset_number', tool_num)
 
-        offset_num = tool.get('length_offset_number', tool_num)
+        # Clearances
         safe_heights = op.get('safe_heights', {})
-        clearance_z = safe_heights.get('clearance', 50.0)
+        clearance_z = safe_heights.get('clearance', 15.0)
         retract_z = safe_heights.get('retract', 5.0)
 
         # Apply offset and coolant safely
@@ -275,10 +280,6 @@ class BasePostProcessor:
 
         if op.get('parameters', {}).get('coolant_enabled', True):
             self.coolant_on()
-
-        segments = op.get('toolpaths', [])
-        if not segments:
-            return
 
         op_type = op.get('type')
         feed_cut = op.get('parameters', {}).get('feed_rate', 1000)
@@ -305,7 +306,7 @@ class BasePostProcessor:
             # Ensure safe Z before any XY motion if it's the first move and state is unknown
             if is_first and move_type in ['approach_retract', 'rapid_xy', 'cut', 'arc_cw', 'arc_ccw', 'plunge', 'drill_cycle']:
                 self.ensure_safe_z(clearance_z)
-                if x is not None and y is not None:
+                if x is not None or y is not None:
                     self.ensure_xy(x, y)
             is_first = False
 
@@ -314,7 +315,7 @@ class BasePostProcessor:
                 cycle_type = op.get('parameters', {}).get('cycle_type', 'G81')
                 # Drill cycle should already have safe XY approaches emitted by motion planner.
                 # If not, we ensure it safely here:
-                if x is not None and y is not None:
+                if x is not None or y is not None:
                     self.ensure_xy(x, y)
                 
                 if cycle_type == 'G83':
@@ -336,7 +337,7 @@ class BasePostProcessor:
                     self.rapid(a=a, b=b, c=c)
                 
             elif move_type == 'approach_retract':
-                if x is not None and y is not None:
+                if x is not None or y is not None:
                     self.ensure_xy(x, y)
                 safe_z = max(z if z is not None else retract_z, retract_z)
                 self.rapid(z=safe_z, a=a, b=b, c=c)
@@ -346,10 +347,10 @@ class BasePostProcessor:
                 self.ensure_safe_z(safe_z)
 
             elif move_type == 'plunge':
-                if x is not None and y is not None:
+                if x is not None or y is not None:
                     self.ensure_xy(x, y)
                 plunge_feed = seg.get('feedrate') or feed_plunge
-                self.linear(z=z, a=a, b=b, c=c, feed=plunge_feed)
+                self.linear(x=x, y=y, z=z, a=a, b=b, c=c, feed=plunge_feed)
                 self.current_z = z if z is not None else self.current_z
 
             elif move_type in ['cut', 'arc_cw', 'arc_ccw']:
@@ -384,6 +385,7 @@ class BasePostProcessor:
 
         # Retract at end of op
         self.emit_safe_retract(clearance_z)
+        self.end_operation(op)
 
 
 class FanucPostProcessor(BasePostProcessor):
@@ -653,6 +655,7 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
         unit_str = "INCH" if self.converter.is_inch else "MM"
         raw_pn = (setup_plan or {}).get("programNumber") or (setup_plan or {}).get("program_number") or "1001"
         program_number = str(raw_pn).lstrip("Oo")
+        self._program_number = program_number
         self.output.append(f"BEGIN PGM {program_number} {unit_str}")
         self.output.append("; VEXCAD GENERATED KLARTEXT")
         self.output.append("; SETUP NOTE:")
@@ -682,7 +685,9 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
         if allow_xy_home:
             self.output.append("L X+0 Y+0 R0 FMAX M91")
         self.output.append("M30")
-        self.output.append("END PGM 1001 MM")
+        program_number = getattr(self, '_program_number', '1001')
+        unit_str = "INCH" if self.converter.is_inch else "MM"
+        self.output.append(f"END PGM {program_number} {unit_str}")
         
     def tool_change(self, tool_num: int, tool_name: str = ""):
         self.output.append(f"; T{tool_num} - {tool_name}")
@@ -809,17 +814,17 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
         self.ensure_safe_z(r)
         self.ensure_xy(x, y)
         self.output.append("CYCL DEF 200 DRILLING ~")
-        self.output.append(f"    Q200={r:.3f} ; SET-UP CLEARANCE ~")
-        self.output.append(f"    Q201={z:.3f} ; DEPTH ~")
-        self.output.append(f"    Q206={feed:.0f} ; FEED RATE FOR PLNG. ~")
+        self.output.append(f"    Q200={self._kfmt(r)} ; SET-UP CLEARANCE ~")
+        self.output.append(f"    Q201={self._kfmt(z)} ; DEPTH ~")
+        self.output.append(f"    Q206={self._kfeed(feed)} ; FEED RATE FOR PLNG. ~")
         
         q202 = min(abs(z) * 0.5, 5.0)
         if q202 <= 0.0: q202 = 0.001
-        self.output.append(f"    Q202={q202:.3f} ; PLUNGING DEPTH ~")
+        self.output.append(f"    Q202={self._kfmt(q202)} ; PLUNGING DEPTH ~")
         
         self.output.append(f"    Q210=0 ; DWELL TIME AT TOP ~")
         self.output.append(f"    Q203=0.000 ; SURFACE COORDINATE ~")
-        self.output.append(f"    Q204={clearance:.3f} ; 2ND SET-UP CLEARANCE ~")
+        self.output.append(f"    Q204={self._kfmt(clearance)} ; 2ND SET-UP CLEARANCE ~")
         self.output.append(f"    Q211=0 ; DWELL TIME AT DEPTH")
         self.output.append("CYCL CALL M8")
         
@@ -827,10 +832,10 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
         self.ensure_safe_z(r)
         self.ensure_xy(x, y)
         self.output.append("CYCL DEF 205 UNIVERSAL PECKING ~")
-        self.output.append(f"    Q200={r:.3f} ; SET-UP CLEARANCE ~")
-        self.output.append(f"    Q201={z:.3f} ; DEPTH ~")
-        self.output.append(f"    Q206={feed:.0f} ; FEED RATE FOR PLNG. ~")
-        self.output.append(f"    Q202={q:.3f} ; PLUNGING DEPTH ~")
+        self.output.append(f"    Q200={self._kfmt(r)} ; SET-UP CLEARANCE ~")
+        self.output.append(f"    Q201={self._kfmt(z)} ; DEPTH ~")
+        self.output.append(f"    Q206={self._kfeed(feed)} ; FEED RATE FOR PLNG. ~")
+        self.output.append(f"    Q202={self._kfmt(q)} ; PLUNGING DEPTH ~")
         surf_z = self.current_z if self.current_z is not None else 0
         self.output.append(f"    Q203=0.000 ; SURFACE COORDINATE ~")
         self.output.append(f"    Q204={clearance:.3f} ; 2ND SET-UP CLEARANCE")
@@ -839,53 +844,135 @@ class HeidenhainKlartextPostProcessor(BasePostProcessor):
     def cancel_cycle(self):
         pass
 
+
 class FanucLathePostProcessor(FanucPostProcessor):
-    """ISO/Fanuc compatible G-Code output for Lathes."""
+    """ISO/Fanuc compatible G-Code output for Lathes and Mill-Turn machines with live tooling."""
+    def __init__(self, is_diameter_mode: bool = True):
+        super().__init__()
+        self.is_diameter_mode = is_diameter_mode
+        self.is_milling_mode = False
+        self.live_tool_running = False
+        self.current_plane = "G18"
+
     def program_start(self, setup_plan: Dict[str, Any] = None):
         unit_gcode = "G20" if self.converter.is_inch else "G21"
         program_number = (setup_plan or {}).get("programNumber") or (setup_plan or {}).get("program_number") or "O1002"
         self.output.append("%")
         self.output.append(f"{program_number} (VEXCAD LATHE GENERATED)")
-        # G18 for XZ plane, G40 comp cancel, G80 cycle cancel, G90 absolute, G94 feed/min.
-        # Absolute mode (G90) is mandatory so a leftover G91 from a prior program
-        # cannot turn coordinates incremental and crash the machine.
-        self.output.append(f"{unit_gcode} G18 G40 G80 G90 G94")
+        initial_plane = "G17" if getattr(self, "is_milling_mode", False) else "G18"
+        self.output.append(f"{unit_gcode} {initial_plane} G40 G80 G90 G94")
         wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
         self.output.append(wcs)
 
     def program_end(self, setup_plan: Dict[str, Any] = None):
         self.coolant_off()
+        if getattr(self, "live_tool_running", False):
+            self.output.append("M105")
+            self.live_tool_running = False
         self.output.append("M05")
-        # Go to safe home position (machine zero in X and Z)
+        # Safe machine home position: X radially first, then Z axially
         self.output.append("G28 U0 W0")
         self.output.append("M30")
         self.output.append("%")
 
+    def safe_tool_retract(self):
+        self.coolant_off()
+        self.spindle_stop()
+        if getattr(self, "live_tool_running", False):
+            self.output.append("M105")
+            self.live_tool_running = False
+        self.output.append("G49")
+        # Retract radially home first (U0), then axially (W0) to prevent turret swing collisions
+        self.output.append("G28 U0")
+        self.output.append("G28 W0")
+
     def tool_change(self, tool_num: int, tool_name: str = ""):
         self.output.append(f"(T{tool_num:02d}{tool_num:02d} - {tool_name})")
-        # Lathe tools are typically T0101 (tool 1, offset 1)
+        # Lathe & mill-turn tools are indexed via T0101 (tool station 1, geometry/wear offset 1)
         self.output.append(f"T{tool_num:02d}{tool_num:02d}")
 
     def apply_tool_length_offset(self, offset_num: int, safe_z: float):
-        # Lathe tool offset is usually applied with the T command.
-        # We just do a rapid approach, routed through the unit converter.
-        self.output.append(f"G0 Z{self.converter.format_length(safe_z)}")
-        self.current_z = safe_z
+        if getattr(self, "is_milling_mode", False):
+            # For live tooling / milling in mill-turn, G43 engages tool length offset
+            self.output.append(f"G43 H{offset_num:02d} Z{self.converter.format_length(safe_z)}")
+            self.current_z = safe_z
+        else:
+            # Lathe tool offset is applied with the T command (T0101)
+            self.output.append(f"G0 Z{self.converter.format_length(safe_z)}")
+            self.current_z = safe_z
 
     def start_spindle(self, rpm: int):
         direction = getattr(self, '_spindle_direction', 'cw')
-        mcode = "M04" if direction == "ccw" else "M03"
-        # G97 = constant RPM for safe generic lathe code.
-        self.output.append(f"G97 S{rpm} {mcode}")
+        if getattr(self, "is_milling_mode", False):
+            mcode = "M104" if direction == "ccw" else "M103"
+            self.output.append(f"{mcode} S{rpm}")
+            self.live_tool_running = True
+        else:
+            mcode = "M04" if direction == "ccw" else "M03"
+            # Cap turning max spindle RPM for centrifugal safety
+            setup_dict = getattr(self, "setup_plan", {}) or {}
+            max_rpm = None
+            if isinstance(setup_dict, dict):
+                max_rpm = (
+                    setup_dict.get("max_spindle_rpm")
+                    or setup_dict.get("maxSpindleSpeed")
+                    or (setup_dict.get("machine", {}) if isinstance(setup_dict.get("machine"), dict) else {}).get("spindle_max_rpm")
+                )
+            if not max_rpm:
+                max_rpm = 3500
+            self.output.append(f"G50 S{int(max_rpm)}")
+            # G97 = constant RPM for safe generic lathe code.
+            self.output.append(f"G97 S{rpm} {mcode}")
 
-    # Overriding rapid and linear to ignore Y axis for typical 2-axis lathe operations
+    def spindle_stop(self):
+        if getattr(self, "live_tool_running", False):
+            self.output.append("M105")
+            self.live_tool_running = False
+        self.output.append("M05")
+        self.current_rpm = None
+
+    def start_operation(self, op: Dict[str, Any]):
+        op_type = str(op.get('type') or op.get('machining_strategy') or '').lower()
+        is_turning = any(t in op_type for t in ('turning', 'lathe', 'facing_turning', 'od_turning', 'id_turning', 'grooving', 'parting'))
+        
+        if is_turning:
+            self.is_milling_mode = False
+            if getattr(self, "live_tool_running", False):
+                self.output.append("M105")
+                self.live_tool_running = False
+            if getattr(self, "current_plane", "G18") != "G18":
+                self.output.append("G18")
+                self.current_plane = "G18"
+        else:
+            self.is_milling_mode = True
+            # For live milling on mill-turn: stop main spindle if running and orient/lock C-axis
+            if getattr(self, "current_rpm", None) is not None:
+                self.output.append("M05")
+            self.output.append("M19")
+            self.output.append("G17")
+            self.current_plane = "G17"
+
+    def end_operation(self, op: Dict[str, Any]):
+        if getattr(self, "is_milling_mode", False) and getattr(self, "live_tool_running", False):
+            self.output.append("M105")
+            self.live_tool_running = False
+            self.current_rpm = None
+
     def rapid(self, x: float = None, y: float = None, z: float = None, a: float = None, b: float = None, c: float = None):
         cmd = "G0"
         changed = False
-        if x is not None and (self.current_x is None or round(self.converter.convert_length(x) or 0.0, 3) != round(self.converter.convert_length(self.current_x) or 0.0, 3)):
-            cmd += f" X{self.converter.format_length(x)}"
-            self.current_x = x
-            changed = True
+        if x is not None:
+            val_x = (x * 2.0) if (not getattr(self, "is_milling_mode", False) and getattr(self, "is_diameter_mode", True)) else x
+            if self.current_x is None or round(self.converter.convert_length(val_x) or 0.0, 3) != round(self.converter.convert_length(self.current_x) or 0.0, 3):
+                cmd += f" X{self.converter.format_length(val_x)}"
+                self.current_x = val_x
+                changed = True
+        if y is not None:
+            if getattr(self, "is_milling_mode", False) or abs(y) > 0.0001 or (self.current_y is not None and abs(self.current_y) > 0.0001):
+                if self.current_y is None or round(self.converter.convert_length(y) or 0.0, 3) != round(self.converter.convert_length(self.current_y) or 0.0, 3):
+                    cmd += f" Y{self.converter.format_length(y)}"
+                    self.current_y = y
+                    changed = True
         if z is not None and (self.current_z is None or round(self.converter.convert_length(z) or 0.0, 3) != round(self.converter.convert_length(self.current_z) or 0.0, 3)):
             cmd += f" Z{self.converter.format_length(z)}"
             self.current_z = z
@@ -897,10 +984,18 @@ class FanucLathePostProcessor(FanucPostProcessor):
     def linear(self, x: float = None, y: float = None, z: float = None, a: float = None, b: float = None, c: float = None, feed: float = None):
         cmd = "G1"
         changed = False
-        if x is not None and (self.current_x is None or round(self.converter.convert_length(x) or 0.0, 3) != round(self.converter.convert_length(self.current_x) or 0.0, 3)):
-            cmd += f" X{self.converter.format_length(x)}"
-            self.current_x = x
-            changed = True
+        if x is not None:
+            val_x = (x * 2.0) if (not getattr(self, "is_milling_mode", False) and getattr(self, "is_diameter_mode", True)) else x
+            if self.current_x is None or round(self.converter.convert_length(val_x) or 0.0, 3) != round(self.converter.convert_length(self.current_x) or 0.0, 3):
+                cmd += f" X{self.converter.format_length(val_x)}"
+                self.current_x = val_x
+                changed = True
+        if y is not None:
+            if getattr(self, "is_milling_mode", False) or abs(y) > 0.0001 or (self.current_y is not None and abs(self.current_y) > 0.0001):
+                if self.current_y is None or round(self.converter.convert_length(y) or 0.0, 3) != round(self.converter.convert_length(self.current_y) or 0.0, 3):
+                    cmd += f" Y{self.converter.format_length(y)}"
+                    self.current_y = y
+                    changed = True
         if z is not None and (self.current_z is None or round(self.converter.convert_length(z) or 0.0, 3) != round(self.converter.convert_length(self.current_z) or 0.0, 3)):
             cmd += f" Z{self.converter.format_length(z)}"
             self.current_z = z
@@ -912,13 +1007,85 @@ class FanucLathePostProcessor(FanucPostProcessor):
                 self.current_feed = feed
             self.output.append(cmd)
 
+    def arc(self, cw: bool, x: float = None, y: float = None, z: float = None,
+            i: float = None, j: float = None, k: float = None, r: float = None,
+            a: float = None, b: float = None, c: float = None, feed: float = None):
+        cmd = "G2" if cw else "G3"
+        if getattr(self, "is_milling_mode", False):
+            # In G17 (XY plane for face milling), circular motion is between X and Y
+            if x is not None:
+                cmd += f" X{self.converter.format_length(x)}"
+                self.current_x = x
+            if y is not None:
+                cmd += f" Y{self.converter.format_length(y)}"
+                self.current_y = y
+            if z is not None and (self.current_z is None or round(self.converter.convert_length(z) or 0.0, 3) != round(self.converter.convert_length(self.current_z) or 0.0, 3)):
+                cmd += f" Z{self.converter.format_length(z)}"
+                self.current_z = z
+            if r is not None and float(r) > 0:
+                cmd += f" R{self.converter.format_length(r)}"
+            elif i is not None or j is not None:
+                if i is not None: cmd += f" I{self.converter.format_length(i)}"
+                if j is not None: cmd += f" J{self.converter.format_length(j)}"
+        else:
+            # In G18 (XZ plane on Lathes), circular motion is between X and Z
+            if x is not None:
+                val_x = (x * 2.0) if getattr(self, "is_diameter_mode", True) else x
+                cmd += f" X{self.converter.format_length(val_x)}"
+                self.current_x = val_x
+            if z is not None:
+                cmd += f" Z{self.converter.format_length(z)}"
+                self.current_z = z
+            if r is not None and float(r) > 0:
+                cmd += f" R{self.converter.format_length(r)}"
+            elif i is not None or k is not None:
+                if i is not None: cmd += f" I{self.converter.format_length(i)}"
+                if k is not None: cmd += f" K{self.converter.format_length(k)}"
+        if feed is not None and (self.current_feed is None or round(feed, 1) != round(self.current_feed, 1)):
+            cmd += f" F{self.converter.format_feed(feed)}"
+            self.current_feed = feed
+        self.output.append(cmd)
+
+    def drilling_cycle(self, x: float, y: float, z: float, r: float, feed: float, clearance: float = 15.0):
+        self.ensure_safe_z(r)
+        self.ensure_xy(x, y)
+        if getattr(self, "is_milling_mode", False):
+            self.output.append(f"G98 G81 X{self.converter.format_length(x)} Y{self.converter.format_length(y)} Z{self.converter.format_length(z)} R{self.converter.format_length(r)} F{self.converter.format_feed(feed)}")
+        else:
+            val_x = (x * 2.0) if x is not None and getattr(self, "is_diameter_mode", True) else (x or 0.0)
+            self.output.append(f"G98 G81 X{self.converter.format_length(val_x)} Z{self.converter.format_length(z)} R{self.converter.format_length(r)} F{self.converter.format_feed(feed)}")
+
+    def peck_drilling_cycle(self, x: float, y: float, z: float, r: float, q: float, feed: float, clearance: float = 15.0):
+        self.ensure_safe_z(r)
+        self.ensure_xy(x, y)
+        if getattr(self, "is_milling_mode", False):
+            self.output.append(f"G98 G83 X{self.converter.format_length(x)} Y{self.converter.format_length(y)} Z{self.converter.format_length(z)} R{self.converter.format_length(r)} Q{self.converter.format_length(q)} F{self.converter.format_feed(feed)}")
+        else:
+            val_x = (x * 2.0) if x is not None and getattr(self, "is_diameter_mode", True) else (x or 0.0)
+            self.output.append(f"G98 G83 X{self.converter.format_length(val_x)} Z{self.converter.format_length(z)} R{self.converter.format_length(r)} Q{self.converter.format_length(q)} F{self.converter.format_feed(feed)}")
+
+
+class MillTurnPostProcessor(FanucLathePostProcessor):
+    """Mazak Integrex / DMG NTX / Mill-Turn EIA compatible G-Code output with Live Tooling."""
+    def program_start(self, setup_plan: Dict[str, Any] = None):
+        unit_gcode = "G20" if self.converter.is_inch else "G21"
+        program_number = (setup_plan or {}).get("programNumber") or (setup_plan or {}).get("program_number") or "O1002"
+        self.output.append("%")
+        self.output.append(f"{program_number} (VEXCAD MILL-TURN GENERATED)")
+        initial_plane = "G17" if getattr(self, "is_milling_mode", False) else "G18"
+        self.output.append(f"{unit_gcode} {initial_plane} G40 G80 G90 G94")
+        wcs = (setup_plan or {}).get("workCoordinateSystem", (setup_plan or {}).get("wcs", "G54"))
+        self.output.append(wcs)
+
 
 class PostProcessorFactory:
     """Factory to instantiate the correct dialect post-processor."""
     @staticmethod
     def create(post_id: str) -> BasePostProcessor:
         post_id = post_id.upper() if post_id else ""
-        if "LATHE" in post_id or "SWISS" in post_id or "CINCOM" in post_id:
+        if "MILL_TURN" in post_id or "INTEGREX" in post_id or "NTX" in post_id:
+            return MillTurnPostProcessor()
+        elif "LATHE" in post_id or "SWISS" in post_id or "CINCOM" in post_id or "TURN" in post_id:
             return FanucLathePostProcessor()
         elif "SIEMENS" in post_id:
             return SiemensPostProcessor()
@@ -957,7 +1124,12 @@ class GCodeGenerator:
             
             # Auto-resolve
             if post_id == "AUTO":
-                post_id = controller_id
+                m_type = str(setup_plan.get("machineType") or setup_plan.get("machine_type") or "").lower()
+                has_turning_ops = any(op.get("type") in ("od_turning", "facing_turning", "od_finish_turning", "id_boring", "grooving", "parting_off") for op in operations)
+                if any(k in m_type for k in ("lathe", "turning", "swiss")) or (has_turning_ops and not m_type):
+                    post_id = "FANUC_LATHE"
+                else:
+                    post_id = controller_id
                 
             # Perform strict validation against matrix
             matrix_path = Path(__file__).resolve().parents[4] / "web-ui" / "lib" / "cam" / "cam_machine_matrix.json"
@@ -968,8 +1140,18 @@ class GCodeGenerator:
                         ctrl_info = matrix.get("controllers", {}).get(controller_id)
                         if ctrl_info and post_id != controller_id:
                             valid_posts = ctrl_info.get("compatiblePosts", [])
-                            # Allow if it's a known generic post or if we match fuzzily
-                            if post_id not in valid_posts and not any(post_id.upper() in vp.upper() or vp.upper() in post_id.upper() for vp in valid_posts):
+                            p_tokens = set(post_id.upper().replace("_", " ").split())
+                            
+                            def is_compat(vp: str) -> bool:
+                                vp_u = vp.upper()
+                                if post_id.upper() in vp_u or vp_u in post_id.upper():
+                                    return True
+                                vp_toks = set(vp_u.replace("_", " ").split())
+                                fam_match = any(f in p_tokens and f in vp_toks for f in ("FANUC", "HAAS", "SIEMENS", "HEIDENHAIN", "MAZAK", "OKUMA", "MAKINO", "DOOSAN", "HURCO", "CENTROID", "MASSO", "LINUXCNC", "GRBL", "MACH3", "MACH4"))
+                                type_match = any(t in p_tokens and any(t in tok for tok in vp_toks) for t in ("LATHE", "MILL", "SWISS", "ROUTER", "TURN"))
+                                return fam_match and (type_match or "ISO" in p_tokens or "AUTO" in p_tokens)
+
+                            if post_id not in valid_posts and not any(is_compat(vp) for vp in valid_posts):
                                 report.status = "failed"
                                 report.issues.append({
                                     "type": "incompatible_post_processor",
@@ -1005,10 +1187,28 @@ class GCodeGenerator:
 
         if report.status == "failed":
             report.status = "error"
-            return {"gcode": "", "validation": report.model_dump()}
+        # Strict Hard Gate: Exclude blocked operations or operations with geometry errors
+        valid_ops = []
+        for op in operations:
+            if op.get("status") in ("blocked", "blocked_missing_depth", "blocked_requires_reorientation", "error", "unsupported"):
+                continue
+            err = (op.get("parameters") or {}).get("error")
+            if err and any(kw in str(err).lower() for kw in ("error", "blocked", "unavailable", "fail")):
+                continue
+            if not op.get("toolpaths"):
+                continue
+            valid_ops.append(op)
+            
+        if not valid_ops:
+            report.status = "failed"
+            report.issues.append({
+                "type": "geometry_blocked",
+                "message": "All operations blocked: missing required geometric boundaries or depth."
+            })
+            return {"gcode": "", "validation": report.model_dump(), "toolpaths": []}
             
         # Post-processor generation
-        gcode_text = post.generate(operations, setup_plan)
+        gcode_text = post.generate(valid_ops, setup_plan)
         
         # Post-posting validation (Dialect specific)
         lines = gcode_text.split('\n')
@@ -1029,7 +1229,7 @@ class GCodeGenerator:
 
 
         return {
-            "gcode": gcode_text if report.status == "passed" else None,
+            "gcode": gcode_text if report.status == "passed" else "",
             "validation": report.model_dump(),
             "toolpaths": []
         }

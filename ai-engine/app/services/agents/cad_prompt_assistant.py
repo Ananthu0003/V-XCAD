@@ -296,7 +296,7 @@ class CADPromptAssistantService:
     ) -> dict[str, Any]:
         """Runs multimodal discrepancy comparison between blueprint and 3D render views."""
         system_instruction = self._build_system_prompt(user_message)
-        model = model_override or "gemini-2.5-flash"
+        model = model_override or "gemini-3.5-flash"
 
         # Prepare images
         images: list[tuple[str, str, str]] = []  # (label, mime, base64)

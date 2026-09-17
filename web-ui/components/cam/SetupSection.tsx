@@ -279,7 +279,7 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                         <div className="flex flex-col gap-2">
                             <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/80 pl-1">Measurement Units</label>
                             <Select
-                                value={setup.displayUnits || setup.units || ""}
+                                value={setup.displayUnits || setup.units || "mm"}
                                 onValueChange={(val) => {
                                     update('displayUnits', val as 'mm' | 'in');
                                     update('units', val as 'mm' | 'in');
@@ -297,7 +297,7 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                         <div className="flex flex-col gap-2">
                             <label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/80 pl-1">Post Output Units</label>
                             <Select
-                                value={setup.postOutputUnits || setup.units || ""}
+                                value={setup.postOutputUnits || setup.units || "mm"}
                                 onValueChange={(val) => update('postOutputUnits', val as 'mm' | 'in')}
                             >
                                 <SelectTrigger className="w-full h-auto px-4 py-3 bg-white dark:bg-background/50 border-slate-200 dark:border-border/50 rounded-xl text-xs text-foreground focus:border-primary/50 focus:ring-1 focus:ring-primary/20 shadow-xs dark:shadow-sm data-[placeholder]:text-muted-foreground/70">
@@ -944,7 +944,7 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                             </p>
                             <div className="ml-5">
                                 <Select
-                                    value={setup.originPosition || ""}
+                                    value={setup.originPosition || "top_center"}
                                     onValueChange={(val) => update('originPosition', val as OriginPosition)}
                                 >
                                     <SelectTrigger className="w-full h-auto px-4 py-2.5 bg-background/80 border-primary/20 rounded-lg text-xs text-foreground focus:border-primary/60 focus:ring-1 focus:ring-primary/30 shadow-sm data-[placeholder]:text-muted-foreground/70">
@@ -970,7 +970,7 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                             </p>
                             <div className="ml-5">
                                 <Select
-                                    value={setup.wcs || ""}
+                                    value={setup.wcs || "G54"}
                                     onValueChange={(val) => update('wcs', val as WorkCoordinateSystem)}
                                 >
                                     <SelectTrigger className="w-full h-auto px-4 py-2.5 bg-background/80 border-primary/20 rounded-lg text-xs text-foreground focus:border-primary/60 focus:ring-1 focus:ring-primary/30 shadow-sm data-[placeholder]:text-muted-foreground/70">

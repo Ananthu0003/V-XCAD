@@ -209,6 +209,14 @@ class GeometryMapper:
 
         bb = face_info.get("bbox", {"min": center, "max": center})
         length = abs(feature.get("dimensions", {}).get("height", 10.0))
+
+        if not feature.get("dimensions") or not isinstance(feature.get("dimensions"), dict):
+            feature["dimensions"] = {}
+        feature["diameter"] = round(radius * 2, 6)
+        feature["radius"] = round(radius, 6)
+        feature["dimensions"]["diameter"] = round(radius * 2, 6)
+        feature["dimensions"]["radius"] = round(radius, 6)
+        feature["dimensions"]["height"] = length
         
         setup_type = setup.get("type", "milling_3axis")
         
@@ -372,6 +380,28 @@ class GeometryMapper:
         except:
             top_z = round(boss_profile_points[0][2], 6)
 
+        dx = max(boss_xs) - min(boss_xs)
+        dy = max(boss_ys) - min(boss_ys)
+        boss_dia = max(dx, dy)
+        boss_radius = boss_dia / 2.0
+
+        cyl_face_id = feature.get("cylinder_face_id") or (top_face_ids[0] if top_face_ids else None)
+        if cyl_face_id and cyl_face_id in self.extractor.faces and self.extractor.faces[cyl_face_id].get("type") == "cylinder":
+            face_cyl_r = self.extractor.faces[cyl_face_id].get("radius")
+            if face_cyl_r and float(face_cyl_r) > 0:
+                boss_radius = float(face_cyl_r)
+                boss_dia = boss_radius * 2.0
+
+        if not feature.get("dimensions") or not isinstance(feature.get("dimensions"), dict):
+            feature["dimensions"] = {}
+        
+        feature["diameter"] = round(boss_dia, 6)
+        feature["radius"] = round(boss_radius, 6)
+        feature["dimensions"]["diameter"] = feature["dimensions"].get("diameter") or round(boss_dia, 6)
+        feature["dimensions"]["radius"] = feature["dimensions"].get("radius") or round(boss_radius, 6)
+        feature["dimensions"]["width"] = feature["dimensions"].get("width") or round(dx, 6)
+        feature["dimensions"]["length"] = feature["dimensions"].get("length") or round(dy, 6)
+
         feature["machining_region"] = "valid"
         feature["machiningRegion"] = {
             "valid": True,
@@ -382,6 +412,8 @@ class GeometryMapper:
             "topZ": top_z,
             "bottomZ": floor_z,
             "area": clearing_area,
+            "diameter": round(boss_dia, 6),
+            "radius": round(boss_radius, 6),
             "source": "boss_floor_minus_island"
         }
 

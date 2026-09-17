@@ -94,7 +94,7 @@ class MotionPlanner:
                 max_y = max(p[1] for p in pts_2d)
                 stock_w = max(max_x - min_x, max_y - min_y)
                 
-                if 0.1 < stock_w <= 15.0 and raw_tool_diameter >= (stock_w * 1.5):
+                if 0.1 < stock_w <= 10.0 and raw_tool_diameter >= (stock_w * 3.0):
                     internal_units = "in"
                     print(f"[MotionPlanner] Unit mismatch heuristic: Assumed 'in' units. Tool={raw_tool_diameter}mm, Stock={stock_w:.2f}units.")
 
@@ -287,12 +287,19 @@ class MotionPlanner:
         all_paths_2d = []
 
         current_poly = poly.buffer(-tool_radius, join_style=2)
-        while not current_poly.is_empty:
+        max_erosions = 500
+        erosion_count = 0
+        while not current_poly.is_empty and erosion_count < max_erosions:
+            erosion_count += 1
             if current_poly.geom_type == "Polygon":
                 all_paths_2d.append(list(current_poly.exterior.coords))
+                for interior in current_poly.interiors:
+                    all_paths_2d.append(list(interior.coords))
             elif current_poly.geom_type == "MultiPolygon":
                 for p in current_poly.geoms:
                     all_paths_2d.append(list(p.exterior.coords))
+                    for interior in p.interiors:
+                        all_paths_2d.append(list(interior.coords))
             current_poly = current_poly.buffer(-stepover, join_style=2)
             
         all_paths_2d.reverse()
@@ -507,6 +514,7 @@ class MotionPlanner:
             if not path or len(path) < 2:
                 continue
 
+            pt_end_retract = None
             for i, z in enumerate(z_passes):
 
                 start_pt_2d = path[0]
@@ -520,9 +528,17 @@ class MotionPlanner:
                     pt_clearance = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=clearance)
                     add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_clearance, pt_lead_in_retract)
                 else:
+                    if pt_end_retract is None:
+                        pt_end_retract = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=retract)
                     add_cmd(ToolpathSegmentType.RAPID_XY, pt_end_retract, pt_lead_in_retract)
                     
-                add_cmd(ToolpathSegmentType.PLUNGE, pt_lead_in_retract, pt_lead_in_z)
+                z_entry = max(z + 0.5, min(retract, (top + 1.0) if i == 0 else (z_passes[i-1] + 1.0)))
+                if retract > z_entry + 0.05:
+                    pt_entry = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=z_entry)
+                    add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_lead_in_retract, pt_entry)
+                    add_cmd(ToolpathSegmentType.PLUNGE, pt_entry, pt_lead_in_z)
+                else:
+                    add_cmd(ToolpathSegmentType.PLUNGE, pt_lead_in_retract, pt_lead_in_z)
 
                 for j in range(1, len(path)):
                     p1 = path[j-1]
@@ -573,7 +589,7 @@ class MotionPlanner:
                     Point3D(x=next_radius + 1.0, y=0, z=0))
 
             # Rapid back to start Z
-            add_cmd(ToolpathSegmentType.RAPID_XY,
+            add_cmd(ToolpathSegmentType.RAPID_CLEARANCE,
                     Point3D(x=next_radius + 1.0, y=0, z=0),
                     Point3D(x=next_radius + 1.0, y=0, z=length))
 

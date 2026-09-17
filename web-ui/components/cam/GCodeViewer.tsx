@@ -78,7 +78,11 @@ export function GCodeViewer({ content, onDownload, setupName }: GCodeViewerProps
 		}
 
 		// Rough estimate: ~0.5 seconds per G-code line of motion
-		const motionLines = lines.filter(l => l.trim().match(/^G0[01]\s/i)).length;
+		// Match Fanuc (G00/G01), Heidenhain (L ...), and Siemens cycles
+		const motionLines = lines.filter(l => {
+			const t = l.trim();
+			return t.match(/^G0[01]\s/i) || t.match(/^L\s/i) || t.match(/CYCLE8\d/i);
+		}).length;
 		estimatedMins = Math.max(1, Math.round(motionLines * 0.5 / 60));
 
 		return { toolChanges, lineCount: lines.length, gCodes: gCodes.size, mCodes: mCodes.size, hasCoolant, estimatedMins };

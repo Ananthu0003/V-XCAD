@@ -5,6 +5,7 @@ export interface ToolpathSegment {
 	tool_id: string | null;
 	segment_index: number;
 	move_type: 'rapid' | 'linear' | 'arc_cw' | 'arc_ccw' | string;
+	coordinate_space?: 'MODEL' | 'SETUP' | 'MACHINE' | 'SCENE';
 	units: string;
 	feed_mode: string | null;
 	source: string;

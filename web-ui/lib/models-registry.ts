@@ -45,28 +45,6 @@ export const MODEL_REGISTRY: ModelMetadata[] = [
         badge: 'thinking',
     },
     {
-        id: 'gemini-3.1-flash-lite',
-        name: 'Gemini 3.1 Flash Lite',
-        vendor: 'google',
-        tier: 'flash',
-        maxTokens: 256000,
-        supportsThinking: false,
-        description: 'Ultra-fast, lightweight fallback model for quick edits.',
-        badge: 'fast',
-    },
-
-    {
-        id: 'deepseek/deepseek-v4-flash-0731',
-        name: 'DeepSeek V4 Flash',
-        vendor: 'openrouter',
-        tier: 'flash',
-        maxTokens: 128000,
-        supportsThinking: true,
-        fallbackModelId: 'gemini-3.5-flash-lite',
-        description: 'DeepSeek next-gen ultra-fast flash reasoning model via OpenRouter.',
-        badge: 'thinking',
-    },
-    {
         id: 'anthropic/claude-sonnet-5',
         name: 'Claude 5 Sonnet',
         vendor: 'openrouter',

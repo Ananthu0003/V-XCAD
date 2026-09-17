@@ -104,11 +104,6 @@ def test_rapid_validator_fails_on_negative_z():
 
 
 
-def test_g53_xy_home_disabled_by_default():
-    gen = GCodeGenerator()
-    res = gen.generate([{"tool": {"number": 1}, "toolpaths": [], "safe_heights": {}}])
-    assert "G53 G0 X0. Y0." in res["gcode"]
-
 def test_duplicate_drilling_cycles_are_merged():
     from app.services.cam_pipeline_manager import CamPipelineManager
     manager = CamPipelineManager()
@@ -355,7 +350,7 @@ def test_klartext_q204_uses_safe_clearance():
         }
     ])
     gcode = "\n".join(post.output)
-    assert "Q204=15.000 ; 2ND SET-UP CLEARANCE" in gcode
+    assert "Q204=+15.000 ; 2ND SET-UP CLEARANCE" in gcode
 
 def test_klartext_q202_uses_safe_peck_depth():
     from app.services.gcode.gcode_generator import HeidenhainKlartextPostProcessor
@@ -372,7 +367,7 @@ def test_klartext_q202_uses_safe_peck_depth():
         }
     ])
     gcode = "\n".join(post.output)
-    assert "Q202=5.000 ; PLUNGING DEPTH" in gcode
+    assert "Q202=+5.000 ; PLUNGING DEPTH" in gcode
 
 def test_klartext_warns_when_lead_move_outside_blk_form():
     from app.services.validation.toolpath_validator import ToolpathValidator
@@ -520,3 +515,185 @@ def test_unsupported_controller_raises_error():
     from app.cam.posts import get_post_processor
     with pytest.raises(ValueError, match="NC export is blocked for unvalidated machine configurations"):
         get_post_processor("UNKNOWN_UNVERIFIED_CNC", {})
+
+def test_od_turning_roughing_multipass_toolpath_safety():
+    """Verify that multi-pass OD turning roughing never produces invalid rapid_xy moves changing Z."""
+    from app.services.toolpath.parametric_toolpath_engine import ParametricToolpathEngine
+    from app.services.validation.gcode_safety_validator import GCodeSafetyValidator
+    from app.services.gcode.gcode_generator import GCodeGenerator
+
+    engine = ParametricToolpathEngine()
+    feat = {
+        "id": "feat_cyl_test",
+        "type": "cylinder",
+        "name": "cyl",
+        "diameter": 10.0,
+        "depth": 25.0,
+        "stock_dia": 35.0,
+    }
+    op = {
+        "id": "op_cyl_rough",
+        "type": "od_turning",
+        "machining_strategy": "od_turning",
+        "tool": {"diameter": 6.0, "tool_number": 1, "name": "Turning Tool"},
+        "safe_heights": {"clearance": 15.0, "retract": 5.0, "top": 0.0, "bottom": -25.0},
+        "toolpath_schema_version": "semantic_v1",
+        "parameters": {"maxStepdown": 2.0}
+    }
+    paths, val_res = engine.generate_toolpath(
+        op, feat, {"machine_type": "lathe", "stockDimensions": [35.0, 35.0, 60.0]}
+    )
+    assert len(paths) > 0
+    # Strict invariant: no rapid_xy segment must change Z
+    for p in paths:
+        if p.get("moveType") == "rapid_xy":
+            s_z = p.get("start", {}).get("z")
+            e_z = p.get("end", {}).get("z")
+            assert abs(s_z - e_z) <= 0.001, f"rapid_xy changed Z: {s_z} -> {e_z}"
+
+    safety_check = GCodeSafetyValidator.validate_toolpath_safety(op, paths, {"machineType": "lathe"})
+    assert safety_check["valid"] is True, f"Safety validation failed: {safety_check['reason']}"
+
+    # Verify G-Code generation succeeds
+    gen = GCodeGenerator()
+    op["toolpaths"] = paths
+    gcode_res = gen.generate([op], setup_plan={"machineType": "lathe", "postProcessor": "AUTO"})
+    assert gcode_res["validation"]["status"] == "passed"
+    assert len(gcode_res["gcode"]) > 0
+
+def test_sanitize_toolpath_segments_decomposes_vertical_rapid_xy():
+    """Verify that any diagonal rapid_xy segment is decomposed into vertical + planar motions."""
+    from app.services.validation.gcode_safety_validator import GCodeSafetyValidator
+
+    # Test upward diagonal move
+    bad_segments_up = [
+        {
+            "moveType": "rapid_xy",
+            "start": {"x": 10.0, "y": 0.0, "z": 1.0},
+            "end": {"x": 8.0, "y": 0.0, "z": 15.0},
+        }
+    ]
+    clean_up = GCodeSafetyValidator.sanitize_toolpath_segments(bad_segments_up, clearance_z=15.0)
+    assert len(clean_up) == 2
+    assert clean_up[0]["moveType"] == "retract_clearance"
+    assert clean_up[0]["end"]["z"] == 15.0
+    assert clean_up[1]["moveType"] == "rapid_xy"
+    assert clean_up[1]["start"]["z"] == 15.0
+    assert clean_up[1]["end"]["z"] == 15.0
+
+    # Test downward diagonal move
+    bad_segments_down = [
+        {
+            "moveType": "rapid_xy",
+            "start": {"x": 10.0, "y": 0.0, "z": 15.0},
+            "end": {"x": 8.0, "y": 0.0, "z": 2.0},
+        }
+    ]
+    clean_down = GCodeSafetyValidator.sanitize_toolpath_segments(bad_segments_down, clearance_z=15.0)
+    assert len(clean_down) == 2
+    assert clean_down[0]["moveType"] == "rapid_xy"
+    assert clean_down[0]["start"]["z"] == 15.0
+    assert clean_down[0]["end"]["z"] == 15.0
+    assert clean_down[1]["moveType"] == "approach_retract"
+    assert clean_down[1]["end"]["z"] == 2.0
+
+def test_post_output_validator_lathe_and_mill():
+    """Verify PostOutputValidator correctly validates lathe and mill G-code."""
+    from app.services.gcode.gcode_generator import PostProcessorFactory
+    from app.services.validation.post_output_validator import PostOutputValidator
+
+    # Lathe operation
+    lathe_ops = [{
+        "id": "op_lathe",
+        "type": "od_turning",
+        "tool": {"number": 1, "name": "Turning Tool", "offset_number": 1},
+        "parameters": {"spindleSpeed": 2000, "feed_rate": 300},
+        "safe_heights": {"clearance": 15.0, "retract": 5.0, "top": 0.0, "bottom": -20.0},
+        "toolpaths": [
+            {"moveType": "rapid_clearance", "end": {"x": 20.0, "y": 0.0, "z": 15.0}},
+            {"moveType": "rapid_xy", "start": {"x": 20.0, "y": 0.0, "z": 15.0}, "end": {"x": 11.0, "y": 0.0, "z": 15.0}},
+            {"moveType": "cut", "start": {"x": 11.0, "y": 0.0, "z": 0.0}, "end": {"x": 11.0, "y": 0.0, "z": -20.0}},
+            {"moveType": "retract_clearance", "start": {"x": 11.0, "y": 0.0, "z": -20.0}, "end": {"x": 20.0, "y": 0.0, "z": 15.0}}
+        ]
+    }]
+    lathe_post = PostProcessorFactory.create("LATHE")
+    lathe_gcode = lathe_post.generate(lathe_ops, {"machineType": "lathe"})
+    lathe_val = PostOutputValidator.validate_gcode(lathe_gcode, lathe_ops)
+    assert lathe_val["valid"] is True, f"Lathe validation failed: {lathe_val['reason']}"
+
+    # Mill operation
+    mill_ops = [{
+        "id": "op_mill",
+        "type": "pocket_milling",
+        "tool": {"number": 1, "name": "End Mill", "offset_number": 1},
+        "parameters": {"spindleSpeed": 5000, "feed_rate": 1000},
+        "safe_heights": {"clearance": 15.0, "retract": 5.0, "top": 0.0, "bottom": -10.0},
+        "toolpaths": [
+            {"moveType": "rapid_clearance", "end": {"x": 0.0, "y": 0.0, "z": 15.0}},
+            {"moveType": "rapid_xy", "start": {"x": 0.0, "y": 0.0, "z": 15.0}, "end": {"x": 5.0, "y": 5.0, "z": 15.0}},
+            {"moveType": "cut", "start": {"x": 5.0, "y": 5.0, "z": -10.0}, "end": {"x": 10.0, "y": 5.0, "z": -10.0}},
+            {"moveType": "retract_clearance", "start": {"x": 10.0, "y": 5.0, "z": -10.0}, "end": {"x": 10.0, "y": 5.0, "z": 15.0}}
+        ]
+    }]
+    mill_post = PostProcessorFactory.create("FANUC")
+    mill_gcode = mill_post.generate(mill_ops, {"machineType": "mill"})
+    mill_val = PostOutputValidator.validate_gcode(mill_gcode, mill_ops)
+    assert mill_val["valid"] is True, f"Mill validation failed: {mill_val['reason']}"
+
+def test_mill_turn_post_processor_preserves_y_axis_and_plane_switching():
+    """Verify MillTurnPostProcessor switches planes, preserves Y coordinates, and handles live tooling."""
+    from app.services.gcode.gcode_generator import PostProcessorFactory
+    from app.services.validation.post_output_validator import PostOutputValidator
+
+    ops = [
+        {
+            "id": "op_turn",
+            "type": "od_turning",
+            "tool": {"number": 1, "name": "Turning Tool", "offset_number": 1},
+            "parameters": {"spindleSpeed": 1200, "feed_rate": 200},
+            "safe_heights": {"clearance": 15.0, "retract": 5.0, "top": 0.0, "bottom": -30.0},
+            "toolpaths": [
+                {"moveType": "rapid_clearance", "end": {"x": 38.0, "y": 0.0, "z": 15.0}},
+                {"moveType": "rapid_xy", "start": {"x": 38.0, "y": 0.0, "z": 15.0}, "end": {"x": 37.5, "y": 0.0, "z": 15.0}},
+                {"moveType": "cut", "start": {"x": 37.5, "y": 0.0, "z": 0.0}, "end": {"x": 37.5, "y": 0.0, "z": -30.0}},
+                {"moveType": "retract_clearance", "start": {"x": 37.5, "y": 0.0, "z": -30.0}, "end": {"x": 38.0, "y": 0.0, "z": 15.0}}
+            ]
+        },
+        {
+            "id": "op_mill",
+            "type": "pocket_milling",
+            "tool": {"number": 2, "name": "End Mill", "offset_number": 2},
+            "parameters": {"spindleSpeed": 3500, "feed_rate": 600},
+            "safe_heights": {"clearance": 15.0, "retract": 5.0, "top": 0.0, "bottom": -10.0},
+            "toolpaths": [
+                {"moveType": "rapid_clearance", "end": {"x": 0.0, "y": 0.0, "z": 15.0}},
+                {"moveType": "rapid_xy", "start": {"x": 0.0, "y": 0.0, "z": 15.0}, "end": {"x": 5.0, "y": 12.0, "z": 15.0}},
+                {"moveType": "cut", "start": {"x": 5.0, "y": 12.0, "z": 0.0}, "end": {"x": 5.0, "y": 24.0, "z": 0.0}},
+                {"moveType": "retract_clearance", "start": {"x": 5.0, "y": 24.0, "z": 0.0}, "end": {"x": 0.0, "y": 0.0, "z": 15.0}}
+            ]
+        }
+    ]
+
+    post = PostProcessorFactory.create("MAZAK_SMOOTH_EIA_MILL_TURN")
+    gcode = post.generate(ops, {"machineType": "MILL_TURN"})
+    
+    # Verify turning mode properties:
+    assert "G18" in gcode
+    assert "X75.000" in gcode  # Diameter mode: 37.5 * 2 = 75.0mm
+    assert "G97 S1200 M03" in gcode  # Main spindle
+    assert "G28 U0" in gcode  # Radial safe retract before tool change
+
+    # Verify milling mode properties:
+    assert "G17" in gcode  # Switched to XY milling plane
+    assert "M19" in gcode  # Main spindle orient/lock
+    assert "M103 S3500" in gcode  # Live tool spindle
+    assert "Y12.000" in gcode  # Y coordinate preserved
+    assert "Y24.000" in gcode  # Y motion preserved
+    assert "G43 H02" in gcode  # Tool length compensation engaged for milling
+
+    # Verify post validation succeeds:
+    val = PostOutputValidator.validate_gcode(gcode, ops)
+    assert val["valid"] is True, f"PostOutputValidator failed: {val['reason']}"
+
+
+

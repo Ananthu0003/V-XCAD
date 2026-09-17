@@ -3,7 +3,6 @@ import { prisma } from '@/lib/prisma';
 import { requireSession } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
-    // VEX-2A-003: Require authenticated session
     if (!(await requireSession())) {
         return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
     }

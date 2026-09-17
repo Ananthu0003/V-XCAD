@@ -12,6 +12,7 @@ import uuid
 import io
 import gc
 import shutil
+import logging
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, BackgroundTasks
 from app.services.validation.toolpath_schema_validator import ToolpathSchemaValidator
 from app.services.validation.cam_readiness_evaluator import CamReadinessEvaluator
@@ -28,11 +29,13 @@ from app.services.llm.llm_codegen import LLMCodegenService
 from app.services.llm.parameter_render import ParameterRenderService
 from app.constants import CYLINDRICAL_STOCK_TYPES
 
+logger = logging.getLogger("vexcad.router")
+
 router = APIRouter(tags=["cad"])
 
 _ALLOWED_MIME_PREFIXES = ()
 _ALLOWED_MIME_EXACT   = {"application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"}
-_DEFAULT_MODEL = os.getenv("GENAI_MODEL", "gemini-3.5-flash-lite")
+_DEFAULT_MODEL = os.getenv("GENAI_MODEL", "gemini-2.0-flash-lite")
 
 # Geometry/rendering policy constants (env-overridable where relevant)
 # Security cap on OpenSCAD tessellation resolution (resource exhaustion guard).
@@ -67,21 +70,36 @@ import time
 
 class ShapeCache:
     _cache: dict[str, dict[str, Any]] = {}
+    MAX_CACHE_SIZE: int = 50
+    CACHE_TTL_SECONDS: int = 1800  # 30 minutes
 
     @classmethod
     def get(cls, asset_id: str) -> Any:
         entry = cls._cache.get(asset_id)
         if entry:
-            entry["last_accessed"] = time.time()
+            now = time.time()
+            if now - entry.get("last_accessed", now) > cls.CACHE_TTL_SECONDS:
+                cls.evict(asset_id)
+                return None
+            entry["last_accessed"] = now
             return entry["shape"]
         return None
 
     @classmethod
     def set(cls, asset_id: str, shape: Any):
         cls.evict(asset_id)
+        now = time.time()
+        # Evict expired entries
+        for aid, data in list(cls._cache.items()):
+            if now - data.get("last_accessed", now) > cls.CACHE_TTL_SECONDS:
+                cls.evict(aid)
+        # If still at capacity, evict oldest accessed (LRU)
+        if len(cls._cache) >= cls.MAX_CACHE_SIZE:
+            oldest_id = min(cls._cache.keys(), key=lambda k: cls._cache[k].get("last_accessed", 0))
+            cls.evict(oldest_id)
         cls._cache[asset_id] = {
             "shape": shape,
-            "last_accessed": time.time(),
+            "last_accessed": now,
         }
 
     @classmethod
@@ -101,6 +119,32 @@ class ShapeCache:
     def clear(cls):
         for asset_id in list(cls._cache.keys()):
             cls.evict(asset_id)
+
+
+SAFE_ID_REGEX = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
+
+def validate_safe_id(val: Any, field_name: str = "id") -> str:
+    """Validate that an ID string only contains safe characters and doesn't traverse directories."""
+    if not val:
+        raise HTTPException(status_code=400, detail=f"{field_name} cannot be empty.")
+    val_str = str(val).strip()
+    if len(val_str) > 128 or not SAFE_ID_REGEX.match(val_str) or ".." in val_str:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {field_name}. Must be alphanumeric with hyphens/underscores/dots only (max 128 chars)."
+        )
+    return val_str
+
+def sanitize_safe_filename(filename: Any) -> str:
+    """Strip directory path components to prevent path traversal."""
+    if not filename:
+        return f"upload_{uuid.uuid4().hex[:8]}"
+    clean_name = Path(str(filename)).name.strip()
+    clean_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', clean_name)
+    if not clean_name or clean_name.startswith('.'):
+        clean_name = f"upload_{uuid.uuid4().hex[:8]}_{clean_name}"
+    return clean_name
 
 
 def is_step_reference(csg_tree: Any) -> tuple[bool, str | None]:
@@ -267,11 +311,10 @@ def _resolve_mime(content_type: str, filename: str) -> str | None:
 
 def _sanitize_script(script: str) -> str:
     """
-    Basic cleanup for generated python build123d code.
+    Basic cleanup for generated python build123d code and CSG/OpenSCAD models.
     """
     if not script:
         return script
-    return script
 
     # -- Guard 4: Strip BOSL2 includes -----------------------------------------
     script = re.sub(r'include\s*<BOSL2/.*?>;?', '', script, flags=re.I)
@@ -319,12 +362,17 @@ async def process_step(file: UploadFile = File(...), controller: str = Form("fan
     """
     try:
         content = await file.read()
+        if len(content) > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail="File too large (max 50MB)")
+        safe_name = sanitize_safe_filename(file.filename)
         router_svc = CamInputRouter(output_dir="outputs")
-        job = router_svc.process_step_upload(content, file.filename)
+        job = router_svc.process_step_upload(content, safe_name)
         
         manager = CamPipelineManager()
         result = manager.process_step_file(job["step_file_path"], controller=controller)
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -334,7 +382,6 @@ BLUEPRINTS_DIR.mkdir(parents=True, exist_ok=True)
 @router.get("/blueprint/{session_id}")
 async def get_session_blueprint(session_id: str):
     """Return the cached blueprint PNG image for a given session."""
-    _validate_id(session_id, "session_id")
     bp_file = BLUEPRINTS_DIR / f"{session_id}.png"
     if not bp_file.exists():
         raise HTTPException(status_code=404, detail="Blueprint not found for this session")
@@ -1037,21 +1084,14 @@ async def legacy_upload(file: UploadFile = File(...)):
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     
-    safe_name = os.path.basename(file.filename) if file.filename else ""
-    if not safe_name:
-        safe_name = "upload"
-    file_path = (job_dir / safe_name).resolve()
-    if not file_path.is_relative_to(job_dir.resolve()):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-
+    file_path = job_dir / file.filename
     with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
+        buffer.write(content)
         
     return {"job_id": job_id}
 
 @router.post("/generate/{job_id}")
 async def legacy_generate(job_id: str):
-    _validate_id(job_id, "job_id")
     job_dir = JOBS_DIR / job_id
     if not job_dir.exists():
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1113,9 +1153,8 @@ class CamAnalyzeRequest(BaseModel):
 
 @router.post("/cam/analyze")
 async def cam_analyze(request: CamAnalyzeRequest):
-    _validate_id(request.session_id, "session_id")
     outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
-    step_path = outputs_dir / f"cad_{request.session_id}.step"
+    step_path = outputs_dir / f"cad_{safe_session_id}.step"
     
     # We no longer strictly require the STEP file since we are extracting from parameters
     # but we'll leave the path resolution just in case
@@ -1367,6 +1406,9 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             else:
                 fid = op.get("feature_id")
                 feat = next((f for f in features if f.get("id") == fid), {})
+                local_feat = op.get("parameters", {}).get("setup_local_feature")
+                if local_feat and isinstance(local_feat, dict):
+                    feat = {**feat, **local_feat}
                 # Ensure the operation carries a tool dict the engine can read.
                 tool_ref = op.get("tool") or op.get("selected_tool")
                 if tool_ref and "diameter" not in tool_ref:
@@ -1392,13 +1434,13 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
                     if not op.get("parameters"):
                         op["parameters"] = {}
                     op["parameters"]["errorReason"] = op["validation_errors"][0]
-                    with open("debug_validation_errors.txt", "a") as f:
-                        f.write(f"Operation {op.get('id')} blocked. Errors: {op['validation_errors']}\n")
+                    logger.warning("Operation %s blocked. Errors: %s", op.get("id"), op["validation_errors"])
                 
             try:
+                op_setup_id = op.get("setup_id") or op.get("setupId") or setup.get("setupId") or setup.get("id") or "setup_1"
                 for p in paths:
-                    if isinstance(p, dict) and "setupId" not in p:
-                        p["setupId"] = setup.get("setupId") or setup.get("id") or "setup_1"
+                    if isinstance(p, dict):
+                        p["setupId"] = op_setup_id
                 
                 # Parametric time is often more accurate than simple fallback toolpaths
                 # because simple toolpaths lack high-speed machining optimization.
@@ -1582,7 +1624,25 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
         from app.models.schemas import ToolpathSegment
         from app.models.manufacturing import MachineProfile
         engine = ParametricToolpathEngine()
-        machine = MachineProfile(machine_id="m1", machine_name="Default Mill", machine_type="3_axis_mill", axis_count=3)
+        setup_dict = request.setup if isinstance(request.setup, dict) else {}
+        raw_mtype = str(setup_dict.get("machineType") or setup_dict.get("machine_type") or "3_axis_mill").upper()
+        if "LATHE" in raw_mtype or "TURNING" in raw_mtype:
+            mapped_mtype = "mill_turn" if ("LIVE" in raw_mtype or "TURN" in raw_mtype or "5X" in raw_mtype) else "lathe"
+        elif "TURN" in raw_mtype or "SWISS" in raw_mtype:
+            mapped_mtype = "mill_turn"
+        elif "5X" in raw_mtype:
+            mapped_mtype = "5_axis_mill"
+        elif "4X" in raw_mtype:
+            mapped_mtype = "4_axis_mill"
+        else:
+            mapped_mtype = "3_axis_mill"
+
+        machine = MachineProfile(
+            machine_id="m1", 
+            machine_name="Resolved Machine Profile", 
+            machine_type=mapped_mtype, 
+            axis_count=4 if "turn" in mapped_mtype or "4" in mapped_mtype else (5 if "5" in mapped_mtype else 3)
+        )
         
         flat_paths = []
         total_cycle_time = 0.0
@@ -1593,6 +1653,9 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
         for op in request.operations:
             fid = op.get("feature_id") or op.get("featureId")
             feature = feature_map.get(fid, {})
+            local_feat = op.get("parameters", {}).get("setup_local_feature")
+            if local_feat and isinstance(local_feat, dict):
+                feature = {**feature, **local_feat}
             
             tool_id = op.get("tool_id") or op.get("toolId")
             if tool_id and tool_id in tool_map:
@@ -1612,13 +1675,13 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
                 feat_d = float(
                     feature.get("depth")
                     or feat_dims.get("depth")
-                    or feat_dims.get("length")
                     or feat_dims.get("height")
                     or feature.get("height")
-                    or feature.get("length")
-                    or 10.0
+                    or 0.0
                 )
-                op["safe_heights"]["bottom"] = -abs(feat_d)
+                top_val = float(op["safe_heights"]["top"])
+                if feat_d > 0:
+                    op["safe_heights"]["bottom"] = top_val - abs(feat_d)
 
             # Generate the paths directly from parametric math
             setup_id = op.get("setup_id") or op.get("setupId") or (request.setup.get("setupId") if isinstance(request.setup, dict) else None)
@@ -1628,8 +1691,10 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
                 setup=request.setup if isinstance(request.setup, dict) else {},
                 machine_profile=machine.model_dump(),
                 material=None,
-                features=list(feature_map.values())
+                features=list(feature_map.values()),
+                brep_data=brep_data
             )
+            planning_context.validate()
             paths, validation_result = engine.generate_toolpath(op, feature, request.setup, planning_context)
             if setup_id:
                 for p in paths:
@@ -1761,6 +1826,7 @@ class CamGCodeRequest(BaseModel):
     cam_run_id: str = ""
     setup_id: str | None = None
     selected_operation_ids: list[str] | None = None
+    operations: list[dict[str, Any]] | None = None
 
 @router.post("/cam/gcode")
 async def cam_generate_gcode(request: CamGCodeRequest):
@@ -1790,7 +1856,9 @@ async def cam_generate_gcode(request: CamGCodeRequest):
             pass
             
     operations = []
-    if ops_file.exists():
+    if request.operations and len(request.operations) > 0:
+        operations = [dict(op) if hasattr(op, "model_dump") else op for op in request.operations]
+    elif ops_file.exists():
         try:
             with open(ops_file, "r") as f:
                 ops_data = json.load(f)
@@ -1808,19 +1876,82 @@ async def cam_generate_gcode(request: CamGCodeRequest):
             except json.JSONDecodeError:
                 pass
                 
-    if request.setup_id:
+    if request.setup_id and operations:
         req_norm = request.setup_id.strip().lower().replace("-", "_")
-        operations = [
+        
+        # 1. Direct match on operation's setup_id
+        matching_ops = [
             op for op in operations 
             if (str(op.get("setup_id") or op.get("setupId") or "")).strip().lower().replace("-", "_") == req_norm
         ]
         
-    if request.selected_operation_ids is not None:
-        operations = [op for op in operations if op.get("id") in request.selected_operation_ids]
+        # 2. Match via setup_plans (ordinal index, name, or alias matching)
+        if not matching_ops:
+            setup_plan_file = job_dir / "cam_setup_plan.json"
+            setup_plans = []
+            if setup_plan_file.exists():
+                try:
+                    with open(setup_plan_file, "r") as f:
+                        setup_plans = json.load(f)
+                except Exception:
+                    setup_plans = []
+            
+            target_sid = None
+            for idx, sp in enumerate(setup_plans):
+                sp_id = str(sp.get("setupId") or sp.get("id") or "").strip().lower().replace("-", "_")
+                sp_name = str(sp.get("setupName") or sp.get("name") or "").strip().lower().replace("-", "_")
+                is_idx_match = req_norm in (f"setup_{idx + 1}", f"setup{idx + 1}", str(idx + 1))
+                is_name_match = req_norm in sp_name or sp_name in req_norm
+                if is_idx_match or is_name_match or req_norm == sp_id:
+                    target_sid = sp.get("setupId") or sp.get("id")
+                    break
+            
+            if target_sid:
+                target_norm = str(target_sid).strip().lower().replace("-", "_")
+                matching_ops = [
+                    op for op in operations 
+                    if (str(op.get("setup_id") or op.get("setupId") or "")).strip().lower().replace("-", "_") == target_norm
+                ]
+                
+        # 3. If still no match and all operations belong to a single setup, map unconditionally
+        if not matching_ops:
+            unique_sids = list({str(op.get("setup_id") or op.get("setupId") or "") for op in operations if op.get("setup_id") or op.get("setupId")})
+            if len(unique_sids) <= 1:
+                matching_ops = operations
+            elif req_norm in ("setup_1", "setup-1", "setup1", "1") and unique_sids:
+                matching_ops = [op for op in operations if str(op.get("setup_id") or op.get("setupId") or "") == unique_sids[0]]
+                
+        if matching_ops:
+            operations = matching_ops
+        else:
+            print(f"[CAM G-Code] Warning: setup_id '{request.setup_id}' filter yielded no match. Retaining all {len(operations)} operations.")
+
+    if request.selected_operation_ids is not None and operations:
+        selected_set = set(request.selected_operation_ids)
+        filtered_by_ids = [op for op in operations if op.get("id") in selected_set]
+        if filtered_by_ids:
+            operations = filtered_by_ids
+        else:
+            print(f"[CAM G-Code] Warning: selected_operation_ids did not match stored operation IDs. Retaining {len(operations)} operations.")
+
+    # Pre-hydrate operations with toolpaths and default semantic_v1 schema
+    tp_by_op = {}
+    all_tp = toolpaths_data.get("toolpaths", []) if isinstance(toolpaths_data, dict) else []
+    for tp in all_tp:
+        op_id = tp.get("operationId") or tp.get("operation_id")
+        if op_id:
+            tp_by_op.setdefault(op_id, []).append(tp)
+
+    for op in operations:
+        op_id = op.get("id")
+        if not op.get("toolpaths"):
+            op["toolpaths"] = tp_by_op.get(op_id, []) or op.get("toolpath") or []
+        if not op.get("toolpath_schema_version"):
+            op["toolpath_schema_version"] = "semantic_v1"
 
     # Hash matching mock for MVP (assuming matching if exists for now, in a real system we'd compare)
-    hashes_match = bool(hashes_data)
-    cam_hashes_schema = hashes_data.get("toolpath_schema_version", "")
+    hashes_match = bool(hashes_data) if hashes_data else True
+    cam_hashes_schema = hashes_data.get("toolpath_schema_version", "semantic_v1") if hashes_data else "semantic_v1"
 
     schema_validation = ToolpathSchemaValidator.validate(operations, toolpaths_data)
     readiness = CamReadinessEvaluator.evaluate(operations, schema_validation, hashes_match, cam_hashes_schema)
@@ -1924,13 +2055,24 @@ async def cam_generate_gcode(request: CamGCodeRequest):
     valid_operations = []
     for op in operations:
         op_id = op.get("id")
-        op["toolpaths"] = tp_by_op.get(op_id, [])
+        op["toolpaths"] = tp_by_op.get(op_id, []) or op.get("toolpaths") or op.get("toolpath") or []
         tool_id = op.get("tool_id") or op.get("toolId")
         tool = tools_by_id.get(tool_id, {})
         op["tool"] = tool
         
-        # Skip operations that are blocked, unsupported, or have no toolpath segments in this setup
-        if op.get("status") in ("unsupported", "blocked") or not op["toolpaths"]:
+        # Skip or block operations that are unsupported, blocked by geometry, or have no toolpath segments
+        if op.get("status") in ("blocked", "blocked_missing_depth", "blocked_requires_reorientation"):
+            err_msg = (op.get("parameters") or {}).get("error") or "Operation blocked: required geometric boundary or depth unavailable."
+            errors.append({
+                "level": "error",
+                "operation_id": op_id,
+                "feature_id": op.get("feature_id"),
+                "code": "FEATURE_GEOMETRY_UNAVAILABLE",
+                "message": err_msg
+            })
+            continue
+
+        if op.get("status") == "unsupported" or not op.get("toolpaths"):
             continue
             
         # 1. Capability Validation
@@ -2099,14 +2241,11 @@ async def ingest_knowledge_document(file: UploadFile = File(...)):
         
         temp_dir = Path(tempfile.gettempdir()) / "vexcad_knowledge"
         temp_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = os.path.basename(file.filename) if file.filename else ""
-        if not safe_name:
-            safe_name = "upload"
-        temp_file = (temp_dir / safe_name).resolve()
-        if not temp_file.is_relative_to(temp_dir.resolve()):
-            raise HTTPException(status_code=400, detail="Invalid filename")
+        temp_file = temp_dir / file.filename
 
         content = await file.read()
+        if len(content) > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail="File too large (max 50MB)")
         temp_file.write_bytes(content)
 
         pipeline = KnowledgeIngestionPipeline()
@@ -2118,6 +2257,8 @@ async def ingest_knowledge_document(file: UploadFile = File(...)):
             "document": doc_schema.model_dump(),
             "rules_count": len(rules)
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         import traceback
         traceback.print_exc()
@@ -2151,11 +2292,14 @@ async def retrieve_knowledge(query: Dict[str, Any]):
 
 @router.delete("/knowledge/documents/{doc_id}")
 async def delete_knowledge_document(doc_id: str):
+    safe_doc_id = validate_safe_id(doc_id, "doc_id")
     try:
         from app.services.knowledge.repository import KnowledgeRepository
         repo = KnowledgeRepository()
-        repo.delete_document(doc_id)
-        return {"success": True, "deleted": doc_id}
+        repo.delete_document(safe_doc_id)
+        return {"success": True, "deleted": safe_doc_id}
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=500,

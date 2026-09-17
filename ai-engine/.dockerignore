@@ -14,11 +14,22 @@ env/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+.coverage
+htmlcov/
 tests/
+test_tmp/
+
+# Logs and debug outputs
 logs/
 
 # Outputs are mounted as a Docker volume — don't bake them in
 outputs/
+
+# Data fixtures (STEP files, etc.) — not needed in production
+data/
+
+# Utility scripts — not needed in production
+scripts/
 
 # IDE / OS
 .idea/
@@ -38,3 +49,12 @@ docs/
 # Local env files (secrets are injected via docker-compose environment:)
 .env
 .env.*
+
+# Scratch / debug files at root
+scratch/
+*.step
+scratch_*.py
+debug_*.txt
+diff_analysis.txt
+last_resp.txt
+log_payload.py

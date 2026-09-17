@@ -19,14 +19,17 @@ const opTypeLabels: Record<string, string> = {
     'facing': 'Facing',
     'facing_turning': 'Face Turning',
     'pocket': '2D Pocket',
+    'pocketing': '2D Pocket',
     '2d_contour': '2D Contour',
     'drilling': 'Drilling',
     'chamfer': 'Chamfer',
+    'chamfer_milling': 'Chamfer',
     'od_turning': 'OD Rough Turning',
     'od_finish_turning': 'OD Finish Turning',
     'id_boring': 'ID Boring',
     'grooving': 'Grooving',
     'parting_off': 'Parting Off',
+    'boss_clearing': 'Boss Clearing',
 };
 
 export function OperationTreeSection({ 
@@ -69,7 +72,7 @@ export function OperationTreeSection({
         <div className="flex flex-col gap-3 h-full">
             <div className="flex flex-col gap-1 rounded-2xl border border-border dark:border-white/10 bg-accent/40 dark:bg-black/40 p-2 flex-1 overflow-hidden">
                 <div className="px-3 py-1 flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Setup 1</span>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Setup</span>
                     <div className="group relative">
                         <button className="flex items-center justify-center p-1 hover:bg-blue-500/20 hover:text-blue-500 rounded text-muted-foreground transition-colors">
                             <Plus className="size-3.5" />

@@ -1,8 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 
-import { getSession } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getFastApiUrl, fetchWithTimeout } from '@/lib/api-config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -73,13 +74,7 @@ function extractErrorFromUnknown(input: unknown, fallback: string): { message: s
 	return { message: fallback };
 }
 
-function getFastApiUrl(): string {
-	const value = process.env.FASTAPI_URL?.trim();
-	if (!value) {
-		throw new Error('FASTAPI_URL is not configured');
-	}
-	return value.replace(/\/$/, '');
-}
+
 
 function toSessionId(outputBasename: string): string {
 	const trimmed = outputBasename.trim();
@@ -129,31 +124,13 @@ function toFastApiRenderRequest(value: unknown): FastApiRenderRequest | null {
 
 export async function POST(request: Request): Promise<Response> {
 	// ── VEX-2A-002: Require authenticated session ────────────────────────────
-	// Unauthenticated requests must be rejected before any body parsing or
-	// forwarding to the AI engine, preventing arbitrary code execution by
-	// anonymous callers.
-	const authSession = await getSession();
-	if (!authSession?.userId) {
+	const authenticatedUserId = await requireSession();
+	if (!authenticatedUserId) {
 		return NextResponse.json(
 			buildError('Authentication required.', 'Log in to use the render endpoint.'),
 			{ status: 401 }
 		);
 	}
-
-	// Validate the authenticated user still exists in the database.
-	const userExists = await prisma.user.findUnique({
-		where: { id: authSession.userId },
-	});
-	if (!userExists) {
-		return NextResponse.json(
-			buildError('Authentication required.', 'Log in to use the render endpoint.'),
-			{ status: 401 }
-		);
-	}
-
-	const authenticatedUserId = authSession.userId;
-	// ── End VEX-2A-002 auth gate ─────────────────────────────────────────────
-
 	let body: any = null;
 	try {
 		body = await request.json();
@@ -224,26 +201,31 @@ export async function POST(request: Request): Promise<Response> {
 
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/render`, {
-			method: 'POST',
-			headers: {
-				'content-type': 'application/json',
-				accept: 'application/json',
+		upstream = await fetchWithTimeout(
+			`${getFastApiUrl()}/render`,
+			{
+				method: 'POST',
+				headers: {
+					'content-type': 'application/json',
+					accept: 'application/json',
+				},
+				// Forward FastAPI schema fields including calculated iteration version
+				body: JSON.stringify({
+					...mappedPayload,
+					version: nextVersion,
+				}),
+				cache: 'no-store',
 			},
-			// Forward FastAPI schema fields including calculated iteration version
-			body: JSON.stringify({
-				...mappedPayload,
-				version: nextVersion,
-			}),
-			cache: 'no-store',
-		});
-	} catch (error) {
+			180000
+		);
+	} catch (error: any) {
+		const isTimeout = error?.name === 'AbortError';
 		return NextResponse.json(
 			buildError(
-				'Unable to connect to AI engine render endpoint.',
+				isTimeout ? 'CAD model rendering timed out after 180 seconds.' : 'Unable to connect to AI engine render endpoint.',
 				error instanceof Error ? error.message : undefined
 			),
-			{ status: 502 }
+			{ status: isTimeout ? 504 : 502 }
 		);
 	}
 
@@ -306,52 +288,68 @@ export async function POST(request: Request): Promise<Response> {
 		// 2. Archive this immutable iteration snapshot (only for actual edits/prompts, not restores)
 		if (iterationSource !== 'restore' && !body.is_restore) {
 			if ((prisma as any).cadIteration) {
-				await (prisma as any).cadIteration.create({
-				data: {
-					sessionId: mappedPayload.session_id,
-					version: nextVersion,
-					prompt: iterationPrompt,
-					source: iterationSource,
-					pythonScript: mappedPayload.python_script,
-					parameters: parametersJson,
-					annotations: artifacts && artifacts.annotations ? (artifacts.annotations as Prisma.InputJsonValue) : Prisma.DbNull,
+				await (prisma as any).cadIteration.upsert({
+					where: {
+						sessionId_version: {
+							sessionId: mappedPayload.session_id,
+							version: nextVersion,
+						},
+					},
+					update: {
+						prompt: iterationPrompt,
+						source: iterationSource,
+						pythonScript: mappedPayload.python_script,
+						parameters: parametersJson,
+						annotations: artifacts && artifacts.annotations ? (artifacts.annotations as Prisma.InputJsonValue) : Prisma.DbNull,
+						stlUrl,
+						stepUrl,
+						dxfUrl,
+					},
+					create: {
+						sessionId: mappedPayload.session_id,
+						version: nextVersion,
+						prompt: iterationPrompt,
+						source: iterationSource,
+						pythonScript: mappedPayload.python_script,
+						parameters: parametersJson,
+						annotations: artifacts && artifacts.annotations ? (artifacts.annotations as Prisma.InputJsonValue) : Prisma.DbNull,
+						stlUrl,
+						stepUrl,
+						dxfUrl,
+					},
+				});
+			} else {
+				const itId = crypto.randomUUID();
+				const paramStr = JSON.stringify(parametersJson || {});
+				const annStr = artifacts && artifacts.annotations ? JSON.stringify(artifacts.annotations) : null;
+				await prisma.$executeRawUnsafe(
+					`INSERT INTO "CadIteration" ("id", "sessionId", "version", "prompt", "source", "pythonScript", "parameters", "annotations", "stlUrl", "stepUrl", "dxfUrl", "createdAt")
+					 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, NOW())
+					 ON CONFLICT ("sessionId", "version") DO UPDATE SET
+					   "prompt" = EXCLUDED."prompt",
+					   "source" = EXCLUDED."source",
+					   "pythonScript" = EXCLUDED."pythonScript",
+					   "parameters" = EXCLUDED."parameters",
+					   "annotations" = EXCLUDED."annotations",
+					   "stlUrl" = EXCLUDED."stlUrl",
+					   "stepUrl" = EXCLUDED."stepUrl",
+					   "dxfUrl" = EXCLUDED."dxfUrl"`,
+					itId,
+					mappedPayload.session_id,
+					nextVersion,
+					iterationPrompt,
+					iterationSource,
+					mappedPayload.python_script,
+					paramStr,
+					annStr,
 					stlUrl,
 					stepUrl,
-					dxfUrl,
-				},
-			});
-		} else {
-			const itId = crypto.randomUUID();
-			const paramStr = JSON.stringify(parametersJson || {});
-			const annStr = artifacts && artifacts.annotations ? JSON.stringify(artifacts.annotations) : null;
-			await prisma.$executeRawUnsafe(
-				`INSERT INTO "CadIteration" ("id", "sessionId", "version", "prompt", "source", "pythonScript", "parameters", "annotations", "stlUrl", "stepUrl", "dxfUrl", "createdAt")
-				 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, NOW())
-				 ON CONFLICT ("sessionId", "version") DO UPDATE SET
-				   "prompt" = EXCLUDED."prompt",
-				   "source" = EXCLUDED."source",
-				   "pythonScript" = EXCLUDED."pythonScript",
-				   "parameters" = EXCLUDED."parameters",
-				   "annotations" = EXCLUDED."annotations",
-				   "stlUrl" = EXCLUDED."stlUrl",
-				   "stepUrl" = EXCLUDED."stepUrl",
-				   "dxfUrl" = EXCLUDED."dxfUrl"`,
-				itId,
-				mappedPayload.session_id,
-				nextVersion,
-				iterationPrompt,
-				iterationSource,
-				mappedPayload.python_script,
-				paramStr,
-				annStr,
-				stlUrl,
-				stepUrl,
-				dxfUrl
-			);
+					dxfUrl
+				);
+			}
 		}
-	}
 	} catch (dbErr) {
-		console.error('Failed to save iteration to database:', dbErr);
+		console.error('[Render Route] Warning: Failed to persist iteration to database:', dbErr);
 	}
 
 	const normalizedResponse = {

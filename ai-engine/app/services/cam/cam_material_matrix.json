@@ -339,6 +339,25 @@
       "costPerKg": 250.0
     },
     {
+      "id": "hss_m2",
+      "name": "High Speed Steel HSS (M2 / 58-62 HRC)",
+      "category": "tool_steels",
+      "categoryLabel": "Tool Steels & Hardened Steels",
+      "machinabilityRating": 25,
+      "cuttingSpeedMMin": 35,
+      "feedPerToothMm": 0.03,
+      "coolantRequirement": "flood",
+      "compatibleToolMaterials": [
+        "carbide",
+        "cbn",
+        "ceramic"
+      ],
+      "densityGcm3": 8.16,
+      "hardnessHb": 600,
+      "description": "Molybdenum-tungsten high speed tool steel hardened to 58-64 HRC for precision punches and tooling.",
+      "costPerKg": 350.0
+    },
+    {
       "id": "hardened_steel",
       "name": "Hardened Steel (50-65 HRC)",
       "category": "tool_steels",

@@ -73,7 +73,7 @@ class ToolRecommendationEngine:
         req_type = "flat_end_mill"
         if operation_type in ("drilling", "peck_drilling"):
             req_type = "drill"
-        elif operation_type == "boring":
+        elif operation_type in ("boring", "id_boring"):
             req_type = "boring_bar"
         elif operation_type == "helical_bore_milling":
             req_type = "flat_end_mill"  # Any end mill smaller than the bore works
@@ -83,9 +83,9 @@ class ToolRecommendationEngine:
             req_type = "tap"
         elif operation_type == "facing":
             req_type = "face_mill"
-        elif operation_type in ("od_turning", "id_turning", "turning", "facing_turning"):
+        elif operation_type in ("od_turning", "id_turning", "turning", "facing_turning", "od_finish_turning"):
             req_type = "turning_tool"
-        elif operation_type in ("parting", "grooving"):
+        elif operation_type in ("parting", "parting_off", "grooving"):
             req_type = "cut_off_tool"
         elif operation_type == "knurling":
             req_type = "knurling_tool"
@@ -175,6 +175,10 @@ class ToolRecommendationEngine:
                         
                     max_feature_tool_dia = _get_dim(feature, ["width", "diameter", "size", "length"])
                     if operation_type in ("pocketing", "pocket_milling", "slot_milling", "cavity"):
+                        min_passage = feature.get("min_passage_width") or feature.get("dimensions", {}).get("min_passage_width")
+                        if min_passage and float(min_passage) > 0 and t.diameter >= float(min_passage):
+                            rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) >= feature passage width ({round(float(min_passage), 2)}mm)")
+                            continue
                         if max_feature_tool_dia > 0 and t.diameter > max_feature_tool_dia:
                             rejections.append(f"{t.name}: tool diameter ({t.diameter}mm) > pocket size ({max_feature_tool_dia}mm)")
                             continue
@@ -225,12 +229,15 @@ class ToolRecommendationEngine:
                             score -= abs(ideal_dia - t.diameter) * 2.0
                         else:
                             score += t.diameter * 2.0
-                    elif operation_type in ("od_turning", "turning"):
+                    elif operation_type in ("od_turning", "turning", "od_finish_turning"):
                         if stock_size > 0 and stock_size < 15:
                             ideal_dia = max(stock_size * 0.6, 1.5)
                             score -= abs(ideal_dia - t.diameter) * 2.0
                         else:
                             score -= abs(target_dia - t.diameter) if target_dia > 0 else 0.0
+                    elif operation_type in ("pocketing", "pocket_milling", "slot_milling", "cavity"):
+                        ideal_dia = (max_feature_tool_dia * 0.65) if max_feature_tool_dia > 0 else 6.0
+                        score -= abs(ideal_dia - t.diameter) * 3.0
                     else:
                         score += t.diameter
                         
@@ -257,12 +264,13 @@ class ToolRecommendationEngine:
                     compatible_materials=["all"],
                     supported_machines=["all"]
                 )
-            elif operation_type in ("od_turning", "turning", "facing_turning"):
+            elif operation_type in ("od_turning", "turning", "facing_turning", "od_finish_turning"):
+                insert_r = float(feature.get("dimensions", {}).get("fillet_radius") or 0.4)
                 best_tool = ToolProfile(
                     tool_id="tool_od_turn_auto",
-                    name="Micro OD Turning Tool",
+                    name="Carbide OD Turning Insert (0.4mm Nose Radius)",
                     type="turning_tool",
-                    diameter=max(min(stock_size, 6.0), 1.0) if stock_size > 0 else 4.0,
+                    diameter=max(min(stock_size, 12.0), 1.0) if stock_size > 0 else 6.0,
                     flute_count=1,
                     cutting_length=max(target_depth * 1.5, 10.0),
                     stickout=25.0,
@@ -284,8 +292,17 @@ class ToolRecommendationEngine:
                     supported_machines=["all"]
                 )
             else:
-                synth_dia = min(feat_size * 0.6, 6.0) if feat_size > 0 else 3.0
-                synth_dia = max(synth_dia, 0.5)
+                min_passage = feature.get("min_passage_width") or feature.get("dimensions", {}).get("min_passage_width")
+                min_corner = _get_dim(feature, ["min_radius", "corner_radius"])
+                if min_passage and float(min_passage) > 0:
+                    synth_dia = min(float(min_passage) * 0.7, 6.0)
+                elif min_corner > 0:
+                    synth_dia = min(min_corner * 1.6, 6.0)
+                elif feat_size > 0:
+                    synth_dia = min(feat_size * 0.6, 6.0)
+                else:
+                    synth_dia = 3.0
+                synth_dia = round(max(synth_dia, 0.5), 2)
                 best_tool = ToolProfile(
                     tool_id=f"tool_end_mill_{int(synth_dia*10)}",
                     name=f"{synth_dia}mm Flat End Mill",
@@ -293,24 +310,38 @@ class ToolRecommendationEngine:
                     diameter=synth_dia,
                     flute_count=2,
                     cutting_length=max(target_depth * 1.5, 10.0),
-                    stickout=30.0,
+                    stickout=max(target_depth * 1.2, 35.0),
                     compatible_materials=["all"],
                     supported_machines=["all"]
                 )
 
-        reason = f"Chosen {best_tool.name} (Dia {best_tool.diameter}mm) as it supports material and feature dimensions."
+        reason = f"Chosen {best_tool.name} as it supports material and feature dimensions."
         if preferred_tool_id:
             reason = "User-preferred tool validated."
         
-        # Calculate Feeds & Speeds based on material & tool physics
-        vc = material.cutting_speed or 120.0
-        if best_tool.diameter > 0:
-            ideal_rpm = (vc * 1000) / (math.pi * best_tool.diameter)
+        # Calculate Feeds & Speeds based on material & tool/workpiece physics
+        vc = getattr(material, "cutting_speed", 120.0) or 120.0
+        is_turning_op = operation_type in ("od_turning", "turning", "facing_turning", "od_finish_turning", "id_boring", "grooving", "parting_off")
+        
+        # In turning, cutting speed is governed by workpiece diameter; in milling, by tool diameter
+        effective_cutting_dia = 0.0
+        if is_turning_op:
+            effective_cutting_dia = target_dia if target_dia > 0 else (stock_size if stock_size > 0 else best_tool.diameter)
         else:
-            ideal_rpm = 1000.0
+            effective_cutting_dia = best_tool.diameter
             
-        fz = material.feed_per_tooth or 0.05
-        ideal_feed = ideal_rpm * max(getattr(best_tool, 'flute_count', 2), 1) * fz
+        if effective_cutting_dia > 0:
+            ideal_rpm = (vc * 1000) / (math.pi * effective_cutting_dia)
+        else:
+            ideal_rpm = 1200.0
+            
+        if is_turning_op:
+            fz = getattr(material, "feed_per_rev", None) or max((getattr(material, "feed_per_tooth", 0.05) or 0.05) * 3.5, 0.18)
+            flutes = 1
+        else:
+            fz = getattr(material, "feed_per_tooth", 0.05) or 0.05
+            flutes = max(getattr(best_tool, 'flute_count', 2), 1)
+        ideal_feed = ideal_rpm * flutes * fz
         
         status = "ready"
         max_rpm = getattr(machine, 'spindle_limits', {}).get("max_rpm", 10000) if hasattr(machine, 'spindle_limits') else 10000
@@ -320,11 +351,10 @@ class ToolRecommendationEngine:
         feed = min(ideal_feed, max_feed)
         
         # Derive granular feeds from material config instead of hardcoded scalars
-        # Fallbacks dynamically calculate safe offsets if schema properties are missing
         plunge_fz = getattr(material, "plunge_feed_per_tooth", None)
         if plunge_fz is None:
             plunge_fz = fz * 0.5
-        ideal_plunge_feed = ideal_rpm * max(getattr(best_tool, 'flute_count', 2), 1) * plunge_fz
+        ideal_plunge_feed = ideal_rpm * flutes * plunge_fz
         
         entry_factor = getattr(material, "entry_feed_factor", None) or 0.8
         lead_in_factor = getattr(material, "lead_in_feed_factor", None) or 0.5

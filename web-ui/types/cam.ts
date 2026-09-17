@@ -105,6 +105,9 @@ export type SetupSettings = {
     clampingAllowance?: number;
     clampingPosition?: 'top' | 'center' | 'bottom';
     fixtureClearance?: number;
+    modelBounds?: { min: [number, number, number]; max: [number, number, number] };
+    topology?: { bounds: number[] };
+    [key: string]: any;
 };
 
 export type FeatureMachiningInfo = {
@@ -127,7 +130,18 @@ export type CamSetupPlan = {
     setupType: string;
     toolAxis: [number, number, number];
     workCoordinateSystem: string;
-    modelToSetupTransform?: number[];
+    modelToSetupTransform?: number[] | number[][];
+    stockTopZ?: number;
+    stockBottomZ?: number;
+    resolvedStock?: {
+        bounds?: { min: [number, number, number]; max: [number, number, number] };
+        dimensions?: [number, number, number];
+        center?: [number, number, number];
+        stockType?: string;
+        stockOffset?: number;
+        [key: string]: any;
+    };
+    coordinateDiagnostics?: Record<string, any>;
     assignedFeatureIds: string[];
     unassignedFeatureIds?: string[];
     allFeatureIds?: string[];

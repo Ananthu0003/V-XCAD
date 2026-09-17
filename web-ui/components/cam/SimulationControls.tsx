@@ -72,15 +72,15 @@ export function SimulationControls({ state, onChange, onGenerateToolpath, isGene
                             <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Live Machine Readout</span>
                         </div>
                         <span className="text-[10px] font-bold tracking-widest text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded">
-                            {activeSegment ? (activeSegment as any).type?.toUpperCase() || 'UNKNOWN' : 'IDLE'}
+                            {activeSegment ? ((activeSegment as any).move_type || (activeSegment as any).moveType || 'UNKNOWN').toUpperCase() : 'IDLE'}
                         </span>
                     </div>
                     
                     <div className="grid grid-cols-3 gap-4 relative z-10">
                         {['X', 'Y', 'Z'].map((axis) => {
-                            const val = axis === 'X' ? ((activeSegment as any)?.end?.x || 0) 
-                                      : axis === 'Y' ? ((activeSegment as any)?.end?.y || 0)
-                                      : ((activeSegment as any)?.end?.z || 0);
+                            const val = axis === 'X' ? ((activeSegment as any)?.end_x ?? (activeSegment as any)?.end?.x ?? 0) 
+                                      : axis === 'Y' ? ((activeSegment as any)?.end_y ?? (activeSegment as any)?.end?.y ?? 0)
+                                      : ((activeSegment as any)?.end_z ?? (activeSegment as any)?.end?.z ?? 0);
                             return (
                                 <div key={axis} className="flex flex-col bg-black/60 rounded-lg p-3 border border-border/30 shadow-inner">
                                     <span className="text-[9px] font-bold text-muted-foreground/70 uppercase tracking-widest mb-1">{axis} AXIS</span>
@@ -96,13 +96,13 @@ export function SimulationControls({ state, onChange, onGenerateToolpath, isGene
                         <div className="flex flex-col bg-black/60 rounded-lg p-3 border border-border/30 shadow-inner">
                             <span className="text-[9px] font-bold text-muted-foreground/70 uppercase tracking-widest mb-1">FEEDRATE (mm/min)</span>
                             <span className="font-mono text-base tracking-wider text-amber-400/90 font-medium">
-                                {((activeSegment as any)?.feedrate || (activeSegment as any)?.feed_rate || 0).toString().padStart(4, '0')}
+                                {((activeSegment as any)?.feed_rate ?? (activeSegment as any)?.feedrate ?? 0).toString().padStart(4, '0')}
                             </span>
                         </div>
                         <div className="flex flex-col bg-black/60 rounded-lg p-3 border border-border/30 shadow-inner">
                             <span className="text-[9px] font-bold text-muted-foreground/70 uppercase tracking-widest mb-1">SPINDLE SPEED (RPM)</span>
                             <span className="font-mono text-base tracking-wider text-green-400/90 font-medium">
-                                {((activeSegment as any)?.spindle || (activeSegment as any)?.rpm || 0).toString().padStart(4, '0')}
+                                {((activeSegment as any)?.rpm ?? (activeSegment as any)?.spindle ?? 0).toString().padStart(4, '0')}
                             </span>
                         </div>
                     </div>
@@ -217,18 +217,16 @@ export function SimulationControls({ state, onChange, onGenerateToolpath, isGene
                 <div className="flex flex-col gap-2 mt-2">
                     <div className="flex justify-between items-end">
                         <span className="text-[10px] font-mono text-cyan-500 font-bold tracking-wider">{Math.round(state.progress)}%</span>
-                        <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">{state.segments ? `Block ${state.activeSegmentIndex || 0} / ${state.segments.length}` : '100%'}</span>
+                        <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">{state.segments && state.segments.length > 0 ? `Block ${(state.activeSegmentIndex ?? 0) + 1} / ${state.segments.length}` : '0 Blocks'}</span>
                     </div>
-                    <div className="relative h-2.5 w-full bg-muted/50 border border-border/50 rounded-full overflow-hidden cursor-pointer group" onClick={(e) => {
+                    <div className={`relative h-2.5 w-full bg-muted/50 border border-border/50 rounded-full overflow-hidden group ${state.segments && state.segments.length > 0 ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`} onClick={(e) => {
+                        if (!state.segments || state.segments.length === 0) return;
                         const rect = e.currentTarget.getBoundingClientRect();
                         const clickX = e.clientX - rect.left;
                         const pct = Math.max(0, Math.min(100, (clickX / rect.width) * 100));
                         
-                        let newActiveIndex = state.activeSegmentIndex || 0;
-                        if (state.segments && state.segments.length > 0) {
-                            newActiveIndex = Math.floor((pct / 100) * state.segments.length);
-                            if (newActiveIndex >= state.segments.length) newActiveIndex = state.segments.length - 1;
-                        }
+                        let newActiveIndex = Math.floor((pct / 100) * state.segments.length);
+                        if (newActiveIndex >= state.segments.length) newActiveIndex = state.segments.length - 1;
                         
                         onChange({ ...state, progress: pct, activeSegmentIndex: newActiveIndex });
                     }}>
@@ -239,7 +237,9 @@ export function SimulationControls({ state, onChange, onGenerateToolpath, isGene
                             <div className="absolute right-0 top-0 bottom-0 w-4 bg-white/20 blur-[2px]" />
                         </div>
                         {/* Hover seeker */}
-                        <div className="absolute top-0 bottom-0 w-0.5 bg-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" style={{ left: 'var(--mouse-x, 0%)' }} />
+                        {state.segments && state.segments.length > 0 && (
+                            <div className="absolute top-0 bottom-0 w-0.5 bg-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" style={{ left: 'var(--mouse-x, 0%)' }} />
+                        )}
                     </div>
                 </div>
             </div>

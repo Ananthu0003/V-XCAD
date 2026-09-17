@@ -22,7 +22,6 @@ COPY . .
 # Real URLs and secrets are injected at runtime via docker-compose / env.
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 ENV DIRECT_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
-ENV JWT_SECRET="build_time_jwt_secret_placeholder_replace_at_runtime"
 
 RUN npx prisma generate
 RUN npm run build

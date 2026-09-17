@@ -186,6 +186,13 @@ export function VolumetricStock({
         new THREE.MeshStandardMaterial({ color: "#94a3b8", metalness: 0.6, roughness: 0.4 })  // Bottom
     ], []);
 
+    useEffect(() => {
+        return () => {
+            boxMaterials.forEach(m => m.dispose());
+            geometryRef.current?.dispose();
+        };
+    }, [boxMaterials]);
+
     return (
         <group position={stockCenter}>
             <mesh>

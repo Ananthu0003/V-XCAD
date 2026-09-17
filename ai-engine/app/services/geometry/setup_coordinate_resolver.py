@@ -199,7 +199,52 @@ class SetupCoordinateResolver:
             "setupToModelTransform": self.get_inverse_transform_matrix(),
             "matrixLayout": "row-major",
             "resolvedStock": setup_space_stock,
-            "originPosition": self.setup_config.get("originPosition", "top_center")
+            "originPosition": self.setup_config.get("originPosition", "top_center"),
+            "coordinateDiagnostics": self.get_coordinate_diagnostics()
+        }
+
+    def get_coordinate_diagnostics(self) -> Dict[str, Any]:
+        """
+        Returns an authoritative diagnostics block describing origin, axes, bounds,
+        and rigid transforms between MODEL and SETUP spaces.
+        """
+        trsf = self.model_to_setup_location.wrapped.Transformation()
+        
+        def transform_pt(pt: Tuple[float, float, float]) -> Tuple[float, float, float]:
+            from OCP.gp import gp_Pnt
+            p = gp_Pnt(*pt)
+            p.Transform(trsf)
+            return (round(p.X(), 4), round(p.Y(), 4), round(p.Z(), 4))
+
+        orig_bounds = self.resolved_stock["bounds"]
+        p_min = transform_pt(orig_bounds["min"])
+        p_max = transform_pt(orig_bounds["max"])
+        st_min = (min(p_min[0], p_max[0]), min(p_min[1], p_max[1]), min(p_min[2], p_max[2]))
+        st_max = (max(p_min[0], p_max[0]), max(p_min[1], p_max[1]), max(p_min[2], p_max[2]))
+        
+        bb = self.shape.bounding_box()
+        m_min = transform_pt((bb.min.X, bb.min.Y, bb.min.Z))
+        m_max = transform_pt((bb.max.X, bb.max.Y, bb.max.Z))
+        model_bounds_setup = {
+            "min": [min(m_min[0], m_max[0]), min(m_min[1], m_max[1]), min(m_min[2], m_max[2])],
+            "max": [max(m_min[0], m_max[0]), max(m_min[1], m_max[1]), max(m_min[2], m_max[2])]
+        }
+
+        c_pt = transform_pt(self.resolved_stock["center"])
+
+        return {
+            "coordinateSpace": "SETUP",
+            "units": "mm",
+            "originType": self.setup_config.get("originPosition", "top_center"),
+            "modelToSetupTransform": self.get_transform_matrix(),
+            "setupToModelTransform": self.get_inverse_transform_matrix(),
+            "stockBoundsSetup": {
+                "min": [st_min[0], st_min[1], st_min[2]],
+                "max": [st_max[0], st_max[1], st_max[2]]
+            },
+            "modelBoundsSetup": model_bounds_setup,
+            "stockDimensions": list(self.resolved_stock["dimensions"]),
+            "stockCenterSetup": [c_pt[0], c_pt[1], c_pt[2]]
         }
 
     def create_setup_space_copy(self) -> bd.Shape:

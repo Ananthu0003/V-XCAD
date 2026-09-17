@@ -1,32 +1,17 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
+import { getFastApiUrl, fetchWithTimeout } from '@/lib/api-config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function getFastApiUrl(): string {
-	const value = process.env.FASTAPI_URL?.trim();
-	if (!value) {
-		throw new Error('FASTAPI_URL is not configured');
-	}
-	return value.replace(/\/$/, '');
-}
 
 export async function POST(
 	request: Request,
 	{ params }: { params: Promise<{ jobId: string }> }
 ): Promise<Response> {
-	// VEX-006: Require authenticated session
-	const authSession = await getSession();
-	if (!authSession?.userId) {
-		return NextResponse.json(
-			{ error: { message: 'Authentication required.', hint: 'Log in to use simulation.' } },
-			{ status: 401 }
-		);
-	}
-	const userExists = await prisma.user.findUnique({ where: { id: authSession.userId } });
-	if (!userExists) {
+	const userId = await requireSession();
+	if (!userId) {
 		return NextResponse.json(
 			{ error: { message: 'Authentication required.', hint: 'Log in to use simulation.' } },
 			{ status: 401 }
@@ -57,7 +42,7 @@ export async function POST(
 		);
 	}
 
-	if (targetSession.userId !== authSession.userId) {
+	if (targetSession.userId !== userId) {
 		return NextResponse.json(
 			{ error: { message: 'Forbidden', hint: 'You do not own this session.' } },
 			{ status: 403 }
@@ -66,7 +51,7 @@ export async function POST(
 
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/cam/simulate/prepare`, {
+		upstream = await fetchWithTimeout(`${getFastApiUrl()}/cam/simulate/prepare`, {
 			method: 'POST',
 			headers: {
 				'content-type': 'application/json',

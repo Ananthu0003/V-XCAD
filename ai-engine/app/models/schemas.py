@@ -4,6 +4,12 @@ from typing import Any, Optional, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 
+class CoordinateSpaceEnum(str, Enum):
+    MODEL = "MODEL"
+    SETUP = "SETUP"
+    MACHINE = "MACHINE"
+    SCENE = "SCENE"
+
 class ToolpathSegmentType(str, Enum):
     RAPID_CLEARANCE = "rapid_clearance"
     RAPID_XY = "rapid_xy"
@@ -29,8 +35,8 @@ class MachineCapability(BaseModel):
     tapping: bool = False
 
 class FeatureMachiningInfo(BaseModel):
-    featureId: str
-    featureType: str
+    featureId: Optional[str] = None
+    featureType: Optional[str] = None
     manufacturing_class: Optional[Literal["2.5D Milling", "3D Milling", "Drilling", "Turning", "Mill-Turn", "Inspection"]] = None
     featureAxis: Optional[list[float]] = None
     preferredToolAxis: Optional[list[float]] = None
@@ -68,6 +74,8 @@ class CamSetupPlan(BaseModel):
     machinableFeatures: list[str] = Field(default_factory=list)
     deferredFeatures: list[str] = Field(default_factory=list)
     unsupportedFeatures: list[str] = Field(default_factory=list)
+    resolvedStock: Optional[dict[str, Any]] = None
+    coordinateDiagnostics: Optional[dict[str, Any]] = None
     estimated_time_s: float = 0.0
     tool_change_count: int = 0
 
@@ -116,6 +124,8 @@ class ToolpathSegment(BaseModel):
     toolDiameterMm: Optional[float] = None
     compensationMode: Optional[Literal["computer", "controller"]] = None
     segmentRole: Optional[Literal["lead_in", "cut", "lead_out", "retract"]] = None
+    coordinateSpace: CoordinateSpaceEnum = CoordinateSpaceEnum.SETUP
+    units: str = "mm"
 
 class MotionCommand(BaseModel):
     commandId: str = ""
@@ -134,6 +144,8 @@ class MotionCommand(BaseModel):
     segmentRole: Optional[Literal["lead_in", "cut", "lead_out", "retract"]] = None
     clockwise: Optional[bool] = None
     plane: Optional[str] = None
+    coordinateSpace: CoordinateSpaceEnum = CoordinateSpaceEnum.SETUP
+    units: str = "mm"
 
 class RegionType(str, Enum):
     DRILL = "drill_region"
@@ -446,11 +458,49 @@ class CADPromptAssistantRequest(BaseModel):
     history: list[dict[str, str]] = Field(default_factory=list)
     model: Optional[str] = None
 
-
 class CADPromptAssistantResponse(BaseModel):
     reply: str
     analysis: Optional[dict[str, Any]] = None
     suggested_prompt: Optional[str] = None
     error: Optional[str] = None
+
+
+class FaceRegion(BaseModel):
+    face_id: Optional[int | str] = None
+    plane_type: str = "XY"  # "XY", "XZ", "YZ", "INCLINED"
+    center: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
+    normal: list[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0])
+    u_axis: list[float] = Field(default_factory=lambda: [1.0, 0.0, 0.0])
+    v_axis: list[float] = Field(default_factory=lambda: [0.0, 1.0, 0.0])
+    outer_wire_3d: list[list[float]] = Field(default_factory=list)
+    inner_wires_3d: list[list[list[float]]] = Field(default_factory=list)
+    outer_wire_uv: list[list[float]] = Field(default_factory=list)
+    inner_wires_uv: list[list[list[float]]] = Field(default_factory=list)
+    area: float = 0.0
+    depth_from_top: float = 0.0
+
+
+class ResolvedFeatureGeometry(BaseModel):
+    feature_id: str
+    feature_type: str
+    source_type: str = "brep"  # "brep", "parametric", "none"
+    face_region: Optional[FaceRegion] = None
+    center_3d: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
+    axis_3d: list[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0])
+    plane_type: str = "XY"
+    depth: float = 0.0
+    diameter: Optional[float] = None
+    radius: Optional[float] = None
+    width: Optional[float] = None
+    length: Optional[float] = None
+    is_through: bool = False
+    outer_polygon_setup: list[list[float]] = Field(default_factory=list)
+    inner_polygons_setup: list[list[list[float]]] = Field(default_factory=list)
+    top_z_setup: float = 0.0
+    bottom_z_setup: float = 0.0
+    coordinate_space: CoordinateSpaceEnum = CoordinateSpaceEnum.SETUP
+    units: str = "mm"
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
 
 

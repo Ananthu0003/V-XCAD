@@ -1,15 +1,18 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 
-// Fail fast: a missing JWT_SECRET must never silently fall back to a
-// publicly-known signing key (token forgery vulnerability).
-if (!process.env.JWT_SECRET) {
-	throw new Error(
-		'JWT_SECRET environment variable is required. Set it in your .env file ' +
-		'(generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))").'
-	);
+const secretKey = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'vexcad-default-secret-key-must-be-32-chars-long');
+if (!secretKey) {
+  throw new Error('JWT_SECRET environment variable is required.');
 }
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
+const JWT_SECRET = new TextEncoder().encode(secretKey);
+
+export interface UserSession {
+  userId: string;
+  email: string;
+  tokenVersion: number;
+  role?: string;
+}
 
 export async function signToken(payload: { userId: string; email: string; tokenVersion: number }) {
   return await new SignJWT(payload)
@@ -45,7 +48,6 @@ export async function requireSession(): Promise<string | null> {
   const session = await getSession();
   if (!session?.userId) return null;
 
-  // Dynamic import to avoid circular deps and keep this file lightweight.
   const { prisma } = await import('@/lib/prisma');
   const user = await prisma.user.findUnique({
     where: { id: session.userId },
@@ -54,8 +56,6 @@ export async function requireSession(): Promise<string | null> {
   if (!user) return null;
 
   // VEX-2A-011: Invalidate tokens issued before a password reset.
-  // Existing JWTs without tokenVersion (from before this fix) are rejected
-  // because they don't match the DB tokenVersion (0 vs undefined).
   if (user.tokenVersion !== session.tokenVersion) return null;
 
   return session.userId;
@@ -73,9 +73,10 @@ export async function requireAdmin(): Promise<string | null> {
   const { prisma } = await import('@/lib/prisma');
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { isAdmin: true },
+    select: { isAdmin: true, role: true },
   });
-  if (!user?.isAdmin) return null;
+  if (!user?.isAdmin && user?.role !== 'admin') return null;
 
   return userId;
 }
+

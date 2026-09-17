@@ -7,8 +7,8 @@ class PostUnitConverter:
     Converts ONLY length or linear feed semantic values, preserving RPM, angles, etc.
     """
     def __init__(self, post_output_units: str = "mm"):
-        self.post_output_units = post_output_units.lower()
-        self.is_inch = self.post_output_units == "in"
+        self.post_output_units = post_output_units.lower().strip()
+        self.is_inch = self.post_output_units in ("in", "inch", "inches", "imperial")
 
     def convert_length(self, val: Optional[float]) -> Optional[float]:
         """Converts a length parameter (X, Y, Z, R, Clearance) to the target unit."""

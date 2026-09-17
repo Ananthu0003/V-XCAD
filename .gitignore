@@ -47,10 +47,6 @@ tmp_*.txt
 # Scratch scripts & temporary test artifacts
 scratch.py
 ai-engine/*.step
-ai-engine/debug_*.txt
-ai-engine/diff_analysis.txt
-ai-engine/last_resp.txt
-ai-engine/log_payload.py
 ai-engine/scratch_*.py
 ai-engine/test.py
 ai-engine/test[0-9].py
@@ -62,3 +58,7 @@ web-ui/test_db_schema.js
 
 # Next.js API route (source code, not generated output)
 !web-ui/app/api/outputs/
+
+# Debug scripts (moved to __tests__/debug/)
+web-ui/__tests__/debug/
+

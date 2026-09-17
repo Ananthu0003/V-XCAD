@@ -1,30 +1,7 @@
 import uuid
 from typing import List, Dict, Any
 from app.constants import TURNING_FEATURE_TYPES
-
-class CamOperation:
-    """Represents a planned machining operation linked to a specific feature."""
-    def __init__(self, operation_type: str, feature_id: str, setup_id: str = "setup_1"):
-        self.id = f"op_{uuid.uuid4().hex[:8]}"
-        self.type = operation_type
-        self.feature_id = feature_id
-        self.setup_id = setup_id
-        self.tool_id = None
-        self.machining_strategy = "default"
-        
-        # Standard Safe Height System (Z coordinates)
-        self.safe_heights = {
-            "clearance": 15.0,  # Rapid height between operations
-            "retract": 5.0,     # Height to lift tool out of cut
-            "feed": 2.0,        # Height to switch from Rapid to Feed rate
-            "top": 0.0,         # Top of stock or feature
-            "bottom": -10.0     # Final cutting depth (will be dynamically calculated)
-        }
-        self.parameters = {}
-        self.machiningRegion = None
-        
-    def to_dict(self):
-        return self.__dict__
+from app.services.planning.operation_planner import CamOperation
 
 class CamOperationPlanner:
     """
@@ -80,12 +57,16 @@ class CamOperationPlanner:
         
         # If the feature is known to be blocked/unmachinable in current setup, 
         # still create an operation for UI visibility but mark it as blocked.
-        if not feature.get('machinable_in_current_setup', True) or machining_status not in ('valid', 'recognized'):
-            if machining_status != 'valid':
-                op = CamOperation("blocked", feat_id)
-                op.parameters['error'] = blocked_reason or "Feature is not machinable in current setup."
-                op.machining_strategy = "blocked"
-                return op
+        if not feature.get('machinable_in_current_setup', True):
+            op = CamOperation("blocked", feat_id)
+            op.parameters['error'] = blocked_reason or "Feature is not machinable in current setup."
+            op.machining_strategy = "blocked"
+            return op
+        if machining_status not in ('valid', 'recognized'):
+            op = CamOperation("blocked", feat_id)
+            op.parameters['error'] = blocked_reason or f"Feature machining status is '{machining_status}'."
+            op.machining_strategy = "blocked"
+            return op
             
         if feat_type in ['hole', 'blind_hole', 'through_hole']:
             op = CamOperation("drilling", feat_id)

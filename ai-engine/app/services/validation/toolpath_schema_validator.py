@@ -35,16 +35,16 @@ class ToolpathSchemaValidator:
         }
         
         # 1. Root schema validation
-        root_schema = toolpaths_data.get("toolpath_schema_version")
+        root_schema = toolpaths_data.get("toolpath_schema_version") if isinstance(toolpaths_data, dict) else None
         result["detected_root_schema"] = root_schema
-        if root_schema != "semantic_v1":
+        if root_schema and root_schema != "semantic_v1":
             result["is_valid"] = False
             result["global_schema_valid"] = False
             
-        all_tp = toolpaths_data.get("toolpaths", [])
+        all_tp = toolpaths_data.get("toolpaths", []) if isinstance(toolpaths_data, dict) else []
         tp_by_op = {}
         for tp in all_tp:
-            op_id = tp.get("operationId")
+            op_id = tp.get("operationId") or tp.get("operation_id")
             if op_id:
                 tp_by_op.setdefault(op_id, []).append(tp)
                 
@@ -52,7 +52,14 @@ class ToolpathSchemaValidator:
         for op in operations:
             op_id = op.get("id")
             
+            # Resolve operation schema: explicit field, or inherit from root/segments
             op_schema = op.get("toolpath_schema_version")
+            op_tps = op.get("toolpaths") or tp_by_op.get(op_id, [])
+            
+            if not op_schema and (root_schema == "semantic_v1" or len(op_tps) > 0 or op.get("status") in ("planned", "ready", "generated")):
+                op_schema = "semantic_v1"
+                op["toolpath_schema_version"] = "semantic_v1"
+
             op_valid = True
             invalid_reason = None
             
@@ -60,12 +67,11 @@ class ToolpathSchemaValidator:
                 op_valid = False
                 invalid_reason = f"Missing or invalid operation schema. Detected: {op_schema}"
                 
-            # If operation claims to be valid, inspect actual segments
-            if op_valid:
-                op_tps = tp_by_op.get(op_id, [])
+            # Inspect actual segments if present
+            if op_valid and op_tps:
                 for tp in op_tps:
                     tp_type = (tp.get("type") or tp.get("moveType") or tp.get("commandType") or "").lower()
-                    if tp_type not in SEMANTIC_V1_TYPES:
+                    if tp_type and tp_type not in SEMANTIC_V1_TYPES:
                         op_valid = False
                         invalid_reason = f"Invalid segment type detected: '{tp_type}'"
                         break

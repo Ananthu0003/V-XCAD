@@ -21,7 +21,6 @@ export function Logo({ className, size = 32, showGlow = false }: LogoProps) {
         alt="VΞXCAD Logo"
         width={size}
         height={size}
-        style={{ width: 'auto', height: 'auto' }}
         className="rounded-lg object-contain drop-shadow-[0_2px_10px_rgba(59,130,246,0.35)]"
         priority
       />

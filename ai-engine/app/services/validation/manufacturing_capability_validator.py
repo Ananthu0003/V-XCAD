@@ -69,4 +69,26 @@ class ManufacturingCapabilityValidator:
                     if not (has_a or has_b or has_c):
                         return {"valid": False, "reason": "Machine lacks rotary kinematics to achieve the required indexed setup axis."}
 
+        # 6. Tool Reach & Stickout Validation
+        safe_h = operation.get('safe_heights', {})
+        top_z = safe_h.get('top')
+        bottom_z = safe_h.get('bottom')
+        if top_z is not None and bottom_z is not None:
+            depth = abs(top_z - bottom_z)
+            effective_reach = max(
+                float(tool.get('stickout') or 0),
+                float(tool.get('cutting_length') or 0),
+                float(tool.get('flute_length') or 0),
+                float(tool.get('overall_length') or 0)
+            )
+            if effective_reach > 0 and depth > effective_reach:
+                if tool.get('is_user_locked_stickout'):
+                    return {
+                        "valid": False,
+                        "reason": f"Cut depth ({depth:.1f}mm) exceeds user-locked tool stickout ({effective_reach:.1f}mm)."
+                    }
+                else:
+                    # Automatically adapt placeholder stickout to clear the feature depth safely
+                    tool['stickout'] = max(depth * 1.2, effective_reach)
+
         return {"valid": True, "reason": None}

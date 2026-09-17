@@ -267,7 +267,7 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                 ) : (
                                     operations.map(op => {
                                         const numSegments = op.toolpaths ? op.toolpaths.length : 0;
-                                        const isOutdated = op.toolpaths && op.toolpaths.length > 0 && op.toolpath_schema_version !== 'semantic_v1';
+                                        const isOutdated = op.toolpaths && op.toolpaths.length > 0 && Boolean(op.toolpath_schema_version) && op.toolpath_schema_version !== 'semantic_v1';
                                         const displayStatus = isOutdated ? 'outdated' : op.status;
                                         
                                         return (

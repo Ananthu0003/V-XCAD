@@ -73,6 +73,160 @@ class MachineProfile(BaseModel):
 
     currency: str = "INR"
 
+    def get_candidate_setup_configurations(self) -> List[Any]:
+        """
+        Dynamically derives all physically valid setup configurations supported
+        by this machine's kinematics, spindles, rotary axes, and fixturing.
+        """
+        from app.models.provenance import SetupConfiguration
+        configs: List[SetupConfiguration] = []
+
+        if self.machine_type in ("3_axis_mill",):
+            # Fixed vertical spindle: tool points along +Z relative to setup.
+            # Workpiece datum re-clamp configurations across 6 primary fixture orientations:
+            configs.append(SetupConfiguration(
+                config_id="config_top",
+                name=f"{self.machine_name} - Top (Z+)",
+                tool_orientation=[0.0, 0.0, 1.0],
+                spindle_mode="milling",
+                work_offset="G54",
+                fixture_side="top",
+                approach_vector=[0.0, 0.0, 1.0]
+            ))
+            configs.append(SetupConfiguration(
+                config_id="config_bottom",
+                name=f"{self.machine_name} - Flip / Bottom (Z-)",
+                tool_orientation=[0.0, 0.0, -1.0],
+                spindle_mode="milling",
+                work_offset="G55",
+                fixture_side="bottom",
+                approach_vector=[0.0, 0.0, -1.0]
+            ))
+            configs.append(SetupConfiguration(
+                config_id="config_right",
+                name=f"{self.machine_name} - Right Side (X+)",
+                tool_orientation=[1.0, 0.0, 0.0],
+                spindle_mode="milling",
+                work_offset="G56",
+                fixture_side="side_right",
+                approach_vector=[1.0, 0.0, 0.0]
+            ))
+            configs.append(SetupConfiguration(
+                config_id="config_left",
+                name=f"{self.machine_name} - Left Side (X-)",
+                tool_orientation=[-1.0, 0.0, 0.0],
+                spindle_mode="milling",
+                work_offset="G57",
+                fixture_side="side_left",
+                approach_vector=[-1.0, 0.0, 0.0]
+            ))
+            configs.append(SetupConfiguration(
+                config_id="config_front",
+                name=f"{self.machine_name} - Front Side (Y-)",
+                tool_orientation=[0.0, -1.0, 0.0],
+                spindle_mode="milling",
+                work_offset="G58",
+                fixture_side="side_front",
+                approach_vector=[0.0, -1.0, 0.0]
+            ))
+            configs.append(SetupConfiguration(
+                config_id="config_back",
+                name=f"{self.machine_name} - Back Side (Y+)",
+                tool_orientation=[0.0, 1.0, 0.0],
+                spindle_mode="milling",
+                work_offset="G59",
+                fixture_side="side_back",
+                approach_vector=[0.0, 1.0, 0.0]
+            ))
+
+        elif self.machine_type in ("lathe", "turning_center", "mill_turn"):
+            configs.append(SetupConfiguration(
+                config_id="config_main_spindle",
+                name=f"{self.machine_name} - Main Spindle (Z+)",
+                tool_orientation=[0.0, 0.0, 1.0],
+                spindle_mode="turning" if self.machine_type != "mill_turn" else "mill_turn",
+                work_offset="G54",
+                fixture_side="top",
+                approach_vector=[0.0, 0.0, 1.0]
+            ))
+            configs.append(SetupConfiguration(
+                config_id="config_sub_spindle",
+                name=f"{self.machine_name} - Sub/Opposed Spindle (Z-)",
+                tool_orientation=[0.0, 0.0, -1.0],
+                spindle_mode="turning" if self.machine_type != "mill_turn" else "mill_turn",
+                work_offset="G55",
+                fixture_side="bottom",
+                approach_vector=[0.0, 0.0, -1.0],
+                is_opposed_spindle=True
+            ))
+            if self.live_tooling or self.machine_type == "mill_turn":
+                for axis_id, vec in [("rad_x_pos", [1.0, 0.0, 0.0]), ("rad_x_neg", [-1.0, 0.0, 0.0]), ("rad_y_pos", [0.0, 1.0, 0.0]), ("rad_y_neg", [0.0, -1.0, 0.0])]:
+                    configs.append(SetupConfiguration(
+                        config_id=f"config_{axis_id}",
+                        name=f"{self.machine_name} - Live Radial ({axis_id})",
+                        tool_orientation=vec,
+                        spindle_mode="milling",
+                        work_offset="G54",
+                        fixture_side="radial",
+                        approach_vector=vec
+                    ))
+
+        elif self.machine_type in ("4_axis_mill",):
+            configs.append(SetupConfiguration(
+                config_id="config_top",
+                name=f"{self.machine_name} - Top (Z+)",
+                tool_orientation=[0.0, 0.0, 1.0],
+                spindle_mode="milling",
+                work_offset="G54",
+                rotary_angles={"A": 0.0},
+                fixture_side="top",
+                approach_vector=[0.0, 0.0, 1.0]
+            ))
+            configs.append(SetupConfiguration(
+                config_id="config_rot_180",
+                name=f"{self.machine_name} - Rotary 180 (Z-)",
+                tool_orientation=[0.0, 0.0, -1.0],
+                spindle_mode="milling",
+                work_offset="G54",
+                rotary_angles={"A": 180.0},
+                fixture_side="bottom",
+                approach_vector=[0.0, 0.0, -1.0]
+            ))
+            configs.append(SetupConfiguration(
+                config_id="config_rot_90",
+                name=f"{self.machine_name} - Rotary 90 (Y-)",
+                tool_orientation=[0.0, -1.0, 0.0],
+                spindle_mode="milling",
+                work_offset="G54",
+                rotary_angles={"A": 90.0},
+                fixture_side="side_front",
+                approach_vector=[0.0, -1.0, 0.0]
+            ))
+            configs.append(SetupConfiguration(
+                config_id="config_rot_270",
+                name=f"{self.machine_name} - Rotary 270 (Y+)",
+                tool_orientation=[0.0, 1.0, 0.0],
+                spindle_mode="milling",
+                work_offset="G54",
+                rotary_angles={"A": 270.0},
+                fixture_side="side_back",
+                approach_vector=[0.0, 1.0, 0.0]
+            ))
+
+        elif self.machine_type in ("5_axis_mill",):
+            # 5-axis continuous/indexed covers arbitrary tool approach angles
+            configs.append(SetupConfiguration(
+                config_id="config_5axis_primary",
+                name=f"{self.machine_name} - 5-Axis Multi-Directional",
+                tool_orientation=[0.0, 0.0, 1.0],
+                spindle_mode="milling",
+                work_offset="G54",
+                fixture_side="table",
+                approach_vector=[0.0, 0.0, 1.0]
+            ))
+
+        return configs
+
 class MaterialProfile(BaseModel):
     material_id: str
     material_name: str

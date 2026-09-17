@@ -61,7 +61,7 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
     // Group operations by setup_id
     const groupedOps: Record<string, CamOperation[]> = {};
     operations.forEach(op => {
-        const setupId = op.setup_id || 'unassigned';
+        const setupId = op.setup_id || op.setupId || 'unassigned';
         if (!groupedOps[setupId]) {
             groupedOps[setupId] = [];
         }

@@ -13,7 +13,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     libxext6 \
     libgomp1 \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user for running the application and CAD subprocesses.
@@ -33,11 +32,8 @@ COPY . .
 # Move entrypoint to root and make executable
 RUN mv /app/docker-entrypoint.sh /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
-# Create outputs directory and set ownership for the non-root user.
-# At runtime the named Docker volume mounts here; the entrypoint script
-# re-applies ownership so caduser can write to it regardless of who
-# owned the volume from a previous container run.
-RUN mkdir -p /app/outputs && chown -R caduser:caduser /app
+# Create outputs and logs directories and set ownership for the non-root user.
+RUN mkdir -p /app/outputs /app/logs && chown -R caduser:caduser /app
 
 EXPOSE 8000
 

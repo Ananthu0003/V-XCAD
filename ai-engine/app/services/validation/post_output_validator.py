@@ -34,20 +34,55 @@ class PostOutputValidator:
         if "legacy_path" in gcode.lower():
             return {"valid": False, "reason": "Generated G-Code contains blocked legacy_path artifact."}
             
+        is_lathe = (
+            "G18" in gcode
+            or "LATHE" in gcode.upper()
+            or "TURNING" in gcode.upper()
+            or any("turning" in str(op.get("type", "")).lower() or "lathe" in str(op.get("type", "")).lower() for op in operations)
+        )
+        is_heidenhain = "TOOL CALL" in gcode or "HEIDENHAIN" in gcode.upper()
+
         for line in lines:
             line = line.strip().upper()
             
             # Strip comments
             if '(' in line:
                 line = line[:line.find('(')].strip()
+            if ';' in line:
+                line = line[:line.find(';')].strip()
                 
             if not line:
                 continue
                 
-            if 'M06' in line or 'M6' in line:
+            # Tool change detection:
+            # - Mill: M06 / M6
+            # - Lathe / Turning: T0101 (4-digit tool+offset call) or standalone T-command
+            # - Heidenhain: TOOL CALL
+            if (
+                'M06' in line
+                or 'M6' in line
+                or 'TOOL CALL' in line
+                or re.search(r'\bT\d{4}\b', line)
+                or (is_lathe and re.search(r'^\s*T\d+\b', line))
+            ):
                 has_tool_change = True
-            if 'M03' in line or 'M3' in line:
+                if is_lathe or 'TOOL CALL' in line or re.search(r'\bT\d{4}\b', line):
+                    # In lathes (T0101) and Heidenhain (TOOL CALL), tool geometry/length offset is engaged directly
+                    has_tool_offset = True
+
+            # Spindle start detection:
+            if (
+                'M03' in line
+                or 'M3' in line
+                or 'M04' in line
+                or 'M4' in line
+                or ('TOOL CALL' in line and re.search(r'\bS\d+', line))
+                or 'M103' in line
+                or 'M104' in line
+            ):
                 has_spindle_start = True
+
+            # Tool length offset detection:
             if 'G43' in line:
                 has_tool_offset = True
                 z_match = re.search(r'Z([-\d\.]+)', line)
@@ -58,23 +93,42 @@ class PostOutputValidator:
                 coolant_started = True
             if 'M09' in line or 'M9' in line:
                 coolant_stopped = True
-            if 'M05' in line or 'M5' in line:
+            if 'M05' in line or 'M5' in line or 'M105' in line:
                 spindle_stopped = True
-            if 'M30' in line:
+            if 'M30' in line or 'M02' in line or 'M2' in line or 'END PGM' in line:
                 program_ended = True
                 
-            # Safety check: cutting moves before setup
+            # Safety check: cutting moves before setup (Fanuc/ISO)
             if any(cmd in line for cmd in ['G01', 'G1 ', 'G02', 'G2 ', 'G03', 'G3 ', 'G81', 'G83']):
                 if not has_tool_change:
-                    return {"valid": False, "reason": "Cutting motion found before tool change (M06)."}
+                    return {"valid": False, "reason": "Cutting motion found before tool change (M06/T-code)."}
                 if not has_spindle_start:
-                    return {"valid": False, "reason": "Cutting motion found before spindle start (M03)."}
+                    return {"valid": False, "reason": "Cutting motion found before spindle start (M03/M04)."}
                 if not has_tool_offset:
-                    return {"valid": False, "reason": "Cutting motion found before tool length offset (G43)."}
+                    return {"valid": False, "reason": "Cutting motion found before tool length offset (G43/T-offset)."}
                     
                 z_match = re.search(r'Z([-\d\.]+)', line)
                 if z_match:
                     current_z = float(z_match.group(1))
+
+            # Safety check: cutting moves for Heidenhain Klartext (L ... R0 F...)
+            if re.match(r'^L\s', line) and 'FMAX' not in line:
+                if not has_tool_change:
+                    return {"valid": False, "reason": "Cutting motion found before tool change (TOOL CALL)."}
+                if not has_spindle_start:
+                    return {"valid": False, "reason": "Cutting motion found before spindle start (M03/M04)."}
+                if not has_tool_offset:
+                    return {"valid": False, "reason": "Cutting motion found before tool offset (TOOL CALL with Z)."}
+                z_match = re.search(r'Z([\+\-\d\.]+)', line)
+                if z_match:
+                    current_z = float(z_match.group(1).replace('+', ''))
+
+            # Safety check: Siemens cycles
+            if re.search(r'CYCLE8\d', line):
+                if not has_tool_change:
+                    return {"valid": False, "reason": "Canned cycle found before tool change."}
+                if not has_spindle_start:
+                    return {"valid": False, "reason": "Canned cycle found before spindle start."}
 
             # Find global min_retract
             min_retract = 5.0 # fallback
@@ -83,7 +137,7 @@ class PostOutputValidator:
                 if retracts:
                     min_retract = min(retracts)
 
-            # Safe Z check for G0 moves
+            # Safe Z check for G0 moves (Fanuc/ISO)
             if 'G00' in line or 'G0 ' in line or line.endswith('G0'):
                 # Find Z coordinate if any
                 z_match = re.search(r'Z([-\d\.]+)', line)
@@ -95,17 +149,26 @@ class PostOutputValidator:
                         if z_val < -500.0:
                             return {"valid": False, "reason": f"Unsafe machine-coordinate rapid move: Z below machine limit on line: {line}"}
                     else:
-                        if z_val < -1000.0: # relaxed
+                        if z_val < min_retract - 0.001:
                             return {"valid": False, "reason": f"Unsafe G0 rapid move below retract_z ({z_val} < {min_retract}) at line: {line}"}
 
                 # XY Check
                 x_match = re.search(r'X([-\d\.]+)', line)
                 y_match = re.search(r'Y([-\d\.]+)', line)
-                if (x_match or y_match) and 'G53' not in line:
+                if (x_match or y_match) and 'G53' not in line and 'G28' not in line:
                     if current_z is None:
                         return {"valid": False, "reason": f"Unsafe rapid XY move before a known safe Z height is established: {line}"}
-                    if current_z < -1000.0: # relaxed
+                    if current_z < min_retract - 0.001:
                         return {"valid": False, "reason": f"Unsafe rapid XY move while Z ({current_z}) is below retract_z ({min_retract}): {line}"}
+
+            # Safe Z check for Heidenhain rapid moves (L ... R0 FMAX)
+            if re.match(r'^L\s', line) and 'FMAX' in line:
+                z_match = re.search(r'Z([\+\-\d\.]+)', line)
+                if z_match:
+                    z_val = float(z_match.group(1).replace('+', ''))
+                    current_z = z_val
+                    if z_val < min_retract - 0.001:
+                        return {"valid": False, "reason": f"Unsafe Heidenhain rapid move below retract_z ({z_val} < {min_retract}): {line}"}
                     
         # Check trailers
         if not spindle_stopped:

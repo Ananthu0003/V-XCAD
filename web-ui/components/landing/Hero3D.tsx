@@ -102,7 +102,7 @@ export function Hero3D() {
         <ambientLight intensity={1.2} />
         <directionalLight position={[10, 10, 10]} intensity={2.5} castShadow />
         <directionalLight position={[-10, -10, -10]} intensity={1.5} color="#06b6d4" />
-        <Environment files="/potsdamer_platz_1k.hdr" />
+        <Environment preset="city" />
         <CadAssembly />
         <OrbitControls enableZoom={false} autoRotate autoRotateSpeed={0.5} />
       </Canvas>

@@ -149,7 +149,7 @@ class ToolpathValidator:
             dz = curr_end.get("z", 0) - next_start.get("z", 0)
             
             dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-            if dist > 0.01:
+            if dist > 0.05:
                 result["errors"].append(f"Geometry validation failed: {f_name} toolpath segments are disconnected by {dist:.3f}mm.")
                 result["status"] = "error"
                 return

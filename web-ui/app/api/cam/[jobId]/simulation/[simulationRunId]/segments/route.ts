@@ -8,7 +8,6 @@ export async function GET(
 	request: Request,
 	{ params }: { params: Promise<{ jobId: string; simulationRunId: string }> }
 ) {
-	// VEX-2A-003: Require authenticated session
 	const session = await requireSession();
 	if (!session) {
 		return NextResponse.json({ error: { message: 'Authentication required.' } }, { status: 401 });

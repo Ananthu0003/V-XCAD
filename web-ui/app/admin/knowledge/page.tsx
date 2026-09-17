@@ -88,7 +88,7 @@ export default function KnowledgeAdminPage() {
 
   const handleDelete = async (docId: string) => {
     try {
-      await fetch(`${KNOWLEDGE_API}/documents/${docId}`, {
+      await fetch(`${KNOWLEDGE_API}/documents/${encodeURIComponent(docId)}`, {
         method: "DELETE",
       });
       fetchDocuments();
@@ -104,19 +104,20 @@ export default function KnowledgeAdminPage() {
         {/* Top Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-border">
           <div className="space-y-1">
-            <Link
-              href="/workspace"
-              className="inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors mb-2 group"
-            >
-              <ArrowLeft className="size-3.5 group-hover:-translate-x-1 transition-transform" />
-              Back to Tactical Workspace
-            </Link>
             <div className="flex items-center gap-3">
-              <div className="size-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
-                <BookOpen className="size-5" />
+              <Link
+                href="/workspace"
+                className="p-2 -ml-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ArrowLeft className="size-4" />
+              </Link>
+              <div className="p-2 rounded-xl bg-blue-500/10 text-blue-500">
+                <Database className="size-5" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold tracking-tight">Engineering Knowledge Administration</h1>
+                <h1 className="text-xl font-semibold tracking-tight">
+                  CAM Knowledge & Standards Base
+                </h1>
                 <p className="text-xs text-muted-foreground">
                   Ingest GD&T manufacturing handbooks, ISO standards, and inspect neural RAG retrieval rules.
                 </p>
@@ -126,7 +127,7 @@ export default function KnowledgeAdminPage() {
 
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/60 border border-border text-xs text-muted-foreground">
             <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>FastAPI Engine: Docker-internal</span>
+            <span>BFF Proxy: Active</span>
           </div>
         </div>
 

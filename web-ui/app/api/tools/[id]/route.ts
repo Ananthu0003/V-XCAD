@@ -8,7 +8,6 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // VEX-2A-003: Require authenticated session
   if (!(await requireSession())) {
     return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
   }
@@ -29,7 +28,6 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // VEX-2A-003: Require authenticated session
   if (!(await requireSession())) {
     return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
   }
@@ -66,7 +64,6 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // VEX-2A-003: Require authenticated session
   if (!(await requireSession())) {
     return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
   }

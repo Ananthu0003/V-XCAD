@@ -152,6 +152,18 @@ function InnerStlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false, 
 		};
 	}, [geometry, expectedSize]);
 
+	useEffect(() => {
+		return () => {
+			processed?.centeredGeometry.dispose();
+		};
+	}, [processed]);
+
+	useEffect(() => {
+		return () => {
+			geometry?.dispose();
+		};
+	}, [geometry]);
+
 	const material = useMemo(() => {
 		const matKey = workpieceMaterial ? workpieceMaterial.toLowerCase().replace(/[^a-z0-9_]/g, '') : 'aluminum_6061';
 		let preset = MATERIAL_PRESETS['aluminum_6061'];
@@ -183,6 +195,12 @@ function InnerStlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false, 
 			side: FrontSide,
 		});
 	}, [workpieceMaterial, xRayMode]);
+
+	useEffect(() => {
+		return () => {
+			material.dispose();
+		};
+	}, [material]);
 
 	if (!processed?.centeredGeometry) return null;
 

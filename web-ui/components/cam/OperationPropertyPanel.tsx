@@ -136,7 +136,7 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                     </div>
                 )}
 
-                {operation.type === 'pocket' && (
+                {(operation.type === 'pocket' || operation.type === 'pocketing') && (
                     <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-2 col-span-2">
                             <label className="text-[10px] font-bold flex items-center gap-2"><input type="checkbox" checked={params.adaptive || false} onChange={e => updateParams('adaptive', e.target.checked)} className="rounded" /> Adaptive Clearing</label>
@@ -268,7 +268,7 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                     </div>
                 )}
 
-                {operation.type === 'chamfer' && (
+                {(operation.type === 'chamfer' || operation.type === 'chamfer_milling') && (
                     <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Chamfer Width</label>

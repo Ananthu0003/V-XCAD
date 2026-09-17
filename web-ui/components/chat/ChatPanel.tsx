@@ -154,7 +154,6 @@ type ChatPanelProps = {
 	width: number;
 	isOpen: boolean;
 	setIsOpen: (v: boolean) => void;
-	onOpenAuthModal?: () => void;
 	fileInputRef?: React.RefObject<HTMLInputElement | null>;
 	selectionContext?: [number, number, number] | null;
 	onClearSelectionContext?: () => void;
@@ -184,7 +183,6 @@ export function ChatPanel({
 	width,
 	isOpen,
 	setIsOpen,
-	onOpenAuthModal,
 	fileInputRef,
 	selectionContext,
 	onClearSelectionContext,

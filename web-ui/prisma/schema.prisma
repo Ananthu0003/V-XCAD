@@ -50,16 +50,33 @@ model CadIteration {
 }
 
 model User {
-  id               String                @id @default(cuid())
-  email            String                @unique
-  createdAt        DateTime              @default(now())
-  name             String                @default("User")
-  password         String                @default("")
-  isAdmin          Boolean               @default(false)
-  tokenVersion     Int                   @default(0)
-  updatedAt        DateTime              @default(now()) @updatedAt
+  id               String                 @id @default(cuid())
+  email            String                 @unique
+  createdAt        DateTime               @default(now())
+  name             String                 @default("User")
+  password         String                 @default("")
+  isAdmin          Boolean                @default(false)
+  role             String                 @default("user") // "user" or "admin"
+  tokenVersion     Int                    @default(0)
+  updatedAt        DateTime               @default(now()) @updatedAt
   sessions         CadSession[]
   passwordResets   PasswordResetRequest[]
+  authSessions     AuthSession[]
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model ToolMaterial {

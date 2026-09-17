@@ -85,6 +85,13 @@ export function migrateLegacyCamSetup(setup: SetupSettings): SetupSettings {
   const newSetup = { ...setup };
   let migrated = false;
 
+  if (!newSetup.internalUnits) newSetup.internalUnits = 'mm';
+  if (!newSetup.units) newSetup.units = 'mm';
+  if (!newSetup.displayUnits) newSetup.displayUnits = newSetup.units || 'mm';
+  if (!newSetup.postOutputUnits) newSetup.postOutputUnits = newSetup.units || 'mm';
+  if (!newSetup.wcs) newSetup.wcs = 'G54';
+  if (!newSetup.originPosition) newSetup.originPosition = 'top_center';
+
   const legacyMachineMap: Record<string, string> = {
     "Generic 3-Axis VMC": "haas_vf2",
     "generic_mill_3x_vmc": "haas_vf2",

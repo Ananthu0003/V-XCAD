@@ -1707,12 +1707,26 @@ class ParameterRenderService:
                 (tmp / "user_script.py").write_text(script, encoding="utf-8")
                 (tmp / "harness.py").write_text(RENDER_HARNESS_TEMPLATE, encoding="utf-8")
 
+<<<<<<< Updated upstream
                 env = _build_sandbox_env(extra={
                     "CAD_PARAMETERS_JSON": json.dumps(parameters, ensure_ascii=True),
                     "CAD_CAM_PARAMETERS_JSON": json.dumps(cam_parameters or {}, ensure_ascii=True),
                     "OUTPUT_DIR": str(self.outputs_dir),
                     "OUTPUT_BASENAME": output_basename,
                 })
+=======
+                # Security: Build minimal safe environment dict without leaking API keys, DB urls, or secrets
+                safe_env_keys = {
+                    "PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP",
+                    "PYTHONPATH", "PYTHONHOME", "HOME", "USERPROFILE",
+                    "LOCALAPPDATA", "APPDATA"
+                }
+                env = {k: v for k, v in os.environ.items() if k.upper() in safe_env_keys}
+                env["CAD_PARAMETERS_JSON"] = json.dumps(parameters, ensure_ascii=True)
+                env["CAD_CAM_PARAMETERS_JSON"] = json.dumps(cam_parameters or {}, ensure_ascii=True)
+                env["OUTPUT_DIR"] = str(self.outputs_dir)
+                env["OUTPUT_BASENAME"] = output_basename
+>>>>>>> Stashed changes
 
                 project_root = Path(__file__).resolve().parents[3]
                 python_exe = sys.executable

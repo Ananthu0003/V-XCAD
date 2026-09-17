@@ -8,30 +8,49 @@ class ManufacturingStrategyPlanner:
     
     @staticmethod
     def determine_strategy(feature: Dict[str, Any], machine_type: str, setup_axis: list[float] = None) -> str:
+        explicit_op = feature.get("recommendedOperation") or feature.get("machining_strategy")
+        if explicit_op and explicit_op in (
+            "facing", "facing_turning", "boss_clearing", "pocket_milling", "slot_milling",
+            "2d_contour", "2d_contour_outer", "helical_bore_milling", "peck_drilling",
+            "drilling", "tapping", "chamfer_milling", "od_turning", "od_finish_turning"
+        ):
+            return explicit_op
+
         feat_type = feature.get("type", "")
         feat_subtype = feature.get("subtype", "")
-        
+        feat_lower = str(feat_type).lower()
+        sub_lower = str(feat_subtype).lower()
+
         mtype_str = str(machine_type).lower() if machine_type else ""
         is_turning = any(t in mtype_str for t in ("lathe", "turning", "mill_turn", "swiss", "cnc_lathe"))
 
-        if feat_type in TURNING_FEATURE_TYPES or feat_subtype in TURNING_FEATURE_TYPES or any(kw in str(feat_type).lower() for kw in ("dia", "od", "shaft", "cylinder", "turn", "bore", "id", "groove")):
+        # Handle internal bores and ID features first so they don't get misclassified as OD/Boss
+        if feat_type in ("bore", "counterbore") or any(kw in feat_lower for kw in ("bore", "id_hole", "id_bore", "counterbore")):
+            if is_turning:
+                return "id_boring"
+            dia = float(feature.get("diameter") or feature.get("dimensions", {}).get("diameter") or 0.0)
+            return "helical_bore_milling" if dia > 6.0 else "drilling"
+
+        if feat_type in TURNING_FEATURE_TYPES or feat_subtype in TURNING_FEATURE_TYPES or any(kw in feat_lower for kw in ("dia", "od", "shaft", "cylinder", "turn")):
             feature_axis = feature.get("axis", [0, 0, 1])
             dot = sum(a*b for a, b in zip(feature_axis, setup_axis)) if setup_axis else 0
             
-            if is_turning:
+            if is_turning and (feat_subtype in ("turned_od", "external_cylinder") or "od" in feat_lower or "turn" in feat_lower):
                 return "od_turning"
             elif machine_type in ("4_axis_mill", "5_axis_mill"):
                 return "indexed_4axis_milling"
-            elif machine_type == "3_axis_mill" and abs(dot) > 0.98:
+            elif (machine_type == "3_axis_mill" or is_turning) and abs(dot) > 0.98:
                 return "boss_clearing"
             else:
                 return "turning_required"
                 
-        elif feat_type == "pocket":
+        elif feat_type in ("pocket", "pocketing", "cavity", "recess", "keyway"):
             return "pocket_milling"
             
         elif feat_type in ("contour", "step"):
-            if is_turning:
+            dia = float(feature.get("diameter") or feature.get("dimensions", {}).get("diameter") or 0.0)
+            is_cyl = dia > 0 and feat_subtype in ("turned_od", "cylinder")
+            if is_turning and is_cyl:
                 if feat_subtype == "outer_profile":
                     return "od_turning"
             
@@ -45,11 +64,15 @@ class ManufacturingStrategyPlanner:
             return "facing"
             
         elif feat_type == "boss":
-            if is_turning:
+            dia = float(feature.get("diameter") or feature.get("dimensions", {}).get("diameter") or 0.0)
+            is_cylindrical = dia > 0 and feat_subtype != "rectangular_boss"
+            if is_turning and is_cylindrical:
                 feature_axis = feature.get("axis", [0, 0, 1])
                 dot = sum(a*b for a, b in zip(feature_axis, setup_axis)) if setup_axis else 1.0
                 if abs(dot) > 0.98:
                     return "od_turning"
+            if feat_subtype == "outer_profile":
+                return "2d_contour_outer"
             return "boss_clearing"
             
         elif feat_type == "slot":

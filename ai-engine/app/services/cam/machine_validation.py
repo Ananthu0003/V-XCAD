@@ -86,13 +86,9 @@ def validate_post_capabilities_for_operations(post_id: str, operations: List[Dic
     for op in operations:
         op_type = op.get("type", "")
         
-        # Example: if the operation is a canned cycle (like drilling), but the post doesn't support it
+        # If the operation is a canned cycle (like drilling), but the post doesn't support it
         if "drill" in op_type.lower() and not supports.get("cannedCycles", False):
-            # In a real CAM system we might expand canned cycles to linear moves, 
-            # but per user requirements, we block it or warn.
-            # However, for GRBL, they specifically don't support canned cycles.
-            # In this stub we'll allow it but might need a flag to expand cycles later.
-            pass
+            return False, f"Operation '{op_type}' requires canned cycles but post processor does not support them."
             
     return True, None
 

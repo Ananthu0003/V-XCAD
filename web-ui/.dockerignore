@@ -4,6 +4,7 @@ out/
 build/
 dist/
 
+# Environment files (secrets injected via docker-compose)
 .env
 .env.*.local
 .env.local
@@ -11,13 +12,44 @@ dist/
 .env.test.local
 .env.production.local
 
+# Testing / debug
+__tests__/
+coverage/
+*.test.*
+*.spec.*
+jest.config.ts
+jest.setup.ts
+
+# Utility scripts (not needed in production build)
+scripts/
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+prisma/dev.db
+
+# Logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+pnpm-error.log*
+*.log
 
+# Git & Version Control
+.git
+.git/**
+.gitignore
+
+# IDE / OS
 .DS_Store
 .vscode/
 .idea/
 
+# Misc
 *.md
+*.pem
+scratch/
+tsconfig.tsbuildinfo

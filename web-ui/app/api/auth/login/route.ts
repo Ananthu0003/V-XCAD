@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
-import { signToken } from '@/lib/auth';
 import { cookies } from 'next/headers';
+import { signToken } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,11 +17,11 @@ export async function POST(req: NextRequest) {
       where: {
         OR: [
           { email: lookup },
-          { email: lookup === 'admin' ? 'admin@vexcad.local' : lookup },
-          { name: { equals: email.trim(), mode: 'insensitive' } },
+          { email: lookup === 'admin' ? 'admin@vexcad.local' : '__no_match__' },
         ],
       },
     });
+
     if (!user) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
@@ -41,7 +41,10 @@ export async function POST(req: NextRequest) {
       path: '/',
     });
 
-    return NextResponse.json({ success: true, user: { id: user.id, name: user.name, email: user.email } });
+    return NextResponse.json({
+      success: true,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role || (user.isAdmin ? 'admin' : 'user') },
+    });
   } catch (error) {
     console.error('Login error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

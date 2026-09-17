@@ -154,7 +154,7 @@ class ToolpathEngine:
             
             # Look for a PLUNGE followed by CUT
             if seg.moveType == ToolpathSegmentType.PLUNGE and i + 1 < n and segments[i+1].moveType == ToolpathSegmentType.CUT:
-                plunge_seg = seg
+                plunge_seg = seg.model_copy(deep=True)
                 cut_seg = segments[i+1]
                 
                 # Find the end of this contour loop (the last CUT before a RETRACT or another PLUNGE)
@@ -203,8 +203,10 @@ class ToolpathEngine:
                     new_plunge_y = cut_seg.start.y + norm_y * lead_dist
                     
                     if not allow_lead_outside:
-                        new_plunge_x = max(-100.0, min(100.0, new_plunge_x))
-                        new_plunge_y = max(-100.0, min(100.0, new_plunge_y))
+                        # Clamp lead point to within 5x the lead distance from the contour start
+                        clamp_bound = max(lead_dist * 5.0, 100.0)
+                        new_plunge_x = max(-clamp_bound, min(clamp_bound, new_plunge_x))
+                        new_plunge_y = max(-clamp_bound, min(clamp_bound, new_plunge_y))
                     
                     # Modify previous APPROACH_RETRACT or RAPID_XY if it ends at the plunge start
                     if len(out_segments) > 0 and out_segments[-1].end.x == plunge_seg.start.x and out_segments[-1].end.y == plunge_seg.start.y:
@@ -265,8 +267,9 @@ class ToolpathEngine:
                         new_retract_y = last_cut_seg.end.y + lnorm_y * l_lead_dist
                         
                         if not allow_lead_outside:
-                            new_retract_x = max(-100.0, min(100.0, new_retract_x))
-                            new_retract_y = max(-100.0, min(100.0, new_retract_y))
+                            clamp_bound = max(l_lead_dist * 5.0, 100.0)
+                            new_retract_x = max(-clamp_bound, min(clamp_bound, new_retract_x))
+                            new_retract_y = max(-clamp_bound, min(clamp_bound, new_retract_y))
                         
                         # Create lead-out CUT segment
                         lead_out_cut = cut_seg.model_copy(deep=True)
@@ -282,7 +285,7 @@ class ToolpathEngine:
                         
                         # Modify the next RETRACT segment if it exists
                         if loop_end_idx < n and segments[loop_end_idx].moveType in [ToolpathSegmentType.RETRACT_CLEARANCE, ToolpathSegmentType.RAPID_XY, ToolpathSegmentType.APPROACH_RETRACT]:
-                            retract_seg = segments[loop_end_idx]
+                            retract_seg = segments[loop_end_idx].model_copy(deep=True)
                             retract_seg.segmentRole = "retract"
                             retract_seg.start.x = new_retract_x
                             retract_seg.start.y = new_retract_y

@@ -3,7 +3,6 @@ import {
   ArrowRight, Cuboid, Upload, Cpu, Sliders, Download,
   Code2, Box, History, Zap, FileImage, ChevronRight,
 } from 'lucide-react';
-import { getSession } from '@/lib/auth';
 import { Hero3D } from '@/components/landing/Hero3D';
 import { AnimatedSection } from '@/components/landing/AnimatedSection';
 import { AnimatedCode } from '@/components/landing/AnimatedCode';
@@ -15,9 +14,6 @@ import { Logo } from '@/components/shared/Logo';
 import { ThemeToggle } from '@/components/shared/theme-toggle';
 
 export default async function LandingPage() {
-  const session = await getSession();
-  const isLoggedIn = Boolean(session);
-
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#080c10] text-slate-900 dark:text-white selection:bg-blue-500/30 overflow-hidden relative font-sans">
 
@@ -46,28 +42,33 @@ export default async function LandingPage() {
             <a href="#features" className="text-sm font-medium text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white scroll-smooth transition-colors">Features</a>
           </div>
 
-          <div className="flex items-center gap-4">
-            {isLoggedIn ? (
-              <Link href="/workspace" className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all duration-200 shadow-md shadow-blue-500/25">
-                Open Workspace
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </Link>
-            ) : (
-              <>
-                <Link href="/login" className="text-sm text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:text-white transition-colors font-medium">Sign in</Link>
-                <Link href="/register" className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all duration-200 shadow-md shadow-blue-500/25">
-                  Get Started
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </Link>
-              </>
-            )}
+          <div className="flex items-center gap-3">
+            <Link
+              href="/login"
+              className="text-sm font-semibold text-slate-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-white px-3.5 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 transition-all"
+            >
+              Sign In
+            </Link>
+            <Link
+              href="/register"
+              className="hidden sm:inline-flex text-sm font-semibold text-slate-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-white px-3.5 py-2 rounded-xl border border-slate-200 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20 transition-all"
+            >
+              Sign Up
+            </Link>
+            <Link
+              href="/workspace"
+              className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-all duration-200 shadow-md shadow-blue-500/25"
+            >
+              Open Workspace
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </Link>
           </div>
 
         </div>
       </nav>
 
       {/* ── Hero ── */}
-      <main className="relative z-10 px-6 pt-28 pb-12 max-w-5xl mx-auto text-center">
+      <main id="home" className="relative z-10 px-6 pt-28 pb-12 max-w-5xl mx-auto text-center">
         <AnimatedSection delay={0} direction="down" duration={0.6}>
           <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/25 text-blue-600 dark:text-blue-400 text-xs font-semibold tracking-widest mb-8 uppercase">
             <span className="relative flex h-2 w-2">
@@ -95,11 +96,11 @@ export default async function LandingPage() {
         <AnimatedSection delay={0.35} direction="up" duration={0.8}>
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
-              href={isLoggedIn ? '/workspace' : '/register'}
+              href="/workspace"
               className="group relative inline-flex items-center gap-2 px-8 py-4 text-base font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-2xl shadow-lg shadow-blue-500/30 transition-all duration-200 overflow-hidden"
             >
               <div className="absolute inset-0 -ml-16 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-[20deg] group-hover:translate-x-[300%] transition-transform duration-700 ease-in-out" />
-              {isLoggedIn ? 'Open Workspace' : 'Start Designing for Free'}
+              Open Workspace
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Link>
             <a
@@ -377,10 +378,10 @@ export default async function LandingPage() {
               Join designers and engineers who are already generating production-ready CAD models with AI.
             </p>
             <Link
-              href={isLoggedIn ? '/workspace' : '/register'}
+              href="/workspace"
               className="group inline-flex items-center gap-3 px-10 py-5 text-lg font-bold text-white bg-gradient-to-b from-zinc-800 to-zinc-950 dark:from-blue-500 dark:to-blue-700 rounded-2xl hover:from-zinc-700 dark:hover:from-blue-400 hover:to-zinc-900 dark:hover:to-blue-600 shadow-[0_0_60px_rgba(37,99,235,0.5)] hover:shadow-[0_0_80px_rgba(37,99,235,0.7)] transition-all duration-200"
             >
-              {isLoggedIn ? 'Open Workspace' : 'Start Designing for Free'}
+              Open Workspace
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Link>
           </div>

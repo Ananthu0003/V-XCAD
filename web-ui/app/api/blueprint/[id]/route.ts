@@ -1,12 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-
-import { getSession } from '@/lib/auth';
+import { getFastApiUrl, fetchWithTimeout } from '@/lib/api-config';
+import { requireSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-
-function getFastApiUrl(): string {
-	const value = process.env.FASTAPI_URL?.trim() || process.env.AI_ENGINE_URL?.trim() || 'http://127.0.0.1:8001/api/v1';
-	return value.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
-}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -69,16 +63,8 @@ export async function GET(
 	request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> }
 ) {
-	// VEX-006: Require authenticated session
-	const authSession = await getSession();
-	if (!authSession?.userId) {
-		return NextResponse.json(
-			{ error: { message: 'Authentication required.', hint: 'Log in to access blueprints.' } },
-			{ status: 401 }
-		);
-	}
-	const userExists = await prisma.user.findUnique({ where: { id: authSession.userId } });
-	if (!userExists) {
+	const userId = await requireSession();
+	if (!userId) {
 		return NextResponse.json(
 			{ error: { message: 'Authentication required.', hint: 'Log in to access blueprints.' } },
 			{ status: 401 }
@@ -91,15 +77,15 @@ export async function GET(
 	}
 
 	// VEX-2A-004: Enforce ownership before proxying to ai-engine
-	const accessCheck = await authorizeSessionAccess(id, authSession.userId);
+	const accessCheck = await authorizeSessionAccess(id, userId);
 	if ('error' in accessCheck) {
 		return accessCheck.error;
 	}
 
 	try {
-		const upstream = await fetch(`${getFastApiUrl()}/api/v1/blueprint/${id}`, {
+		const upstream = await fetchWithTimeout(`${getFastApiUrl()}/blueprint/${encodeURIComponent(id)}`, {
 			cache: 'no-store',
-		});
+		}, 30000);
 
 		if (!upstream.ok) {
 			return new NextResponse('Blueprint not found', { status: upstream.status });
