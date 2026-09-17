@@ -112,6 +112,88 @@ def _build_sandbox_env(
     return safe_env
 
 
+# CLAUDE-001: Module-level restricted builtins for test importability.
+# The harness template contains an identical copy that runs in the subprocess.
+# This dict is the single source of truth for which builtins are safe.
+RESTRICTED_BUILTINS = {
+    "__name__": "__main__",
+    "__build_class__": __builtins__["__build_class__"] if isinstance(__builtins__, dict) else __builtins__.__dict__["__build_class__"],
+    "__doc__": None,
+    "__spec__": None,
+    "__loader__": None,
+    "__package__": None,
+    "__debug__": False,
+    # Constants
+    "True": True, "False": False, "None": None,
+    "Ellipsis": Ellipsis, "NotImplemented": NotImplemented,
+    # Type conversions
+    "int": int, "float": float, "str": str, "bool": bool,
+    "complex": complex, "bytes": bytes, "bytearray": bytearray,
+    # Math
+    "abs": abs, "min": min, "max": max, "sum": sum,
+    "pow": pow, "round": round, "divmod": divmod,
+    "hex": hex, "oct": oct, "bin": bin,
+    # Sequences / collections
+    "len": len, "range": range, "enumerate": enumerate,
+    "zip": zip, "map": map, "filter": filter,
+    "sorted": sorted, "reversed": reversed,
+    "list": list, "tuple": tuple, "set": set, "frozenset": frozenset,
+    "dict": dict, "slice": slice,
+    # Iteration
+    "iter": iter, "next": next,
+    # Type inspection / checking
+    "isinstance": isinstance, "issubclass": issubclass,
+    "callable": callable, "type": type, "hasattr": hasattr,
+    # Output (harmless — writes to stdout only)
+    "print": print,
+    # String operations
+    "format": format, "repr": repr, "ascii": ascii,
+    "chr": chr, "ord": ord,
+    # Other safe builtins
+    "id": id, "hash": hash,
+    "property": property, "staticmethod": staticmethod,
+    "classmethod": classmethod, "super": super, "object": object,
+    # Exception hierarchy
+    "Exception": Exception, "BaseException": BaseException,
+    "TypeError": TypeError, "ValueError": ValueError,
+    "KeyError": KeyError, "IndexError": IndexError,
+    "AttributeError": AttributeError, "RuntimeError": RuntimeError,
+    "StopIteration": StopIteration, "ZeroDivisionError": ZeroDivisionError,
+    "ImportError": ImportError, "ModuleNotFoundError": ModuleNotFoundError,
+    "OSError": OSError, "IOError": IOError, "FileNotFoundError": FileNotFoundError,
+    "MemoryError": MemoryError, "RecursionError": RecursionError,
+    "ArithmeticError": ArithmeticError, "AssertionError": AssertionError,
+    "BufferError": BufferError, "LookupError": LookupError,
+    "NameError": NameError, "UnboundLocalError": UnboundLocalError,
+    "NotImplementedError": NotImplementedError, "OverflowError": OverflowError,
+    "ReferenceError": ReferenceError, "SyntaxError": SyntaxError,
+    "SystemError": SystemError, "TabError": TabError,
+    "TimeoutError": TimeoutError,
+    "UnicodeError": UnicodeError, "UnicodeDecodeError": UnicodeDecodeError,
+    "UnicodeEncodeError": UnicodeEncodeError, "UnicodeTranslateError": UnicodeTranslateError,
+    "ConnectionError": ConnectionError, "BrokenPipeError": BrokenPipeError,
+    "FileExistsError": FileExistsError, "IsADirectoryError": IsADirectoryError,
+    "NotADirectoryError": NotADirectoryError, "PermissionError": PermissionError,
+    "ProcessLookupError": ProcessLookupError, "BlockingIOError": BlockingIOError,
+    "ChildProcessError": ChildProcessError, "InterruptedError": InterruptedError,
+    "ConnectionAbortedError": ConnectionAbortedError,
+    "ConnectionRefusedError": ConnectionRefusedError,
+    "ConnectionResetError": ConnectionResetError,
+    # Warning hierarchy
+    "Warning": Warning, "DeprecationWarning": DeprecationWarning,
+    "FutureWarning": FutureWarning, "UserWarning": UserWarning,
+    "RuntimeWarning": RuntimeWarning, "SyntaxWarning": SyntaxWarning,
+    "ImportWarning": ImportWarning, "UnicodeWarning": UnicodeWarning,
+    "BytesWarning": BytesWarning, "ResourceWarning": ResourceWarning,
+    "PendingDeprecationWarning": PendingDeprecationWarning,
+    "EnvironmentError": EnvironmentError,
+    "FloatingPointError": FloatingPointError,
+    "GeneratorExit": GeneratorExit,
+    "SystemExit": SystemExit, "KeyboardInterrupt": KeyboardInterrupt,
+    "EOFError": EOFError,
+}
+
+
 RENDER_HARNESS_TEMPLATE = r"""
 import json
 import os
@@ -123,7 +205,92 @@ from functools import reduce
 import operator
 import uuid
 import faulthandler
+import builtins as _builtins_mod
 faulthandler.enable()
+
+# CLAUDE-001: Restricted builtins for user-controlled script execution.
+# The build123d bootstrap (exec("from build123d import *", ns)) runs with
+# unrestricted builtins because it is trusted harness code.  After bootstrap,
+# we replace ns["__builtins__"] with this restricted mapping before executing
+# the user-generated CAD script, so that open/__import__/eval/exec/etc. are
+# unreachable even through __builtins__["key"] dict subscript access.
+_RESTRICTED_BUILTINS = {
+    "__name__": "__main__",
+    "__build_class__": _builtins_mod.__build_class__,
+    "__doc__": None,
+    "__spec__": None,
+    "__loader__": None,
+    "__package__": None,
+    "__debug__": False,
+    # Constants
+    "True": True, "False": False, "None": None,
+    "Ellipsis": Ellipsis, "NotImplemented": NotImplemented,
+    # Type conversions (needed by parameterized CAD scripts)
+    "int": int, "float": float, "str": str, "bool": bool,
+    "complex": complex, "bytes": bytes, "bytearray": bytearray,
+    # Math
+    "abs": abs, "min": min, "max": max, "sum": sum,
+    "pow": pow, "round": round, "divmod": divmod,
+    "hex": hex, "oct": oct, "bin": bin,
+    # Sequences / collections
+    "len": len, "range": range, "enumerate": enumerate,
+    "zip": zip, "map": map, "filter": filter,
+    "sorted": sorted, "reversed": reversed,
+    "list": list, "tuple": tuple, "set": set, "frozenset": frozenset,
+    "dict": dict, "slice": slice,
+    # Iteration
+    "iter": iter, "next": next,
+    # Type inspection / checking
+    "isinstance": isinstance, "issubclass": issubclass,
+    "callable": callable, "type": type, "hasattr": hasattr,
+    # Output (harmless — writes to stdout only)
+    "print": print,
+    # String operations
+    "format": format, "repr": repr, "ascii": ascii,
+    "chr": chr, "ord": ord,
+    # Other safe builtins
+    "id": id, "hash": hash,
+    "property": property, "staticmethod": staticmethod,
+    "classmethod": classmethod, "super": super, "object": object,
+    # Exception hierarchy (needed for try/except in CAD scripts)
+    "Exception": Exception, "BaseException": BaseException,
+    "TypeError": TypeError, "ValueError": ValueError,
+    "KeyError": KeyError, "IndexError": IndexError,
+    "AttributeError": AttributeError, "RuntimeError": RuntimeError,
+    "StopIteration": StopIteration, "ZeroDivisionError": ZeroDivisionError,
+    "ImportError": ImportError, "ModuleNotFoundError": ModuleNotFoundError,
+    "OSError": OSError, "IOError": IOError, "FileNotFoundError": FileNotFoundError,
+    "MemoryError": MemoryError, "RecursionError": RecursionError,
+    "ArithmeticError": ArithmeticError, "AssertionError": AssertionError,
+    "BufferError": BufferError, "LookupError": LookupError,
+    "NameError": NameError, "UnboundLocalError": UnboundLocalError,
+    "NotImplementedError": NotImplementedError, "OverflowError": OverflowError,
+    "ReferenceError": ReferenceError, "SyntaxError": SyntaxError,
+    "SystemError": SystemError, "TabError": TabError,
+    "TimeoutError": TimeoutError,
+    "UnicodeError": UnicodeError, "UnicodeDecodeError": UnicodeDecodeError,
+    "UnicodeEncodeError": UnicodeEncodeError, "UnicodeTranslateError": UnicodeTranslateError,
+    "ConnectionError": ConnectionError, "BrokenPipeError": BrokenPipeError,
+    "FileExistsError": FileExistsError, "IsADirectoryError": IsADirectoryError,
+    "NotADirectoryError": NotADirectoryError, "PermissionError": PermissionError,
+    "ProcessLookupError": ProcessLookupError, "BlockingIOError": BlockingIOError,
+    "ChildProcessError": ChildProcessError, "InterruptedError": InterruptedError,
+    "ConnectionAbortedError": ConnectionAbortedError,
+    "ConnectionRefusedError": ConnectionRefusedError,
+    "ConnectionResetError": ConnectionResetError,
+    # Warning hierarchy
+    "Warning": Warning, "DeprecationWarning": DeprecationWarning,
+    "FutureWarning": FutureWarning, "UserWarning": UserWarning,
+    "RuntimeWarning": RuntimeWarning, "SyntaxWarning": SyntaxWarning,
+    "ImportWarning": ImportWarning, "UnicodeWarning": UnicodeWarning,
+    "BytesWarning": BytesWarning, "ResourceWarning": ResourceWarning,
+    "PendingDeprecationWarning": PendingDeprecationWarning,
+    "EnvironmentError": EnvironmentError,
+    "FloatingPointError": FloatingPointError,
+    "GeneratorExit": GeneratorExit,
+    "SystemExit": SystemExit, "KeyboardInterrupt": KeyboardInterrupt,
+    "EOFError": EOFError,
+}
 
 # Patch math.dist to be robust against dimensional mismatches (e.g. 3D Vector vs 2D tuple)
 _orig_dist = math.dist
@@ -1355,6 +1522,13 @@ def run():
         # Prevent hallucinated GeomType.POINT from crashing by removing the filter entirely
         script_content = re.sub(r"\.filter_by\(\s*(?:bd|build123d)\.GeomType\.POINT\s*\)", "", script_content)
 
+        # CLAUDE-001: Enforce restricted builtins before executing user script.
+        # The build123d bootstrap above ran with unrestricted builtins (trusted
+        # harness code).  Now we lock down so that the user-generated script
+        # cannot access open, __import__, eval, exec, or any other dangerous
+        # builtin — even through __builtins__["key"] dict subscript access.
+        ns["__builtins__"] = _RESTRICTED_BUILTINS
+
         exec(script_content, ns)
     except Exception:
         import traceback
@@ -2019,6 +2193,29 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
         # dynamically constructed names like '__class__' etc.)
         FORBIDDEN_ATTR_SUBSTRINGS = ("__",)
 
+        # CLAUDE-001: Bare identifiers that must never appear as ast.Name
+        # nodes.  These can be used to recover builtins or dangerous
+        # functionality even when __builtins__ is restricted.
+        FORBIDDEN_NAME_IDENTIFIERS = frozenset({
+            "__builtins__", "__import__",
+            "open", "eval", "exec", "compile",
+            "globals", "locals", "vars",
+            "getattr", "setattr", "delattr",
+            "input", "breakpoint", "help", "exit", "quit",
+            "__name__", "__doc__",
+        })
+
+        # CLAUDE-001: String constants that are dangerous as subscript keys.
+        # Catches patterns like __builtins__["open"] or obj["__import__"].
+        FORBIDDEN_SUBSCRIPT_KEYS = frozenset({
+            "open", "__import__", "eval", "exec", "compile",
+            "system", "popen", "execv", "execve", "execvp",
+            "environ", "modules",
+            "__builtins__", "__globals__", "__code__",
+            "__class__", "__subclasses__",
+            "getattr", "setattr", "delattr",
+        })
+
         for node in ast.walk(tree):
             # 1. Enforce Module Import Whitelist
             if isinstance(node, ast.Import):
@@ -2044,6 +2241,11 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
                 if attr_name in FORBIDDEN_ATTRIBUTES:
                     return False, f"Security Violation: Access to attribute '{attr_name}' is forbidden."
 
+            # 2b. CLAUDE-001: Block dangerous bare identifiers (ast.Name)
+            elif isinstance(node, ast.Name):
+                if node.id in FORBIDDEN_NAME_IDENTIFIERS:
+                    return False, f"Security Violation: Use of identifier '{node.id}' is forbidden."
+
             # 3. Block forbidden built-in calls
             elif isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Name):
@@ -2066,6 +2268,11 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
                     base_attr = node.value.attr
                     if base_attr in ("modules", "environ"):
                         return False, f"Security Violation: Subscript access on '{base_attr}' is forbidden."
+                # CLAUDE-001: Block subscript with dangerous string constant keys.
+                # Catches __builtins__["open"], obj["__import__"], etc.
+                if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+                    if node.slice.value in FORBIDDEN_SUBSCRIPT_KEYS:
+                        return False, f"Security Violation: Subscript access with key '{node.slice.value}' is forbidden."
 
         return True, None
     except SyntaxError:
