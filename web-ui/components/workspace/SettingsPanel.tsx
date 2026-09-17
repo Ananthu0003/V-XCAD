@@ -253,6 +253,24 @@ export function SettingsPanel({ isOpen, onClose, user }: SettingsPanelProps) {
 									</div>
 									<ChevronRight className="size-3.5 text-cyan-400 group-hover:translate-x-0.5 transition-all" />
 								</a>
+								<a
+									href="/admin/password-reset-requests"
+									className="group w-full flex items-center justify-between px-4 py-3 rounded-xl
+										bg-amber-500/10 border border-amber-500/20
+										hover:bg-amber-500/15 hover:border-amber-500/40
+										transition-all duration-200"
+								>
+									<div className="flex items-center gap-3">
+										<div className="size-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+											<Shield className="size-4 text-amber-400" />
+										</div>
+										<div>
+											<div className="text-[12px] font-bold text-zinc-900 dark:text-white">Password Reset Requests</div>
+											<div className="text-[10px] text-zinc-400 dark:text-zinc-500">Approve or reject user reset requests</div>
+										</div>
+									</div>
+									<ChevronRight className="size-3.5 text-amber-400 group-hover:translate-x-0.5 transition-all" />
+								</a>
 							</div>
 						</section>
 					)}

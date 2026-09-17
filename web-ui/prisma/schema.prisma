@@ -50,13 +50,16 @@ model CadIteration {
 }
 
 model User {
-  id        String       @id @default(cuid())
-  email     String       @unique
-  createdAt DateTime     @default(now())
-  name      String       @default("User")
-  password  String       @default("")
-  updatedAt DateTime     @default(now()) @updatedAt
-  sessions  CadSession[]
+  id               String                @id @default(cuid())
+  email            String                @unique
+  createdAt        DateTime              @default(now())
+  name             String                @default("User")
+  password         String                @default("")
+  isAdmin          Boolean               @default(false)
+  tokenVersion     Int                   @default(0)
+  updatedAt        DateTime              @default(now()) @updatedAt
+  sessions         CadSession[]
+  passwordResets   PasswordResetRequest[]
 }
 
 model ToolMaterial {
@@ -486,4 +489,22 @@ model EngineeringRule {
   updatedAt        DateTime          @updatedAt
   ontology_node    OntologyNode?     @relation(fields: [ontology_node_id], references: [id])
   source_document  KnowledgeDocument @relation(fields: [source_id], references: [id])
+}
+
+model PasswordResetRequest {
+  id           String   @id @default(cuid())
+  userId       String
+  passwordHash String
+  status       String   @default("pending")
+  rejectReason String?
+  createdAt    DateTime @default(now())
+  reviewedAt   DateTime?
+  reviewedBy   String?
+  expiresAt    DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, status])
+  @@index([status])
+  @@index([userId])
+  @@index([expiresAt])
 }

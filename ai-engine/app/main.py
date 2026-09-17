@@ -10,7 +10,6 @@ except Exception:
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -25,15 +24,6 @@ app = FastAPI(
     version="2.0.0",
     docs_url="/docs",
     redoc_url=None,
-)
-
-# Allow the Next.js dev server to call the API directly
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 app.include_router(v1_router, prefix="/api/v1")

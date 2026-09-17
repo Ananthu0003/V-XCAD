@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getTools } from '@/lib/db/tools';
+import { requireSession } from '@/lib/auth';
 
 export async function GET() {
+  // VEX-2A-003: Require authenticated session
+  if (!(await requireSession())) {
+    return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+  }
   try {
     const tools = await getTools();
     

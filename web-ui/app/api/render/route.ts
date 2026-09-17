@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 
+import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -127,6 +128,32 @@ function toFastApiRenderRequest(value: unknown): FastApiRenderRequest | null {
 }
 
 export async function POST(request: Request): Promise<Response> {
+	// ── VEX-2A-002: Require authenticated session ────────────────────────────
+	// Unauthenticated requests must be rejected before any body parsing or
+	// forwarding to the AI engine, preventing arbitrary code execution by
+	// anonymous callers.
+	const authSession = await getSession();
+	if (!authSession?.userId) {
+		return NextResponse.json(
+			buildError('Authentication required.', 'Log in to use the render endpoint.'),
+			{ status: 401 }
+		);
+	}
+
+	// Validate the authenticated user still exists in the database.
+	const userExists = await prisma.user.findUnique({
+		where: { id: authSession.userId },
+	});
+	if (!userExists) {
+		return NextResponse.json(
+			buildError('Authentication required.', 'Log in to use the render endpoint.'),
+			{ status: 401 }
+		);
+	}
+
+	const authenticatedUserId = authSession.userId;
+	// ── End VEX-2A-002 auth gate ─────────────────────────────────────────────
+
 	let body: any = null;
 	try {
 		body = await request.json();
@@ -149,6 +176,24 @@ export async function POST(request: Request): Promise<Response> {
 			),
 			{ status: 400 }
 		);
+	}
+
+	// VEX-2A-012: Ownership check — verify the authenticated user owns the target session
+	// before calling the ai-engine or allowing the upsert to overwrite existing session data.
+	try {
+		const existingSession = await prisma.cadSession.findUnique({
+			where: { id: mappedPayload.session_id },
+			select: { userId: true },
+		});
+
+		if (existingSession && existingSession.userId !== authenticatedUserId) {
+			return NextResponse.json(
+				buildError('Forbidden', 'You do not own this session.'),
+				{ status: 403 }
+			);
+		}
+	} catch (e) {
+		console.warn('Could not verify session ownership for VEX-2A-012:', e);
 	}
 
 	// Determine next version for this session
@@ -254,6 +299,7 @@ export async function POST(request: Request): Promise<Response> {
 				annotations: artifacts && artifacts.annotations ? (artifacts.annotations as Prisma.InputJsonValue) : Prisma.DbNull,
 				stlUrl,
 				stepUrl,
+				userId: authenticatedUserId,
 			},
 		});
 

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,22 @@ export async function POST(
 	request: Request,
 	{ params }: { params: Promise<{ jobId: string }> }
 ): Promise<Response> {
+	// VEX-006: Require authenticated session
+	const authSession = await getSession();
+	if (!authSession?.userId) {
+		return NextResponse.json(
+			{ error: { message: 'Authentication required.', hint: 'Log in to use simulation.' } },
+			{ status: 401 }
+		);
+	}
+	const userExists = await prisma.user.findUnique({ where: { id: authSession.userId } });
+	if (!userExists) {
+		return NextResponse.json(
+			{ error: { message: 'Authentication required.', hint: 'Log in to use simulation.' } },
+			{ status: 401 }
+		);
+	}
+
 	const { jobId } = await params;
 	if (!jobId) {
 		return NextResponse.json({ error: { message: 'Missing jobId' } }, { status: 400 });
@@ -24,6 +41,27 @@ export async function POST(
 	const body = await request.json().catch(() => null);
 	if (!body || !body.setup || !body.operations) {
 		return NextResponse.json({ error: { message: 'Missing setup or operations in body' } }, { status: 400 });
+	}
+
+	// VEX-2A-013b: Ownership check — verify the authenticated user owns the target session
+	// before calling the ai-engine or creating any CAM records.
+	const targetSession = await prisma.cadSession.findUnique({
+		where: { id: jobId },
+		select: { userId: true },
+	});
+
+	if (!targetSession) {
+		return NextResponse.json(
+			{ error: { message: 'Session not found.' } },
+			{ status: 404 }
+		);
+	}
+
+	if (targetSession.userId !== authSession.userId) {
+		return NextResponse.json(
+			{ error: { message: 'Forbidden', hint: 'You do not own this session.' } },
+			{ status: 403 }
+		);
 	}
 
 	let upstream: Response;

@@ -9,7 +9,6 @@ export async function GET(request: Request, context: any) {
 	try {
 		const { id } = await context.params;
 		const authSession = await getSession();
-		const userId = authSession?.userId || null;
 
 		const session = await prisma.cadSession.findUnique({
 			where: { id },
@@ -24,8 +23,17 @@ export async function GET(request: Request, context: any) {
 			return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 		}
 
-		if (session.userId !== userId && !session.isShared && session.userId !== null) {
-			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+		// VEX-009: Explicit ownership/shared semantics.
+		// Owner: allowed.  Shared session: allowed (including unauthenticated for share page).
+		// Null-user / other user's private: forbidden.
+		const isOwner = authSession?.userId && session.userId === authSession.userId;
+		const isShared = session.isShared;
+
+		if (!isOwner && !isShared) {
+			return NextResponse.json(
+				{ error: authSession?.userId ? 'Forbidden' : 'Unauthorized' },
+				{ status: authSession?.userId ? 403 : 401 }
+			);
 		}
 
 		let iterations: any[] = [];
@@ -61,7 +69,9 @@ export async function DELETE(request: Request, context: any) {
 	try {
 		const { id } = await context.params;
 		const authSession = await getSession();
-		const userId = authSession?.userId || null;
+		if (!authSession?.userId) {
+			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+		}
 		const { searchParams } = new URL(request.url);
 		const iterationId = searchParams.get('iterationId');
 		const version = searchParams.get('version');
@@ -79,8 +89,10 @@ export async function DELETE(request: Request, context: any) {
 			return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 		}
 
-		if (session.userId !== userId && session.userId !== null) {
-			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+		// VEX-2A-005: Only the owner may delete iterations from their session.
+		// Null-user sessions and shared sessions do not grant deletion rights.
+		if (session.userId !== authSession.userId) {
+			return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 		}
 
 		// 1. Delete matching CadIteration record by either ID or Version
