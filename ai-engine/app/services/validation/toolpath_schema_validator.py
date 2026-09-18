@@ -27,7 +27,7 @@ class ToolpathSchemaValidator:
         """
         result = {
             "is_valid": True,
-            "stale_operations": set(),
+            "stale_operations": [],
             "global_schema_valid": True,
             "detected_root_schema": None,
             "required_schema": "semantic_v1",
@@ -78,7 +78,7 @@ class ToolpathSchemaValidator:
                         
             if not op_valid:
                 result["is_valid"] = False
-                result["stale_operations"].add(op_id)
+                result["stale_operations"].append(op_id)
                 
             result["operation_details"][op_id] = {
                 "operation_id": op_id,

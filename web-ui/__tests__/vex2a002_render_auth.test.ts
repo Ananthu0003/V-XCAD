@@ -87,11 +87,23 @@ jest.mock('next/server', () => ({
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
 const mockGetSession = jest.fn();
+const mockRequireSession = jest.fn();
 jest.mock('@/lib/auth', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
+  requireSession: async (...args: unknown[]) => {
+    const custom = mockRequireSession(...args);
+    if (custom !== undefined) return custom;
+    const session = await mockGetSession(...args);
+    if (!session?.userId) return null;
+    const user = await mockFindUnique({ where: { id: session.userId } });
+    if (!user) return null;
+    return session.userId;
+  },
+  requireAdmin: jest.fn().mockResolvedValue({ id: 'admin-1', isAdmin: true, role: 'admin' }),
 }));
 
 const mockFindUnique = jest.fn();
+const mockCadSessionFindUnique = jest.fn().mockResolvedValue(null);
 const mockUpsert = jest.fn();
 const mockFindFirst = jest.fn();
 const mockExecuteRawUnsafe = jest.fn();
@@ -100,7 +112,10 @@ const mockCadIterationCreate = jest.fn();
 jest.mock('@/lib/prisma', () => ({
   prisma: {
     user: { findUnique: (...args: unknown[]) => mockFindUnique(...args) },
-    cadSession: { upsert: (...args: unknown[]) => mockUpsert(...args) },
+    cadSession: {
+      findUnique: (...args: unknown[]) => mockCadSessionFindUnique(...args),
+      upsert: (...args: unknown[]) => mockUpsert(...args),
+    },
     cadIteration: {
       findFirst: (...args: unknown[]) => mockFindFirst(...args),
       create: (...args: unknown[]) => mockCadIterationCreate(...args),

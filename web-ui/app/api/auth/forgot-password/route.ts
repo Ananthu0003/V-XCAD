@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 
 const TOKEN_EXPIRY_HOURS = 24;
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/;
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,8 +14,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing email or new password' }, { status: 400 });
     }
 
-    if (newPassword.length < 6) {
-      return NextResponse.json({ error: 'Password must be at least 6 characters long' }, { status: 400 });
+    if (newPassword.length < PASSWORD_MIN_LENGTH) {
+      return NextResponse.json({ error: `Password must be at least ${PASSWORD_MIN_LENGTH} characters long` }, { status: 400 });
+    }
+
+    if (!PASSWORD_REGEX.test(newPassword)) {
+      return NextResponse.json({ error: 'Password must contain at least one uppercase letter, one lowercase letter, and one number' }, { status: 400 });
     }
 
     if (confirmPassword && newPassword !== confirmPassword) {

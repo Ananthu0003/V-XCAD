@@ -1,31 +1,27 @@
 import { NextResponse } from 'next/server';
 
-import { getSession } from '@/lib/auth';
-import { prisma } from '@/lib/prisma';
+import { requireAdmin, requireSession } from '@/lib/auth';
+import { getFastApiUrl, fetchWithTimeout } from '@/lib/api-config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function getFastApiUrl(): string {
-	const value = process.env.FASTAPI_URL?.trim();
-	if (!value) throw new Error('FASTAPI_URL is not configured');
-	return value.replace(/\/$/, '');
-}
-
 export async function POST(request: Request): Promise<Response> {
-	// VEX-006: Require authenticated session
-	const authSession = await getSession();
-	if (!authSession?.userId) {
+	// Require authenticated session
+	const userId = await requireSession();
+	if (!userId) {
 		return NextResponse.json(
-			{ error: { message: 'Authentication required.', hint: 'Log in to ingest documents.' } },
+			{ error: { message: 'Authentication required.', hint: 'Sign in to access this resource.' } },
 			{ status: 401 }
 		);
 	}
-	const userExists = await prisma.user.findUnique({ where: { id: authSession.userId } });
-	if (!userExists) {
+
+	// Require administrative session
+	const admin = await requireAdmin();
+	if (!admin) {
 		return NextResponse.json(
-			{ error: { message: 'Authentication required.', hint: 'Log in to ingest documents.' } },
-			{ status: 401 }
+			{ error: { message: 'Forbidden: Admin access required.', hint: 'Administrative privileges are required to ingest documents.' } },
+			{ status: 403 }
 		);
 	}
 
@@ -34,11 +30,11 @@ export async function POST(request: Request): Promise<Response> {
 
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/knowledge/documents/ingest`, {
+		upstream = await fetchWithTimeout(`${getFastApiUrl()}/knowledge/documents/ingest`, {
 			method: 'POST',
 			body: formData,
 			cache: 'no-store',
-		});
+		}, 120000);
 	} catch (error) {
 		return NextResponse.json(
 			{ error: { message: 'Unable to connect to AI engine.' } },

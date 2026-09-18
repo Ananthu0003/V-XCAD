@@ -565,7 +565,11 @@ export default function HitlWorkspace() {
 		if (!sessionId) return;
 		setIsSharing(true);
 		try {
-			const res = await fetch(`/api/sessions/${sessionId}/share`, { method: 'POST' });
+			const res = await fetch(`/api/sessions/${sessionId}/share`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ isShared: true }),
+			});
 			if (!res.ok) throw new Error('Failed to create share link');
 			const data = await res.json();
 			const url = `${window.location.origin}/share/${sessionId}`;
@@ -1299,12 +1303,7 @@ export default function HitlWorkspace() {
 		setStatusText('Generating G-Code with CAM parameters...');
 
 		try {
-<<<<<<< Updated upstream
-			const backendUrl = '/api/cam';
-			const response = await fetch(`${backendUrl}/gcode`, {
-=======
 			const response = await fetch('/api/cam/gcode', {
->>>>>>> Stashed changes
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -1388,16 +1387,7 @@ export default function HitlWorkspace() {
 		latestCamRunId.current = runId;
 
 		try {
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-			const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
-=======
->>>>>>> Stashed changes
 			const opsToSend = selectedOperationIds.size > 0
-=======
-			const backendUrl = '/api/cam';
-			const opsToSend = selectedOperationIds.size > 0 
->>>>>>> 9e28a72c862bac0386888284e0405a5c8021d9cb
 				? camOperations.filter(op => selectedOperationIds.has(op.id))
 				: camOperations;
 
@@ -1431,7 +1421,6 @@ export default function HitlWorkspace() {
 				});
 			}
 
-<<<<<<< HEAD
 			// Ensure setup has actual stock dimensions derived from the CAD model
 			let effectiveCamSetup: any = { ...camSetup };
 			const isStockDefault = !effectiveCamSetup.stockDimensions || (Array.isArray(effectiveCamSetup.stockDimensions) && effectiveCamSetup.stockDimensions.every((v: number) => v === 100));
@@ -1458,14 +1447,7 @@ export default function HitlWorkspace() {
 				};
 			}
 
-<<<<<<< Updated upstream
-			const res = await fetch(`${backendUrl}/api/v1/cam/toolpaths`, {
-=======
-			const res = await fetch(`${backendUrl}/toolpaths`, {
->>>>>>> 9e28a72c862bac0386888284e0405a5c8021d9cb
-=======
 			const res = await fetch('/api/cam/toolpaths', {
->>>>>>> Stashed changes
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -1565,12 +1547,7 @@ export default function HitlWorkspace() {
 		setStatusText('Analyzing 3D geometry for features...');
 
 		try {
-<<<<<<< Updated upstream
-			const backendUrl = '/api/cam';
-			const res = await fetch(`${backendUrl}/analyze`, {
-=======
 			const res = await fetch('/api/cam/analyze', {
->>>>>>> Stashed changes
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ session_id: sessionId, parameters: parameters })
@@ -1684,12 +1661,7 @@ export default function HitlWorkspace() {
 				console.warn('Could not fetch global tool library for AI planning', e);
 			}
 
-<<<<<<< Updated upstream
-			const backendUrl = '/api/cam';
-			const res = await fetch(`${backendUrl}/auto-plan`, {
-=======
-			const res = await fetch('/api/cam/auto_plan', {
->>>>>>> Stashed changes
+			const res = await fetch('/api/cam/auto-plan', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({

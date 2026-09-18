@@ -51,6 +51,12 @@ _REQUIRED_ENV_KEYS = frozenset({
     "TMPDIR",
     "TEMP",
     "TMP",
+    # Windows runtime essentials
+    "SYSTEMROOT",
+    "WINDIR",
+    "USERPROFILE",
+    "LOCALAPPDATA",
+    "APPDATA",
     # System library paths (OCP/OpenCASCADE needs these on some distros)
     "LD_LIBRARY_PATH",
     "DYLD_LIBRARY_PATH",
@@ -61,6 +67,21 @@ _REQUIRED_ENV_KEYS = frozenset({
     "PYTHONIOENCODING",
     "PYTHONLEGACYWINDOWSSTDIO",
 })
+
+
+def _set_subprocess_limits():
+    """Apply OS-level resource limits (POSIX only) on CAD render subprocess."""
+    if sys.platform != "win32":
+        try:
+            import resource
+            # Limit virtual memory (address space) to 1.5 GB
+            max_mem = 1536 * 1024 * 1024
+            resource.setrlimit(resource.RLIMIT_AS, (max_mem, max_mem))
+            # Limit CPU time to 120 seconds
+            resource.setrlimit(resource.RLIMIT_CPU, (120, 120))
+        except Exception:
+            pass
+
 
 # Application-set variables that are safe to forward (non-secret CAD config):
 _SAFE_APP_KEYS = frozenset({
@@ -1785,6 +1806,7 @@ class ParameterRenderService:
                         stderr=asyncio.subprocess.PIPE,
                         cwd=temp_dir,
                         env=env,
+                        preexec_fn=_set_subprocess_limits if sys.platform != "win32" else None,
                     )
                     try:
                         stdout, stderr = await asyncio.wait_for(
@@ -1881,26 +1903,12 @@ class ParameterRenderService:
                 (tmp / "user_script.py").write_text(script, encoding="utf-8")
                 (tmp / "harness.py").write_text(RENDER_HARNESS_TEMPLATE, encoding="utf-8")
 
-<<<<<<< Updated upstream
                 env = _build_sandbox_env(extra={
                     "CAD_PARAMETERS_JSON": json.dumps(parameters, ensure_ascii=True),
                     "CAD_CAM_PARAMETERS_JSON": json.dumps(cam_parameters or {}, ensure_ascii=True),
                     "OUTPUT_DIR": str(self.outputs_dir),
                     "OUTPUT_BASENAME": output_basename,
                 })
-=======
-                # Security: Build minimal safe environment dict without leaking API keys, DB urls, or secrets
-                safe_env_keys = {
-                    "PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP",
-                    "PYTHONPATH", "PYTHONHOME", "HOME", "USERPROFILE",
-                    "LOCALAPPDATA", "APPDATA"
-                }
-                env = {k: v for k, v in os.environ.items() if k.upper() in safe_env_keys}
-                env["CAD_PARAMETERS_JSON"] = json.dumps(parameters, ensure_ascii=True)
-                env["CAD_CAM_PARAMETERS_JSON"] = json.dumps(cam_parameters or {}, ensure_ascii=True)
-                env["OUTPUT_DIR"] = str(self.outputs_dir)
-                env["OUTPUT_BASENAME"] = output_basename
->>>>>>> Stashed changes
 
                 project_root = Path(__file__).resolve().parents[3]
                 python_exe = sys.executable
@@ -1918,6 +1926,7 @@ class ParameterRenderService:
                             stderr=asyncio.subprocess.PIPE,
                             cwd=temp_dir,
                             env=env,
+                            preexec_fn=_set_subprocess_limits if sys.platform != "win32" else None,
                         )
                         try:
                             stdout, stderr = await asyncio.wait_for(
@@ -2305,9 +2314,8 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
                         return False, f"Security Violation: Subscript access with key '{node.slice.value}' is forbidden."
 
         return True, None
-    except SyntaxError:
-        # Let validate_script_syntax handle syntax errors
-        return True, None
+    except SyntaxError as exc:
+        return False, f"Syntax error in script: {str(exc)}"
     except Exception as exc:
         return False, f"Security validation failed: {str(exc)}"
 

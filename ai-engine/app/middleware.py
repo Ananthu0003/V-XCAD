@@ -3,6 +3,7 @@ API Key authentication middleware for the ai-engine.
 Validates the X-Api-Key header against the INTERNAL_API_KEY env var.
 """
 import os
+import hmac
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -21,7 +22,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         path = request.url.path
 
         # Allow public endpoints without auth
-        if path in PUBLIC_PATHS or path.startswith("/outputs/"):
+        if path in PUBLIC_PATHS:
             return await call_next(request)
 
         # If no API key is configured, deny all requests
@@ -32,9 +33,9 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 media_type="application/json",
             )
 
-        # Check the X-Api-Key header
+        # Check the X-Api-Key header using constant-time comparison
         provided_key = request.headers.get("X-Api-Key", "")
-        if not provided_key or provided_key != self.api_key:
+        if not provided_key or not hmac.compare_digest(provided_key, self.api_key):
             return Response(
                 content='{"error": "Invalid or missing API key"}',
                 status_code=401,

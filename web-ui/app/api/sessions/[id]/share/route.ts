@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
+import { z } from 'zod';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const shareBodySchema = z.object({
+  isShared: z.boolean(),
+});
 
 export async function POST(
     request: NextRequest,
@@ -15,8 +20,8 @@ export async function POST(
             return NextResponse.json({ error: 'ID is required' }, { status: 400 });
         }
 
-        const authSession = await getSession();
-        if (!authSession?.userId) {
+        const authUserId = await requireSession();
+        if (!authUserId) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
@@ -29,12 +34,20 @@ export async function POST(
             return NextResponse.json({ error: 'Session not found' }, { status: 404 });
         }
 
-        if (session.userId !== authSession.userId) {
+        if (session.userId !== authUserId) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
-        // Always enable sharing when requested
-        const isShared = true;
+        const body = await request.json();
+        const parsed = shareBodySchema.safeParse(body);
+        if (!parsed.success) {
+            return NextResponse.json(
+                { error: 'Invalid request body. Provide { isShared: boolean }.' },
+                { status: 400 }
+            );
+        }
+
+        const { isShared } = parsed.data;
 
         await prisma.cadSession.update({
             where: { id },

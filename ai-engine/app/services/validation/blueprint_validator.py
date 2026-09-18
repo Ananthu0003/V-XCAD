@@ -43,11 +43,11 @@ class BlueprintValidator:
             ftype = feature.get("type", "").lower()
             if ftype == "hole":
                 has_dia = any(e.name.lower() == "diameter" for e in f_evidences)
-                if not has_dia and "dimensions" in feature and "diameter" in feature["dimensions"]:
+                if not has_dia and "dimensions" in feature and "diameter" in feature.get("dimensions", {}):
                     has_dia = feature["dimensions"]["diameter"] > 0
 
                 has_depth = any(e.name.lower() == "depth" for e in f_evidences)
-                if not has_depth and "dimensions" in feature and "depth" in feature["dimensions"]:
+                if not has_depth and "dimensions" in feature and "depth" in feature.get("dimensions", {}):
                     has_depth = feature["dimensions"]["depth"] > 0
 
                 is_through = feature.get("parameters", {}).get("depth_type") == "through"

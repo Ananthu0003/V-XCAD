@@ -1,14 +1,25 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
+import { z } from 'zod';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const sessionPatchSchema = z.object({
+  currentVersion: z.number().int().positive().optional(),
+  pythonScript: z.string().optional(),
+  parameters: z.any().optional(),
+  annotations: z.any().optional(),
+  stlUrl: z.string().url().optional().nullable(),
+  stepUrl: z.string().url().optional().nullable(),
+  prompt: z.string().optional(),
+}).strict();
+
 export async function GET(request: Request, context: any) {
 	try {
 		const { id } = await context.params;
-		const authSession = await getSession();
+		const authUserId = await requireSession();
 		const session = await prisma.cadSession.findUnique({
 			where: { id },
 		});
@@ -20,13 +31,13 @@ export async function GET(request: Request, context: any) {
 		// VEX-009: Explicit ownership/shared semantics.
 		// Owner: allowed.  Shared session: allowed (including unauthenticated for share page).
 		// Null-user / other user's private: forbidden.
-		const isOwner = authSession?.userId && session.userId === authSession.userId;
+		const isOwner = authUserId && session.userId === authUserId;
 		const isShared = session.isShared;
 
 		if (!isOwner && !isShared) {
 			return NextResponse.json(
-				{ error: authSession?.userId ? 'Forbidden' : 'Unauthorized' },
-				{ status: authSession?.userId ? 403 : 401 }
+				{ error: authUserId ? 'Forbidden' : 'Unauthorized' },
+				{ status: authUserId ? 403 : 401 }
 			);
 		}
 
@@ -40,8 +51,8 @@ export async function GET(request: Request, context: any) {
 export async function DELETE(request: Request, context: any) {
 	try {
 		const { id } = await context.params;
-		const authSession = await getSession();
-		if (!authSession?.userId) {
+		const authUserId = await requireSession();
+		if (!authUserId) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
 
@@ -56,7 +67,7 @@ export async function DELETE(request: Request, context: any) {
 
 		// VEX-2A-005: Only the owner may delete their session.
 		// Shared status and null-user sessions do not grant deletion rights.
-		if (session.userId !== authSession.userId) {
+		if (session.userId !== authUserId) {
 			return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 		}
 
@@ -74,11 +85,19 @@ export async function DELETE(request: Request, context: any) {
 export async function PATCH(request: Request, context: any) {
 	try {
 		const { id } = await context.params;
-		const authSession = await getSession();
-		if (!authSession?.userId) {
+		const authUserId = await requireSession();
+		if (!authUserId) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
 		const body = await request.json();
+
+		const parsed = sessionPatchSchema.safeParse(body);
+		if (!parsed.success) {
+			return NextResponse.json(
+				{ error: 'Validation failed', details: parsed.error.issues },
+				{ status: 400 }
+			);
+		}
 
 		const session = await prisma.cadSession.findUnique({
 			where: { id },
@@ -91,20 +110,21 @@ export async function PATCH(request: Request, context: any) {
 
 		// VEX-009: Only the owner may modify their session.
 		// Shared status does NOT grant write permission.
-		if (session.userId !== authSession.userId) {
+		if (session.userId !== authUserId) {
 			return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 		}
 
+		const data = parsed.data;
 		const updated = await prisma.cadSession.update({
 			where: { id },
 			data: {
-				...(body.currentVersion !== undefined ? { currentVersion: body.currentVersion } : {}),
-				...(body.pythonScript !== undefined ? { pythonScript: body.pythonScript } : {}),
-				...(body.parameters !== undefined ? { parameters: body.parameters } : {}),
-				...(body.annotations !== undefined ? { annotations: body.annotations } : {}),
-				...(body.stlUrl !== undefined ? { stlUrl: body.stlUrl } : {}),
-				...(body.stepUrl !== undefined ? { stepUrl: body.stepUrl } : {}),
-				...(body.prompt !== undefined ? { prompt: body.prompt } : {}),
+				...(data.currentVersion !== undefined ? { currentVersion: data.currentVersion } : {}),
+				...(data.pythonScript !== undefined ? { pythonScript: data.pythonScript } : {}),
+				...(data.parameters !== undefined ? { parameters: data.parameters } : {}),
+				...(data.annotations !== undefined ? { annotations: data.annotations } : {}),
+				...(data.stlUrl !== undefined ? { stlUrl: data.stlUrl } : {}),
+				...(data.stepUrl !== undefined ? { stepUrl: data.stepUrl } : {}),
+				...(data.prompt !== undefined ? { prompt: data.prompt } : {}),
 			},
 		});
 

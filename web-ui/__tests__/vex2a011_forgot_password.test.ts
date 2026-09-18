@@ -192,7 +192,7 @@ describe('VEX-2A-011 — Password Reset Workflow', () => {
       const { POST } = require('@/app/api/auth/forgot-password/route');
       const req = makePostRequest('http://localhost:3000/api/auth/forgot-password', {
         email: 'test@example.com',
-        newPassword: 'newpassword123',
+        newPassword: 'NewPassword123',
       });
       const res = await POST(req);
       const data = await res.json();
@@ -214,7 +214,7 @@ describe('VEX-2A-011 — Password Reset Workflow', () => {
       const { POST } = require('@/app/api/auth/forgot-password/route');
       const req = makePostRequest('http://localhost:3000/api/auth/forgot-password', {
         email: 'test@example.com',
-        newPassword: 'newpassword123',
+        newPassword: 'NewPassword123',
       });
       await POST(req);
 
@@ -226,7 +226,7 @@ describe('VEX-2A-011 — Password Reset Workflow', () => {
       const { POST } = require('@/app/api/auth/forgot-password/route');
       const req1 = makePostRequest('http://localhost:3000/api/auth/forgot-password', {
         email: 'existing@example.com',
-        newPassword: 'newpassword123',
+        newPassword: 'NewPassword123',
       });
       const res1 = await POST(req1);
       const data1 = await res1.json();
@@ -234,7 +234,7 @@ describe('VEX-2A-011 — Password Reset Workflow', () => {
       mockFindUnique.mockResolvedValue(null);
       const req2 = makePostRequest('http://localhost:3000/api/auth/forgot-password', {
         email: 'nonexistent@example.com',
-        newPassword: 'newpassword123',
+        newPassword: 'NewPassword123',
       });
       const res2 = await POST(req2);
       const data2 = await res2.json();
@@ -249,6 +249,17 @@ describe('VEX-2A-011 — Password Reset Workflow', () => {
       const req = makePostRequest('http://localhost:3000/api/auth/forgot-password', {
         email: 'test@example.com',
         newPassword: '12345',
+      });
+      const res = await POST(req);
+
+      expect(res.status).toBe(400);
+    });
+
+    it('validates password complexity (uppercase, lowercase, number)', async () => {
+      const { POST } = require('@/app/api/auth/forgot-password/route');
+      const req = makePostRequest('http://localhost:3000/api/auth/forgot-password', {
+        email: 'test@example.com',
+        newPassword: 'lowercaseandnumber123',
       });
       const res = await POST(req);
 
@@ -272,7 +283,7 @@ describe('VEX-2A-011 — Password Reset Workflow', () => {
       const { POST } = require('@/app/api/auth/forgot-password/route');
       const req = makePostRequest('http://localhost:3000/api/auth/forgot-password', {
         email: 'test@example.com',
-        newPassword: 'updatedpassword',
+        newPassword: 'UpdatedPassword123',
       });
       const res = await POST(req);
 

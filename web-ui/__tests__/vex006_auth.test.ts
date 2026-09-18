@@ -91,8 +91,25 @@ jest.mock('next/server', () => {
 // ── Shared Mocks ──────────────────────────────────────────────────────────
 
 const mockGetSession = jest.fn();
+const mockRequireSession = jest.fn();
 jest.mock('@/lib/auth', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
+  requireSession: async (...args: unknown[]) => {
+    const custom = mockRequireSession(...args);
+    if (custom !== undefined) return custom;
+    const session = await mockGetSession(...args);
+    if (!session?.userId) return null;
+    const user = await mockUserFindUnique({ where: { id: session.userId } });
+    if (!user) return null;
+    return session.userId;
+  },
+  requireAdmin: async (...args: unknown[]) => {
+    const session = await mockGetSession(...args);
+    if (!session?.userId) return null;
+    const user = await mockUserFindUnique({ where: { id: session.userId } });
+    if (!user) return null;
+    return session.userId;
+  },
 }));
 
 const mockUserFindUnique = jest.fn();

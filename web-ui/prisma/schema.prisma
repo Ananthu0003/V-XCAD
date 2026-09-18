@@ -27,6 +27,8 @@ model CadSession {
   camSetups    CamSetup[]
   simulations  SimulationRun[]
   iterations   CadIteration[]
+
+  @@index([userId])
 }
 
 model CadIteration {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getToolById, updateTool, deleteTool, deactivateTool } from '@/lib/db/tools';
 import { toolSchema } from '@/lib/validation/toolSchema';
 import { Prisma } from '@prisma/client';
-import { requireSession } from '@/lib/auth';
+import { requireSession, requireAdmin } from '@/lib/auth';
 
 export async function GET(
   request: NextRequest,
@@ -28,8 +28,13 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!(await requireSession())) {
+  const userId = await requireSession();
+  if (!userId) {
     return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+  }
+  const admin = await requireAdmin();
+  if (!admin) {
+    return NextResponse.json({ error: 'Forbidden: Admin access required.' }, { status: 403 });
   }
   try {
     const { id } = await params;
@@ -64,8 +69,13 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!(await requireSession())) {
+  const userId = await requireSession();
+  if (!userId) {
     return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+  }
+  const admin = await requireAdmin();
+  if (!admin) {
+    return NextResponse.json({ error: 'Forbidden: Admin access required.' }, { status: 403 });
   }
   try {
     const { id } = await params;

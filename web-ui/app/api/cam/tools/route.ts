@@ -52,8 +52,12 @@ export async function GET(request: NextRequest) {
         // depending on how they were imported, we do manual post-filtering if needed.
         if (material_code) {
             tools = tools.filter(t => {
-                const materials = t.compatibility?.compatibleMaterialsJson ? JSON.parse(t.compatibility.compatibleMaterialsJson) : [];
-                return materials.includes(material_code);
+                try {
+                    const materials = t.compatibility?.compatibleMaterialsJson ? JSON.parse(t.compatibility.compatibleMaterialsJson) : [];
+                    return materials.includes(material_code);
+                } catch {
+                    return false;
+                }
             });
         }
         

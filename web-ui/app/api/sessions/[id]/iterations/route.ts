@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request, context: any) {
 	try {
 		const { id } = await context.params;
-		const authSession = await getSession();
+		const authUserId = await requireSession();
 
 		const session = await prisma.cadSession.findUnique({
 			where: { id },
@@ -26,13 +26,13 @@ export async function GET(request: Request, context: any) {
 		// VEX-009: Explicit ownership/shared semantics.
 		// Owner: allowed.  Shared session: allowed (including unauthenticated for share page).
 		// Null-user / other user's private: forbidden.
-		const isOwner = authSession?.userId && session.userId === authSession.userId;
+		const isOwner = authUserId && session.userId === authUserId;
 		const isShared = session.isShared;
 
 		if (!isOwner && !isShared) {
 			return NextResponse.json(
-				{ error: authSession?.userId ? 'Forbidden' : 'Unauthorized' },
-				{ status: authSession?.userId ? 403 : 401 }
+				{ error: authUserId ? 'Forbidden' : 'Unauthorized' },
+				{ status: authUserId ? 403 : 401 }
 			);
 		}
 
@@ -60,29 +60,27 @@ export async function GET(request: Request, context: any) {
 			iterations,
 		});
 	} catch (error) {
-		console.error('Failed to fetch session iterations:', error);
-		return NextResponse.json({ error: 'Failed to fetch iterations' }, { status: 500 });
+		console.error('Failed to load iterations:', error);
+		return NextResponse.json({ error: 'Failed to load iterations' }, { status: 500 });
 	}
 }
 
 export async function DELETE(request: Request, context: any) {
 	try {
 		const { id } = await context.params;
-		const authSession = await getSession();
-		if (!authSession?.userId) {
+		const authUserId = await requireSession();
+		if (!authUserId) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
+
 		const { searchParams } = new URL(request.url);
 		const iterationId = searchParams.get('iterationId');
-		const version = searchParams.get('version');
-		const versionNum = version ? parseInt(version, 10) : undefined;
+		const versionStr = searchParams.get('version');
+		const versionNum = versionStr ? parseInt(versionStr, 10) : null;
 
 		const session = await prisma.cadSession.findUnique({
 			where: { id },
-			select: {
-				id: true,
-				userId: true,
-			},
+			select: { userId: true },
 		});
 
 		if (!session) {
@@ -91,7 +89,7 @@ export async function DELETE(request: Request, context: any) {
 
 		// VEX-2A-005: Only the owner may delete iterations from their session.
 		// Null-user sessions and shared sessions do not grant deletion rights.
-		if (session.userId !== authSession.userId) {
+		if (session.userId !== authUserId) {
 			return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 		}
 

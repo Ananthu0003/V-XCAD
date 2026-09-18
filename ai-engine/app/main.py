@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="VEXCAD AI Engine",
     version="2.0.0",
-    docs_url="/docs",
+    docs_url=None if os.getenv("ENVIRONMENT") == "production" else "/docs",
     redoc_url=None,
     lifespan=lifespan,
 )

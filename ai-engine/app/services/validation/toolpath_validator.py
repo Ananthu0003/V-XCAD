@@ -420,7 +420,7 @@ class ToolpathValidator:
         
         # Tool Reach: Is plunge deeper than usable stickout?
         if max_plunge_depth > tool_assembly.usable_stickout:
-            result["errors"].append(f"Tool Reach failed: {f_name} max depth ({max_plunge_depth:.3f}mm) exceeds usable stickout ({tool_assembly.usable_stickout:.3f}mm). Holder collision eminent.")
+            result["errors"].append(f"Tool Reach failed: {f_name} max depth ({max_plunge_depth:.3f}mm) exceeds usable stickout ({tool_assembly.usable_stickout:.3f}mm). Holder collision imminent.")
             result["status"] = "error"
             return
             

@@ -8,16 +8,13 @@ import { cleanupExpiredSessions, requireAdmin } from '@/lib/auth';
  */
 export async function POST() {
   try {
-    await requireAdmin();
+    const adminId = await requireAdmin();
+    if (!adminId) {
+      return NextResponse.json({ error: 'Forbidden: Admin access required.' }, { status: 403 });
+    }
     const deleted = await cleanupExpiredSessions();
     return NextResponse.json({ success: true, deleted });
-  } catch (error: any) {
-    if (error.message === 'UNAUTHORIZED') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    if (error.message === 'FORBIDDEN') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
+  } catch (error) {
     console.error('Session cleanup error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

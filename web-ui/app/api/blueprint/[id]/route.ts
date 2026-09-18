@@ -1,6 +1,7 @@
-import { getFastApiUrl, fetchWithTimeout } from '@/lib/api-config';
+import { NextRequest, NextResponse } from 'next/server';
 import { requireSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getFastApiUrl, fetchWithTimeout } from '@/lib/api-config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,10 +38,6 @@ async function authorizeSessionAccess(
 		return { session };
 	}
 
-	// Null-user (anonymous) sessions: access denied to other authenticated users.
-	// This prevents an authenticated user from reading another user's anonymous session
-	// by claiming ownership.  Anonymous sessions should have been claimed via render/generate
-	// with a valid userId; if they haven't, they remain inaccessible to other authenticated users.
 	if (session.userId === null) {
 		return {
 			error: NextResponse.json(
@@ -63,8 +60,9 @@ export async function GET(
 	request: NextRequest,
 	{ params }: { params: Promise<{ id: string }> }
 ) {
-	const userId = await requireSession();
-	if (!userId) {
+	// VEX-006 / VEX-LATEST-09: Require authenticated session with tokenVersion validation
+	const authUserId = await requireSession();
+	if (!authUserId) {
 		return NextResponse.json(
 			{ error: { message: 'Authentication required.', hint: 'Log in to access blueprints.' } },
 			{ status: 401 }
@@ -77,13 +75,13 @@ export async function GET(
 	}
 
 	// VEX-2A-004: Enforce ownership before proxying to ai-engine
-	const accessCheck = await authorizeSessionAccess(id, userId);
+	const accessCheck = await authorizeSessionAccess(id, authUserId);
 	if ('error' in accessCheck) {
 		return accessCheck.error;
 	}
 
 	try {
-		const upstream = await fetchWithTimeout(`${getFastApiUrl()}/blueprint/${encodeURIComponent(id)}`, {
+		const upstream = await fetchWithTimeout(`${getFastApiUrl()}/blueprint/${id}`, {
 			cache: 'no-store',
 		}, 30000);
 
@@ -95,7 +93,7 @@ export async function GET(
 		return new NextResponse(blob, {
 			headers: {
 				'Content-Type': 'image/png',
-				'Cache-Control': 'private, no-store',
+				'Cache-Control': 'private, max-age=3600',
 			},
 		});
 	} catch (e) {

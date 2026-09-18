@@ -24,7 +24,7 @@ class CamReadinessEvaluator:
         # Determine global staleness from hashes and root schemas
         global_stale = not hashes_match or cam_hashes_schema != "semantic_v1" or not schema_validation.get("global_schema_valid", True)
         
-        stale_ops = schema_validation.get("stale_operations", set())
+        stale_ops = schema_validation.get("stale_operations", [])
         
         if global_stale:
             status = "toolpaths_outdated"

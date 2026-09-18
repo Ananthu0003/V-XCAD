@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import { join, extname } from 'path';
 
-import { getSession } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -49,16 +49,9 @@ export async function GET(
 	request: NextRequest,
 	{ params }: { params: Promise<{ path: string[] }> }
 ): Promise<Response> {
-	// VEX-006: Require authenticated session
-	const authSession = await getSession();
-	if (!authSession?.userId) {
-		return NextResponse.json(
-			{ error: { message: 'Authentication required.', hint: 'Log in to access files.' } },
-			{ status: 401 }
-		);
-	}
-	const userExists = await prisma.user.findUnique({ where: { id: authSession.userId } });
-	if (!userExists) {
+	// VEX-006 / VEX-LATEST-09: Require authenticated session with tokenVersion validation
+	const authUserId = await requireSession();
+	if (!authUserId) {
 		return NextResponse.json(
 			{ error: { message: 'Authentication required.', hint: 'Log in to access files.' } },
 			{ status: 401 }
@@ -96,7 +89,7 @@ export async function GET(
 		);
 	}
 
-	const isOwner = session.userId === authSession.userId;
+	const isOwner = session.userId === authUserId;
 	const isShared = session.isShared;
 	const isNullUser = session.userId === null;
 

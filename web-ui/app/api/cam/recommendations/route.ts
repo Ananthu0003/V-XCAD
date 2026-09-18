@@ -42,9 +42,17 @@ export async function POST(request: NextRequest) {
         // Filter tools that are compatible with the workpiece material, if specified
         if (workpieceMaterial) {
             const materialCompatibleTools = tools.filter(t => {
-                const materials = t.compatibility?.compatibleMaterialsJson 
-                    ? JSON.parse(t.compatibility.compatibleMaterialsJson) 
-                    : [];
+                let materials: string[] = [];
+                if (t.compatibility?.compatibleMaterialsJson) {
+                    try {
+                        const parsed = JSON.parse(t.compatibility.compatibleMaterialsJson);
+                        if (Array.isArray(parsed)) {
+                            materials = parsed;
+                        }
+                    } catch {
+                        materials = [];
+                    }
+                }
                 return materials.includes(workpieceMaterial) || materials.length === 0;
             });
             // If we have some that match the material, use them. Otherwise fallback to all tools of that type.

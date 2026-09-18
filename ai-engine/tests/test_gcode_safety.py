@@ -321,19 +321,21 @@ def test_unknown_compensation_blocks_gcode():
     assert res["status"] == "error"
     assert "Only computer compensation with R0 is currently supported for Klartext" in res["errors"][0]
 
-def test_missing_tool_diameter_blocks_contour_generation():
-    from app.services.toolpath.toolpath_engine import ToolpathEngine
-    from app.models.schemas import MotionCommand, Point3D
-    engine = ToolpathEngine()
-    op = {"type": "2d_contour_outer", "tool": {}}
-    cmds = [
-        MotionCommand(commandId="1", commandType="plunge", start=Point3D(x=0,y=0,z=5), end=Point3D(x=0,y=0,z=-5), toolId="T1", operationId="O1", featureId="F1", setupId="S1", source="contour"),
-        MotionCommand(commandId="2", commandType="cut", start=Point3D(x=0,y=0,z=-5), end=Point3D(x=0,y=10,z=-5), toolId="T1", operationId="O1", featureId="F1", setupId="S1", source="contour")
-    ]
-    segs = engine.generate_toolpaths_from_commands(op, cmds)
-    assert len(segs) == 0
-    assert op["status"] == "error"
-    assert "Missing tool diameter for contour generation" in op.get("parameters", {}).get("error", "")
+def test_missing_tool_diameter_blocks_outer_contour_generation():
+    from app.services.validation.toolpath_validator import ToolpathValidator
+    v = ToolpathValidator()
+    op = {"type": "2d_contour_outer", "geometry": {"axis": [0,0,1]}}
+    toolpaths = [{
+        "moveType": "cut",
+        "segmentRole": "cut",
+        "toolpathType": "tool_centerline",
+        "toolRadiusCompensated": True,
+        "compensationMode": "computer"
+    }]
+    res = {"errors": [], "status": "passed"}
+    v._validate_compensation(op, toolpaths, "op1", "f1", res)
+    assert res["status"] == "error"
+    assert "Tool diameter missing; cannot validate radius compensation" in res["errors"][0]
 
 def test_klartext_q204_uses_safe_clearance():
     from app.services.gcode.gcode_generator import HeidenhainKlartextPostProcessor

@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 
-const secretKey = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'vexcad-default-secret-key-must-be-32-chars-long');
+const secretKey = process.env.JWT_SECRET;
 if (!secretKey) {
   throw new Error('JWT_SECRET environment variable is required.');
 }
@@ -78,5 +78,26 @@ export async function requireAdmin(): Promise<string | null> {
   if (!user?.isAdmin && user?.role !== 'admin') return null;
 
   return userId;
+}
+
+/**
+ * Delete an auth session by its JWT token.
+ * Used by the logout endpoint to invalidate the session server-side.
+ */
+export async function deleteSession(token: string): Promise<void> {
+  const { prisma } = await import('@/lib/prisma');
+  await prisma.authSession.deleteMany({ where: { token } });
+}
+
+/**
+ * Remove all expired auth sessions from the database.
+ * Returns the number of deleted sessions.
+ */
+export async function cleanupExpiredSessions(): Promise<number> {
+  const { prisma } = await import('@/lib/prisma');
+  const result = await prisma.authSession.deleteMany({
+    where: { expiresAt: { lt: new Date() } },
+  });
+  return result.count;
 }
 

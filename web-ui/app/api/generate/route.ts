@@ -141,6 +141,26 @@ export async function POST(request: Request): Promise<Response> {
 		formData.set('session_id', sessionId);
 	} else {
 		sessionId = rawSessionId.trim();
+
+		// VEX-REV-001: Enforce session ownership verification before allowing iteration
+		try {
+			const existing = await prisma.cadSession.findUnique({
+				where: { id: sessionId },
+				select: { id: true, userId: true },
+			});
+			if (existing && existing.userId !== validUserId) {
+				return NextResponse.json(
+					buildError('Forbidden', 'You do not have permission to modify this session.', sessionId),
+					{ status: 403 }
+				);
+			}
+		} catch (dbError) {
+			console.error('[Generate Route] Failed to verify session ownership:', dbError);
+			return NextResponse.json(
+				buildError('Authorization verification unavailable.', 'Please retry later.', sessionId),
+				{ status: 500 }
+			);
+		}
 	}
 
 	// If no file was uploaded, remove the empty image field so FastAPI treats it as optional

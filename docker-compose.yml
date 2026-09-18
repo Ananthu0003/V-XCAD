@@ -7,15 +7,15 @@ services:
     container_name: vexcad_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: cad_db
-      POSTGRES_USER: cad_user
-      POSTGRES_PASSWORD: cad_pass
+      POSTGRES_DB: ${POSTGRES_DB:-cad_db}
+      POSTGRES_USER: ${POSTGRES_USER:-cad_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cad_pass}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - cad_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cad_user -d cad_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cad_user} -d ${POSTGRES_DB:-cad_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -38,7 +38,7 @@ services:
       - 1.1.1.1
     restart: unless-stopped
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     environment:
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       GENAI_MODEL: ${GENAI_MODEL:-gemini-2.0-flash-lite}
@@ -86,7 +86,7 @@ services:
       DATABASE_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
       DIRECT_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
       # JWT secret for auth
-      JWT_SECRET: ${JWT_SECRET:-vexcad_secret_key_change_in_production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       NODE_ENV: production
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
     depends_on:

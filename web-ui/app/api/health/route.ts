@@ -21,7 +21,7 @@ export async function GET(): Promise<Response> {
 				status: 'error',
 				timestamp: new Date().toISOString(),
 				database: 'disconnected',
-				error: error?.message || 'Database ping failed',
+				error: 'Database ping failed',
 			},
 			{ status: 503 }
 		);

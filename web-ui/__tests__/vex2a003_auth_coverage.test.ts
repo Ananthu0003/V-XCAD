@@ -85,10 +85,18 @@ jest.mock('next/server', () => ({
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
 const mockRequireSession = jest.fn();
+const mockRequireAdmin = jest.fn();
 const mockGetSession = jest.fn();
 jest.mock('@/lib/auth', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
   requireSession: (...args: unknown[]) => mockRequireSession(...args),
+  requireAdmin: (...args: unknown[]) => {
+    if (mockRequireAdmin.mock.calls.length > 0 || mockRequireAdmin.getMockImplementation()) {
+      const res = mockRequireAdmin(...args);
+      if (res !== undefined) return res;
+    }
+    return mockRequireSession(...args);
+  },
 }));
 
 const mockFindMany = jest.fn();
@@ -454,6 +462,7 @@ describe('VEX-2A-003 — Authentication Coverage', () => {
 
     it('POST proceeds when authenticated', async () => {
       mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@example.com' });
+      mockRequireSession.mockResolvedValue('user-123');
       mockFindUnique.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
       mockFetch.mockResolvedValue({
         ok: true,
@@ -491,13 +500,14 @@ describe('VEX-2A-003 — Authentication Coverage', () => {
     });
 
     it('/api/auth/login does not call requireSession', async () => {
+      mockRequireSession.mockClear();
       const { POST } = require('@/app/api/auth/login/route');
       const req = makePostRequest('http://localhost:3000/api/auth/login', {
         email: 'test@example.com',
         password: 'password123',
       });
-      const res = await POST(req);
-      expect(res.status).not.toBe(401);
+      await POST(req);
+      expect(mockRequireSession).not.toHaveBeenCalled();
     });
 
     it('/api/auth/logout does not call requireSession', async () => {

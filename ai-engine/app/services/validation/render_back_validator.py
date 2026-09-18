@@ -14,5 +14,5 @@ class RenderBackValidator:
         """
         Synthetically renders the shape and computes comparison metrics (e.g. L_image, L_edge).
         """
-        # Stub implementation
-        return ValidationMetric(score=1.0, passed=True, details="Render-back validation pending.")
+        # Stub implementation — skip validation until full render-back is implemented
+        return ValidationMetric(score=0.0, passed=False, details="Render-back validation not yet implemented. Skipping.")

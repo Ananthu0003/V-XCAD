@@ -1,12 +1,15 @@
 """Knowledge base and manufacturing standards endpoints."""
 from __future__ import annotations
 
+import logging
 import tempfile
 import traceback
 from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+
+logger = logging.getLogger("vexcad.knowledge")
 
 from app.api.v1.routers.common import (
     MAX_UPLOAD_SIZE,
@@ -26,7 +29,7 @@ async def list_knowledge_documents():
         docs = repo.list_documents()
         return {"documents": [d.model_dump() for d in docs]}
     except Exception as exc:
-        print(f"[Knowledge] List documents error: {exc}")
+        logger.error(f"[Knowledge] List documents error: {exc}")
         return {"documents": []}
 
 

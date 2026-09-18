@@ -47,7 +47,7 @@ export const toolOffsetSchema = z.object({
 });
 
 export const toolAssemblySchema = z.object({
-  holderId: z.string().uuid().optional().or(z.literal('')),
+  holderId: z.string().uuid().optional().or(z.literal('')).transform(v => v === '' ? undefined : v),
   stickoutLength: z.number().positive("Stickout length must be positive"),
   totalLength: z.number().positive().optional(),
   safeClearanceLength: z.number().positive().optional(),

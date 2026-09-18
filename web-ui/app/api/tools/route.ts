@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTools, createTool } from '@/lib/db/tools';
 import { toolSchema } from '@/lib/validation/toolSchema';
 import { Prisma } from '@prisma/client';
-import { requireSession } from '@/lib/auth';
+import { requireSession, requireAdmin } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,8 +21,13 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  if (!(await requireSession())) {
+  const userId = await requireSession();
+  if (!userId) {
     return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+  }
+  const admin = await requireAdmin();
+  if (!admin) {
+    return NextResponse.json({ error: 'Forbidden: Admin access required.' }, { status: 403 });
   }
   try {
     const body = await request.json();

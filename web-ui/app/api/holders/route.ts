@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from "@/lib/prisma";
-import { requireSession } from '@/lib/auth';
+import { requireSession, requireAdmin } from '@/lib/auth';
+import { holderSchema } from '@/lib/validation/holderSchema';
 
 export async function GET() {
   if (!(await requireSession())) {
@@ -18,22 +19,36 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  if (!(await requireSession())) {
+  const userId = await requireSession();
+  if (!userId) {
     return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
+  }
+  const admin = await requireAdmin();
+  if (!admin) {
+    return NextResponse.json({ error: 'Forbidden: Admin access required.' }, { status: 403 });
   }
   try {
     const body = await request.json();
     
+    const parsed = holderSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Validation failed', details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
+
     const holder = await prisma.holder.create({
       data: {
-        name: body.name,
-        type: body.type,
-        gaugeLength: body.gaugeLength,
-        diameter: body.diameter,
-        shankSize: body.shankSize,
-        taperType: body.taperType,
-        manufacturer: body.manufacturer,
-        description: body.description,
+        name: parsed.data.name,
+        type: parsed.data.type,
+        gaugeLength: parsed.data.gaugeLength,
+        diameter: parsed.data.diameter,
+        shankSize: parsed.data.shankSize ?? null,
+        taperType: parsed.data.taperType ?? null,
+        manufacturer: parsed.data.manufacturer ?? null,
+        description: parsed.data.description ?? null,
+        isActive: parsed.data.isActive,
       }
     });
     

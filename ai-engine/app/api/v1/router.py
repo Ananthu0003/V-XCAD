@@ -33,7 +33,6 @@ logger = logging.getLogger("vexcad.router")
 
 router = APIRouter(tags=["cad"])
 
-_ALLOWED_MIME_PREFIXES = ()
 _ALLOWED_MIME_EXACT   = {"application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"}
 _DEFAULT_MODEL = os.getenv("GENAI_MODEL", "gemini-2.0-flash-lite")
 
@@ -67,43 +66,62 @@ def _validate_id(value: str, field_name: str = "id") -> str:
 
 import ast
 import time
+import threading
 
 class ShapeCache:
     _cache: dict[str, dict[str, Any]] = {}
+    _lock = threading.Lock()
     MAX_CACHE_SIZE: int = 50
     CACHE_TTL_SECONDS: int = 1800  # 30 minutes
 
     @classmethod
-    def get(cls, asset_id: str) -> Any:
-        entry = cls._cache.get(asset_id)
-        if entry:
-            now = time.time()
-            if now - entry.get("last_accessed", now) > cls.CACHE_TTL_SECONDS:
-                cls.evict(asset_id)
-                return None
-            entry["last_accessed"] = now
-            return entry["shape"]
+    def get(cls, asset_id: str, outputs_dir: Optional[Path] = None) -> Any:
+        with cls._lock:
+            entry = cls._cache.get(asset_id)
+            if entry:
+                now = time.time()
+                if now - entry.get("last_accessed", now) > cls.CACHE_TTL_SECONDS:
+                    cls._evict_unlocked(asset_id)
+                    entry = None
+                else:
+                    entry["last_accessed"] = now
+                    return entry["shape"]
+
+        # Fallback to disk loading for multi-worker consistency (VEX-2A-007)
+        if outputs_dir:
+            try:
+                step_file = outputs_dir / f"cad_{asset_id}.step"
+                if step_file.exists():
+                    from build123d import import_step
+                    loaded_shape = import_step(str(step_file))
+                    cls.set(asset_id, loaded_shape)
+                    return loaded_shape
+            except Exception:
+                pass
         return None
 
     @classmethod
     def set(cls, asset_id: str, shape: Any):
-        cls.evict(asset_id)
-        now = time.time()
-        # Evict expired entries
-        for aid, data in list(cls._cache.items()):
-            if now - data.get("last_accessed", now) > cls.CACHE_TTL_SECONDS:
-                cls.evict(aid)
-        # If still at capacity, evict oldest accessed (LRU)
-        if len(cls._cache) >= cls.MAX_CACHE_SIZE:
-            oldest_id = min(cls._cache.keys(), key=lambda k: cls._cache[k].get("last_accessed", 0))
-            cls.evict(oldest_id)
-        cls._cache[asset_id] = {
-            "shape": shape,
-            "last_accessed": now,
-        }
+        with cls._lock:
+            cls._evict_unlocked(asset_id)
+            now = time.time()
+            # Evict expired entries
+            for aid in list(cls._cache.keys()):
+                data = cls._cache[aid]
+                if now - data.get("last_accessed", now) > cls.CACHE_TTL_SECONDS:
+                    cls._evict_unlocked(aid)
+            # If still at capacity, evict oldest accessed (LRU)
+            if len(cls._cache) >= cls.MAX_CACHE_SIZE:
+                oldest_id = min(cls._cache.keys(), key=lambda k: cls._cache[k].get("last_accessed", 0))
+                cls._evict_unlocked(oldest_id)
+            cls._cache[asset_id] = {
+                "shape": shape,
+                "last_accessed": now,
+            }
 
     @classmethod
-    def evict(cls, asset_id: str):
+    def _evict_unlocked(cls, asset_id: str):
+        """Internal evict — caller must hold cls._lock."""
         if asset_id in cls._cache:
             entry = cls._cache.pop(asset_id)
             shape = entry.get("shape")
@@ -116,9 +134,15 @@ class ShapeCache:
                 del shape
 
     @classmethod
+    def evict(cls, asset_id: str):
+        with cls._lock:
+            cls._evict_unlocked(asset_id)
+
+    @classmethod
     def clear(cls):
-        for asset_id in list(cls._cache.keys()):
-            cls.evict(asset_id)
+        with cls._lock:
+            for asset_id in list(cls._cache.keys()):
+                cls._evict_unlocked(asset_id)
 
 
 SAFE_ID_REGEX = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
@@ -258,7 +282,7 @@ def _extract_parameters(script: str) -> dict[str, Any]:
                 if isinstance(parsed, dict):
                     return parsed
         except Exception as e:
-            print(f"[_extract_parameters] Failed to parse: {e}")
+            logger.error(f"[_extract_parameters] Failed to parse: {e}")
             pass
     return {}
 
@@ -283,7 +307,7 @@ def _extract_metadata(script: str) -> dict[str, Any]:
                 if isinstance(parsed, dict):
                     return parsed
         except Exception as e:
-            print(f"[_extract_metadata] Failed to parse: {e}")
+            logger.error(f"[_extract_metadata] Failed to parse: {e}")
             pass
     return {}
 
@@ -382,7 +406,8 @@ BLUEPRINTS_DIR.mkdir(parents=True, exist_ok=True)
 @router.get("/blueprint/{session_id}")
 async def get_session_blueprint(session_id: str):
     """Return the cached blueprint PNG image for a given session."""
-    bp_file = BLUEPRINTS_DIR / f"{session_id}.png"
+    safe_id = _validate_id(session_id, "session_id")
+    bp_file = BLUEPRINTS_DIR / f"{safe_id}.png"
     if not bp_file.exists():
         raise HTTPException(status_code=404, detail="Blueprint not found for this session")
     return Response(content=bp_file.read_bytes(), media_type="image/png")
@@ -414,7 +439,7 @@ def _crop_blueprint_image(image_bytes: bytes, crop_box: dict[str, Any]) -> bytes
             cropped.save(buf, format="PNG")
             return buf.getvalue()
     except Exception as e:
-        print(f"Failed to crop blueprint image: {e}")
+        logger.error(f"Failed to crop blueprint image: {e}")
     return image_bytes
 
 
@@ -462,7 +487,7 @@ def _patch_parameters_in_script(script: str, adjustments: dict[str, Any]) -> str
         m = pattern.search(patched)
         if m:
             patched = patched[:m.start(2)] + val_str + patched[m.end(2):]
-            print(f"[param-patch] Updated '{key}' → {val_str}")
+            logger.debug(f"[param-patch] Updated '{key}' → {val_str}")
         else:
             # Key not found — queue it for appending
             appended_keys.append((key, val_str))
@@ -474,7 +499,7 @@ def _patch_parameters_in_script(script: str, adjustments: dict[str, Any]) -> str
             insert_text = ""
             for key, val_str in appended_keys:
                 insert_text += f'\n    "{key}": {val_str},'
-                print(f"[param-patch] Appended new key '{key}' = {val_str}")
+                logger.debug(f"[param-patch] Appended new key '{key}' = {val_str}")
             patched = patched[:param_close.end(1)] + insert_text + patched[param_close.start(2):]
 
     return patched
@@ -525,7 +550,7 @@ async def generate(
                     mime_type = "image/png"
                 doc.close()
             except Exception as e:
-                print(f"Failed to rasterize PDF: {e}")
+                logger.error(f"Failed to rasterize PDF: {e}")
 
         # Persist blueprint for subsequent multi-iteration turns in this session
         if session_id and image_bytes:
@@ -533,7 +558,7 @@ async def generate(
                 bp_file = BLUEPRINTS_DIR / f"{session_id}.png"
                 bp_file.write_bytes(image_bytes)
             except Exception as e:
-                print(f"Failed to cache session blueprint: {e}")
+                logger.error(f"Failed to cache session blueprint: {e}")
     elif session_id:
         # Check if we have a persisted blueprint from a previous turn
         bp_file = BLUEPRINTS_DIR / f"{session_id}.png"
@@ -542,7 +567,7 @@ async def generate(
                 image_bytes = bp_file.read_bytes()
                 mime_type = "image/png"
             except Exception as e:
-                print(f"Failed to read cached session blueprint: {e}")
+                logger.error(f"Failed to read cached session blueprint: {e}")
 
     # ── Initialise service ────────────────────────────────────────────────────
     try:
@@ -572,9 +597,9 @@ async def generate(
                             fm_file = BLUEPRINTS_DIR / f"{session_id}_feature_map.json"
                             fm_file.write_text(json.dumps(feature_map), encoding="utf-8")
                         except Exception as e:
-                            print(f"Failed to cache session feature map: {e}")
+                            logger.error(f"Failed to cache session feature map: {e}")
                 except Exception as e:
-                    print(f"Audit failed: {e}")
+                    logger.warning(f"Audit failed: {e}")
             yield f'data: {json.dumps({"status": "generating code (stage 2 of 2)"})}\n\n'
         else:  # iteration turn
             # ── Iteration Turn (Targeted Inspection & Surgical Refinement) ────
@@ -586,7 +611,7 @@ async def generate(
                     try:
                         feature_map = json.loads(fm_file.read_text(encoding="utf-8"))
                     except Exception as e:
-                        print(f"Failed to read cached session feature map: {e}")
+                        logger.error(f"Failed to read cached session feature map: {e}")
                 else:
                     yield f'data: {json.dumps({"warning": "Stage-1 engineering audit unavailable for this session; refinement proceeds without full-part context."})}\n\n'
 
@@ -639,7 +664,7 @@ async def generate(
                         crop_box=target_crop_box,
                     )
                 except Exception as e:
-                    print(f"Targeted feature audit failed: {e}")
+                    logger.debug(f"Targeted feature audit failed: {e}")
                     yield f'data: {json.dumps({"error": {"message": f"Targeted feature inspection failed: {e}", "hint": "Check API key and quota, then retry."}})}\n\n'
                     return
 
@@ -656,7 +681,7 @@ async def generate(
                             1 for k in param_adjustments
                             if k in patched
                         )
-                        print(f"[param-patch] Applied {n_patched}/{len(param_adjustments)} parameter adjustments to base_code")
+                        logger.debug(f"[param-patch] Applied {n_patched}/{len(param_adjustments)} parameter adjustments to base_code")
                         # Use patched copy downstream — never reassign the closure variable
                         effective_base_code = patched
                         yield f'data: {json.dumps({"status": f"applied {n_patched} parameter patches from blueprint inspection..."})}\n\n'
@@ -682,7 +707,7 @@ async def generate(
             try:
                 clean_script = LLMCodegenService._normalize_script(full_script)
             except Exception as norm_err:
-                print(f"[generate stream] _normalize_script failed: {norm_err}. Falling back to effective_base_code.")
+                logger.debug(f"[generate stream] _normalize_script failed: {norm_err}. Falling back to effective_base_code.")
                 if effective_base_code:
                     clean_script = effective_base_code
                 else:
@@ -697,7 +722,7 @@ async def generate(
 
             
         except Exception as exc:
-            print(f"[generate stream] error: {exc}")
+            logger.debug(f"[generate stream] error: {exc}")
             yield f'data: {json.dumps({"error": {"message": str(exc), "hint": "Check API key and quota."}})}\n\n'
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
@@ -1080,11 +1105,15 @@ JOBS_DIR = Path("storage/jobs")
 
 @router.post("/upload")
 async def legacy_upload(file: UploadFile = File(...)):
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="File too large (max 50MB)")
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     
-    file_path = job_dir / file.filename
+    safe_name = sanitize_safe_filename(file.filename)
+    file_path = job_dir / safe_name
     with open(file_path, "wb") as buffer:
         buffer.write(content)
         
@@ -1092,7 +1121,8 @@ async def legacy_upload(file: UploadFile = File(...)):
 
 @router.post("/generate/{job_id}")
 async def legacy_generate(job_id: str):
-    job_dir = JOBS_DIR / job_id
+    safe_job_id = _validate_id(job_id, "job_id")
+    job_dir = JOBS_DIR / safe_job_id
     if not job_dir.exists():
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -1134,7 +1164,7 @@ async def legacy_generate(job_id: str):
     script_file.write_text(script, encoding="utf-8")
 
     return {
-        "job_id": job_id,
+        "job_id": safe_job_id,
         "features": features,
         "script": script
     }
@@ -1153,6 +1183,7 @@ class CamAnalyzeRequest(BaseModel):
 
 @router.post("/cam/analyze")
 async def cam_analyze(request: CamAnalyzeRequest):
+    safe_session_id = _validate_id(request.session_id, "session_id")
     outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
     step_path = outputs_dir / f"cad_{safe_session_id}.step"
     
@@ -1454,7 +1485,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
                     op["estimated_breakdown"] = breakdown.model_dump()
                     
             except Exception as e:
-                print(f"Error computing time for op {op.get('id')}: {e}")
+                logger.error(f"Error computing time for op {op.get('id')}: {e}")
                 if "estimated_time_s" not in op:
                     op["estimated_time_s"] = 0.0
                 
@@ -1502,7 +1533,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             # also update planned cycle time
             result["planned_cycle_time_seconds"] = total_machining_time_s
         except Exception as e:
-            print(f"Cost estimation failed: {e}")
+            logger.debug(f"Cost estimation failed: {e}")
             if "stats" not in result:
                 result["stats"] = {}
             result["stats"]["costEstimate"] = {
@@ -1717,7 +1748,7 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
                 op["estimated_breakdown"] = breakdown.model_dump()
                 total_cycle_time += float(breakdown.total_seconds)
             except Exception as e:
-                print(f"Error computing op cycle time: {e}")
+                logger.error(f"Error computing op cycle time: {e}")
                 if "estimated_time_s" not in op:
                     op["estimated_time_s"] = 0.0
                 
@@ -1801,7 +1832,7 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
             if setup_time_details.get("total_setup_time_seconds"):
                 total_cycle_time = setup_time_details["total_setup_time_seconds"]
         except Exception as e:
-            print(f"Failed to calculate setup cycle time: {e}")
+            logger.error(f"Failed to calculate setup cycle time: {e}")
             
         result["planned_cycle_time_seconds"] = total_cycle_time
         
@@ -1817,7 +1848,7 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
     except Exception as exc:
         import traceback
         tb = traceback.format_exc()
-        print(f"[CAM TOOLPATH ERROR]\n{tb}")
+        logger.debug(f"[CAM TOOLPATH ERROR]\n{tb}")
         raise HTTPException(status_code=500, detail={"error": {"message": f"{str(exc)}\n{tb}"}})
 
 class CamGCodeRequest(BaseModel):
@@ -1924,7 +1955,7 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         if matching_ops:
             operations = matching_ops
         else:
-            print(f"[CAM G-Code] Warning: setup_id '{request.setup_id}' filter yielded no match. Retaining all {len(operations)} operations.")
+            logger.debug(f"[CAM G-Code] Warning: setup_id '{request.setup_id}' filter yielded no match. Retaining all {len(operations)} operations.")
 
     if request.selected_operation_ids is not None and operations:
         selected_set = set(request.selected_operation_ids)
@@ -1932,7 +1963,7 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         if filtered_by_ids:
             operations = filtered_by_ids
         else:
-            print(f"[CAM G-Code] Warning: selected_operation_ids did not match stored operation IDs. Retaining {len(operations)} operations.")
+            logger.debug(f"[CAM G-Code] Warning: selected_operation_ids did not match stored operation IDs. Retaining {len(operations)} operations.")
 
     # Pre-hydrate operations with toolpaths and default semantic_v1 schema
     tp_by_op = {}
@@ -2185,7 +2216,7 @@ async def cam_generate_gcode(request: CamGCodeRequest):
     except Exception as exc:
         import traceback
         tb = traceback.format_exc()
-        print(f"[GCODE ERROR]\n{tb}")
+        logger.debug(f"[GCODE ERROR]\n{tb}")
         return {"can_generate_gcode": False, "gcode": None, "errors": [{"level": "error", "message": f"G-Code generation failed: {str(exc)}"}]}
 
 
@@ -2228,7 +2259,7 @@ async def list_knowledge_documents():
         docs = repo.list_documents()
         return {"documents": [d.model_dump() for d in docs]}
     except Exception as exc:
-        print(f"[Knowledge] List documents error: {exc}")
+        logger.debug(f"[Knowledge] List documents error: {exc}")
         return {"documents": []}
 
 

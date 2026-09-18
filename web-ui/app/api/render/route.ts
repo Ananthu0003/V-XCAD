@@ -155,7 +155,7 @@ export async function POST(request: Request): Promise<Response> {
 		);
 	}
 
-	// VEX-2A-012: Ownership check — verify the authenticated user owns the target session
+	// VEX-2A-012 / CLAUDE-010: Ownership check — verify the authenticated user owns the target session
 	// before calling the ai-engine or allowing the upsert to overwrite existing session data.
 	try {
 		const existingSession = await prisma.cadSession.findUnique({
@@ -170,7 +170,11 @@ export async function POST(request: Request): Promise<Response> {
 			);
 		}
 	} catch (e) {
-		console.warn('Could not verify session ownership for VEX-2A-012:', e);
+		console.error('Failed to verify session ownership for VEX-2A-012:', e);
+		return NextResponse.json(
+			buildError('Authorization verification unavailable', 'Database error during ownership check.'),
+			{ status: 500 }
+		);
 	}
 
 	// Determine next version for this session

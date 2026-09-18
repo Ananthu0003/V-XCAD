@@ -89,6 +89,9 @@ class ManufacturingCapabilityValidator:
                     }
                 else:
                     # Automatically adapt placeholder stickout to clear the feature depth safely
-                    tool['stickout'] = max(depth * 1.2, effective_reach)
+                    # Return adjusted tool info instead of mutating the input dict
+                    adjusted_tool = dict(tool)
+                    adjusted_tool['stickout'] = max(depth * 1.2, effective_reach)
+                    return {"valid": True, "reason": None, "adjusted_tool": adjusted_tool}
 
         return {"valid": True, "reason": None}

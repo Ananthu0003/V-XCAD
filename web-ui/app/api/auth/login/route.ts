@@ -13,16 +13,13 @@ export async function POST(req: NextRequest) {
     }
 
     const lookup = email.trim().toLowerCase();
-    const user = await prisma.user.findFirst({
+    const user = await prisma.user.findUnique({
       where: {
-        OR: [
-          { email: lookup },
-          { email: lookup === 'admin' ? 'admin@vexcad.local' : '__no_match__' },
-        ],
+        email: lookup,
       },
     });
 
-    if (!user) {
+    if (!user || !user.password) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 

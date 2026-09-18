@@ -94,10 +94,13 @@ class TestVexAudit011FilenameSanitization:
         assert result == tmp_path / "图纸_v2.pdf"
 
     def test_windows_backslash_literal(self, tmp_path):
-        """On Unix, backslash is not a path separator, so it's treated as literal."""
+        """On Unix, backslash is not a path separator, so it's treated as literal; on Windows it's a separator."""
         result, err = sanitize_upload_filename("foo\\bar.pdf", tmp_path)
         assert err is None
-        assert result == tmp_path / "foo\\bar.pdf"
+        if os.name == "nt":
+            assert result == tmp_path / "bar.pdf"
+        else:
+            assert result == tmp_path / "foo\\bar.pdf"
 
     def test_containment_defense_in_depth(self, tmp_path):
         """

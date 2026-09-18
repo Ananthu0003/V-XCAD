@@ -89,7 +89,17 @@ const mockGetSession = jest.fn();
 const mockRequireSession = jest.fn();
 jest.mock('@/lib/auth', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
-  requireSession: (...args: unknown[]) => mockRequireSession(...args),
+  requireSession: async (...args: unknown[]) => {
+    if (mockRequireSession.mock.calls.length > 0 || mockRequireSession.getMockImplementation()) {
+      const res = mockRequireSession(...args);
+      if (res !== undefined) return res;
+    }
+    const session = await mockGetSession(...args);
+    if (!session?.userId) return null;
+    const user = await mockFindUnique({ where: { id: session.userId } });
+    if (!user) return null;
+    return session.userId;
+  },
 }));
 
 const mockFindUnique = jest.fn();
