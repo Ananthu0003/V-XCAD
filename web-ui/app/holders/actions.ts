@@ -3,8 +3,14 @@
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from 'next/cache';
 import { Prisma } from '@prisma/client';
+import { requireAdmin } from "@/lib/auth";
 
 export async function toggleHolderStatus(id: string, currentStatus: boolean) {
+  const userId = await requireAdmin();
+  if (!userId) {
+    throw new Error('Unauthorized');
+  }
+
   await prisma.holder.update({
     where: { id },
     data: { isActive: !currentStatus }
@@ -16,6 +22,11 @@ export async function toggleHolderStatus(id: string, currentStatus: boolean) {
 
 export async function createHolder(data: any) {
   try {
+    const userId = await requireAdmin();
+    if (!userId) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
     const holder = await prisma.holder.create({
       data
     });
@@ -33,6 +44,11 @@ export async function createHolder(data: any) {
 
 export async function updateHolder(id: string, data: any) {
   try {
+    const userId = await requireAdmin();
+    if (!userId) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
     await prisma.holder.update({
       where: { id },
       data
@@ -52,6 +68,11 @@ export async function updateHolder(id: string, data: any) {
 
 export async function deleteHolder(id: string) {
   try {
+    const userId = await requireAdmin();
+    if (!userId) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
     await prisma.holder.delete({
       where: { id }
     });

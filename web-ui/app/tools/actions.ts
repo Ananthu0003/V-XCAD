@@ -2,8 +2,14 @@
 
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from 'next/cache';
+import { requireAdmin } from "@/lib/auth";
 
 export async function toggleToolStatus(id: string, currentStatus: boolean) {
+  const userId = await requireAdmin();
+  if (!userId) {
+    throw new Error('Unauthorized');
+  }
+
   await prisma.tool.update({
     where: { id },
     data: { isActive: !currentStatus }
@@ -15,6 +21,11 @@ export async function toggleToolStatus(id: string, currentStatus: boolean) {
 
 export async function deleteTool(id: string) {
   try {
+    const userId = await requireAdmin();
+    if (!userId) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
     await prisma.tool.delete({
       where: { id }
     });
