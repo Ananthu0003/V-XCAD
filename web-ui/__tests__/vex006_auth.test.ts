@@ -91,8 +91,10 @@ jest.mock('next/server', () => {
 // ── Shared Mocks ──────────────────────────────────────────────────────────
 
 const mockGetSession = jest.fn();
+const mockRequireAdmin = jest.fn();
 jest.mock('@/lib/auth', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
+  requireAdmin: (...args: unknown[]) => mockRequireAdmin(...args),
 }));
 
 const mockUserFindUnique = jest.fn();
@@ -168,13 +170,20 @@ describe('VEX-006 — BFF authentication boundary', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.FASTAPI_URL = 'http://ai-engine:8000/api/v1';
+    process.env.SERVICE_API_KEY = 'test-service-key';
     mockGetSession.mockResolvedValue(null); // unauthenticated by default
+    mockRequireAdmin.mockResolvedValue(null); // non-admin by default
     mockUserFindUnique.mockResolvedValue(null);
   });
 
-  describe('Unauthenticated access returns 401', () => {
+  describe('Unauthenticated access returns 401/403', () => {
+    const KNOWLEDGE_ROUTES = new Set(['/api/knowledge/documents', '/api/knowledge/documents/ingest', '/api/knowledge/retrieve']);
     for (const route of BFF_ROUTES) {
-      it(`${route.method} ${route.name} → 401`, async () => {
+      const isKnowledgeDelete = route.url.includes('doc-123') && route.method === 'DELETE';
+      const isKnowledgeRoute = KNOWLEDGE_ROUTES.has(route.name) || isKnowledgeDelete;
+      const expectedStatus = isKnowledgeRoute ? 403 : 401;
+
+      it(`${route.method} ${route.name} → ${expectedStatus}`, async () => {
         const routeModule = require(route.route);
         const handler = route.method === 'GET' ? routeModule.GET : route.method === 'DELETE' ? routeModule.DELETE : routeModule.POST;
 
@@ -196,9 +205,9 @@ describe('VEX-006 — BFF authentication boundary', () => {
 
         const res = await handler(req, routeParams);
 
-        expect(res.status).toBe(401);
+        expect(res.status).toBe(expectedStatus);
         const data = await res.json();
-        expect(data.error.message).toMatch(/authentication required/i);
+        expect(data.error.message).toMatch(isKnowledgeRoute ? /forbidden/i : /authentication required/i);
 
         // Must NOT have called ai-engine
         expect(mockFetch).not.toHaveBeenCalled();
@@ -206,11 +215,17 @@ describe('VEX-006 — BFF authentication boundary', () => {
     }
   });
 
-  describe('Deleted/nonexistent user returns 401', () => {
+  describe('Deleted/nonexistent user returns 401/403', () => {
+    const KNOWLEDGE_POST_ROUTES = new Set(['/api/knowledge/documents/ingest', '/api/knowledge/retrieve']);
     for (const route of BFF_ROUTES.filter(r => r.method === 'POST')) {
-      it(`${route.method} ${route.name} with deleted user → 401`, async () => {
+      const isKnowledgeRoute = KNOWLEDGE_POST_ROUTES.has(route.name);
+      const expectedStatus = isKnowledgeRoute ? 403 : 401;
+
+      it(`${route.method} ${route.name} with deleted user → ${expectedStatus}`, async () => {
         mockGetSession.mockResolvedValue({ userId: 'user-deleted', email: 'gone@test.com' });
         mockUserFindUnique.mockResolvedValue(null); // user not in DB
+        // requireAdmin calls requireSession which checks user exists; deleted user → null
+        mockRequireAdmin.mockResolvedValue(null);
 
         const routeModule = require(route.route);
         const handler = routeModule.POST;
@@ -225,7 +240,7 @@ describe('VEX-006 — BFF authentication boundary', () => {
 
         const res = await handler(req, routeParams);
 
-        expect(res.status).toBe(401);
+        expect(res.status).toBe(expectedStatus);
         expect(mockFetch).not.toHaveBeenCalled();
       });
     }
@@ -233,9 +248,15 @@ describe('VEX-006 — BFF authentication boundary', () => {
 
   describe('Authenticated request reaches ai-engine', () => {
     for (const route of BFF_ROUTES.filter(r => r.method === 'POST' && !r.url.includes('ingest'))) {
+      const isKnowledgeRoute = route.name === '/api/knowledge/retrieve';
+
       it(`${route.method} ${route.name} with valid session → forwards to ai-engine`, async () => {
         mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@test.com' });
         mockUserFindUnique.mockResolvedValue({ id: 'user-123' });
+        // Knowledge routes use requireAdmin — grant admin for knowledge tests
+        if (isKnowledgeRoute) {
+          mockRequireAdmin.mockResolvedValue('user-123');
+        }
         // VEX-2A-013b: simulate/prepare requires cadSession ownership check
         if (route.url.includes('simulate/prepare')) {
           mockCadSessionFindUnique.mockResolvedValue({ userId: 'user-123' });
@@ -322,6 +343,7 @@ describe('VEX-006 — BFF authentication boundary', () => {
     it('/api/knowledge/documents preserves list response', async () => {
       mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@test.com' });
       mockUserFindUnique.mockResolvedValue({ id: 'user-123' });
+      mockRequireAdmin.mockResolvedValue('user-123');
 
       const upstreamPayload = { documents: [{ id: 'doc-1', filename: 'iso.pdf', status: 'Active' }] };
       mockFetch.mockResolvedValue(new Response(JSON.stringify(upstreamPayload), {

@@ -40,6 +40,7 @@ services:
       GENAI_RETRY_BASE_DELAY: ${GENAI_RETRY_BASE_DELAY:-1.5}
       GENAI_MAX_RETRY_DELAY: ${GENAI_MAX_RETRY_DELAY:-75}
       DATABASE_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
+      SERVICE_API_KEY: ${SERVICE_API_KEY:?SERVICE_API_KEY must be set in .env or environment}
     volumes:
       # Persist generated CAD outputs (STL, STEP, G-code, etc.)
       - cad_outputs:/app/outputs
@@ -71,6 +72,8 @@ services:
       DIRECT_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
       # JWT secret for auth
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env or environment}
+      # Service-to-service auth key for ai-engine communication
+      SERVICE_API_KEY: ${SERVICE_API_KEY:?SERVICE_API_KEY must be set in .env or environment}
       NODE_ENV: production
     depends_on:
       postgres:

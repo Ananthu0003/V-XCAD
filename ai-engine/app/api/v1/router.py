@@ -12,7 +12,7 @@ import uuid
 import io
 import gc
 import shutil
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, BackgroundTasks
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks
 from app.services.validation.toolpath_schema_validator import ToolpathSchemaValidator
 from app.services.validation.cam_readiness_evaluator import CamReadinessEvaluator
 from app.services.cam_pipeline_manager import CamPipelineManager
@@ -26,6 +26,7 @@ from app.models.schemas import (
 from app.services.geometry.csg_parser import CSGParser, export_to_step
 from app.services.llm.llm_codegen import LLMCodegenService
 from app.services.llm.parameter_render import ParameterRenderService
+from app.deps import validate_service_key
 
 router = APIRouter(tags=["cad"])
 
@@ -1942,7 +1943,7 @@ async def simulate_prepare(request: SimulatePrepareRequest):
 # ── Knowledge Base Management Endpoints ──────────────────────────────────────
 
 @router.get("/knowledge/documents")
-async def list_knowledge_documents():
+async def list_knowledge_documents(_service_auth: None = Depends(validate_service_key)):
     try:
         from app.services.knowledge.repository import KnowledgeRepository
         repo = KnowledgeRepository()
@@ -1954,7 +1955,7 @@ async def list_knowledge_documents():
 
 
 @router.post("/knowledge/documents/ingest")
-async def ingest_knowledge_document(file: UploadFile = File(...)):
+async def ingest_knowledge_document(file: UploadFile = File(...), _service_auth: None = Depends(validate_service_key)):
     import tempfile
     from pathlib import Path
     try:
@@ -1991,7 +1992,7 @@ async def ingest_knowledge_document(file: UploadFile = File(...)):
 
 
 @router.post("/knowledge/retrieve")
-async def retrieve_knowledge(query: Dict[str, Any]):
+async def retrieve_knowledge(query: Dict[str, Any], _service_auth: None = Depends(validate_service_key)):
     try:
         from app.services.knowledge.retriever import KnowledgeRetriever
         from app.services.knowledge.schemas import KnowledgeRetrievalQuery
@@ -2013,7 +2014,7 @@ async def retrieve_knowledge(query: Dict[str, Any]):
 
 
 @router.delete("/knowledge/documents/{doc_id}")
-async def delete_knowledge_document(doc_id: str):
+async def delete_knowledge_document(doc_id: str, _service_auth: None = Depends(validate_service_key)):
     try:
         from app.services.knowledge.repository import KnowledgeRepository
         repo = KnowledgeRepository()

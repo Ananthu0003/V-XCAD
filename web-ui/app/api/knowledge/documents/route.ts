@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { getSession } from '@/lib/auth';
+import { requireAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -12,20 +12,18 @@ function getFastApiUrl(): string {
 	return value.replace(/\/$/, '');
 }
 
+function getServiceApiKey(): string {
+	const value = process.env.SERVICE_API_KEY?.trim();
+	if (!value) throw new Error('SERVICE_API_KEY is not configured');
+	return value;
+}
+
 export async function GET(): Promise<Response> {
-	// VEX-006: Require authenticated session
-	const authSession = await getSession();
-	if (!authSession?.userId) {
+	const adminId = await requireAdmin();
+	if (!adminId) {
 		return NextResponse.json(
-			{ error: { message: 'Authentication required.', hint: 'Log in to access knowledge documents.' } },
-			{ status: 401 }
-		);
-	}
-	const userExists = await prisma.user.findUnique({ where: { id: authSession.userId } });
-	if (!userExists) {
-		return NextResponse.json(
-			{ error: { message: 'Authentication required.', hint: 'Log in to access knowledge documents.' } },
-			{ status: 401 }
+			{ error: { message: 'Forbidden. Administrator access required.' } },
+			{ status: 403 }
 		);
 	}
 
@@ -33,6 +31,7 @@ export async function GET(): Promise<Response> {
 	try {
 		upstream = await fetch(`${getFastApiUrl()}/knowledge/documents`, {
 			method: 'GET',
+			headers: { 'X-Service-Key': getServiceApiKey() },
 			cache: 'no-store',
 		});
 	} catch (error) {
