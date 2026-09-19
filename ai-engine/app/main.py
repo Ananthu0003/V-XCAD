@@ -24,6 +24,7 @@ app = FastAPI(
     version="2.0.0",
     docs_url="/docs",
     redoc_url=None,
+    openapi_url="/openapi.json" if os.getenv("ENABLE_DOCS", "").lower() in ("1", "true", "yes") else None,
 )
 
 app.include_router(v1_router, prefix="/api/v1")
