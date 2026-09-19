@@ -92,6 +92,7 @@ jest.mock('@/lib/auth', () => ({
 }));
 
 const mockFindUnique = jest.fn();
+const mockCadSessionFindUnique = jest.fn();
 const mockUpsert = jest.fn();
 const mockFindFirst = jest.fn();
 const mockExecuteRawUnsafe = jest.fn();
@@ -100,7 +101,10 @@ const mockCadIterationCreate = jest.fn();
 jest.mock('@/lib/prisma', () => ({
   prisma: {
     user: { findUnique: (...args: unknown[]) => mockFindUnique(...args) },
-    cadSession: { upsert: (...args: unknown[]) => mockUpsert(...args) },
+    cadSession: {
+      findUnique: (...args: unknown[]) => mockCadSessionFindUnique(...args),
+      upsert: (...args: unknown[]) => mockUpsert(...args),
+    },
     cadIteration: {
       findFirst: (...args: unknown[]) => mockFindFirst(...args),
       create: (...args: unknown[]) => mockCadIterationCreate(...args),
@@ -150,6 +154,9 @@ describe('VEX-2A-002 — /api/render authentication gate', () => {
 
     // Default: user lookup succeeds
     mockFindUnique.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
+
+    // Default: ownership check — no existing session (new session creation path)
+    mockCadSessionFindUnique.mockResolvedValue(null);
 
     // Default: no existing iterations
     mockFindFirst.mockResolvedValue(null);

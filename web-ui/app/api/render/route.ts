@@ -193,7 +193,14 @@ export async function POST(request: Request): Promise<Response> {
 			);
 		}
 	} catch (e) {
-		console.warn('Could not verify session ownership for VEX-2A-012:', e);
+		console.error('Session ownership verification failed — denying render:', e);
+		return NextResponse.json(
+			buildError(
+				'Unable to verify session ownership.',
+				'Please try again later.'
+			),
+			{ status: 500 }
+		);
 	}
 
 	// Determine next version for this session
