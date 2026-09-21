@@ -36,12 +36,31 @@ export async function POST(request: Request): Promise<Response> {
 		return NextResponse.json({ error: { message: 'Invalid JSON body.' } }, { status: 400 });
 	}
 
+	// VEX-SEC: session_id is mandatory and must be owned by the caller.
+	// P1-NEW-01: the ai-engine keys CAM artifacts by job_id, so job_id is derived
+	// here from the authorized session_id and is never taken from the client.
+	const sessionId = body?.session_id;
+	if (typeof sessionId !== 'string' || !sessionId) {
+		return NextResponse.json({ error: { message: 'session_id is required.' } }, { status: 400 });
+	}
+	const session = await prisma.cadSession.findUnique({
+		where: { id: sessionId },
+		select: { userId: true },
+	});
+	if (!session || session.userId !== authSession.userId) {
+		return NextResponse.json(
+			{ error: { message: 'Forbidden', hint: 'You do not own this session.' } },
+			{ status: 403 }
+		);
+	}
+	const upstreamBody = { ...body, session_id: sessionId, job_id: sessionId };
+
 	let upstream: Response;
 	try {
 		upstream = await fetch(`${getFastApiUrl()}/cam/auto_plan`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json', accept: 'application/json' },
-			body: JSON.stringify(body),
+			body: JSON.stringify(upstreamBody),
 			cache: 'no-store',
 		});
 	} catch (error) {
