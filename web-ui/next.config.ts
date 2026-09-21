@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   headers: async () => [
     {
-      source: '/(.*)',
+      source: '/:path*',
       headers: [
         { key: 'X-Content-Type-Options', value: 'nosniff' },
         { key: 'X-Frame-Options', value: 'DENY' },
