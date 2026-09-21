@@ -95,8 +95,6 @@ export async function middleware(request: NextRequest) {
 export const config = {
 	matcher: [
 		'/workspace/:path*',
-		'/login',
-		'/register',
 		'/api/:path*',
 	],
 };
