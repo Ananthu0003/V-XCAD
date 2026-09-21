@@ -36,9 +36,6 @@ RUN mv /app/docker-entrypoint.sh /docker-entrypoint.sh && chmod +x /docker-entry
 RUN mkdir -p /app/outputs /app/logs && chown -R caduser:caduser /app
 
 EXPOSE 8000
-
-# The entrypoint runs as root to fix volume permissions, then drops
-# privileges to caduser via runuser(1).  The main application (uvicorn)
-# always runs as caduser.
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+
