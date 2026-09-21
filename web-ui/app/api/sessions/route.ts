@@ -68,7 +68,7 @@ export async function GET() {
     }
 }
 
-export async function DELETE(request?: NextRequest) {
+export async function DELETE(request: NextRequest) {
     try {
         const userId = await requireSession();
         if (!userId) {
