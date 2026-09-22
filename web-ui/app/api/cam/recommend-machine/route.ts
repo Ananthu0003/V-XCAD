@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { aiEngineFetch } from '@/lib/aiEngine';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,9 +37,23 @@ export async function POST(request: Request): Promise<Response> {
 		return NextResponse.json({ error: { message: 'Invalid JSON body.' } }, { status: 400 });
 	}
 
+	// VEX-SEC: Validate session ownership if session_id is provided
+	if (body?.session_id) {
+		const session = await prisma.cadSession.findUnique({
+			where: { id: body.session_id },
+			select: { userId: true },
+		});
+		if (!session || session.userId !== authSession.userId) {
+			return NextResponse.json(
+				{ error: { message: 'Forbidden', hint: 'You do not own this session.' } },
+				{ status: 403 }
+			);
+		}
+	}
+
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/cam/recommend-machine`, {
+		upstream = await aiEngineFetch(`${getFastApiUrl()}/cam/recommend-machine`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json', accept: 'application/json' },
 			body: JSON.stringify(body),

@@ -2,23 +2,64 @@ services:
   # ─────────────────────────────────────────────
   # 1. PostgreSQL Database
   # ─────────────────────────────────────────────
+  # SECURITY: PostgreSQL is NOT published to the host. It is reachable only over the
+  # internal `db` network (no external route) by web-ui, ai-engine and the one-shot
+  # `migrate` service. For host-side tooling use docker-compose.dev.yml, which binds
+  # 127.0.0.1 only.
+  #
+  # The credential below is the bootstrap/owner ("admin") role. The official image creates
+  # POSTGRES_USER as a cluster SUPERUSER. It is held by this service itself (which must set it
+  # to create the role) and by `migrate` (which connects as it to run schema/role/grant setup);
+  # it is never handed to web-ui or ai-engine, which connect as the least-privilege application
+  # role that `migrate` creates.
   postgres:
     image: postgres:16-alpine
     container_name: vexcad_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: cad_db
-      POSTGRES_USER: cad_user
-      POSTGRES_PASSWORD: cad_pass
-    ports:
-      - "5433:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-cad_db}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-vexcad_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD must be set in .env or environment}
+    networks:
+      - db
     volumes:
       - cad_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cad_user -d cad_db"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ─────────────────────────────────────────────
+  # 1b. One-shot database bootstrap + schema migration
+  # ─────────────────────────────────────────────
+  # Idempotent. Creates/updates the least-privilege application role, applies the Prisma
+  # schema (`prisma db push`, which refuses destructive changes without an explicit flag),
+  # then (re)grants the application role DML-only access. Safe to re-run on every `up`.
+  # postgres and migrate are the only services that receive the admin/owner credential;
+  # web-ui and ai-engine receive only the least-privilege application credential.
+  #
+  # S2: deliberately no `container_name`. `docker compose up` gives a fixed-named one-shot
+  # container a name that outlives it (Exited, not removed), which then conflicts with `up`
+  # from any second instance of this stack on the same Docker host (a second developer,
+  # staging next to prod, or a project-directory rename). `docker compose run --rm migrate`
+  # (the documented command) already gets its own unique per-invocation name either way.
+  migrate:
+    build:
+      context: ./web-ui
+      dockerfile: Dockerfile
+      target: migrate
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_ADMIN_USER:-vexcad_admin}:${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD must be set in .env or environment}@postgres:5432/${POSTGRES_DB:-cad_db}
+      DIRECT_URL: postgresql://${POSTGRES_ADMIN_USER:-vexcad_admin}:${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD must be set in .env or environment}@postgres:5432/${POSTGRES_DB:-cad_db}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-vexcad_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD must be set in .env or environment}
+    networks:
+      - db
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # ─────────────────────────────────────────────
   # 2. Python AI Engine (FastAPI + build123d)
@@ -33,13 +74,19 @@ services:
       - 1.1.1.1
     restart: unless-stopped
     # VEX-006: ai-engine is Docker-internal only — no host port published.
+    # Every /api/v1 route additionally requires the X-Service-Key header (SERVICE_API_KEY),
+    # so network reachability alone is not enough to call it.
+    networks:
+      - default
+      - db
     environment:
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       GENAI_MODEL: ${GENAI_MODEL:-gemini-2.0-flash-lite}
       GENAI_MAX_RETRIES: ${GENAI_MAX_RETRIES:-5}
       GENAI_RETRY_BASE_DELAY: ${GENAI_RETRY_BASE_DELAY:-1.5}
       GENAI_MAX_RETRY_DELAY: ${GENAI_MAX_RETRY_DELAY:-75}
-      DATABASE_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
+      # Least-privilege application role (DML only) — never the admin/superuser role.
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER:-vexcad_app}:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD must be set in .env or environment}@postgres:5432/${POSTGRES_DB:-cad_db}
       SERVICE_API_KEY: ${SERVICE_API_KEY:?SERVICE_API_KEY must be set in .env or environment}
     volumes:
       # Persist generated CAD outputs (STL, STEP, G-code, etc.)
@@ -62,24 +109,39 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    networks:
+      - default
+      - db
     volumes:
       - cad_outputs:/app/outputs
     environment:
       # Point to the ai-engine service by its container name (Docker-internal only)
       FASTAPI_URL: http://ai-engine:8000/api/v1
-      # PostgreSQL connection (Prisma)
-      DATABASE_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
-      DIRECT_URL: postgresql://cad_user:cad_pass@postgres:5432/cad_db
+      # PostgreSQL connection (Prisma) — least-privilege application role (DML only).
+      # DIRECT_URL is only used by the Prisma CLI; the runtime has no need for the admin role.
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER:-vexcad_app}:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD must be set in .env or environment}@postgres:5432/${POSTGRES_DB:-cad_db}
+      DIRECT_URL: postgresql://${POSTGRES_APP_USER:-vexcad_app}:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD must be set in .env or environment}@postgres:5432/${POSTGRES_DB:-cad_db}
       # JWT secret for auth
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env or environment}
       # Service-to-service auth key for ai-engine communication
       SERVICE_API_KEY: ${SERVICE_API_KEY:?SERVICE_API_KEY must be set in .env or environment}
+      # Rate limiting: X-Forwarded-For is attacker-controlled while web-ui is published directly, so it is
+      # NOT used unless you put a reverse proxy in front that OVERWRITES/appends it AND is the only path to
+      # this container. See README "Rate limiting".
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
       NODE_ENV: production
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       ai-engine:
         condition: service_healthy
+
+# `db` has no route to the outside world and contains only PostgreSQL and its clients.
+networks:
+  db:
+    internal: true
 
 volumes:
   cad_postgres_data:

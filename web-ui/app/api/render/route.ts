@@ -1,8 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 
-import { getSession } from '@/lib/auth';
+import { requireSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { aiEngineFetch } from '@/lib/aiEngine';
+import { RATE_LIMITS, enforce, rateLimitedResponse, renderSlots } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -128,31 +130,19 @@ function toFastApiRenderRequest(value: unknown): FastApiRenderRequest | null {
 }
 
 export async function POST(request: Request): Promise<Response> {
-	// ── VEX-2A-002: Require authenticated session ────────────────────────────
-	// Unauthenticated requests must be rejected before any body parsing or
-	// forwarding to the AI engine, preventing arbitrary code execution by
-	// anonymous callers.
-	const authSession = await getSession();
-	if (!authSession?.userId) {
+	// ── VEX-2A-002 + VEX-SEC: Require authenticated session with tokenVersion ─
+	const authenticatedUserId = await requireSession();
+	if (!authenticatedUserId) {
 		return NextResponse.json(
 			buildError('Authentication required.', 'Log in to use the render endpoint.'),
 			{ status: 401 }
 		);
 	}
+	// ── End auth gate ───────────────────────────────────────────────────────
 
-	// Validate the authenticated user still exists in the database.
-	const userExists = await prisma.user.findUnique({
-		where: { id: authSession.userId },
-	});
-	if (!userExists) {
-		return NextResponse.json(
-			buildError('Authentication required.', 'Log in to use the render endpoint.'),
-			{ status: 401 }
-		);
-	}
-
-	const authenticatedUserId = authSession.userId;
-	// ── End VEX-2A-002 auth gate ─────────────────────────────────────────────
+	// Abuse control: CAD execution is CPU-heavy. Per-user attempt limit (keyed by authenticated identity).
+	const renderLimited = await enforce([[RATE_LIMITS.render, authenticatedUserId]]);
+	if (renderLimited) return rateLimitedResponse(renderLimited, 'nested');
 
 	let body: any = null;
 	try {
@@ -229,9 +219,18 @@ export async function POST(request: Request): Promise<Response> {
 		console.warn('Could not query previous versions for session, defaulting to 1:', e);
 	}
 
+	// Bounded concurrency: at most a few renders per user and process-wide (fail fast, no queue).
+	const releaseRenderSlot = renderSlots().acquire(authenticatedUserId);
+	if (!releaseRenderSlot) {
+		return NextResponse.json(
+			buildError('Too many renders in progress.', 'Wait for your current render to finish and try again.'),
+			{ status: 429, headers: { 'Retry-After': '5' } }
+		);
+	}
+
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/render`, {
+		upstream = await aiEngineFetch(`${getFastApiUrl()}/render`, {
 			method: 'POST',
 			headers: {
 				'content-type': 'application/json',
@@ -245,6 +244,7 @@ export async function POST(request: Request): Promise<Response> {
 			cache: 'no-store',
 		});
 	} catch (error) {
+		releaseRenderSlot();
 		return NextResponse.json(
 			buildError(
 				'Unable to connect to AI engine render endpoint.',
@@ -255,6 +255,7 @@ export async function POST(request: Request): Promise<Response> {
 	}
 
 	const upstreamData = await upstream.json().catch(() => null);
+	releaseRenderSlot();
 	if (!upstream.ok || !upstreamData || typeof upstreamData !== 'object') {
 		const extracted = extractErrorFromUnknown(upstreamData, 'AI engine failed to render CAD model.');
 		return NextResponse.json(buildError(extracted.message, extracted.hint), { status: upstream.status || 502 });

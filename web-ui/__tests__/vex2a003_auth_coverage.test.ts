@@ -440,6 +440,7 @@ describe('VEX-2A-003 — Authentication Coverage', () => {
   describe('/api/generate', () => {
     it('POST returns 401 when unauthenticated', async () => {
       mockGetSession.mockResolvedValue(null);
+      mockRequireSession.mockResolvedValue(null);
       const { POST } = require('@/app/api/generate/route');
       const formData = new FormData();
       formData.set('prompt', 'Build a box');
@@ -454,6 +455,7 @@ describe('VEX-2A-003 — Authentication Coverage', () => {
 
     it('POST proceeds when authenticated', async () => {
       mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@example.com' });
+      mockRequireSession.mockResolvedValue('user-123');
       mockFindUnique.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
       mockFetch.mockResolvedValue({
         ok: true,

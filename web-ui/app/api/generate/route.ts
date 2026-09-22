@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+import { aiEngineFetch } from '@/lib/aiEngine';
+import { RATE_LIMITS, enforce, rateLimitedResponse } from '@/lib/rateLimit';
+import { requireSession } from '@/lib/auth';
 import { getModelById } from '@/lib/models-registry';
 
 
@@ -80,21 +82,18 @@ function getFastApiUrl(): string {
 }
 
 export async function POST(request: Request): Promise<Response> {
-	// VEX-2A-003: Require authenticated session (hard gate)
-	const authGate = await getSession();
-	if (!authGate?.userId) {
+	// VEX-SEC: Require authenticated session with tokenVersion validation
+	const authGate = await requireSession();
+	if (!authGate) {
 		return NextResponse.json(
 			buildError('Authentication required.', 'Log in to use the generate endpoint.'),
 			{ status: 401 }
 		);
 	}
-	const gateUser = await prisma.user.findUnique({ where: { id: authGate.userId } });
-	if (!gateUser) {
-		return NextResponse.json(
-			buildError('Authentication required.', 'Log in to use the generate endpoint.'),
-			{ status: 401 }
-		);
-	}
+
+	// Abuse control: LLM calls cost money. Per-user attempt limit (keyed by authenticated identity).
+	const generateLimited = await enforce([[RATE_LIMITS.generate, authGate]]);
+	if (generateLimited) return rateLimitedResponse(generateLimited, 'nested');
 
 	let formData: FormData;
 	try {
@@ -136,7 +135,7 @@ export async function POST(request: Request): Promise<Response> {
 	}
 
 	// Auth already validated by hard gate above — use the confirmed userId.
-	const validUserId = authGate.userId;
+	const validUserId = authGate;
 
 	const rawSessionId = formData.get('session_id');
 	let sessionId: string;
@@ -162,7 +161,7 @@ export async function POST(request: Request): Promise<Response> {
 
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/generate`, {
+		upstream = await aiEngineFetch(`${getFastApiUrl()}/generate`, {
 			method: 'POST',
 			body: formData,
 			headers: {

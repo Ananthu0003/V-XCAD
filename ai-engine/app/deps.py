@@ -13,7 +13,8 @@ _SERVICE_API_KEY: str | None = os.environ.get("SERVICE_API_KEY")
 
 def _get_expected_key() -> str:
     """Return the configured service API key, or raise if missing."""
-    if not _SERVICE_API_KEY:
+    # Fail closed: an unset OR blank/whitespace-only key must never authenticate anyone.
+    if not (_SERVICE_API_KEY and _SERVICE_API_KEY.strip()):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"error": {"message": "Service authentication is not configured."}},
@@ -35,7 +36,9 @@ def validate_service_key(x_service_key: str | None = Header(default=None)) -> No
             detail={"error": {"message": "Missing service authentication credential."}},
         )
 
-    if not hmac.compare_digest(x_service_key, expected):
+    # Compare as bytes: hmac.compare_digest() raises TypeError for non-ASCII str,
+    # which would turn a hostile header into a 500 instead of a clean 401.
+    if not hmac.compare_digest(x_service_key.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": {"message": "Invalid service authentication credential."}},

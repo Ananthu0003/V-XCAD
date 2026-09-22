@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 
 import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { aiEngineFetch } from '@/lib/aiEngine';
+import { RATE_LIMITS, enforce, rateLimitedResponse } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,11 +30,15 @@ export async function POST(request: Request): Promise<Response> {
 		);
 	}
 
+	// Abuse control: LLM calls cost money. Per-user attempt limit (keyed by authenticated identity).
+	const assistantLimited = await enforce([[RATE_LIMITS.assistant, authSession.userId]]);
+	if (assistantLimited) return rateLimitedResponse(assistantLimited, 'nested');
+
 	try {
 		const body = await request.json();
 		const fastApiUrl = `${getFastApiUrl()}/assistant/compare-and-prompt`;
 
-		const response = await fetch(fastApiUrl, {
+		const response = await aiEngineFetch(fastApiUrl, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',

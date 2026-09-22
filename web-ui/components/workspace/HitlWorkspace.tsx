@@ -2,7 +2,7 @@
 
 import JSON5 from 'json5';
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AuthModal } from '@/components/auth/AuthModal';
+
 import { toast } from 'sonner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -434,31 +434,12 @@ export default function HitlWorkspace() {
 	const [xRayMode, setXRayMode] = useState(false);
 
 
-	const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
+
 	const [isSharing, setIsSharing] = useState(false);
 
 
-	const [isDeveloper, setIsDeveloper] = useState(false);
-	const [developerUsername, setDeveloperUsername] = useState('');
-	const [developerPassword, setDeveloperPassword] = useState('');
-	const [developerAuthError, setDeveloperAuthError] = useState<string | null>(null);
 	const [debugMode, setDebugMode] = useState(false);
-
-	const handleDeveloperLogin = () => {
-		if (developerUsername === 'admin' && developerPassword === 'admin') {
-			setIsDeveloper(true);
-			setDeveloperAuthError(null);
-			setDeveloperUsername('');
-			setDeveloperPassword('');
-		} else {
-			setDeveloperAuthError('Invalid credentials');
-		}
-	};
-
-	const handleDeveloperLogout = () => {
-		setIsDeveloper(false);
-		setActiveDrawerTab('parameters');
-	};
 
 	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 	const [isChatOpen, setIsChatOpen] = useState(false);
@@ -2116,7 +2097,6 @@ export default function HitlWorkspace() {
 										isOpen={true}
 										setIsOpen={setIsChatOpen}
 										fileInputRef={fileUploadRef}
-										onOpenAuthModal={() => setIsAuthModalOpen(true)}
 										selectionContext={selectionContext}
 										onClearSelectionContext={() => setSelectionContext(null)}
 										hasActiveModel={Boolean(pythonScript)}
@@ -2216,7 +2196,6 @@ export default function HitlWorkspace() {
 													hasStl={hasStl}
 													hasStep={hasStep}
 													hasDxf={hasDxf}
-													isDeveloper={false}
 													isDownloadingStl={isDownloadingStl}
 													isDownloadingStep={isDownloadingStep}
 													isDownloadingDxf={isDownloadingDxf}
@@ -2617,16 +2596,7 @@ export default function HitlWorkspace() {
 					onRestore={handleRestoreSession}
 				/>
 			</main>
-			<AuthModal
-				isOpen={isAuthModalOpen}
-				onClose={() => setIsAuthModalOpen(false)}
-				developerUsername={developerUsername}
-				developerPassword={developerPassword}
-				developerAuthError={developerAuthError}
-				onDeveloperUsernameChange={setDeveloperUsername}
-				onDeveloperPasswordChange={setDeveloperPassword}
-				onDeveloperLogin={handleDeveloperLogin}
-			/>
+
 
 			{/* Unified Floating Action Dock (Animated Robot + Theme Toggle) */}
 			<div className="fixed bottom-6 right-6 z-50 flex flex-col items-center gap-3">

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { RATE_LIMITS, enforce, rateLimitedResponse } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,10 @@ export async function POST(
       { status: 403 }
     );
   }
+
+  // Abuse control: per-admin limit on password-reset review actions (keyed by authenticated identity).
+  const limited = await enforce([[RATE_LIMITS.adminAction, adminId]]);
+  if (limited) return rateLimitedResponse(limited, 'nested');
 
   const { id } = await params;
   const body = (await req.json().catch(() => null)) ?? {};

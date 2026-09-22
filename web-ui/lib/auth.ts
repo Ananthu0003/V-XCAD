@@ -28,7 +28,17 @@ export async function verifyToken(token: string) {
   }
 }
 
-export async function getSession() {
+/**
+ * Signature-only session read: verifies the JWT (signature + expiry) and
+ * NOTHING else. It does not touch the database, so it does not know whether the
+ * account still exists or whether the token was invalidated by a tokenVersion
+ * change.
+ *
+ * Use ONLY for database-independent, non-security decisions (e.g. choosing a
+ * "Log in" vs "Open workspace" button on the landing page). Never use it to
+ * gate data access or side effects — use getSession()/requireSession().
+ */
+export async function getUnverifiedSession() {
   const cookieStore = await cookies();
   const token = cookieStore.get('auth_token')?.value;
   if (!token) return null;
@@ -36,29 +46,44 @@ export async function getSession() {
 }
 
 /**
+ * Authoritative session resolver.
+ *
+ * VEX-2A-011 / P2 (tokenVersion): a JWT is only accepted when its signature is
+ * valid AND the user still exists AND the token's tokenVersion equals the
+ * user's current tokenVersion. Tokens issued before an admin-approved password
+ * reset (which increments tokenVersion) are therefore rejected by every caller.
+ * Tokens without a tokenVersion claim (legacy) never match and are rejected.
+ *
+ * Fails closed: returns null for a missing/invalid token, an unknown user, or a
+ * tokenVersion mismatch. A database error propagates to the caller instead of
+ * being treated as "authenticated".
+ */
+export async function getSession() {
+  const claims = await getUnverifiedSession();
+  if (!claims?.userId) return null;
+
+  // Dynamic import to avoid circular deps and keep this file lightweight.
+  const { prisma } = await import('@/lib/prisma');
+  const user = await prisma.user.findUnique({
+    where: { id: claims.userId },
+    select: { id: true, tokenVersion: true },
+  });
+  if (!user) return null;
+  if (user.tokenVersion !== claims.tokenVersion) return null;
+
+  return claims;
+}
+
+/**
  * VEX-2A-003: Require an authenticated session with a valid user in the database.
- * VEX-2A-011: Also validates tokenVersion to invalidate old tokens after password reset.
+ * VEX-2A-011: Validates tokenVersion (via getSession) to invalidate old tokens
+ * after password reset.
  * Returns the userId if valid, or null if authentication fails.
  * Callers should return 401 when this returns null.
  */
 export async function requireSession(): Promise<string | null> {
   const session = await getSession();
-  if (!session?.userId) return null;
-
-  // Dynamic import to avoid circular deps and keep this file lightweight.
-  const { prisma } = await import('@/lib/prisma');
-  const user = await prisma.user.findUnique({
-    where: { id: session.userId },
-    select: { id: true, tokenVersion: true },
-  });
-  if (!user) return null;
-
-  // VEX-2A-011: Invalidate tokens issued before a password reset.
-  // Existing JWTs without tokenVersion (from before this fix) are rejected
-  // because they don't match the DB tokenVersion (0 vs undefined).
-  if (user.tokenVersion !== session.tokenVersion) return null;
-
-  return session.userId;
+  return session?.userId ?? null;
 }
 
 /**

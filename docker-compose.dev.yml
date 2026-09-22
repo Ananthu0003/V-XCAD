@@ -1,0 +1,17 @@
+# Developer-only override. NOT for production.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
+#
+# Publishes PostgreSQL to the LOOPBACK interface only, so host tooling (`npm run prisma:push`,
+# `npm run dev` on the host, psql, scripts/*) can reach it. It is never bound to 0.0.0.0/[::],
+# so other machines on the network cannot connect. Use the same POSTGRES_* values as .env.
+#
+# PostgreSQL also joins the ordinary (non-internal) `default` network here, because Docker
+# cannot publish a port for a container attached only to an `internal` network.
+services:
+  postgres:
+    networks:
+      - db
+      - default
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"

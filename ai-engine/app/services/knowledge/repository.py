@@ -6,7 +6,9 @@ from app.services.knowledge.schemas import EngineeringRuleSchema, KnowledgeDocum
 
 class KnowledgeRepository:
     def __init__(self, database_url: str = None):
-        self.db_url = database_url or os.environ.get("DATABASE_URL", "postgresql://cad_user:cad_pass@127.0.0.1:5433/cad_db")
+        self.db_url = database_url or os.environ.get("DATABASE_URL")
+        if not self.db_url:
+            raise ValueError("DATABASE_URL environment variable is required")
         
     def _get_connection(self):
         return psycopg2.connect(self.db_url)

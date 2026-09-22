@@ -20,7 +20,6 @@ class UniversalHTTPXGateway(BaseLLMGateway):
 
         openrouter_gw = OpenRouterGateway(self.openrouter_api_key)
         google_gw = GoogleGateway(self.google_api_key) if self.google_api_key else openrouter_gw
-        print(f"DEBUG: google_api_key length: {len(self.google_api_key)}, type of google gateway: {type(google_gw)}")
 
         self._gateways = {
             "google": google_gw,

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { requireAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { aiEngineFetch } from '@/lib/aiEngine';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,12 +11,6 @@ function getFastApiUrl(): string {
 	const value = process.env.FASTAPI_URL?.trim();
 	if (!value) throw new Error('FASTAPI_URL is not configured');
 	return value.replace(/\/$/, '');
-}
-
-function getServiceApiKey(): string {
-	const value = process.env.SERVICE_API_KEY?.trim();
-	if (!value) throw new Error('SERVICE_API_KEY is not configured');
-	return value;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -32,9 +27,8 @@ export async function POST(request: Request): Promise<Response> {
 
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/knowledge/documents/ingest`, {
+		upstream = await aiEngineFetch(`${getFastApiUrl()}/knowledge/documents/ingest`, {
 			method: 'POST',
-			headers: { 'X-Service-Key': getServiceApiKey() },
 			body: formData,
 			cache: 'no-store',
 		});

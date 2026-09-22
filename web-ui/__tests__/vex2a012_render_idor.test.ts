@@ -85,8 +85,10 @@ jest.mock('next/server', () => ({
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
 const mockGetSession = jest.fn();
+const mockRequireSession = jest.fn();
 jest.mock('@/lib/auth', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
+  requireSession: (...args: unknown[]) => mockRequireSession(...args),
 }));
 
 const mockUserFindUnique = jest.fn();
@@ -147,6 +149,7 @@ describe('VEX-2A-012 — Render IDOR / session ownership', () => {
     process.env.FASTAPI_URL = 'http://ai-engine:8000/api/v1';
 
     mockGetSession.mockResolvedValue({ userId: 'user-attacker', email: 'attacker@example.com' });
+    mockRequireSession.mockResolvedValue('user-attacker');
     mockUserFindUnique.mockResolvedValue({ id: 'user-attacker', email: 'attacker@example.com' });
 
     // Default: no existing iterations
@@ -262,6 +265,7 @@ describe('VEX-2A-012 — Render IDOR / session ownership', () => {
 
   it('returns 401 for unauthenticated request (auth gate runs first)', async () => {
     mockGetSession.mockResolvedValue(null);
+    mockRequireSession.mockResolvedValue(null);
 
     const req = makeRequest({
       ...VALID_BODY,

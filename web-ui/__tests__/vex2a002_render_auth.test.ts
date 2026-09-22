@@ -87,8 +87,10 @@ jest.mock('next/server', () => ({
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
 const mockGetSession = jest.fn();
+const mockRequireSession = jest.fn();
 jest.mock('@/lib/auth', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
+  requireSession: (...args: unknown[]) => mockRequireSession(...args),
 }));
 
 const mockFindUnique = jest.fn();
@@ -151,6 +153,7 @@ describe('VEX-2A-002 — /api/render authentication gate', () => {
 
     // Default: no auth session (unauthenticated)
     mockGetSession.mockResolvedValue(null);
+    mockRequireSession.mockResolvedValue(null);
 
     // Default: user lookup succeeds
     mockFindUnique.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
@@ -187,6 +190,7 @@ describe('VEX-2A-002 — /api/render authentication gate', () => {
 
   it('returns 401 when session token is invalid', async () => {
     mockGetSession.mockResolvedValue(null);
+    mockRequireSession.mockResolvedValue(null);
 
     const req = makeRequest(VALID_BODY);
     const res = await POST(req);
@@ -196,6 +200,7 @@ describe('VEX-2A-002 — /api/render authentication gate', () => {
 
   it('returns 401 when session has no userId', async () => {
     mockGetSession.mockResolvedValue({ userId: undefined, email: 'anon' });
+    mockRequireSession.mockResolvedValue(null);
 
     const req = makeRequest(VALID_BODY);
     const res = await POST(req);
@@ -223,6 +228,7 @@ describe('VEX-2A-002 — /api/render authentication gate', () => {
 
   it('returns 401 when authenticated user no longer exists in database', async () => {
     mockGetSession.mockResolvedValue({ userId: 'user-deleted', email: 'gone@example.com' });
+    mockRequireSession.mockResolvedValue(null);
     mockFindUnique.mockResolvedValue(null);
 
     const req = makeRequest(VALID_BODY);
@@ -236,6 +242,7 @@ describe('VEX-2A-002 — /api/render authentication gate', () => {
 
   it('calls ai-engine when authenticated with valid user', async () => {
     mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@example.com' });
+    mockRequireSession.mockResolvedValue('user-123');
     mockFindUnique.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
     mockFetch.mockResolvedValue({
       ok: true,
@@ -253,6 +260,7 @@ describe('VEX-2A-002 — /api/render authentication gate', () => {
 
   it('returns upstream error status when ai-engine fails', async () => {
     mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@example.com' });
+    mockRequireSession.mockResolvedValue('user-123');
     mockFindUnique.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
     mockFetch.mockResolvedValue({
       ok: false,
@@ -270,6 +278,7 @@ describe('VEX-2A-002 — /api/render authentication gate', () => {
 
   it('creates CadSession with authenticated userId', async () => {
     mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@example.com' });
+    mockRequireSession.mockResolvedValue('user-123');
     mockFindUnique.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
     mockFetch.mockResolvedValue({
       ok: true,
@@ -286,6 +295,7 @@ describe('VEX-2A-002 — /api/render authentication gate', () => {
 
   it('does not create session with null userId', async () => {
     mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@example.com' });
+    mockRequireSession.mockResolvedValue('user-123');
     mockFindUnique.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
     mockFetch.mockResolvedValue({
       ok: true,
@@ -312,6 +322,7 @@ describe('VEX-2A-002 — /api/render authentication gate', () => {
 
   it('returns 400 for missing python_script when authenticated (body validation runs after auth)', async () => {
     mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@example.com' });
+    mockRequireSession.mockResolvedValue('user-123');
     mockFindUnique.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
 
     const req = makeRequest({ parameters: {} });

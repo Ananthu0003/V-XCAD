@@ -86,8 +86,10 @@ jest.mock('next/server', () => ({
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
 const mockGetSession = jest.fn();
+const mockRequireSession = jest.fn();
 jest.mock('@/lib/auth', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
+  requireSession: (...args: unknown[]) => mockRequireSession(...args),
 }));
 
 const mockUserFindUnique = jest.fn();
@@ -150,6 +152,7 @@ describe('P0-01 — Render ownership fail-closed on DB error', () => {
 
     // Default: authenticated valid user
     mockGetSession.mockResolvedValue({ userId: 'user-123', email: 'test@example.com' });
+    mockRequireSession.mockResolvedValue('user-123');
     mockUserFindUnique.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
 
     // Default: no existing iterations

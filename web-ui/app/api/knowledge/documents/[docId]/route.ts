@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { requireAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { aiEngineFetch } from '@/lib/aiEngine';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,12 +11,6 @@ function getFastApiUrl(): string {
 	const value = process.env.FASTAPI_URL?.trim();
 	if (!value) throw new Error('FASTAPI_URL is not configured');
 	return value.replace(/\/$/, '');
-}
-
-function getServiceApiKey(): string {
-	const value = process.env.SERVICE_API_KEY?.trim();
-	if (!value) throw new Error('SERVICE_API_KEY is not configured');
-	return value;
 }
 
 export async function DELETE(
@@ -37,9 +32,8 @@ export async function DELETE(
 
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/knowledge/documents/${docId}`, {
+		upstream = await aiEngineFetch(`${getFastApiUrl()}/knowledge/documents/${docId}`, {
 			method: 'DELETE',
-			headers: { 'X-Service-Key': getServiceApiKey() },
 			cache: 'no-store',
 		});
 	} catch (error) {

@@ -3,7 +3,7 @@ import {
   ArrowRight, Cuboid, Upload, Cpu, Sliders, Download,
   Code2, Box, History, Zap, FileImage, ChevronRight,
 } from 'lucide-react';
-import { getSession } from '@/lib/auth';
+import { getUnverifiedSession } from '@/lib/auth';
 import { Hero3D } from '@/components/landing/Hero3D';
 import { AnimatedSection } from '@/components/landing/AnimatedSection';
 import { AnimatedCode } from '@/components/landing/AnimatedCode';
@@ -13,7 +13,9 @@ import { BackToTop } from '@/components/landing/BackToTop';
 import { ValueGrid } from '@/components/landing/ValueGrid';
 
 export default async function LandingPage() {
-  const session = await getSession();
+  // Signature-only on purpose: the landing page must not depend on the database,
+  // and this value only picks a button label (no data access / side effect).
+  const session = await getUnverifiedSession();
   const isLoggedIn = Boolean(session);
 
   return (

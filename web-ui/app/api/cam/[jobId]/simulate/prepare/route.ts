@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { aiEngineFetch } from '@/lib/aiEngine';
 import { getSession } from '@/lib/auth';
 
 export const runtime = 'nodejs';
@@ -66,7 +67,7 @@ export async function POST(
 
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/cam/simulate/prepare`, {
+		upstream = await aiEngineFetch(`${getFastApiUrl()}/cam/simulate/prepare`, {
 			method: 'POST',
 			headers: {
 				'content-type': 'application/json',

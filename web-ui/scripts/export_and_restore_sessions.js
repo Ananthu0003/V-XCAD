@@ -24,7 +24,11 @@ async function main() {
     await prismaHost.$disconnect();
 
     // 2. Connect to Docker DB (if different URL)
-    const dockerUrl = 'postgresql://cad_user:cad_pass@127.0.0.1:5433/cad_db?schema=public';
+    // No credentials in source: supply the target connection string explicitly.
+    const dockerUrl = process.env.DOCKER_DATABASE_URL;
+    if (!dockerUrl) {
+        throw new Error('DOCKER_DATABASE_URL is required (target PostgreSQL connection string; see README "Database").');
+    }
     const prismaDocker = new PrismaClient({
         datasources: {
             db: {

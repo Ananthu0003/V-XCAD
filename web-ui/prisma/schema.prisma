@@ -508,3 +508,13 @@ model PasswordResetRequest {
   @@index([userId])
   @@index([expiresAt])
 }
+
+/// Attempt counters for abuse controls (lib/rateLimit.ts). One row per (rule, identity) key; the
+/// window is fixed and reset atomically by an upsert. Expired rows are purged opportunistically.
+model RateLimitBucket {
+  key         String   @id
+  count       Int
+  windowStart DateTime @default(now())
+
+  @@index([windowStart])
+}

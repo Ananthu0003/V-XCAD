@@ -27,6 +27,21 @@ ENV JWT_SECRET="build_time_jwt_secret_placeholder_replace_at_runtime"
 RUN npx prisma generate
 RUN npm run build
 
+# ── Stage: one-shot database bootstrap + schema migration ────────────────────
+# Used only by the compose `migrate` service (`target: migrate`); it is NOT part of the
+# runtime image (the `runner` stage below stays the default/last target). It carries the
+# Prisma CLI, which the runtime image deliberately does not, and runs as a non-root user.
+#   1. create/update the least-privilege application role   (scripts/db-bootstrap.js roles)
+#   2. apply the schema as the admin/owner role             (prisma db push — refuses destructive
+#                                                            changes unless explicitly forced)
+#   3. grant the application role DML-only access           (scripts/db-bootstrap.js grants)
+FROM deps AS migrate
+WORKDIR /app
+COPY prisma ./prisma
+COPY scripts/db-bootstrap.js ./scripts/db-bootstrap.js
+USER node
+CMD ["sh", "-c", "node scripts/db-bootstrap.js roles && ./node_modules/.bin/prisma db push --skip-generate && node scripts/db-bootstrap.js grants"]
+
 # ── Stage 3: Production runtime ───────────────────────────────────────────────
 FROM node:20-alpine AS runner
 WORKDIR /app

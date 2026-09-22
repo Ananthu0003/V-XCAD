@@ -79,7 +79,6 @@ type CadViewportProps = {
 	hasStep: boolean;
 	hasDxf: boolean;
 	hasGcode?: boolean;
-	isDeveloper: boolean;
 	isDownloadingStl: boolean;
 	isDownloadingStep: boolean;
 	isDownloadingDxf: boolean;
@@ -166,7 +165,6 @@ export function CadViewport({
 	hasStep = false,
 	hasDxf = false,
 	hasGcode = false,
-	isDeveloper,
 	isDownloadingStl = false,
 	isDownloadingStep = false,
 	isDownloadingDxf = false,

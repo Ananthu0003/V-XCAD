@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { aiEngineFetch } from '@/lib/aiEngine';
 
 function getFastApiUrl(): string {
 	const value = process.env.FASTAPI_URL?.trim() || process.env.AI_ENGINE_URL?.trim() || 'http://127.0.0.1:8001/api/v1';
@@ -97,7 +98,7 @@ export async function GET(
 	}
 
 	try {
-		const upstream = await fetch(`${getFastApiUrl()}/api/v1/blueprint/${id}`, {
+		const upstream = await aiEngineFetch(`${getFastApiUrl()}/api/v1/blueprint/${id}`, {
 			cache: 'no-store',
 		});
 

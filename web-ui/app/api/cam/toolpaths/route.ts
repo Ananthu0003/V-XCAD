@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { aiEngineFetch } from '@/lib/aiEngine';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -57,7 +58,7 @@ export async function POST(request: Request): Promise<Response> {
 
 	let upstream: Response;
 	try {
-		upstream = await fetch(`${getFastApiUrl()}/cam/toolpaths`, {
+		upstream = await aiEngineFetch(`${getFastApiUrl()}/cam/toolpaths`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json', accept: 'application/json' },
 			body: JSON.stringify(upstreamBody),
