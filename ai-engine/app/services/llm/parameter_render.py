@@ -2159,6 +2159,13 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
             "modules",        # sys.modules → access to all loaded modules
             "environ",        # os.environ → environment secrets
             "sys",            # typing.sys, enum.sys → re-export of sys module
+            "os",             # build123d.os (importers.py/mesher.py leak it via
+                               # `import os` + no __all__) → captured os-module
+                               # reference, defense-in-depth (2026-09-22 audit:
+                               # currently unreachable at runtime because the
+                               # restricted builtins omit __import__ and the
+                               # bootstrap only exports build123d's curated
+                               # __all__, but denylisted here regardless).
             # OS-level command execution via any module re-export
             "system",         # os.system("command")
             "popen",          # os.popen("command")
@@ -2166,7 +2173,6 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
             "execve",         # os.execve(...)
             "execvp",         # os.execvp(...)
             "fork",           # os.fork()
-            "spawn",          # os.spawn*
             # Dangerous Python object introspection
             "__builtins__",   # access to all builtins
             "__import__",     # dynamic import
@@ -2175,6 +2181,15 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
             "__globals__",    # function global scope access
             "__code__",       # code object introspection
         })
+
+        # os.spawn* / os.posix_spawn* family. These are attribute NAMES, not
+        # the bare word "spawn" (which never appears as a real attribute on
+        # the os module and previously matched nothing) — e.g. spawnv,
+        # spawnve, spawnvp, spawnl, spawnle, spawnlp, spawnlpe, posix_spawn,
+        # posix_spawnp. Matched by prefix rather than an exhaustive frozenset
+        # so new variants aren't missed; no legitimate build123d/math/re/
+        # typing/bd_warehouse/ocp_vscode API name starts with these prefixes.
+        FORBIDDEN_ATTR_PREFIXES = ("spawn", "posix_spawn")
 
         # Functions that are dangerous when called bare (ast.Name), but are
         # safe when called as methods on whitelisted modules (e.g. re.compile).
@@ -2240,6 +2255,9 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
                 # Block known-dangerous attributes (VEX-2A-001 bypass vectors)
                 if attr_name in FORBIDDEN_ATTRIBUTES:
                     return False, f"Security Violation: Access to attribute '{attr_name}' is forbidden."
+                # Block the os.spawn*/os.posix_spawn* family by prefix.
+                if attr_name.startswith(FORBIDDEN_ATTR_PREFIXES):
+                    return False, f"Security Violation: Access to attribute '{attr_name}' is forbidden."
 
             # 2b. CLAUDE-001: Block dangerous bare identifiers (ast.Name)
             elif isinstance(node, ast.Name):
@@ -2256,6 +2274,8 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
                     if any(sub in func_attr for sub in FORBIDDEN_ATTR_SUBSTRINGS):
                         return False, f"Security Violation: Access to attribute '{func_attr}' is forbidden."
                     if func_attr in FORBIDDEN_ATTRIBUTES:
+                        return False, f"Security Violation: Access to attribute '{func_attr}' is forbidden."
+                    if func_attr.startswith(FORBIDDEN_ATTR_PREFIXES):
                         return False, f"Security Violation: Access to attribute '{func_attr}' is forbidden."
                     if func_attr in FORBIDDEN_ANYWHERE_FUNCTIONS:
                         return False, f"Security Violation: Call to function '{func_attr}' is forbidden."
@@ -2275,9 +2295,14 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
                         return False, f"Security Violation: Subscript access with key '{node.slice.value}' is forbidden."
 
         return True, None
-    except SyntaxError:
-        # Let validate_script_syntax handle syntax errors
-        return True, None
+    except SyntaxError as exc:
+        # Both current callers run validate_script_syntax() first and never
+        # reach this function on invalid syntax, so this path is not known
+        # to be reachable today. It must still fail closed for any future
+        # caller that invokes validate_script_security() directly without
+        # that prior check — returning True here would mean "secure" for a
+        # script this function never actually analyzed.
+        return False, f"Security validation failed: Syntax error at line {exc.lineno}: {exc.msg}"
     except Exception as exc:
         return False, f"Security validation failed: {str(exc)}"
 

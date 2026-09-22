@@ -12,7 +12,9 @@ const nextConfig: NextConfig = {
         { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         { key: 'X-XSS-Protection', value: '1; mode=block' },
         { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
-        { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" },
+        // Content-Security-Policy is set per-request in proxy.ts (nonce-based
+        // script-src requires a fresh value per request, which next.config.js
+        // headers() cannot generate — see proxy.ts for the full policy).
       ],
     },
   ],

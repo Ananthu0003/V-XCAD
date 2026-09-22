@@ -66,6 +66,20 @@ import ast
 import time
 
 class ShapeCache:
+    """In-memory cache keyed by asset_id, intended to let /export-step,
+    /export-stl and /export-dxf re-export a previously-parsed shape (via
+    is_step_reference()) without re-parsing the full CSG tree.
+
+    KNOWN ISSUE (deferred, not a security DoS — audited 2026-09-22):
+    ShapeCache.set() currently has no callers anywhere in this codebase, so
+    the cache is never populated. Every is_step_reference()-based export
+    request therefore always misses (ValueError/404 at the three call sites
+    below), and the cache cannot grow — it is dead-but-harmless, not
+    unbounded. The intended architecture (asset-id-based re-export to avoid
+    re-parsing) is left intact here rather than removed or redesigned,
+    since something is clearly meant to populate this cache; wiring that up
+    is a separate, real feature-completion task, not a security fix.
+    """
     _cache: dict[str, dict[str, Any]] = {}
 
     @classmethod

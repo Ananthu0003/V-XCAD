@@ -16,6 +16,12 @@ export const metadata: Metadata = {
 	description: 'Generate and refine CAD from documents with HITL controls.',
 };
 
+// Finding 2 (P3): nonce-based CSP requires dynamic rendering (see proxy.ts) —
+// a nonce is generated fresh per request and cannot be baked into a
+// statically-generated page. Applies to the whole app since this is the
+// root layout.
+export const dynamic = 'force-dynamic';
+
 export default function RootLayout({
 	children,
 }: Readonly<{

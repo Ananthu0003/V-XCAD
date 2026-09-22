@@ -3,25 +3,22 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import fs from 'fs';
 import path from 'path';
+import { resolveOutputsDir } from '@/lib/outputsDir';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 async function autoSyncDiskSessions() {
     try {
-        const outputsDirs = [
-            path.resolve(process.cwd(), '../outputs'),
-            path.resolve(process.cwd(), 'outputs'),
-            path.resolve('/app/outputs')
-        ];
-
-        let outputsDir: string | null = null;
-        for (const d of outputsDirs) {
-            if (fs.existsSync(d)) {
-                outputsDir = d;
-                break;
-            }
-        }
+        // Only the application's actual runtime output volume is eligible for
+        // sync. Previously this also guessed at process.cwd()-relative paths
+        // (e.g. '../outputs'), which in local development resolved to the
+        // repository's own tracked outputs/ directory — arbitrary committed
+        // fixture/test files unrelated to any real session — and silently
+        // imported them as userId:null sessions. Fails safe (no-op) if the
+        // runtime output directory isn't present, e.g. when running outside
+        // Docker without the shared cad_outputs volume mounted.
+        const outputsDir = resolveOutputsDir();
 
         if (!outputsDir) return;
 

@@ -4,11 +4,10 @@ import { join, extname } from 'path';
 
 import { getSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { OUTPUTS_DIR } from '@/lib/outputsDir';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const OUTPUTS_DIR = '/app/outputs';
 
 const MIME_TYPES: Record<string, string> = {
 	'.stl': 'model/stl',
