@@ -503,7 +503,20 @@ model PasswordResetRequest {
   expiresAt    DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, status])
+  // A user must be able to have unlimited historical requests (multiple approved,
+  // multiple rejected, over time) — only "at most one PENDING request per user" is an
+  // actual invariant. Prisma's schema language has no partial/filtered unique index
+  // (verified against the installed Prisma version: `@@unique(..., where: ...)` is not
+  // valid PSL), so `@@unique([userId, status])` previously over-constrained this to "at
+  // most one request per user PER STATUS EVER", which broke a user's second-ever
+  // approved (or rejected) request with a unique-constraint violation.
+  //
+  // The real invariant is enforced at the database level by a partial unique index
+  // created in scripts/db-bootstrap.js's grants phase (which already runs after every
+  // `prisma db push`, via the existing migrate command — no Docker/compose change
+  // needed): CREATE UNIQUE INDEX ... ON "PasswordResetRequest" ("userId") WHERE status
+  // = 'pending'. `db push` does not manage or drop indexes it does not declare (verified
+  // empirically), so that index survives every future push undisturbed.
   @@index([status])
   @@index([userId])
   @@index([expiresAt])

@@ -74,12 +74,15 @@ async function autoSyncDiskSessions() {
 
 export async function GET() {
     try {
-        await autoSyncDiskSessions();
-
+        // Authenticate BEFORE any filesystem/database side effect. autoSyncDiskSessions()
+        // reads the outputs directory and can write orphaned CadSession rows; an
+        // unauthenticated caller must not be able to trigger that.
         const authSession = await getSession();
         if (!authSession?.userId) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
+
+        await autoSyncDiskSessions();
 
         // VEX-009: Return only the authenticated user's sessions and intentionally
         // shared sessions.  Null-user (unowned) sessions are excluded.

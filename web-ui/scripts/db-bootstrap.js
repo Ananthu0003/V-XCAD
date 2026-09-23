@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 /**
- * Idempotent PostgreSQL role/grant bootstrap (Finding 3 — least privilege).
+ * Idempotent PostgreSQL role/grant bootstrap (Finding 3 — least privilege), plus
+ * database-level invariants Prisma's schema language cannot express (see
+ * buildSchemaInvariantStatements below — currently: the PasswordResetRequest
+ * "at most one pending request per user" partial unique index).
  *
  * Runs as the ADMIN/owner role (DATABASE_URL points at it) inside the one-shot `migrate`
  * compose service — never inside web-ui or ai-engine.
@@ -109,6 +112,30 @@ function buildGrantStatements({ appUser }, q) {
 }
 
 /**
+ * SQL for database-level invariants that Prisma's schema language (PSL) cannot express
+ * (run in the same `grants` phase, after `prisma db push` has created the table).
+ *
+ * PasswordResetRequest: "at most one PENDING request per user" is a partial/filtered
+ * unique index — PSL has no `@@unique(..., where: ...)` syntax (verified against the
+ * installed Prisma version: `@@unique` with a `where` argument fails schema validation).
+ * A plain `@@unique([userId, status])` was tried previously and was wrong: it also
+ * limited a user to one request EVER per terminal status (approved/rejected), so a
+ * user's second-ever approved or rejected request failed with a constraint violation.
+ * `CREATE UNIQUE INDEX IF NOT EXISTS` is idempotent, connects with the admin role this
+ * phase already uses (no privilege change needed), and — verified empirically —
+ * `prisma db push` does not manage or drop indexes it doesn't declare, so this survives
+ * every future push undisturbed.
+ */
+function buildSchemaInvariantStatements(q) {
+  const table = q.ident('PasswordResetRequest');
+  const column = q.ident('userId');
+  const indexName = q.ident('PasswordResetRequest_userId_pending_key');
+  return [
+    `CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${table} (${column}) WHERE status = ${q.literal('pending')}`,
+  ];
+}
+
+/**
  * @param {'roles'|'grants'} phase
  * @param {NodeJS.ProcessEnv} env
  * @param {{ Client: new (cfg: object) => any, log?: (m: string) => void }} deps
@@ -147,7 +174,7 @@ async function run(phase, env, deps = {}) {
         q,
       );
     } else {
-      statements = buildGrantStatements({ appUser: cfg.appUser }, q);
+      statements = [...buildGrantStatements({ appUser: cfg.appUser }, q), ...buildSchemaInvariantStatements(q)];
     }
 
     await client.query('BEGIN');
@@ -172,6 +199,7 @@ module.exports = {
   readConfig,
   buildRoleStatements,
   buildGrantStatements,
+  buildSchemaInvariantStatements,
   run,
 };
 
