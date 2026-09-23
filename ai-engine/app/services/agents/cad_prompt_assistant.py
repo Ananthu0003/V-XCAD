@@ -19,6 +19,23 @@ from dotenv import dotenv_values
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 PARTS_JSON_PATH = DATA_DIR / "parts.json"
 
+# Gemini 3+ Flash-family models this assistant may request directly via the Google API.
+# `model_override` is caller-supplied (CADPromptAssistantRequest.model), so a bare
+# `.startswith("gemini")` check let a caller request legacy Gemini 2.5 models (models
+# intentionally excluded from the V-XCAD runtime allowlist) by name. This is an explicit
+# allowlist instead: no Gemini 2.x, no Gemini Pro — Flash/Flash-Lite only. This assistant
+# never receives a caller-selected model in practice (PromptAssistantWidget.tsx sends no
+# `model` field), so the allowlist only needs to cover the models actually used as
+# defaults/fallbacks here and in google.py's fallback chain.
+ALLOWED_GEMINI_MODELS = frozenset({
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash",
+})
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
+
 SYSTEM_PROMPT_COMPARATOR = """You are VexCAD CAD Prompt Assistant, an elite mechanical design engineer, CAD specialist, and prompt engineer for parametric 3D CAD modeling (build123d / OpenCASCADE).
 
 YOUR MISSION:
@@ -296,7 +313,7 @@ class CADPromptAssistantService:
     ) -> dict[str, Any]:
         """Runs multimodal discrepancy comparison between blueprint and 3D render views."""
         system_instruction = self._build_system_prompt(user_message)
-        model = model_override or "gemini-2.5-flash"
+        model = model_override or DEFAULT_GEMINI_MODEL
 
         # Prepare images
         images: list[tuple[str, str, str]] = []  # (label, mime, base64)
@@ -339,7 +356,7 @@ class CADPromptAssistantService:
             try:
                 raw_reply = await self._call_gemini(
                     api_key=self.google_api_key,
-                    model=model if model.startswith("gemini") else "gemini-2.5-flash",
+                    model=model if model in ALLOWED_GEMINI_MODELS else DEFAULT_GEMINI_MODEL,
                     system_prompt=system_instruction,
                     user_text=prompt_text,
                     images=images,
@@ -353,7 +370,7 @@ class CADPromptAssistantService:
             try:
                 raw_reply = await self._call_openrouter(
                     api_key=self.openrouter_api_key,
-                    model="google/gemini-2.5-flash",
+                    model="google/gemini-3.5-flash",
                     system_prompt=system_instruction,
                     user_text=prompt_text,
                     images=images,
@@ -506,7 +523,7 @@ class CADPromptAssistantService:
         import asyncio
 
         def _sync_call() -> str:
-            target_model = model if model.startswith("gemini") else "gemini-2.5-flash"
+            target_model = model if model in ALLOWED_GEMINI_MODELS else DEFAULT_GEMINI_MODEL
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={api_key}"
             contents = []
 

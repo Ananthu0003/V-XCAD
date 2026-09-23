@@ -61,14 +61,14 @@ class GoogleGateway(BaseLLMGateway):
         config_params = self._build_config(metadata, system_instruction, response_json)
 
         import asyncio
-        fallback_candidates = [metadata.id, "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
-        
+        fallback_candidates = [metadata.id, "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+
         def _call() -> str:
             last_err: Exception | None = None
             for candidate in fallback_candidates:
                 try:
                     params = dict(config_params)
-                    if not candidate.startswith("gemini-3") and not candidate.startswith("gemini-2.5"):
+                    if not candidate.startswith("gemini-3"):
                         params.pop("thinking_config", None)
                     response = self.client.models.generate_content(
                         model=candidate,
@@ -116,14 +116,14 @@ class GoogleGateway(BaseLLMGateway):
         config_params = self._build_config(metadata, system_instruction, response_json=False)
 
         import asyncio
-        fallback_candidates = [metadata.id, "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
-        
+        fallback_candidates = [metadata.id, "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+
         def _call_stream():
             last_err: Exception | None = None
             for candidate in fallback_candidates:
                 try:
                     params = dict(config_params)
-                    if not candidate.startswith("gemini-3") and not candidate.startswith("gemini-2.5"):
+                    if not candidate.startswith("gemini-3"):
                         params.pop("thinking_config", None)
                     return self.client.models.generate_content_stream(
                         model=candidate,
