@@ -112,11 +112,174 @@ def _build_sandbox_env(
     return safe_env
 
 
+# Guarded ``__import__`` for generated CAD scripts.
+#
+# The restricted builtins below deliberately omit the real ``__import__`` (a raw
+# importer hands back live module objects, and build123d's package namespace leaks
+# ``os``/``sys``/``ctypes``/``Path`` and raw OCP file I/O classes).  Generated scripts
+# nevertheless legitimately contain ``import build123d as bd`` etc., so builtins get
+# THIS function instead.  It never returns a real module: it returns a read-only
+# facade holding only an explicit, module-free API surface.
+#
+# This text is the single source of truth.  It is exec'd here (for the module-level
+# RESTRICTED_BUILTINS) and embedded verbatim into RENDER_HARNESS_TEMPLATE (for the
+# subprocess), so the two copies cannot drift.  ``_real_import`` is injected by the
+# caller as the trusted importer captured BEFORE the script's builtins are restricted;
+# it is only ever called with names taken from the fixed table below.
+_GUARDED_IMPORT_SOURCE = r'''
+import types as _types
+
+_MISSING = object()
+
+
+class _ApiFacade:
+    """Read-only bundle of API names.  Deliberately not a module.
+
+    It has no ``__name__``: when ``from pkg import x`` cannot find ``x`` as an attribute,
+    CPython falls back to ``sys.modules[pkg.__name__ + '.x']``.  A module-like facade
+    would therefore resolve ``from build123d import geometry`` to the REAL submodule.
+    """
+
+    def __init__(self, values):
+        self.__dict__.update(values)
+        self.__dict__["__all__"] = tuple(values)
+
+    def __setattr__(self, name, value):
+        raise AttributeError("sandbox API objects are read-only")
+
+    def __delattr__(self, name):
+        raise AttributeError("sandbox API objects are read-only")
+
+
+def _collect(module, names):
+    """Public, non-module attributes of ``module`` among ``names``."""
+    out = {}
+    for name in names:
+        if not isinstance(name, str) or name.startswith("_"):
+            continue
+        value = getattr(module, name, _MISSING)
+        if value is _MISSING or isinstance(value, _types.ModuleType):
+            continue
+        out[name] = value
+    return out
+
+
+# build123d's declared public API, plus the harness's own polyfills for hallucinated
+# cadquery-style helpers.  dir(build123d) is NOT used: it also lists everything
+# build123d itself imports (os, sys, ctypes, Path, raw OCP classes, ...).
+_BUILD123D_POLYFILLS = ("intersect", "fuse", "cut")
+
+# Filesystem-capable build123d API.  Generated scripts describe geometry; they must never
+# read or write files (another session's STEP/STL/DXF in the shared outputs volume, any
+# file the render user can write, ...).  The trusted harness performs its own exports from
+# its own module-level names, which this filter never touches.  This is the ONE place that
+# decides which build123d names a script can see: the `bd` facade is built from
+# _public_build123d_values(), and the harness drops the same names from the bare-name
+# script namespace (the bootstrap star-import binds them too), so the two cannot drift.
+# `Text(font_path=...)` / `Compound.make_text(font_path=...)` are not removed (plain text is
+# harmless geometry); the harness rejects a non-None font_path instead.
+_FILESYSTEM_API_DENY = frozenset({
+    "import_step", "import_stl", "import_brep", "import_svg", "import_svg_as_buildline_code",
+    "export_step", "export_stl", "export_brep", "export_gltf",
+    "Mesher", "Export2D", "ExportDXF", "ExportSVG",
+})
+
+
+def _public_build123d_values(module):
+    names = tuple(getattr(module, "__all__", ())) + _BUILD123D_POLYFILLS
+    return _collect(module, tuple(n for n in names if n not in _FILESYSTEM_API_DENY))
+
+
+# Annotation-only subset of typing.  ForwardRef / get_type_hints / evaluate_forward_ref
+# eval() strings against real globals, so they are intentionally absent.
+_TYPING_NAMES = (
+    "Any", "Optional", "Union", "List", "Dict", "Tuple", "Set", "FrozenSet",
+    "Sequence", "MutableSequence", "Iterable", "Iterator", "Mapping", "Callable",
+    "Literal", "Final", "ClassVar", "Type", "TypeVar", "Generic", "Annotated",
+    "NoReturn", "TypeAlias", "TYPE_CHECKING", "cast",
+)
+
+
+def _build_build123d():
+    return _public_build123d_values(_real_import("build123d"))
+
+
+def _build_math():
+    module = _real_import("math")
+    return _collect(module, dir(module))
+
+
+def _build_re():
+    module = _real_import("re")
+    return _collect(module, module.__all__)
+
+
+def _build_typing():
+    return _collect(_real_import("typing"), _TYPING_NAMES)
+
+
+def _build_ocp_vscode():
+    # Headless render: there is no viewer to talk to, and the real package would open
+    # a network connection.  The documented `try: from ocp_vscode import show` pattern
+    # therefore gets inert stand-ins whether or not the package is installed.
+    def _noop(*args, **kwargs):
+        return None
+
+    return {"show": _noop, "show_object": _noop, "show_all": _noop}
+
+
+def _build_bd_warehouse_thread():
+    module = _real_import("bd_warehouse.thread", None, None, ("IsoThread",), 0)
+    return {"IsoThread": module.IsoThread}
+
+
+_FACADE_BUILDERS = {
+    "build123d": _build_build123d,
+    "math": _build_math,
+    "re": _build_re,
+    "typing": _build_typing,
+    "ocp_vscode": _build_ocp_vscode,
+    # The only dotted import the generation contract needs.
+    "bd_warehouse.thread": _build_bd_warehouse_thread,
+}
+
+# Dotted names must be imported with `from X import <names>` and only these names.
+_DOTTED_FROM_NAMES = {"bd_warehouse.thread": frozenset({"IsoThread"})}
+
+_FACADES = {}
+
+
+def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if level != 0:
+        raise ImportError("relative imports are not permitted in CAD scripts")
+    if type(name) is not str or name not in _FACADE_BUILDERS:
+        raise ImportError("this import is not permitted in CAD scripts")
+    if fromlist is None:
+        fromlist = ()
+    if type(fromlist) not in (tuple, list):
+        raise ImportError("this import is not permitted in CAD scripts")
+    if name in _DOTTED_FROM_NAMES:
+        if not fromlist or not all(
+            type(item) is str and item in _DOTTED_FROM_NAMES[name] for item in fromlist
+        ):
+            raise ImportError("this import is not permitted in CAD scripts")
+    facade = _FACADES.get(name)
+    if facade is None:
+        facade = _FACADES[name] = _ApiFacade(_FACADE_BUILDERS[name]())
+    return facade
+'''
+
+_guard_ns = {"_real_import": __import__}
+exec(_GUARDED_IMPORT_SOURCE, _guard_ns)
+_guarded_import = _guard_ns["_guarded_import"]
+
 # CLAUDE-001: Module-level restricted builtins for test importability.
 # The harness template contains an identical copy that runs in the subprocess.
 # This dict is the single source of truth for which builtins are safe.
+# ``__import__`` is the guarded importer above, never the real one.
 RESTRICTED_BUILTINS = {
     "__name__": "__main__",
+    "__import__": _guarded_import,
     "__build_class__": __builtins__["__build_class__"] if isinstance(__builtins__, dict) else __builtins__.__dict__["__build_class__"],
     "__doc__": None,
     "__spec__": None,
@@ -208,6 +371,16 @@ import faulthandler
 import builtins as _builtins_mod
 faulthandler.enable()
 
+# Guarded importer (verbatim copy of _GUARDED_IMPORT_SOURCE from the service module).
+# It is exec'd in its own namespace so the function's globals hold only what it needs,
+# and the trusted builtin importer is captured here, BEFORE the script's builtins are
+# restricted.  Generated code only ever receives `_guarded_import`, never `_real_import`.
+_GUARD_NS = {"_real_import": _builtins_mod.__import__}
+exec(__GUARDED_IMPORT_SOURCE_LITERAL__, _GUARD_NS)
+_guarded_import = _GUARD_NS["_guarded_import"]
+_public_build123d_values = _GUARD_NS["_public_build123d_values"]
+_FILESYSTEM_API_DENY = _GUARD_NS["_FILESYSTEM_API_DENY"]
+
 # CLAUDE-001: Restricted builtins for user-controlled script execution.
 # The build123d bootstrap (exec("from build123d import *", ns)) runs with
 # unrestricted builtins because it is trusted harness code.  After bootstrap,
@@ -216,6 +389,7 @@ faulthandler.enable()
 # unreachable even through __builtins__["key"] dict subscript access.
 _RESTRICTED_BUILTINS = {
     "__name__": "__main__",
+    "__import__": _guarded_import,
     "__build_class__": _builtins_mod.__build_class__,
     "__doc__": None,
     "__spec__": None,
@@ -878,8 +1052,13 @@ def run():
         build123d.Location.__enter__ = loc_enter
         build123d.Location.__exit__ = loc_exit
 
-    # Sync patched objects to namespace
-    ns.update({k: getattr(build123d, k) for k in dir(build123d) if not k.startswith('_')})
+    # Sync patched objects to namespace.  Only build123d's declared public API (plus the
+    # polyfills above) is bound by bare name: dir(build123d) also lists everything the
+    # package itself imports (os, sys, ctypes, Path, raw OCP file-I/O classes, ...), which
+    # must never become a global of the generated script.
+    ns.update(_public_build123d_values(build123d))
+    for _denied_name in _FILESYSTEM_API_DENY:
+        ns.pop(_denied_name, None)  # the bootstrap `from build123d import *` bound them too
 
     def _safe_rectangle(width, height, *args, **kwargs):
         radius = kwargs.pop("radius", None)
@@ -907,12 +1086,28 @@ def run():
     })
 
     if hasattr(build123d, "Part") and not hasattr(build123d.Part, "export_step"):
-        def _part_export_step(self, path):
-            return build123d.export_step(self, path)
-        def _part_export_stl(self, path):
-            return build123d.export_stl(self, path)
+        # Compat for hallucinated `part.export_step(path)` calls.  Deliberately inert: a
+        # generated script must never write files (the harness exports the model itself).
+        def _part_export_step(self, *args, **kwargs):
+            return True
+        def _part_export_stl(self, *args, **kwargs):
+            return True
         build123d.Part.export_step = _part_export_step
         build123d.Part.export_stl = _part_export_stl
+
+    # Text is harmless geometry, but `font_path` makes build123d open a caller-chosen file.
+    # Compound.make_text is the single choke point (Text.__init__ and every Compound subclass
+    # go through it), so reject a caller-supplied font_path there.  System font *names*
+    # (`font="Arial"`) keep working.
+    if hasattr(build123d, "Compound") and isinstance(build123d.Compound.__dict__.get("make_text"), classmethod):
+        import inspect as _inspect
+        _orig_make_text = build123d.Compound.__dict__["make_text"].__func__
+        _make_text_sig = _inspect.signature(_orig_make_text)
+        def _safe_make_text(cls, *args, **kwargs):
+            if _make_text_sig.bind(cls, *args, **kwargs).arguments.get("font_path") is not None:
+                raise ValueError("font_path is not permitted in generated CAD scripts; use a system font name via `font=`.")
+            return _orig_make_text(cls, *args, **kwargs)
+        build123d.Compound.make_text = classmethod(_safe_make_text)
 
     def _rotated_patch(x=0, y=0, z=0, axis=None, angle=0):
         if axis is not None:
@@ -1701,7 +1896,7 @@ def run():
 
 if __name__ == "__main__":
     run()
-"""
+""".replace("__GUARDED_IMPORT_SOURCE_LITERAL__", repr(_GUARDED_IMPORT_SOURCE))
 
 
 class ParameterRenderService:
@@ -2161,11 +2356,11 @@ def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
             "sys",            # typing.sys, enum.sys → re-export of sys module
             "os",             # build123d.os (importers.py/mesher.py leak it via
                                # `import os` + no __all__) → captured os-module
-                               # reference, defense-in-depth (2026-09-22 audit:
-                               # currently unreachable at runtime because the
-                               # restricted builtins omit __import__ and the
-                               # bootstrap only exports build123d's curated
-                               # __all__, but denylisted here regardless).
+                               # reference, defense-in-depth (unreachable at
+                               # runtime: the guarded __import__ only returns
+                               # curated facades and the script namespace only
+                               # receives build123d's __all__, but denylisted
+                               # here regardless).
             # OS-level command execution via any module re-export
             "system",         # os.system("command")
             "popen",          # os.popen("command")

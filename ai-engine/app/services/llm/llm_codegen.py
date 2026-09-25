@@ -672,13 +672,6 @@ with bd.BuildPart() as part:
 
 # Ensure top surface is exactly at Z=0 for CAM export
 part.part = part.part.locate(bd.Location((0, 0, -part.part.bounding_box().max.Z)))
-
-if __name__ == '__main__':
-    try:
-        from ocp_vscode import show
-        show(part)
-    except ImportError:
-        pass
 ```
 
 **YOU ARE NOW READY TO GENERATE PRODUCTION-GRADE BUILD123D PYTHON CODE.**
@@ -849,6 +842,8 @@ _CODE_FENCE_RE = re.compile(r"```(?:scad|openscad|text|python)?\s*(.*?)```", re.
 _CODE_START_RE = re.compile(
     r"(?m)^(?:import\s+|from\s+|PARAMETERS\s*=|with\s+bd\.BuildPart|with\s+BuildPart|#\s*---|def\s+|part\s*=)"
 )
+# Top-level ``if __name__ == "__main__":`` guard (see LLMCodegenService._strip_main_guard).
+_MAIN_GUARD_RE = re.compile(r"""^if\s+__name__\s*==\s*['"]__main__['"]\s*:""")
 
 
 
@@ -904,6 +899,28 @@ class LLMCodegenService:
         )
 
     @staticmethod
+    def _strip_main_guard(code: str) -> str:
+        """Remove top-level ``if __name__ == "__main__":`` blocks.
+
+        The render sandbox forbids the ``__name__`` identifier (and the script is never
+        run as a standalone program), so such a block is both rejected by the security
+        validator and dead code.  Only column-0 guards are removed, together with their
+        indented body; everything else is left untouched.
+        """
+        kept: list[str] = []
+        in_guard = False
+        for line in code.split("\n"):
+            if in_guard:
+                if not line.strip() or line[0] in " \t":
+                    continue
+                in_guard = False
+            if _MAIN_GUARD_RE.match(line):
+                in_guard = True
+                continue
+            kept.append(line)
+        return "\n".join(kept).strip()
+
+    @staticmethod
     def _normalize_script(raw: str) -> str:
         """Strip markdown fences and leading prose from a raw LLM response."""
         if not raw:
@@ -933,7 +950,7 @@ class LLMCodegenService:
             code = max(cad_fences, key=len)
             if "import build123d as bd" not in code and ("bd." in code or "BuildPart" in code):
                 code = "import build123d as bd\n" + code
-            return code
+            return LLMCodegenService._strip_main_guard(code)
         
         # Fallback: search for code start in raw text directly (handles missing/unclosed code fences)
         m_raw = _CODE_START_RE.search(raw)
@@ -947,7 +964,7 @@ class LLMCodegenService:
                     candidate = candidate[:end_idx].strip()
             if "import build123d as bd" not in candidate and ("bd." in candidate or "BuildPart" in candidate):
                 candidate = "import build123d as bd\n" + candidate
-            return candidate
+            return LLMCodegenService._strip_main_guard(candidate)
 
         # Additional fallback: if 'BuildPart' or 'bd.' is anywhere in raw text
         if "BuildPart" in raw or "bd." in raw:
@@ -960,7 +977,7 @@ class LLMCodegenService:
                 extracted = raw[idx:].strip().rstrip("`").strip()
                 if "import build123d as bd" not in extracted:
                     extracted = "import build123d as bd\n" + extracted
-                return extracted
+                return LLMCodegenService._strip_main_guard(extracted)
 
         # If no valid code block was found, raise an error
         raise ValueError(f"LLM failed to generate a valid Python code block. Response was: {raw[:100]}...")
