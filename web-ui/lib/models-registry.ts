@@ -12,6 +12,18 @@ export interface ModelMetadata {
 
 export const MODEL_REGISTRY: ModelMetadata[] = [
     {
+        id: 'gemini-3.8-flash',
+        name: 'Gemini 3.8 Flash',
+        vendor: 'google',
+        tier: 'flash',
+        maxTokens: 1000000,
+        supportsThinking: true,
+        fallbackModelId: 'gemini-3.5-flash-lite',
+        description: 'Google latest flagship hybrid reasoning model with dynamic thinking.',
+        badge: 'thinking',
+    },
+
+    {
         id: 'gemini-3.7-flash',
         name: 'Gemini 3.7 Flash',
         vendor: 'google',
@@ -53,18 +65,6 @@ export const MODEL_REGISTRY: ModelMetadata[] = [
         supportsThinking: false,
         description: 'Ultra-fast, lightweight fallback model for quick edits.',
         badge: 'fast',
-    },
-
-    {
-        id: 'deepseek/deepseek-v4-flash-0731',
-        name: 'DeepSeek V4 Flash',
-        vendor: 'openrouter',
-        tier: 'flash',
-        maxTokens: 128000,
-        supportsThinking: true,
-        fallbackModelId: 'gemini-3.5-flash-lite',
-        description: 'DeepSeek next-gen ultra-fast flash reasoning model via OpenRouter.',
-        badge: 'thinking',
     },
     {
         id: 'anthropic/claude-sonnet-5',
@@ -109,28 +109,6 @@ export const MODEL_REGISTRY: ModelMetadata[] = [
         fallbackModelId: 'gemini-3.5-flash-lite',
         description: 'Anthropic Claude 5 Fable model.',
         badge: 'thinking',
-    },
-    {
-        id: 'openai/gpt-4o',
-        name: 'GPT-4o',
-        vendor: 'openai',
-        tier: 'ultra',
-        maxTokens: 128000,
-        supportsThinking: true,
-        fallbackModelId: 'gemini-3.5-flash-lite',
-        description: 'OpenAI premier engine for high-fidelity code synthesis.',
-        badge: 'thinking',
-    },
-    {
-        id: 'gemma4:31b-cloud',
-        name: 'Gemma 4 31B',
-        vendor: 'ollama',
-        tier: 'pro',
-        maxTokens: 32000,
-        supportsThinking: false,
-        fallbackModelId: 'gemini-3.5-flash-lite',
-        description: 'Gemma 4 31B model running locally/cloud via Ollama endpoints.',
-        badge: 'local',
     }
 ];
 

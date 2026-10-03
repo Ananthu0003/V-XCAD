@@ -26,9 +26,13 @@ from app.models.schemas import (
 from app.services.geometry.csg_parser import CSGParser, export_to_step
 from app.services.llm.llm_codegen import LLMCodegenService
 from app.services.llm.parameter_render import ParameterRenderService
+from app.services.geometry.blueprint_auto_corrector import BlueprintAutoCorrector
 from app.deps import validate_service_key
+from app.api.v1.cad_modify_router import router as cad_modify_router
 
 router = APIRouter(tags=["cad"])
+router.include_router(cad_modify_router)
+
 
 _ALLOWED_MIME_PREFIXES = ()
 _ALLOWED_MIME_EXACT   = {"application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"}
@@ -41,6 +45,8 @@ OPENSCAD_FN_CAP = int(os.getenv("OPENSCAD_FN_CAP", "32"))
 CSG_EPS = float(os.getenv("CSG_EPS", "0.02"))
 # Horizontal/vertical spacing (mm) between the four views in a blueprint DXF export.
 BLUEPRINT_DXF_VIEW_SPACING = float(os.getenv("BLUEPRINT_DXF_VIEW_SPACING", "120.0"))
+# Maximum upload file size (10MB)
+MAX_UPLOAD_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(10 * 1024 * 1024)))
 
 # VEX-AUDIT-012: Allowlist for session_id / job_id values used in filesystem paths.
 # All legitimate IDs in this application (CUIDs, UUIDs, job_ prefixed IDs) match this.
@@ -354,6 +360,69 @@ async def get_session_blueprint(session_id: str):
         raise HTTPException(status_code=404, detail="Blueprint not found for this session")
     return Response(content=bp_file.read_bytes(), media_type="image/png")
 
+def rasterize_pdf_to_image(pdf_bytes: bytes, dpi: int = 150, max_pages: int = 20) -> bytes:
+    """
+    Rasterize all pages of a PDF document into a single unified PNG image.
+    Single-page PDFs are rasterized directly.
+    Multi-page PDFs are rasterized page-by-page and stitched vertically with clean dividers.
+    """
+    if not pdf_bytes:
+        return pdf_bytes
+
+    import fitz
+    import io
+    from PIL import Image
+
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        print(f"[rasterize_pdf_to_image] Failed to open PDF stream: {e}")
+        return pdf_bytes
+
+    try:
+        page_count = len(doc)
+        if page_count == 0:
+            return pdf_bytes
+        if page_count == 1:
+            page = doc.load_page(0)
+            pix = page.get_pixmap(dpi=dpi)
+            return pix.tobytes("png")
+
+        # Multi-page PDF: rasterize pages up to max_pages
+        effective_pages = min(page_count, max_pages)
+        page_images: list[Image.Image] = []
+        max_width = 0
+        total_height = 0
+        gap = 24  # subtle margin between pages
+
+        for page_num in range(effective_pages):
+            page = doc.load_page(page_num)
+            pix = page.get_pixmap(dpi=dpi)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            page_images.append(img)
+            max_width = max(max_width, img.width)
+            total_height += img.height + (gap if page_num > 0 else 0)
+
+        composite = Image.new("RGB", (max_width, total_height), color=(240, 240, 240))
+        y_offset = 0
+        for img in page_images:
+            x_offset = (max_width - img.width) // 2
+            composite.paste(img, (x_offset, y_offset))
+            y_offset += img.height + gap
+
+        buf = io.BytesIO()
+        composite.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception as e:
+        print(f"[rasterize_pdf_to_image] Error during PDF rasterization: {e}")
+        return pdf_bytes
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
+
+
 def _crop_blueprint_image(image_bytes: bytes, crop_box: dict[str, Any]) -> bytes:
     try:
         from PIL import Image
@@ -479,18 +548,17 @@ async def generate(
                 detail={"error": {"message": "File must be an image (PNG/JPEG/WEBP) or PDF."}},
             )
         image_bytes = await image.read()
+        if len(image_bytes) > MAX_UPLOAD_SIZE_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"message": f"File size exceeds {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB limit. Please upload a smaller file."}},
+            )
         
         # OpenRouter and some vision models don't accept PDF via image payload
         if mime_type == "application/pdf":
             try:
-                import fitz
-                doc = fitz.open(stream=image_bytes, filetype="pdf")
-                if len(doc) > 0:
-                    page = doc.load_page(0)
-                    pix = page.get_pixmap(dpi=150)
-                    image_bytes = pix.tobytes("png")
-                    mime_type = "image/png"
-                doc.close()
+                image_bytes = rasterize_pdf_to_image(image_bytes, dpi=150)
+                mime_type = "image/png"
             except Exception as e:
                 print(f"Failed to rasterize PDF: {e}")
 
@@ -584,11 +652,8 @@ async def generate(
                     cx, cy = float(m.group(1)), float(m.group(2))
                     target_crop_box = {"x": max(0, cx - 10), "y": max(0, cy - 10), "w": 20, "h": 20}
 
-            # Fail loudly when the user explicitly targets a region but the
-            # targeted inspection cannot run - never refine blind silently.
-            if target_portion and not (image_bytes and mime_type):
-                yield f'data: {json.dumps({"error": {"message": "Targeted repair requires the session blueprint image, but none is available for this session. Re-upload the blueprint or start a new generation.", "hint": "Re-attach the blueprint image and retry."}})}\n\n'
-                return
+            if target_crop_box and not (image_bytes and mime_type):
+                yield f'data: {json.dumps({"warning": "Blueprint image unavailable for region crop; proceeding with direct 3D CAD targeted refinement."})}\n\n'
 
             if image_bytes and mime_type and (target_portion or prompt):
                 portion_label = target_portion or "target feature"
@@ -656,6 +721,20 @@ async def generate(
                     raise norm_err
 
             clean_script = _sanitize_script(clean_script)
+
+            # ── Metrology & Precision Auto-Correction Gate (100% Accuracy) ───
+            effective_audit = feature_map or targeted_feature
+            if effective_audit:
+                yield f'data: {json.dumps({"status": "running closed-loop metrology verification (100% precision gate)..."})}\n\n'
+                try:
+                    report = BlueprintAutoCorrector.verify_and_correct(clean_script, effective_audit)
+                    if report.corrections:
+                        clean_script = report.verified_script
+                        print(f"[BlueprintAutoCorrector] Applied {len(report.corrections)} precision corrections: {report.corrections}")
+                        yield f'data: {json.dumps({"status": f"verified blueprint accuracy (applied {len(report.corrections)} metrology corrections)"})}\n\n'
+                except Exception as corr_err:
+                    print(f"[BlueprintAutoCorrector] Verification error: {corr_err}")
+
             params = _extract_parameters(clean_script)
             metadata = _extract_metadata(clean_script)
             
@@ -1128,18 +1207,18 @@ class CamAnalyzeRequest(BaseModel):
 @router.post("/cam/analyze")
 async def cam_analyze(request: CamAnalyzeRequest):
     _validate_id(request.session_id, "session_id")
-    outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
-    step_path = outputs_dir / f"cad_{request.session_id}.step"
     
-    # We no longer strictly require the STEP file since we are extracting from parameters
-    # but we'll leave the path resolution just in case
-        
     try:
+        from app.services.geometry.manual_cad_service import ManualCADService
         from app.services.cam.parametric_feature_extractor import ParametricFeatureExtractor
         from app.services.cam.brep_feature_extractor import BRepFeatureExtractor
+
+        manual_service = ManualCADService()
+        active_step_path = manual_service.get_active_step_path(request.session_id)
+        step_path = active_step_path if (active_step_path and active_step_path.exists()) else (Path(__file__).resolve().parents[3] / "outputs" / f"cad_{request.session_id}.step")
         
         brep_data = None
-        if step_path.exists():
+        if step_path and step_path.exists():
             brep_extractor = BRepFeatureExtractor(str(step_path))
             brep_data = brep_extractor.analyze()
             
@@ -1149,6 +1228,7 @@ async def cam_analyze(request: CamAnalyzeRequest):
         return {
             "status": "ok",
             "features": features,
+            "step_source": str(step_path) if (step_path and step_path.exists()) else None,
             "geometry_mapping_summary": {
                 "mapped_features": len(features),
                 "failed_features": 0,

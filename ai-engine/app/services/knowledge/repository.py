@@ -11,7 +11,15 @@ class KnowledgeRepository:
             raise ValueError("DATABASE_URL environment variable is required")
         
     def _get_connection(self):
-        return psycopg2.connect(self.db_url)
+        db_url = self.db_url
+        if db_url and "?" in db_url:
+            from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+            parts = urlsplit(db_url)
+            query_params = dict(parse_qsl(parts.query))
+            query_params.pop("schema", None)
+            new_query = urlencode(query_params)
+            db_url = urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+        return psycopg2.connect(db_url)
         
     def save_document(self, doc: KnowledgeDocumentSchema):
         with self._get_connection() as conn:

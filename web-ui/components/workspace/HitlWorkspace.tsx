@@ -19,9 +19,11 @@ import { EngineeringConsole } from '@/components/workspace/EngineeringConsole';
 import { ChatPanel, type TargetPortion } from '@/components/chat/ChatPanel';
 import { SessionBrowserModal } from '@/components/workspace/SessionBrowserModal';
 import { PromptAssistantWidget } from '@/components/assistant/PromptAssistantWidget';
+import { ManualCadWorkspace } from '@/components/manual-cad/ManualCadWorkspace';
 import { ThemeToggle } from '@/components/shared/theme-toggle';
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { History, Cuboid, RotateCcw, IndianRupee, Plus, FolderKanban, Sparkles } from 'lucide-react';
+import { History, Cuboid, RotateCcw, IndianRupee, Plus, FolderKanban, Sparkles, ChevronRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, CamFeature, PostProcessor, OperationType, ToolType, ToolMaterial, CoolantType, CamSetupPlan } from '@/types/cam';
 
 
@@ -378,7 +380,7 @@ export default function HitlWorkspace() {
 	const [sessionId, setSessionId] = useState<string | null>(null);
 	const [pythonScript, setPythonScript] = useState('');
 	const [activeDrawerTab, setActiveDrawerTab] = useState<DrawerTab>('parameters');
-	const [activeRightTab, setActiveRightTab] = useState<'cad' | 'cam'>('cad');
+	const [activeRightTab, setActiveRightTab] = useState<'cad' | 'manual_cad' | 'cam'>('cad');
 	const [parameters, setParameters] = useState<Record<string, unknown>>({});
 	const [stlUrl, setStlUrl] = useState<string | null>(null);
 	const [stepUrl, setStepUrl] = useState<string | null>(null);
@@ -450,7 +452,7 @@ export default function HitlWorkspace() {
 	const activeRevisionId = activeRevisionIndex >= 0 && revisions[activeRevisionIndex] ? revisions[activeRevisionIndex].id : null;
 
 	const [statusText, setStatusText] = useState<string>('Ready');
-	const [workflowStage, setWorkflowStage] = useState<'blueprint' | 'extraction' | 'cad' | 'cam' | 'gcode'>('blueprint');
+	const [workflowStage, setWorkflowStage] = useState<'blueprint' | 'extraction' | 'cad' | 'manual_cad' | 'cam' | 'gcode'>('blueprint');
 	const [annotations, setAnnotations] = useState<Record<string, { p1: [number, number, number]; p2: [number, number, number] }>>({});
 	const [parameterMetadata, setParameterMetadata] = useState<Record<string, any>>({});
 	const [geometryInfo, setGeometryInfo] = useState<StlGeometryInfo | null>(null);
@@ -486,6 +488,8 @@ export default function HitlWorkspace() {
 	useEffect(() => {
 		if (workflowStage === 'cam' || workflowStage === 'gcode') {
 			setActiveRightTab('cam');
+		} else if (workflowStage === 'manual_cad') {
+			setActiveRightTab('manual_cad');
 		} else if (workflowStage === 'cad') {
 			setActiveRightTab('cad');
 		}
@@ -2078,112 +2082,151 @@ export default function HitlWorkspace() {
 						<div className="h-full w-full flex">
 
 							{/* 1. Left Navigation (Fixed Width) */}
-							<div className="w-[360px] shrink-0 h-full overflow-hidden flex flex-col z-10 border-r border-border bg-popover/95 backdrop-blur-xl relative">
-								{/* Chat Panel */}
-								<div className="flex-1 overflow-hidden relative">
-									<ChatPanel
-										messages={messages}
-										prompt={prompt}
-										setPrompt={setPrompt}
-										selectedModel={selectedModel}
-										setSelectedModel={setSelectedModel}
-										modelOptions={MODEL_OPTIONS}
-										selectedFile={selectedFile}
-										handleFileChange={setSelectedFile}
-										isGenerating={isGenerating}
-										onSubmit={handleGenerate}
-										onClear={handleClear}
-										width={360}
-										isOpen={true}
-										setIsOpen={setIsChatOpen}
-										fileInputRef={fileUploadRef}
-										selectionContext={selectionContext}
-										onClearSelectionContext={() => setSelectionContext(null)}
-										hasActiveModel={Boolean(pythonScript)}
-										parameterEntries={parameterEntries}
-										targetPortion={targetPortion}
-										setTargetPortion={setTargetPortion}
-										blueprintUrl={blueprintUrl}
-										activeRevisionId={activeRevisionId}
-										onRestoreRevision={handleRestoreRevision}
-										onDeleteRevision={handleDeleteRevision}
-									/>
+							{workflowStage !== 'manual_cad' && (
+								<div className="w-[360px] shrink-0 h-full overflow-hidden flex flex-col z-10 border-r border-border bg-popover/95 backdrop-blur-xl relative">
+									{/* Chat Panel */}
+									<div className="flex-1 overflow-hidden relative">
+										<ChatPanel
+											messages={messages}
+											prompt={prompt}
+											setPrompt={setPrompt}
+											selectedModel={selectedModel}
+											setSelectedModel={setSelectedModel}
+											modelOptions={MODEL_OPTIONS}
+											selectedFile={selectedFile}
+											handleFileChange={setSelectedFile}
+											isGenerating={isGenerating}
+											onSubmit={handleGenerate}
+											onClear={handleClear}
+											width={360}
+											isOpen={true}
+											setIsOpen={setIsChatOpen}
+											fileInputRef={fileUploadRef}
+											selectionContext={selectionContext}
+											onClearSelectionContext={() => setSelectionContext(null)}
+											hasActiveModel={Boolean(pythonScript)}
+											parameters={parameters}
+											parameterEntries={parameterEntries}
+											parameterMetadata={parameterMetadata}
+											annotations={annotations}
+											camFeatures={camFeatures}
+											geometryInfo={geometryInfo}
+											targetPortion={targetPortion}
+											setTargetPortion={setTargetPortion}
+											blueprintUrl={blueprintUrl}
+											activeRevisionId={activeRevisionId}
+											onRestoreRevision={handleRestoreRevision}
+											onDeleteRevision={handleDeleteRevision}
+										/>
+									</div>
 								</div>
-							</div>
+							)}
 
 							{/* 2. Resizable Viewport and Settings */}
-							<div className="flex-1 h-full overflow-hidden pl-3">
+							<div className={cn("flex-1 h-full overflow-hidden", workflowStage !== 'manual_cad' && "pl-3")}>
 								<PanelGroup id="top-horizontal-v4" orientation="horizontal">
 
 									{/* Center: CAD/CAM Viewport */}
-									<Panel defaultSize="70%" minSize="35%">
+									<Panel defaultSize={workflowStage === 'manual_cad' ? "100%" : "70%"} minSize="35%">
 										<div 
 											className="h-full w-full bg-card rounded-xl border border-border shadow-2xl overflow-hidden relative"
 										>
 											{workflowStage === 'blueprint' ? (
 												<div
-													className="h-full flex flex-col items-center justify-center bg-background relative overflow-hidden"
-													onMouseMove={(e) => {
-														const rect = e.currentTarget.getBoundingClientRect();
-														const x = (e.clientX - rect.left) / rect.width - 0.5;
-														const y = (e.clientY - rect.top) / rect.height - 0.5;
-														setMousePos({ x, y });
-													}}
+													className="h-full flex flex-col items-center justify-center bg-gradient-to-b from-card via-background to-muted/20 relative overflow-hidden select-none"
 												>
-													<div className="absolute inset-0 bg-[url('/grid.svg')] opacity-5" />
+													{/* Refined Engineering Blueprint Dot Grid */}
+													<div className="absolute inset-0 bg-[radial-gradient(#94a3b8_1px,transparent_1px)] [background-size:24px_24px] opacity-20 dark:opacity-10 pointer-events-none" />
 
-													{/* Faint Hexagon Watermark */}
-													<div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-5 flex items-center justify-center">
-														<svg width="600" height="600" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="0.5" strokeLinecap="round" strokeLinejoin="round">
-															<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-															<polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-															<line x1="12" y1="22.08" x2="12" y2="12"></line>
-														</svg>
-													</div>
+													{/* Subtle Center Spotlight Glow */}
+													<div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[100px] pointer-events-none" />
 
-													<div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-500/5 rounded-full blur-[120px] pointer-events-none" />
-
-													<div className="z-10 flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-500">
-														<div className="flex items-center gap-3 mb-4">
-															<div className="size-2 rounded-full bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.5)]" />
-															<h2 className="text-[11px] font-bold uppercase tracking-[0.3em] text-blue-400">NO BLUEPRINT LOADED</h2>
+													{/* Centered CAD Workspace Action Card */}
+													<div className="z-10 flex flex-col items-center gap-6 animate-in fade-in zoom-in-95 duration-300 max-w-sm w-full px-4">
+														{/* Status Pill */}
+														<div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-md">
+															<div className="size-2 rounded-full bg-primary animate-pulse" />
+															<h2 className="text-[10px] font-mono font-bold uppercase tracking-[0.25em] text-primary">
+																NO BLUEPRINT LOADED
+															</h2>
 														</div>
 
-														<div className="flex flex-col gap-3 w-[320px]">
+														{/* Action Cards */}
+														<div className="flex flex-col gap-2.5 w-full">
 															<button
 																onClick={() => {
 																	setIsChatOpen(true);
 																	setTimeout(() => fileUploadRef.current?.click(), 100);
 																}}
-																className="flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/50 hover:bg-muted hover:border-blue-500/30 transition-all text-left group"
+																className="group relative flex items-center gap-3.5 p-3.5 rounded-xl border border-border bg-card hover:border-primary/50 hover:shadow-md transition-all text-left cursor-pointer"
 															>
-																<div className="size-8 rounded-lg bg-black/50 dark:bg-black/50 border border-border flex items-center justify-center shrink-0">
-																	<svg className="size-4 text-muted-foreground group-hover:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+																<div className="size-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 group-hover:scale-105 group-hover:bg-primary/15 transition-all text-primary">
+																	<svg className="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 																		<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
 																	</svg>
 																</div>
-																<div>
-																	<div className="text-sm font-bold text-foreground group-hover:text-blue-400 transition-colors">Upload Blueprint</div>
-																	<div className="text-[10px] text-muted-foreground">PDF, PNG, JPG</div>
+																<div className="flex-1 min-w-0">
+																	<div className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">
+																		Upload Blueprint Drawing
+																	</div>
+																	<div className="text-[10px] text-muted-foreground font-mono mt-0.5">
+																		PDF, PNG, JPG (Max 10MB)
+																	</div>
 																</div>
+																<ChevronRight className="size-3.5 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all shrink-0" />
 															</button>
 
 															<button
 																onClick={() => setIsSessionBrowserOpen(true)}
-																className="flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/50 hover:bg-muted hover:border-blue-500/30 transition-all text-left group"
+																className="group relative flex items-center gap-3.5 p-3.5 rounded-xl border border-border bg-card hover:border-primary/50 hover:shadow-md transition-all text-left cursor-pointer"
 															>
-																<div className="size-8 rounded-lg bg-black/50 dark:bg-black/50 border border-border flex items-center justify-center shrink-0">
-																	<History className="size-4 text-muted-foreground group-hover:text-blue-400" />
+																<div className="size-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 group-hover:scale-105 group-hover:bg-primary/15 transition-all text-primary">
+																	<History className="size-4" />
 																</div>
-																<div>
-																	<div className="text-sm font-bold text-foreground group-hover:text-blue-400 transition-colors">Recent Projects</div>
-																	<div className="text-[10px] text-muted-foreground">Resume work</div>
+																<div className="flex-1 min-w-0">
+																	<div className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">
+																		Recent Projects
+																	</div>
+																	<div className="text-[10px] text-muted-foreground font-mono mt-0.5">
+																		Resume saved session
+																	</div>
 																</div>
+																<ChevronRight className="size-3.5 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all shrink-0" />
 															</button>
 														</div>
 													</div>
-													
 												</div>
+											) : workflowStage === 'manual_cad' ? (
+												<ManualCadWorkspace
+													sessionId={sessionId || 'default_session'}
+													initialStlUrl={stlUrl}
+													initialStepUrl={stepUrl}
+													onSwitchStage={async (st) => {
+														if (st === 'cam') {
+															try {
+																if (sessionId) {
+																	const res = await fetch(`/api/cad/modify/history/${sessionId}`);
+																	if (res.ok) {
+																		const ops = await res.json();
+																		if (ops && ops.length > 0) {
+																			const lastOp = ops[ops.length - 1];
+																			const activeRev = lastOp.output_revision || lastOp.input_revision || 'rev_000';
+																			setStlUrl(`/api/cad/modify/file/${sessionId}/revisions/${activeRev}.stl`);
+																		}
+																	}
+																}
+															} catch (e) {
+																console.error('Failed to sync active revision for CAM:', e);
+															}
+															setIsCamDrawerOpen(true);
+															toast.success('Loaded Refined CAD Model into VexCAM');
+														} else {
+															setIsCamDrawerOpen(false);
+														}
+														setWorkflowStage(st);
+														setActiveRightTab(st);
+													}}
+												/>
 											) : (
 												<CadViewport
 													hoveredFeatureId={hoveredFeatureId}
@@ -2298,8 +2341,23 @@ export default function HitlWorkspace() {
 													)}
 												</CadViewport>
 											)}
-											{/* Bottom Overlay with CAM Metrics */}
+											{/* Bottom Overlay with CAM Metrics or Manual CAD Switch */}
 											<div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none z-30 flex flex-col items-center">
+												{workflowStage === 'cad' && stlUrl && (
+													<div className="flex items-center justify-center pointer-events-auto mt-2">
+														<button
+															onClick={() => {
+																setWorkflowStage('manual_cad');
+																setActiveRightTab('manual_cad');
+															}}
+															className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600/90 hover:bg-purple-600 text-white font-mono text-xs font-bold shadow-lg backdrop-blur-md border border-purple-400/40 hover:scale-105 transition-all cursor-pointer"
+														>
+															<Sparkles className="size-3.5" />
+															<span>Enter Manual CAD Refinement Mode</span>
+														</button>
+													</div>
+												)}
+
 												{/* CAM Metrics Pill */}
 												{(workflowStage === 'cam' || workflowStage === 'gcode') && (
 													<div className="flex items-center justify-center pointer-events-auto mt-2">
@@ -2429,84 +2487,104 @@ export default function HitlWorkspace() {
 										</div>
 									</Panel>
 
-									<PanelResizeHandle className="w-3 relative group flex items-center justify-center cursor-col-resize z-50">
-										<div className="w-1 h-8 rounded-full bg-transparent group-hover:bg-blue-500/50 transition-colors" />
-									</PanelResizeHandle>
+									{workflowStage !== 'manual_cad' && (
+										<>
+											<PanelResizeHandle className="w-3 relative group flex items-center justify-center cursor-col-resize z-50">
+												<div className="w-1 h-8 rounded-full bg-transparent group-hover:bg-blue-500/50 transition-colors" />
+											</PanelResizeHandle>
 
-									{/* Right: Workspace Settings */}
-									<Panel defaultSize="30%" minSize="20%">
-										<div className="h-full w-full glass-panel bg-card/40 rounded-xl overflow-hidden relative flex flex-col">
-											{/* Segmented Control Header */}
-											<div className="flex h-14 shrink-0 items-center justify-center px-4 border-b border-border/50 bg-background/50 dark:bg-background/20 backdrop-blur-md">
-												<div className="flex bg-black/5 dark:bg-black/40 p-1 rounded-lg border border-black/5 dark:border-white/5 w-full max-w-[280px]">
-													<button
-														onClick={() => {
-															setActiveRightTab('cad');
-															setIsCamDrawerOpen(false);
-														}}
-														className={`flex-1 py-1.5 px-3 text-[11px] font-bold tracking-widest uppercase rounded-md transition-all duration-200 ${
-															activeRightTab === 'cad'
-																? 'bg-blue-100/50 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(59,130,246,0.15)]'
-																: 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
-														}`}
-													>
-														📐 CAD Design
-													</button>
-													<button
-														onClick={() => {
-															setActiveRightTab('cam');
-															setIsCamDrawerOpen(true);
-														}}
-														className={`flex-1 py-1.5 px-3 text-[11px] font-bold tracking-widest uppercase rounded-md transition-all duration-200 ${
-															activeRightTab === 'cam'
-																? 'bg-amber-100/50 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(245,158,11,0.15)]'
-																: 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
-														}`}
-													>
-														⚙️ CAM Setup
-													</button>
-												</div>
-											</div>
-
-											{/* Tab Content */}
-											<div className="flex-1 overflow-y-auto">
-												{activeRightTab === 'cad' && (
-													<WorkspaceSettings
-														workflowStage={workflowStage}
-														parameters={parameters}
-														activeParameter={activeParameter}
-														onParameterSelect={setActiveParameter}
-														onParameterChange={(key, val) => {
-															const newParams = setParameterValue(parameters, key, val);
-															setParameters(newParams);
-															const newScript = injectParameters(pythonScript, newParams);
-															updatePythonScript(newScript);
-															void performSync(newScript, newParams, sessionId || '');
-														}}
-														parameterMetadata={parameterMetadata}
-														camSetup={camSetup}
-														setCamSetup={setCamSetup}
-														pythonScript={pythonScript}
-													/>
-												)}
-
-												{activeRightTab === 'cam' && (
-													<div className="p-5">
-														<CamSummaryPanel 
-															setup={camSetup as any} 
-															setups={camSetups}
-															tools={camTools} 
-															operations={camOperations}
-															features={camFeatures}
-															coordValidation={coordValidation}
-															costEstimate={camStats?.costEstimate}
-															onClickSection={() => {}}
-														/>
+											{/* Right: Workspace Settings */}
+											<Panel defaultSize="30%" minSize="20%">
+												<div className="h-full w-full glass-panel bg-card/40 rounded-xl overflow-hidden relative flex flex-col">
+													{/* Segmented Control Header */}
+													<div className="flex h-14 shrink-0 items-center justify-center px-4 border-b border-border/50 bg-background/50 dark:bg-background/20 backdrop-blur-md">
+														<div className="flex bg-black/5 dark:bg-black/40 p-1 rounded-lg border border-black/5 dark:border-white/5 w-full max-w-[360px] gap-1">
+															<button
+																onClick={() => {
+																	setActiveRightTab('cad');
+																	setWorkflowStage('cad');
+																	setIsCamDrawerOpen(false);
+																}}
+																className={`flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md transition-all duration-200 whitespace-nowrap text-center ${
+																	activeRightTab === 'cad'
+																		? 'bg-blue-100/50 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30 shadow-sm'
+																		: 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
+																}`}
+															>
+																📐 AI CAD
+															</button>
+															<button
+																onClick={() => {
+																	setActiveRightTab('manual_cad');
+																	setWorkflowStage('manual_cad');
+																	setIsCamDrawerOpen(false);
+																}}
+																className={`flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md transition-all duration-200 whitespace-nowrap text-center ${
+																	activeRightTab === 'manual_cad'
+																		? 'bg-purple-100/50 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(168,85,247,0.15)]'
+																		: 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
+																}`}
+															>
+																🛠️ Manual CAD
+															</button>
+															<button
+																onClick={() => {
+																	setActiveRightTab('cam');
+																	setWorkflowStage('cam');
+																	setIsCamDrawerOpen(true);
+																}}
+																className={`flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md transition-all duration-200 whitespace-nowrap text-center ${
+																	activeRightTab === 'cam'
+																		? 'bg-amber-100/50 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 shadow-sm'
+																		: 'text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
+																}`}
+															>
+																⚙️ CAM Setup
+															</button>
+														</div>
 													</div>
-												)}
-											</div>
-										</div>
-									</Panel>
+
+													{/* Tab Content */}
+													<div className="flex-1 overflow-y-auto">
+														{activeRightTab === 'cad' && (
+															<WorkspaceSettings
+																workflowStage={workflowStage}
+																parameters={parameters}
+																activeParameter={activeParameter}
+																onParameterSelect={setActiveParameter}
+																onParameterChange={(key, val) => {
+																	const newParams = setParameterValue(parameters, key, val);
+																	setParameters(newParams);
+																	const newScript = injectParameters(pythonScript, newParams);
+																	updatePythonScript(newScript);
+																	void performSync(newScript, newParams, sessionId || '');
+																}}
+																parameterMetadata={parameterMetadata}
+																camSetup={camSetup}
+																setCamSetup={setCamSetup}
+																pythonScript={pythonScript}
+															/>
+														)}
+
+														{activeRightTab === 'cam' && (
+															<div className="p-5">
+																<CamSummaryPanel 
+																	setup={camSetup as any} 
+																	setups={camSetups}
+																	tools={camTools} 
+																	operations={camOperations}
+																	features={camFeatures}
+																	coordValidation={coordValidation}
+																	costEstimate={camStats?.costEstimate}
+																	onClickSection={() => {}}
+																/>
+															</div>
+														)}
+													</div>
+												</div>
+											</Panel>
+										</>
+									)}
 								</PanelGroup>
 							</div>
 						</div>

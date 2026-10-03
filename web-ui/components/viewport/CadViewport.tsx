@@ -99,7 +99,7 @@ type CadViewportProps = {
 	// CAM/G-code
 	toolpaths?: RenderToolpathSegment[] | null;
 	showToolpaths?: boolean;
-	workflowStage?: 'blueprint' | 'extraction' | 'cad' | 'cam' | 'gcode';
+	workflowStage?: 'blueprint' | 'extraction' | 'cad' | 'manual_cad' | 'cam' | 'gcode';
 	camFeatures?: any[];
 	parameters?: Record<string, unknown>;
 	hasBlockedOperations?: boolean;
@@ -1146,36 +1146,38 @@ export function CadViewport({
 
 
 				{/* Global Safety Note */}
-				<div className={`absolute left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-24' : 'bottom-6'}`}>
-					{toolpaths && toolpaths.length > 0 && !hasValidToolpaths && (
-						<div className="flex items-center gap-2 rounded-full border border-orange-500/30 bg-background/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
-							<svg className="size-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				{workflowStage !== 'manual_cad' && (
+					<div className={`absolute left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-24' : 'bottom-2'}`}>
+						{toolpaths && toolpaths.length > 0 && !hasValidToolpaths && (
+							<div className="flex items-center gap-2 rounded-full border border-orange-500/30 bg-background/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
+								<svg className="size-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+								</svg>
+								<span className="text-[11px] font-bold uppercase tracking-wider text-orange-400">
+									No valid machining toolpaths to display
+								</span>
+							</div>
+						)}
+						{hasBlockedOperations && (
+							<div className="flex items-center gap-2 rounded-full border border-red-500/30 bg-background/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
+								<svg className="size-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+								</svg>
+								<span className="text-[11px] font-bold uppercase tracking-wider text-red-400">
+									Some features require turning, mill-turn, or secondary setup
+								</span>
+							</div>
+						)}
+						<div className="flex items-center gap-3 rounded-full border border-transparent bg-background/80 px-5 py-2.5 backdrop-blur-xl transition-all hover:border-blue-500/30 whitespace-nowrap">
+							<svg className="size-3 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
 							</svg>
-							<span className="text-[11px] font-bold uppercase tracking-wider text-orange-400">
-								No valid machining toolpaths to display
-							</span>
+							<p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+								AI can make mistakes. Verify critical dimensions against original blueprints.
+							</p>
 						</div>
-					)}
-					{hasBlockedOperations && (
-						<div className="flex items-center gap-2 rounded-full border border-red-500/30 bg-background/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
-							<svg className="size-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-							</svg>
-							<span className="text-[11px] font-bold uppercase tracking-wider text-red-400">
-								Some features require turning, mill-turn, or secondary setup
-							</span>
-						</div>
-					)}
-					<div className="flex items-center gap-3 rounded-full border border-transparent bg-background/80 px-5 py-2.5 backdrop-blur-xl transition-all hover:border-blue-500/30 whitespace-nowrap">
-						<svg className="size-3 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-						</svg>
-						<p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
-							AI can make mistakes. Verify critical dimensions against original blueprints.
-						</p>
 					</div>
-				</div>
+				)}
 			</div>
 		</section>
 	);

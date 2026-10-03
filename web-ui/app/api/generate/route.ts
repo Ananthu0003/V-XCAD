@@ -66,6 +66,8 @@ function extractErrorFromUnknown(input: unknown, fallback: string): { message: s
 	return { message: fallback };
 }
 
+const MAX_BLUEPRINT_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
 function isSupportedUpload(upload: File): boolean {
 	const mimeType = upload.type.toLowerCase();
 	if (mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'application/pdf') {
@@ -113,8 +115,16 @@ export async function POST(request: Request): Promise<Response> {
 		return NextResponse.json(buildError('Uploaded file must be a JPEG, PNG, or PDF.'), { status: 400 });
 	}
 
-	if (upload && upload instanceof File && !isSupportedUpload(upload)) {
-		return NextResponse.json(buildError('Uploaded file must be a JPEG, PNG, or PDF.'), { status: 400 });
+	if (upload && upload instanceof File) {
+		if (!isSupportedUpload(upload)) {
+			return NextResponse.json(buildError('Uploaded file must be a JPEG, PNG, or PDF.'), { status: 400 });
+		}
+		if (upload.size > MAX_BLUEPRINT_FILE_SIZE) {
+			return NextResponse.json(
+				buildError('File size exceeds the 10MB limit. Please upload a smaller blueprint file.'),
+				{ status: 400 }
+			);
+		}
 	}
 
 	const modelRaw = formData.get('model_name');

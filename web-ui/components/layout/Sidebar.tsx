@@ -10,18 +10,18 @@ const navigation = [
 
 export function Sidebar() {
   return (
-    <div className="flex h-full w-64 flex-col bg-card border-r">
-      <div className="flex h-16 shrink-0 items-center px-6 border-b">
-        <span className="text-lg font-bold tracking-tight text-foreground">CAM Tool Manager</span>
+    <div className="flex h-full w-64 flex-col bg-sidebar border-r bg-gradient-panel">
+      <div className="flex h-16 shrink-0 items-center px-6 border-b border-sidebar-border">
+        <span className="text-lg font-bold tracking-tight text-sidebar-foreground">CAM Tool Manager</span>
       </div>
-      <nav className="flex flex-1 flex-col px-4 py-6 space-y-2">
+      <nav className="flex flex-1 flex-col px-4 py-6 space-y-1">
         {navigation.map((item) => {
           const Icon = item.icon;
           return (
             <Link
               key={item.name}
               href={item.href}
-              className="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-all duration-200"
             >
               <Icon className="h-5 w-5" />
               {item.name}
@@ -29,7 +29,7 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="p-4 border-t text-xs text-muted-foreground">
+      <div className="p-4 border-t border-sidebar-border text-xs text-sidebar-foreground/50">
         Version 0.1.0
       </div>
     </div>

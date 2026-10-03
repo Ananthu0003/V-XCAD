@@ -2,6 +2,17 @@ from app.models.domain import ModelMetadata
 
 MODEL_REGISTRY = [
     ModelMetadata(
+        id='gemini-3.8-flash',
+        name='Gemini 3.8 Flash',
+        vendor='google',
+        tier='flash',
+        maxTokens=1000000,
+        supportsThinking=True,
+        fallbackModelId='gemini-3.5-flash-lite',
+        description='Google latest flagship hybrid reasoning model with dynamic thinking.',
+        badge='thinking',
+    ),
+    ModelMetadata(
         id='gemini-3.7-flash',
         name='Gemini 3.7 Flash',
         vendor='google',

@@ -1476,6 +1476,7 @@ docker compose run --rm migrate           # re-run DB bootstrap/migration only
 
 **web-ui**
 ```bash
+
 npm install         # install dependencies
 npm run dev          # start dev server (port 3000)
 npx jest               # run Jest suite (no "npm test" script is defined)
@@ -1486,6 +1487,7 @@ npx tsc --noEmit          # TypeScript check (no dedicated script)
 
 **ai-engine**
 ```bash
+
 python -m venv .venv && source .venv/bin/activate   # (Windows: .venv\Scripts\Activate.ps1)
 pip install -r requirements.txt                       # install dependencies
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000   # run

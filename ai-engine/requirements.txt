@@ -73,3 +73,4 @@ pytest-mock==3.14.0
 pymupdf>=1.24.9
 psycopg2-binary==2.9.9
 pgvector==0.3.2
+shapely>=2.0.0

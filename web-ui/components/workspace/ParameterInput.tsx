@@ -9,7 +9,7 @@ type ParameterInputProps = {
 };
 
 export function ParameterInput({ label, value, onChange, isActive = false, description }: ParameterInputProps) {
-	const inputBase = "w-full rounded-lg border border-border dark:border-white/10 bg-input px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 focus:outline-none transition-all group-hover:border-blue-500/30";
+	const inputBase = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/50 focus:outline-none transition-all group-hover:border-primary/30";
 
 	const renderInput = () => {
 		if (typeof value === 'number') {
@@ -31,13 +31,13 @@ export function ParameterInput({ label, value, onChange, isActive = false, descr
 							type="checkbox"
 							checked={value}
 							onChange={(e) => onChange(e.target.checked)}
-							className="peer size-full cursor-pointer appearance-none rounded border border-zinc-700 bg-zinc-900 transition-all checked:bg-blue-500 checked:border-blue-400"
+							className="peer size-full cursor-pointer appearance-none rounded border border-border bg-background transition-all checked:bg-primary checked:border-primary"
 						/>
-						<div className="pointer-events-none absolute scale-0 opacity-0 peer-checked:scale-100 peer-checked:opacity-100 transition-all text-black font-bold text-[10px]">
+						<div className="pointer-events-none absolute scale-0 opacity-0 peer-checked:scale-100 peer-checked:opacity-100 transition-all text-primary-foreground font-bold text-[10px]">
 							✓
 						</div>
 					</div>
-					<span className="text-xs font-medium text-zinc-400 group-hover:text-zinc-200 transition-colors">Enabled</span>
+					<span className="text-xs font-medium text-foreground transition-colors">Enabled</span>
 				</label>
 			);
 		}

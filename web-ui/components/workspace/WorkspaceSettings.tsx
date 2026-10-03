@@ -1,4 +1,4 @@
-import { Settings2, Copy, Check } from 'lucide-react';
+import { Settings2, Copy, Check, SlidersHorizontal, Code2 } from 'lucide-react';
 import { useState } from 'react';
 import { ParameterInput } from '@/components/workspace/ParameterInput';
 import type { SetupSettings } from '@/types/cam';
@@ -69,8 +69,16 @@ export function WorkspaceSettings({
             )}
           </div>
           {Object.keys(parameters).length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border bg-muted/50 p-6 text-center text-xs text-muted-foreground font-mono">
-              NO PARAMETERS EXTRACTED
+            <div className="rounded-xl border border-dashed border-border bg-card/60 p-6 text-center space-y-2">
+              <div className="size-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto text-primary">
+                <SlidersHorizontal className="size-4" />
+              </div>
+              <div className="text-[10.5px] font-bold text-foreground font-mono uppercase tracking-wider">
+                No Parameters Extracted
+              </div>
+              <p className="text-[10px] text-muted-foreground max-w-[200px] mx-auto leading-relaxed">
+                Upload a blueprint or prompt the copilot to extract geometric dimensions.
+              </p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -110,19 +118,27 @@ export function WorkspaceSettings({
             )}
           </div>
           {!pythonScript ? (
-            <div className="rounded-xl border border-dashed border-border bg-muted/50 p-6 text-center text-xs text-muted-foreground font-mono">
-              NO SCRIPT GENERATED
+            <div className="rounded-xl border border-dashed border-border bg-card/60 p-6 text-center space-y-2">
+              <div className="size-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto text-primary">
+                <Code2 className="size-4" />
+              </div>
+              <div className="text-[10.5px] font-bold text-foreground font-mono uppercase tracking-wider">
+                No Script Generated
+              </div>
+              <p className="text-[10px] text-muted-foreground max-w-[200px] mx-auto leading-relaxed">
+                Python CAD build script will be generated dynamically upon synthesis.
+              </p>
             </div>
           ) : (
-            <div className="rounded-xl border border-black/5 dark:border-white/5 bg-slate-100 dark:bg-black/40 overflow-hidden shadow-inner backdrop-blur-sm">
+            <div className="rounded-xl border border-border bg-slate-900 text-slate-100 dark:bg-black/60 dark:text-cyan-200 overflow-hidden shadow-sm">
               {/* Fake Mac Header */}
-              <div className="flex items-center gap-1.5 px-4 py-2 border-b border-black/5 dark:border-white/5 bg-slate-200 dark:bg-black/20">
-                <div className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
-                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" />
-                <div className="w-2.5 h-2.5 rounded-full bg-green-500/70" />
-                <span className="ml-2 text-[10px] text-zinc-500 font-mono">model.py</span>
+              <div className="flex items-center gap-1.5 px-4 py-2 border-b border-white/10 bg-slate-800/80 dark:bg-white/[0.03]">
+                <div className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
+                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/80" />
+                <div className="w-2.5 h-2.5 rounded-full bg-green-500/80" />
+                <span className="ml-2 text-[10px] text-slate-400 font-mono">model.py</span>
               </div>
-              <pre className="p-4 text-[11px] leading-relaxed font-mono text-blue-800 dark:text-blue-300 overflow-x-auto whitespace-pre-wrap max-h-[400px] custom-scrollbar selection:bg-blue-500/30">
+              <pre className="p-4 text-[11px] leading-relaxed font-mono overflow-x-auto whitespace-pre-wrap max-h-[400px] custom-scrollbar selection:bg-blue-500/30">
                 {pythonScript}
               </pre>
             </div>

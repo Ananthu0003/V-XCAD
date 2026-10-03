@@ -51,6 +51,26 @@ _REQUIRED_ENV_KEYS = frozenset({
     "TMPDIR",
     "TEMP",
     "TMP",
+    # Windows system environment variables (required for Winsock, asyncio, and C runtime DLLs)
+    "SYSTEMROOT",
+    "SystemRoot",
+    "SYSTEMDRIVE",
+    "SystemDrive",
+    "WINDIR",
+    "windir",
+    "COMSPEC",
+    "ComSpec",
+    "PATHEXT",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "USERPROFILE",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "COMMONPROGRAMFILES",
+    "COMMONPROGRAMFILES(X86)",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
     # System library paths (OCP/OpenCASCADE needs these on some distros)
     "LD_LIBRARY_PATH",
     "DYLD_LIBRARY_PATH",
@@ -1948,12 +1968,13 @@ class ParameterRenderService:
                 "VALIDATION_MODE": "1",   # ← key: activate strict geometry checking
             })
 
-            project_root = Path(__file__).resolve().parents[3]
             python_exe = sys.executable
-            if (project_root / ".venv" / "Scripts" / "python.exe").exists():
-                python_exe = str(project_root / ".venv" / "Scripts" / "python.exe")
-            elif (project_root / ".venv" / "bin" / "python").exists():
-                python_exe = str(project_root / ".venv" / "bin" / "python")
+            if not python_exe:
+                project_root = Path(__file__).resolve().parents[3]
+                if (project_root / ".venv" / "Scripts" / "python.exe").exists():
+                    python_exe = str(project_root / ".venv" / "Scripts" / "python.exe")
+                elif (project_root / ".venv" / "bin" / "python").exists():
+                    python_exe = str(project_root / ".venv" / "bin" / "python")
 
             try:
                 try:
@@ -2067,12 +2088,13 @@ class ParameterRenderService:
                     "OUTPUT_BASENAME": output_basename,
                 })
 
-                project_root = Path(__file__).resolve().parents[3]
                 python_exe = sys.executable
-                if (project_root / ".venv" / "Scripts" / "python.exe").exists():
-                    python_exe = str(project_root / ".venv" / "Scripts" / "python.exe")
-                elif (project_root / ".venv" / "bin" / "python").exists():
-                    python_exe = str(project_root / ".venv" / "bin" / "python")
+                if not python_exe:
+                    project_root = Path(__file__).resolve().parents[3]
+                    if (project_root / ".venv" / "Scripts" / "python.exe").exists():
+                        python_exe = str(project_root / ".venv" / "Scripts" / "python.exe")
+                    elif (project_root / ".venv" / "bin" / "python").exists():
+                        python_exe = str(project_root / ".venv" / "bin" / "python")
 
                 try:
                     try:

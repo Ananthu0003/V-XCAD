@@ -470,20 +470,20 @@ export function PromptAssistantWidget({
 				type="button"
 				onClick={() => setIsOpen(!isOpen)}
 				aria-label="Toggle AI Prompt Assistant"
-				className={`relative group flex items-center justify-center size-11 rounded-full transition-all duration-300 shadow-2xl border cursor-pointer ${
+				className={`relative group flex items-center justify-center size-11 rounded-full transition-all duration-300 border cursor-pointer ${
 					isOpen
-						? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-[0_0_25px_rgba(34,211,238,0.55)] ring-2 ring-cyan-400/40'
-						: 'bg-[#0a101f]/95 hover:bg-[#111c33] border-cyan-500/30 hover:border-cyan-400 text-cyan-400 hover:text-cyan-200 shadow-[0_4px_25px_rgba(0,0,0,0.6),0_0_15px_rgba(34,211,238,0.2)]'
+						? 'bg-primary/15 border-primary text-primary shadow-md dark:bg-cyan-500/20 dark:border-cyan-400 dark:text-cyan-300 dark:shadow-[0_0_25px_rgba(34,211,238,0.55)] ring-2 ring-primary/40 dark:ring-cyan-400/40'
+						: 'bg-card hover:bg-muted border-border hover:border-primary/50 text-primary shadow-lg dark:bg-[#0a101f]/95 dark:hover:bg-[#111c33] dark:border-cyan-500/30 dark:hover:border-cyan-400 dark:text-cyan-400 dark:hover:text-cyan-200 dark:shadow-[0_4px_25px_rgba(0,0,0,0.6),0_0_15px_rgba(34,211,238,0.2)]'
 				}`}
 				title="AI Prompt Assistant Robot"
 			>
 				{/* Animated Robot Icon */}
 				<div className="relative flex items-center justify-center">
-					<Bot className="size-5 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-6 text-cyan-400 group-hover:text-cyan-300" />
+					<Bot className="size-5 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-6 text-primary dark:text-cyan-400 group-hover:text-primary dark:group-hover:text-cyan-300" />
 					
 					{/* Robot Eye Blink Glow Animation */}
-					<span className="absolute top-[5px] left-[4px] size-1 rounded-full bg-cyan-300 shadow-[0_0_4px_#22d3ee] animate-ping opacity-75 pointer-events-none" />
-					<span className="absolute top-[5px] right-[4px] size-1 rounded-full bg-cyan-300 shadow-[0_0_4px_#22d3ee] animate-ping opacity-75 pointer-events-none" />
+					<span className="absolute top-[5px] left-[4px] size-1 rounded-full bg-primary dark:bg-cyan-300 shadow-[0_0_4px_currentColor] animate-ping opacity-75 pointer-events-none" />
+					<span className="absolute top-[5px] right-[4px] size-1 rounded-full bg-primary dark:bg-cyan-300 shadow-[0_0_4px_currentColor] animate-ping opacity-75 pointer-events-none" />
 				</div>
 
 				{!isOpen && (
@@ -497,27 +497,27 @@ export function PromptAssistantWidget({
 			{/* Floating Chatbox Panel */}
 			{isOpen && (
 				<div
-					className="fixed bottom-20 right-6 z-50 w-[450px] max-w-[calc(100vw-32px)] h-[620px] max-h-[calc(100vh-100px)] flex flex-col rounded-2xl border border-cyan-500/25 bg-[#090d16]/95 backdrop-blur-2xl shadow-[0_25px_70px_rgba(0,0,0,0.85),0_0_40px_rgba(34,211,238,0.12)] overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200"
+					className="fixed bottom-20 right-6 z-50 w-[450px] max-w-[calc(100vw-32px)] h-[620px] max-h-[calc(100vh-100px)] flex flex-col rounded-2xl border border-border dark:border-cyan-500/25 bg-card/95 dark:bg-[#090d16]/95 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] dark:shadow-[0_25px_70px_rgba(0,0,0,0.85),0_0_40px_rgba(34,211,238,0.12)] overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200"
 				>
 					{/* Top Ambient Glow Line */}
-					<div className="h-[2px] w-full bg-gradient-to-r from-transparent via-cyan-400/80 to-transparent" />
+					<div className="h-[2px] w-full bg-gradient-to-r from-transparent via-primary/80 dark:via-cyan-400/80 to-transparent" />
 
 					{/* Header */}
-					<div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08] bg-white/[0.02]">
+					<div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-white/[0.08] bg-muted/30 dark:bg-white/[0.02]">
 						<div className="flex items-center gap-2.5">
-							<div className="size-8 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+							<div className="size-8 rounded-xl bg-primary/10 dark:bg-gradient-to-br dark:from-cyan-500/20 dark:to-blue-600/10 border border-primary/20 dark:border-cyan-500/30 flex items-center justify-center text-primary dark:text-cyan-400 shadow-sm">
 								<Bot className="size-4.5" />
 							</div>
 							<div>
 								<div className="flex items-center gap-2">
-									<span className="text-[13px] font-extrabold tracking-wider text-white font-mono">
+									<span className="text-[13px] font-extrabold tracking-wider text-foreground font-mono">
 										PROMPT ASSISTANT
 									</span>
-									<span className="px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-widest rounded bg-cyan-400/15 text-cyan-300 border border-cyan-400/30">
+									<span className="px-1.5 py-0.5 text-[8.5px] font-black uppercase tracking-widest rounded bg-primary/10 text-primary border border-primary/20 dark:bg-cyan-400/15 dark:text-cyan-300 dark:border-cyan-400/30">
 										AI
 									</span>
 								</div>
-								<p className="text-[10.5px] text-muted-foreground/80 leading-none mt-0.5">
+								<p className="text-[10.5px] text-muted-foreground leading-none mt-0.5">
 									Iterative Blueprint vs. 3D Model Discrepancy
 								</p>
 							</div>
@@ -527,16 +527,16 @@ export function PromptAssistantWidget({
 							<button
 								type="button"
 								onClick={() => captureCanvasSnapshot(true)}
-								className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 hover:border-cyan-400/60 text-cyan-300 transition-all font-medium cursor-pointer shadow-[0_0_12px_rgba(34,211,238,0.1)]"
+								className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] bg-primary/10 hover:bg-primary/20 border border-primary/25 hover:border-primary/50 text-primary dark:bg-cyan-500/10 dark:hover:bg-cyan-500/20 dark:border-cyan-500/30 dark:text-cyan-300 transition-all font-medium cursor-pointer shadow-sm"
 								title="Capture current 3D viewport angle"
 							>
-								<Camera className="size-3.5 text-cyan-400" />
+								<Camera className="size-3.5" />
 								<span>+ Snap</span>
 							</button>
 							<button
 								type="button"
 								onClick={handleClearAssistantChat}
-								className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-400 hover:bg-white/5 transition-colors cursor-pointer"
+								className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:bg-muted dark:hover:bg-white/5 transition-colors cursor-pointer"
 								title="Clear Prompt Assistant chat"
 							>
 								<Trash2 className="size-4" />
@@ -544,7 +544,7 @@ export function PromptAssistantWidget({
 							<button
 								type="button"
 								onClick={() => setIsOpen(false)}
-								className="p-1.5 rounded-lg text-muted-foreground hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+								className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground dark:hover:text-white hover:bg-muted dark:hover:bg-white/5 transition-colors cursor-pointer"
 							>
 								<X className="size-4" />
 							</button>
@@ -552,14 +552,14 @@ export function PromptAssistantWidget({
 					</div>
 
 					{/* Visual Context Ribbon (Blueprint + Multi-Angle 3D Gallery) */}
-					<div className="px-4 py-2.5 border-b border-white/[0.06] bg-black/30">
+					<div className="px-4 py-2.5 border-b border-border dark:border-white/[0.06] bg-muted/20 dark:bg-black/30">
 						<div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
 							{/* 1. Blueprint Card */}
-							<div className="flex items-center gap-2 px-2 py-1.5 rounded-xl border border-white/[0.08] bg-white/[0.02] shrink-0">
+							<div className="flex items-center gap-2 px-2 py-1.5 rounded-xl border border-border dark:border-white/[0.08] bg-card dark:bg-white/[0.02] shrink-0 shadow-sm">
 								{blueprintUrl ? (
 									<div
 										onClick={() => openLightbox(croppedBlueprintUrl || blueprintUrl, '2D Reference Blueprint', true)}
-										className="relative size-8 rounded-lg overflow-hidden border border-emerald-400/50 bg-black/60 shrink-0 cursor-pointer group shadow-[0_0_10px_rgba(52,211,153,0.15)]"
+										className="relative size-8 rounded-lg overflow-hidden border border-emerald-500/40 bg-muted shrink-0 cursor-pointer group shadow-sm"
 										title="Click to zoom / crop blueprint"
 									>
 										{/* eslint-disable-next-line @next/next/no-img-element */}
@@ -569,7 +569,7 @@ export function PromptAssistantWidget({
 										</div>
 									</div>
 								) : (
-									<div className="size-8 rounded-lg border border-dashed border-white/15 flex items-center justify-center text-muted-foreground/40 shrink-0">
+									<div className="size-8 rounded-lg border border-dashed border-border flex items-center justify-center text-muted-foreground shrink-0">
 										<FileImage className="size-3.5" />
 									</div>
 								)}
@@ -586,30 +586,30 @@ export function PromptAssistantWidget({
 													setCroppedBlueprintUrl(null);
 													toast.info('Reverted to full blueprint.');
 												}}
-												className="text-muted-foreground hover:text-amber-300 text-[8.5px] underline cursor-pointer"
+												className="text-muted-foreground hover:text-amber-600 dark:hover:text-amber-300 text-[8.5px] underline cursor-pointer"
 												title="Reset back to full blueprint"
 											>
 												Reset
 											</button>
 										)}
 									</div>
-									<div className="text-[10px] font-semibold text-white/90">
+									<div className="text-[10px] font-semibold text-foreground">
 										{blueprintUrl ? (croppedBlueprintUrl ? 'Cropped Detail' : 'Full Sheet') : 'None'}
 									</div>
 								</div>
 							</div>
 
-							<div className="w-px h-6 bg-white/10 shrink-0" />
+							<div className="w-px h-6 bg-border dark:bg-white/10 shrink-0" />
 
 							{/* 2. Captured 3D View Angles */}
 							{capturedSnapshots.map((snapUrl, idx) => (
 								<div
 									key={idx}
-									className="relative flex items-center gap-2 px-2 py-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/[0.04] shrink-0 group"
+									className="relative flex items-center gap-2 px-2 py-1.5 rounded-xl border border-primary/25 dark:border-cyan-500/30 bg-primary/5 dark:bg-cyan-500/[0.04] shrink-0 group shadow-sm"
 								>
 									<div
 										onClick={() => openLightbox(snapUrl, `3D Model Angle #${idx + 1}`, false)}
-										className="relative size-8 rounded-lg overflow-hidden border border-cyan-400/80 bg-black shrink-0 cursor-pointer shadow-[0_0_10px_rgba(34,211,238,0.25)]"
+										className="relative size-8 rounded-lg overflow-hidden border border-primary/40 dark:border-cyan-400/80 bg-muted shrink-0 cursor-pointer shadow-sm"
 										title={`Click to preview View #${idx + 1}`}
 									>
 										{/* eslint-disable-next-line @next/next/no-img-element */}
@@ -620,13 +620,13 @@ export function PromptAssistantWidget({
 									</div>
 
 									<div className="text-left pr-0.5">
-										<div className="text-[9px] font-extrabold uppercase tracking-wider text-cyan-300 font-mono">
+										<div className="text-[9px] font-extrabold uppercase tracking-wider text-primary dark:text-cyan-300 font-mono">
 											View #{idx + 1}
 										</div>
 										<button
 											type="button"
 											onClick={() => deleteSnapshotAt(idx)}
-											className="text-[9.5px] text-muted-foreground/80 hover:text-rose-400 flex items-center gap-0.5 transition-colors cursor-pointer mt-0.5"
+											className="text-[9.5px] text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 flex items-center gap-0.5 transition-colors cursor-pointer mt-0.5"
 										>
 											<Trash2 className="size-2.5" />
 											<span>Remove</span>
@@ -640,10 +640,10 @@ export function PromptAssistantWidget({
 								<button
 									type="button"
 									onClick={() => captureCanvasSnapshot(true)}
-									className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-dashed border-cyan-500/30 hover:border-cyan-400 bg-cyan-500/[0.03] hover:bg-cyan-500/[0.08] text-cyan-300 text-[10.5px] font-medium transition-all shrink-0 cursor-pointer"
+									className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl border border-dashed border-primary/30 hover:border-primary dark:border-cyan-500/30 dark:hover:border-cyan-400 bg-primary/5 hover:bg-primary/10 dark:bg-cyan-500/[0.03] dark:hover:bg-cyan-500/[0.08] text-primary dark:text-cyan-300 text-[10.5px] font-medium transition-all shrink-0 cursor-pointer"
 									title="Rotate 3D model and click to add angle"
 								>
-									<Plus className="size-3 text-cyan-400" />
+									<Plus className="size-3" />
 									<span>Add Angle</span>
 								</button>
 							)}
@@ -867,8 +867,8 @@ export function PromptAssistantWidget({
 								<div
 									className={`p-3 rounded-2xl max-w-[92%] leading-relaxed ${
 										m.role === 'user'
-											? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-br-none shadow-lg font-medium'
-											: 'bg-white/[0.04] text-foreground border border-white/[0.08] rounded-bl-none shadow-md backdrop-blur-md'
+											? 'bg-primary text-primary-foreground rounded-br-none shadow-sm font-medium'
+											: 'bg-muted/70 dark:bg-white/[0.04] text-foreground border border-border dark:border-white/[0.08] rounded-bl-none shadow-sm backdrop-blur-md'
 									}`}
 								>
 									{(() => {
@@ -893,21 +893,21 @@ export function PromptAssistantWidget({
 											<div>
 												<p className="whitespace-pre-wrap">{cleanText}</p>
 												{m.role === 'assistant' && m.id !== 'welcome' && (
-													<div className="flex items-center gap-2 mt-2 pt-1.5 border-t border-white/[0.06] text-[10px] font-mono">
+													<div className="flex items-center gap-2 mt-2 pt-1.5 border-t border-border dark:border-white/[0.06] text-[10px] font-mono">
 														<button
 															type="button"
 															onClick={() => handleApply(`${m.id}_msg`, cleanText)}
-															className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 transition-colors cursor-pointer font-medium"
+															className="text-primary dark:text-cyan-400 hover:underline flex items-center gap-1 transition-colors cursor-pointer font-medium"
 															title="Apply this entire analysis description directly to CAD Generator input"
 														>
 															<ArrowUpRight className="size-2.5" />
 															<span>{appliedId === `${m.id}_msg` ? 'Applied to CAD!' : 'Apply Analysis to CAD'}</span>
 														</button>
-														<span className="text-white/20">•</span>
+														<span className="text-muted-foreground/40">•</span>
 														<button
 															type="button"
 															onClick={() => handleCopy(`${m.id}_msg`, cleanText)}
-															className="text-muted-foreground hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+															className="text-muted-foreground hover:text-foreground dark:hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
 															title="Copy analysis description"
 														>
 															<Copy className="size-2.5" />
@@ -921,23 +921,23 @@ export function PromptAssistantWidget({
 
 									{/* Non-Existent / Unsupported Claims Alert Card */}
 									{m.analysis?.unsupported_or_invalid_claims && m.analysis.unsupported_or_invalid_claims.length > 0 && (
-										<div className="mt-3 pt-2.5 border-t border-rose-500/30 space-y-1.5 animate-in fade-in duration-150">
-											<div className="text-[10px] font-extrabold uppercase tracking-wider text-rose-400 flex items-center gap-1">
-												<AlertTriangle className="size-3 text-rose-400" />
+										<div className="mt-3 pt-2.5 border-t border-rose-300 dark:border-rose-500/30 space-y-1.5 animate-in fade-in duration-150">
+											<div className="text-[10px] font-extrabold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-1">
+												<AlertTriangle className="size-3 text-rose-500" />
 												<span>Blueprint Verification Warning ({m.analysis.unsupported_or_invalid_claims.length}):</span>
 											</div>
 											<div className="space-y-1">
 												{m.analysis.unsupported_or_invalid_claims.map((claim, idx) => (
 													<div
 														key={idx}
-														className="flex items-start gap-1.5 text-[11px] bg-rose-950/40 p-2 rounded-lg border border-rose-500/20 text-rose-200"
+														className="flex items-start gap-1.5 text-[11px] bg-rose-50 dark:bg-rose-950/40 p-2 rounded-lg border border-rose-200 dark:border-rose-500/20 text-rose-900 dark:text-rose-200"
 													>
-														<span className="px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30 shrink-0 mt-0.5">
+														<span className="px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-500/30 shrink-0 mt-0.5">
 															Not in Drawing
 														</span>
 														<div>
-															<strong className="text-rose-300 capitalize">{claim.claim || claim.feature}:</strong>{' '}
-															<span className="text-rose-200/90">{claim.reason || claim.issue}</span>
+															<strong className="text-rose-800 dark:text-rose-300 capitalize">{claim.claim || claim.feature}:</strong>{' '}
+															<span className="text-rose-900/90 dark:text-rose-200/90">{claim.reason || claim.issue}</span>
 														</div>
 													</div>
 												))}
@@ -947,23 +947,23 @@ export function PromptAssistantWidget({
 
 									{/* Feature Verification Table */}
 									{m.analysis?.blueprint_features && m.analysis.blueprint_features.length > 0 && (
-										<div className="mt-3 pt-2.5 border-t border-white/10 space-y-2">
+										<div className="mt-3 pt-2.5 border-t border-border dark:border-white/10 space-y-2">
 											<div className="flex items-center justify-between">
-												<div className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-300 flex items-center gap-1 font-mono">
-													<Layers className="size-3 text-cyan-400" />
+												<div className="text-[10px] font-extrabold uppercase tracking-wider text-primary dark:text-cyan-300 flex items-center gap-1 font-mono">
+													<Layers className="size-3 text-primary dark:text-cyan-400" />
 													<span>Feature Verification Table ({m.analysis.blueprint_features.length})</span>
 												</div>
 												{m.analysis.object_name && (
-													<span className="text-[9px] text-muted-foreground/80 font-mono truncate max-w-[170px]" title={m.analysis.object_name}>
+													<span className="text-[9px] text-muted-foreground font-mono truncate max-w-[170px]" title={m.analysis.object_name}>
 														{m.analysis.object_name}
 													</span>
 												)}
 											</div>
 
-											<div className="rounded-xl border border-white/10 overflow-hidden bg-black/50 shadow-inner">
+											<div className="rounded-xl border border-border dark:border-white/10 overflow-hidden bg-card dark:bg-black/50 shadow-sm">
 												<div className="overflow-x-auto max-h-[220px] no-scrollbar">
 													<table className="w-full text-left text-[10.5px] border-collapse">
-														<thead className="sticky top-0 bg-[#0c121e] border-b border-white/10 text-muted-foreground font-mono text-[9px] uppercase tracking-wider z-10">
+														<thead className="sticky top-0 bg-muted dark:bg-[#0c121e] border-b border-border dark:border-white/10 text-muted-foreground font-mono text-[9px] uppercase tracking-wider z-10">
 															<tr>
 																<th className="py-1.5 px-2 font-bold">Feature</th>
 																<th className="py-1.5 px-2 font-bold">Blueprint Spec</th>
@@ -971,41 +971,41 @@ export function PromptAssistantWidget({
 																<th className="py-1.5 px-2 font-bold">Action</th>
 															</tr>
 														</thead>
-														<tbody className="divide-y divide-white/5 font-sans leading-tight">
+														<tbody className="divide-y divide-border/60 dark:divide-white/5 font-sans leading-tight">
 															{m.analysis.blueprint_features.map((feat, idx) => {
 																const statusLower = (feat.status || '').toLowerCase();
 																const isMatched = statusLower.includes('match') || statusLower.includes('accurate') || statusLower.includes('ok');
 																const isMissing = statusLower.includes('miss') || statusLower.includes('absent');
 
 																return (
-																	<tr key={idx} className="hover:bg-white/[0.03] transition-colors">
-																		<td className="py-1.5 px-2 font-medium text-white align-top">
+																	<tr key={idx} className="hover:bg-muted/40 dark:hover:bg-white/[0.03] transition-colors">
+																		<td className="py-1.5 px-2 font-medium text-foreground dark:text-white align-top">
 																			<div className="font-semibold leading-snug">{feat.name}</div>
 																			{feat.callout && (
-																				<span className="text-[8.5px] text-cyan-400 font-mono block mt-0.5">
+																				<span className="text-[8.5px] text-primary dark:text-cyan-400 font-mono block mt-0.5">
 																					{feat.callout}
 																				</span>
 																			)}
 																		</td>
-																		<td className="py-1.5 px-2 text-muted-foreground/90 max-w-[130px] align-top text-[10px]">
+																		<td className="py-1.5 px-2 text-muted-foreground max-w-[130px] align-top text-[10px]">
 																			{feat.specification || feat.description || '—'}
 																		</td>
 																		<td className="py-1.5 px-2 text-center shrink-0 align-top">
 																			{isMatched ? (
-																				<span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+																				<span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:border-emerald-500/30">
 																					<Check className="size-2.5" /> Matched
 																				</span>
 																			) : isMissing ? (
-																				<span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-rose-500/15 text-rose-400 border border-rose-500/30">
+																				<span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-500/15 dark:text-rose-400 dark:border-rose-500/30">
 																					<X className="size-2.5" /> Missing
 																				</span>
 																			) : (
-																				<span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30">
+																				<span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30">
 																					<AlertCircle className="size-2.5" /> Inaccurate
 																				</span>
 																			)}
 																		</td>
-																		<td className="py-1.5 px-2 text-cyan-200/90 text-[9.5px] align-top">
+																		<td className="py-1.5 px-2 text-foreground/80 dark:text-cyan-200/90 text-[9.5px] align-top">
 																			{feat.action || (isMatched ? 'None' : isMissing ? 'Add to model' : 'Refine dimensions')}
 																		</td>
 																	</tr>
@@ -1020,22 +1020,22 @@ export function PromptAssistantWidget({
 
 									{/* Detected Discrepancies */}
 									{(!m.analysis?.blueprint_features || m.analysis.blueprint_features.length === 0) && m.analysis?.discrepancies && m.analysis.discrepancies.length > 0 && (
-										<div className="mt-3 pt-2.5 border-t border-white/10 space-y-1.5">
-											<div className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-400 flex items-center gap-1">
-												<AlertCircle className="size-3 text-cyan-400" />
+										<div className="mt-3 pt-2.5 border-t border-border dark:border-white/10 space-y-1.5">
+											<div className="text-[10px] font-extrabold uppercase tracking-wider text-primary dark:text-cyan-400 flex items-center gap-1">
+												<AlertCircle className="size-3 text-primary dark:text-cyan-400" />
 												<span>Detected Discrepancies ({m.analysis.discrepancies.length}):</span>
 											</div>
 											<div className="space-y-1">
 												{m.analysis.discrepancies.map((d, idx) => (
 													<div
 														key={idx}
-														className="flex items-start gap-1.5 text-[11px] bg-black/40 p-2 rounded-lg border border-white/5"
+														className="flex items-start gap-1.5 text-[11px] bg-muted/40 dark:bg-black/40 p-2 rounded-lg border border-border dark:border-white/5"
 													>
-														<span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+														<span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30">
 															{d.action || 'fix'}
 														</span>
 														<div>
-															<strong className="text-white capitalize">{d.feature}:</strong>{' '}
+															<strong className="text-foreground dark:text-white capitalize">{d.feature}:</strong>{' '}
 															<span className="text-muted-foreground">{d.issue}</span>
 														</div>
 													</div>
@@ -1046,11 +1046,11 @@ export function PromptAssistantWidget({
 
 									{/* Suggested CAD Prompt Card */}
 									{m.suggested_prompt && (
-										<div className="mt-3 pt-2.5 border-t border-cyan-500/30">
-											<div className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-400 mb-1.5 flex items-center justify-between">
+										<div className="mt-3 pt-2.5 border-t border-primary/20 dark:border-cyan-500/30">
+											<div className="text-[10px] font-extrabold uppercase tracking-wider text-primary dark:text-cyan-400 mb-1.5 flex items-center justify-between">
 												<span>🎯 Corrected CAD Prompt</span>
 											</div>
-											<div className="p-2.5 rounded-xl bg-black/60 border border-cyan-500/30 text-cyan-100 font-mono text-[11px] leading-relaxed break-words selection:bg-cyan-500 selection:text-black shadow-inner">
+											<div className="p-2.5 rounded-xl bg-slate-900 text-slate-100 dark:bg-black/60 dark:text-cyan-100 font-mono text-[11px] leading-relaxed break-words border border-border dark:border-cyan-500/30 shadow-inner">
 												{m.suggested_prompt}
 											</div>
 
@@ -1059,7 +1059,7 @@ export function PromptAssistantWidget({
 												<button
 													type="button"
 													onClick={() => handleApply(m.id, m.suggested_prompt!)}
-													className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-black font-extrabold text-[11px] tracking-wide transition-all shadow-[0_0_15px_rgba(34,211,238,0.3)] cursor-pointer"
+													className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground dark:bg-gradient-to-r dark:from-cyan-400 dark:to-blue-500 dark:text-black font-extrabold text-[11px] tracking-wide transition-all shadow-sm cursor-pointer"
 												>
 													{appliedId === m.id ? (
 														<>
@@ -1077,11 +1077,11 @@ export function PromptAssistantWidget({
 												<button
 													type="button"
 													onClick={() => handleCopy(m.id, m.suggested_prompt!)}
-													className="flex items-center gap-1 py-2 px-3 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] text-muted-foreground hover:text-white text-[11px] transition-colors cursor-pointer"
+													className="flex items-center gap-1 py-2 px-3 rounded-xl border border-border dark:border-white/10 bg-muted hover:bg-accent text-foreground dark:text-muted-foreground dark:hover:text-white text-[11px] transition-colors cursor-pointer"
 													title="Copy prompt"
 												>
 													{copiedId === m.id ? (
-														<Check className="size-3.5 text-emerald-400" />
+														<Check className="size-3.5 text-emerald-500" />
 													) : (
 														<Copy className="size-3.5" />
 													)}
@@ -1090,7 +1090,7 @@ export function PromptAssistantWidget({
 										</div>
 									)}
 								</div>
-								<span className="text-[9px] text-muted-foreground/50 px-1 mt-1 font-mono">
+								<span className="text-[9px] text-muted-foreground px-1 mt-1 font-mono">
 									{new Date(m.timestamp).toLocaleTimeString([], {
 										hour: '2-digit',
 										minute: '2-digit',
@@ -1100,8 +1100,8 @@ export function PromptAssistantWidget({
 						))}
 
 						{isLoading && (
-							<div className="flex items-center gap-2.5 p-3 rounded-xl bg-cyan-500/[0.05] border border-cyan-500/20 text-cyan-300 text-xs animate-pulse">
-								<RefreshCw className="size-3.5 animate-spin text-cyan-400" />
+							<div className="flex items-center gap-2.5 p-3 rounded-xl bg-primary/10 dark:bg-cyan-500/[0.05] border border-primary/20 dark:border-cyan-500/20 text-primary dark:text-cyan-300 text-xs animate-pulse">
+								<RefreshCw className="size-3.5 animate-spin" />
 								<span>Analyzing blueprint vs 3D model geometry...</span>
 							</div>
 						)}
@@ -1109,12 +1109,12 @@ export function PromptAssistantWidget({
 					</div>
 
 					{/* Quick Suggestions Strip */}
-					<div className="px-3.5 py-2 border-t border-white/[0.06] bg-black/40 flex gap-1.5 overflow-x-auto no-scrollbar">
+					<div className="px-3.5 py-2 border-t border-border dark:border-white/[0.06] bg-muted/40 dark:bg-black/40 flex gap-1.5 overflow-x-auto no-scrollbar">
 						<button
 							type="button"
 							disabled={isLoading}
 							onClick={() => handleSendMessage('Compare the blueprint specification with the 3D model renders and find all missing features.')}
-							className="shrink-0 text-[10.5px] font-medium px-3 py-1 rounded-full border border-cyan-500/30 hover:border-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 transition-all cursor-pointer shadow-sm"
+							className="shrink-0 text-[10.5px] font-medium px-3 py-1 rounded-full border border-primary/25 hover:border-primary bg-primary/10 hover:bg-primary/20 text-primary dark:border-cyan-500/30 dark:hover:border-cyan-400 dark:bg-cyan-500/10 dark:text-cyan-300 transition-all cursor-pointer shadow-sm"
 						>
 							Compare Full Model
 						</button>
@@ -1122,14 +1122,14 @@ export function PromptAssistantWidget({
 							type="button"
 							disabled={isLoading}
 							onClick={() => handleSendMessage('The mounting holes, boss, and keyways are missing or misaligned.')}
-							className="shrink-0 text-[10.5px] font-medium px-3 py-1 rounded-full border border-white/10 hover:border-white/20 bg-white/[0.03] hover:bg-white/[0.07] text-muted-foreground hover:text-white transition-all cursor-pointer"
+							className="shrink-0 text-[10.5px] font-medium px-3 py-1 rounded-full border border-border hover:border-primary/40 bg-card hover:bg-muted text-muted-foreground hover:text-foreground dark:border-white/10 dark:hover:border-white/20 dark:bg-white/[0.03] dark:text-muted-foreground dark:hover:text-white transition-all cursor-pointer"
 						>
 							Check Holes & Keyway
 						</button>
 					</div>
 
 					{/* Input Footer */}
-					<div className="p-3 border-t border-white/[0.08] bg-[#090d16] flex items-center gap-2">
+					<div className="p-3 border-t border-border dark:border-white/[0.08] bg-card dark:bg-[#090d16] flex items-center gap-2">
 						<div className="flex-1 relative flex items-center">
 							<input
 								type="text"
@@ -1143,14 +1143,14 @@ export function PromptAssistantWidget({
 								}}
 								placeholder="Describe missing parts or ask for a fix..."
 								disabled={isLoading}
-								className="w-full bg-white/[0.04] border border-white/10 focus:border-cyan-400/70 focus:bg-white/[0.06] rounded-xl px-3.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none transition-all pr-8"
+								className="w-full bg-background border border-border focus:border-primary rounded-xl px-3.5 py-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none transition-all pr-8"
 							/>
 						</div>
 						<button
 							type="button"
 							onClick={() => handleSendMessage()}
 							disabled={isLoading || (!inputMessage.trim() && !blueprintUrl && capturedSnapshots.length === 0)}
-							className="size-9 rounded-xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-30 text-black flex items-center justify-center transition-all shadow-[0_0_15px_rgba(34,211,238,0.35)] shrink-0 cursor-pointer font-bold"
+							className="size-9 rounded-xl bg-primary hover:bg-primary/90 disabled:opacity-30 text-primary-foreground dark:bg-cyan-400 dark:hover:bg-cyan-300 dark:text-black flex items-center justify-center transition-all shadow-sm shrink-0 cursor-pointer font-bold"
 						>
 							<Send className="size-4" />
 						</button>

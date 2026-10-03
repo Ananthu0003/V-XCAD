@@ -112,21 +112,43 @@ export async function GET(
 		);
 	}
 
-	const fullPath = join(OUTPUTS_DIR, filePath);
-
+	let data: Buffer;
 	try {
-		const data = await readFile(fullPath);
-		const ext = extname(filePath).toLowerCase();
-		const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
-		return new Response(data, {
-			status: 200,
-			headers: {
-				'Content-Type': contentType,
-				'Cache-Control': 'private, no-store',
-			},
-		});
+		data = await readFile(join(OUTPUTS_DIR, filePath));
 	} catch {
-		return NextResponse.json({ error: { message: 'File not found.' } }, { status: 404 });
+		try {
+			// Host-side local development fallback (when running directly on host outside Docker)
+			const devPaths = [
+				join(process.cwd(), '../ai-engine/outputs', filePath),
+				join(process.cwd(), 'outputs', filePath),
+				join(process.cwd(), '../outputs', filePath),
+			];
+			let foundData: Buffer | null = null;
+			for (const devPath of devPaths) {
+				try {
+					foundData = await readFile(devPath);
+					break;
+				} catch {
+					// continue
+				}
+			}
+			if (!foundData) {
+				return NextResponse.json({ error: { message: 'File not found.' } }, { status: 404 });
+			}
+			data = foundData;
+		} catch {
+			return NextResponse.json({ error: { message: 'File not found.' } }, { status: 404 });
+		}
 	}
+
+	const ext = extname(filePath).toLowerCase();
+	const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
+	return new Response(new Uint8Array(data), {
+		status: 200,
+		headers: {
+			'Content-Type': contentType,
+			'Cache-Control': 'private, no-store',
+		},
+	});
 }

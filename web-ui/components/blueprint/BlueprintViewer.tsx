@@ -255,9 +255,9 @@ export function BlueprintViewer({
 			{/* Top Floating Control Bar */}
 			<div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between pointer-events-auto gap-2">
 				{/* Active Target Banner */}
-				<div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900/90 backdrop-blur-md border border-blue-500/30 shadow-lg">
-					<div className={`size-2 rounded-full ${customSelection ? 'bg-cyan-400' : 'bg-blue-500'} animate-pulse shadow-[0_0_8px_rgba(6,182,212,0.8)]`} />
-					<span className="text-[10px] font-mono font-bold uppercase tracking-wider text-blue-400">
+				<div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card/90 dark:bg-zinc-900/90 backdrop-blur-md border border-primary/30 shadow-md">
+					<div className={`size-2 rounded-full ${customSelection ? 'bg-cyan-500' : 'bg-primary'} animate-pulse shadow-[0_0_8px_rgba(6,182,212,0.8)]`} />
+					<span className="text-[10px] font-mono font-bold uppercase tracking-wider text-primary">
 						Blueprint Inspector
 					</span>
 					{targetPortion && (
@@ -271,7 +271,7 @@ export function BlueprintViewer({
 				</div>
 
 				{/* Tool Mode Switch (Select / Crop vs Pan) & Zoom Controls */}
-				<div className="flex items-center gap-1 px-1.5 py-1 rounded-lg bg-zinc-900/90 backdrop-blur-md border border-border/60 shadow-lg">
+				<div className="flex items-center gap-1 px-1.5 py-1 rounded-lg bg-card/90 dark:bg-zinc-900/90 backdrop-blur-md border border-border shadow-md">
 					{/* Free Select Tool Button */}
 					<button
 						type="button"
@@ -596,8 +596,15 @@ export function BlueprintViewer({
 							className="hidden"
 							onChange={(e) => {
 								const file = e.target.files?.[0];
-								if (file && onAttachBlueprint) {
-									onAttachBlueprint(file);
+								if (file) {
+									if (file.size > 10 * 1024 * 1024) {
+										alert('File size exceeds the 10MB limit. Please select a smaller blueprint file.');
+										e.target.value = '';
+										return;
+									}
+									if (onAttachBlueprint) {
+										onAttachBlueprint(file);
+									}
 								}
 							}}
 						/>
@@ -615,18 +622,18 @@ export function BlueprintViewer({
 			</div>
 
 			{/* Bottom Targeted Feature Info Footer */}
-			<div className="p-2.5 bg-zinc-900/95 border-t border-border/80 flex items-center justify-between text-xs z-30 gap-2">
+			<div className="p-2.5 bg-card/95 dark:bg-zinc-900/95 border-t border-border flex items-center justify-between text-xs z-30 gap-2">
 				<div className="flex items-center gap-2 min-w-0">
-					<div className={`size-6 rounded ${customSelection ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-blue-500/10 border-blue-500/20 text-blue-400'} border flex items-center justify-center shrink-0`}>
+					<div className={`size-6 rounded ${customSelection ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-600 dark:text-cyan-400' : 'bg-primary/10 border-primary/20 text-primary'} border flex items-center justify-center shrink-0`}>
 						{customSelection ? <Crosshair className="size-3" /> : <Target className="size-3" />}
 					</div>
 					<div className="min-w-0">
 						<div className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
 							<span>Selected Target:</span>
 							{customSelection ? (
-								<span className="text-cyan-400 font-bold">Custom Free Selection</span>
+								<span className="text-cyan-600 dark:text-cyan-400 font-bold">Custom Free Selection</span>
 							) : (
-								activeHotspot && <span className="text-blue-400 font-bold">{activeHotspot.category}</span>
+								activeHotspot && <span className="text-primary font-bold">{activeHotspot.category}</span>
 							)}
 						</div>
 						<div className="text-[11px] font-bold text-foreground truncate">
@@ -640,7 +647,7 @@ export function BlueprintViewer({
 						<button
 							type="button"
 							onClick={handleClearCustomSelection}
-							className="px-2 py-0.5 rounded text-[10px] font-semibold text-zinc-400 hover:text-white bg-zinc-800/80 hover:bg-zinc-700 transition-colors border border-border"
+							className="px-2 py-0.5 rounded text-[10px] font-semibold text-muted-foreground hover:text-foreground bg-muted hover:bg-accent transition-colors border border-border"
 						>
 							Clear Target
 						</button>

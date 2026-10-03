@@ -6,8 +6,8 @@ import Link from 'next/link';
 
 export function Header() {
   return (
-    <header className="h-14 border-b px-6 flex items-center justify-between bg-card text-card-foreground">
-      <div className="font-semibold text-lg">CAM Tool Manager</div>
+    <header className="h-14 border-b border-border px-6 flex items-center justify-between bg-card/80 backdrop-blur-xl bg-gradient-panel sticky top-0 z-40">
+      <div className="font-semibold text-lg text-foreground">CAM Tool Manager</div>
       <div>
         <Link href="#" className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}>
           <UserCircle className="h-5 w-5" />
