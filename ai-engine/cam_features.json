@@ -1,0 +1,3114 @@
+{
+  "features": [
+    {
+      "id": "feat_f9b39818",
+      "type": "hole",
+      "subtype": "through_hole",
+      "name": "Through Hole",
+      "face_ids": [
+        "face_7"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_7",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        0.0,
+        0.0,
+        -59.005
+      ],
+      "center": [
+        0.0,
+        0.0,
+        -59.005
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions": {
+        "diameter": 26.0,
+        "depth": 73.005
+      },
+      "confidence": 0.95,
+      "warnings": [],
+      "area": 5232.517047702546,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "drill_bit",
+      "recommendedOperation": "drilling",
+      "geometry": {
+        "status": "ok",
+        "center": [
+          0.0,
+          0.0,
+          -59.005
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "radius": 13.0,
+        "depth": 73.005,
+        "top_z": 59.005,
+        "bottom_z": -14.0
+      }
+    },
+    {
+      "id": "feat_da01e8c9",
+      "type": "hole",
+      "subtype": "through_hole",
+      "name": "Through Hole",
+      "face_ids": [
+        "face_18"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_18",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        -0.0,
+        -25.0,
+        6.01
+      ],
+      "center": [
+        -0.0,
+        -25.0,
+        6.01
+      ],
+      "axis": [
+        0.0,
+        -0.0,
+        -1.0
+      ],
+      "dimensions": {
+        "diameter": 7.0,
+        "depth": 5.0
+      },
+      "confidence": 0.95,
+      "warnings": [],
+      "area": 109.95574287564999,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "drill_bit",
+      "recommendedOperation": "drilling",
+      "geometry": {
+        "status": "ok",
+        "center": [
+          -0.0,
+          -25.0,
+          6.01
+        ],
+        "axis": [
+          0.0,
+          -0.0,
+          -1.0
+        ],
+        "radius": 3.5,
+        "depth": 5.0,
+        "top_z": 6.0,
+        "bottom_z": 1.0
+      }
+    },
+    {
+      "id": "feat_1582e37d",
+      "type": "hole",
+      "subtype": "through_hole",
+      "name": "Through Hole",
+      "face_ids": [
+        "face_19"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_19",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        -25.0,
+        0.0,
+        6.01
+      ],
+      "center": [
+        -25.0,
+        0.0,
+        6.01
+      ],
+      "axis": [
+        -0.0,
+        0.0,
+        -1.0
+      ],
+      "dimensions": {
+        "diameter": 7.0,
+        "depth": 5.0
+      },
+      "confidence": 0.95,
+      "warnings": [],
+      "area": 109.95574287564999,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "drill_bit",
+      "recommendedOperation": "drilling",
+      "geometry": {
+        "status": "ok",
+        "center": [
+          -25.0,
+          0.0,
+          6.01
+        ],
+        "axis": [
+          -0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 3.5,
+        "depth": 5.0,
+        "top_z": 6.0,
+        "bottom_z": 1.0
+      }
+    },
+    {
+      "id": "feat_fc1a8a08",
+      "type": "hole",
+      "subtype": "through_hole",
+      "name": "Through Hole",
+      "face_ids": [
+        "face_20"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_20",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        0.0,
+        25.0,
+        6.01
+      ],
+      "center": [
+        0.0,
+        25.0,
+        6.01
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "dimensions": {
+        "diameter": 7.0,
+        "depth": 5.0
+      },
+      "confidence": 0.95,
+      "warnings": [],
+      "area": 109.95574287564999,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "drill_bit",
+      "recommendedOperation": "drilling",
+      "geometry": {
+        "status": "ok",
+        "center": [
+          0.0,
+          25.0,
+          6.01
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 3.5,
+        "depth": 5.0,
+        "top_z": 6.0,
+        "bottom_z": 1.0
+      }
+    },
+    {
+      "id": "feat_6204156b",
+      "type": "hole",
+      "subtype": "through_hole",
+      "name": "Through Hole",
+      "face_ids": [
+        "face_21"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_21",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        -0.0,
+        -25.0,
+        1.0
+      ],
+      "center": [
+        -0.0,
+        -25.0,
+        1.0
+      ],
+      "axis": [
+        0.0,
+        -0.0,
+        -1.0
+      ],
+      "dimensions": {
+        "diameter": 13.0,
+        "depth": 1.0
+      },
+      "confidence": 0.95,
+      "warnings": [],
+      "area": 40.84070449666999,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "drill_bit",
+      "recommendedOperation": "drilling",
+      "geometry": {
+        "status": "ok",
+        "center": [
+          -0.0,
+          -25.0,
+          1.0
+        ],
+        "axis": [
+          0.0,
+          -0.0,
+          -1.0
+        ],
+        "radius": 6.5,
+        "depth": 1.0,
+        "top_z": 1.0,
+        "bottom_z": 0.0
+      }
+    },
+    {
+      "id": "feat_0b3b7fec",
+      "type": "hole",
+      "subtype": "through_hole",
+      "name": "Through Hole",
+      "face_ids": [
+        "face_22"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_22",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        -25.0,
+        0.0,
+        1.0
+      ],
+      "center": [
+        -25.0,
+        0.0,
+        1.0
+      ],
+      "axis": [
+        -0.0,
+        0.0,
+        -1.0
+      ],
+      "dimensions": {
+        "diameter": 13.0,
+        "depth": 1.0
+      },
+      "confidence": 0.95,
+      "warnings": [],
+      "area": 40.84070449666999,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "drill_bit",
+      "recommendedOperation": "drilling",
+      "geometry": {
+        "status": "ok",
+        "center": [
+          -25.0,
+          0.0,
+          1.0
+        ],
+        "axis": [
+          -0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 6.5,
+        "depth": 1.0,
+        "top_z": 1.0,
+        "bottom_z": 0.0
+      }
+    },
+    {
+      "id": "feat_33286f51",
+      "type": "hole",
+      "subtype": "through_hole",
+      "name": "Through Hole",
+      "face_ids": [
+        "face_23"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_23",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        0.0,
+        25.0,
+        1.0
+      ],
+      "center": [
+        0.0,
+        25.0,
+        1.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "dimensions": {
+        "diameter": 13.0,
+        "depth": 1.0
+      },
+      "confidence": 0.95,
+      "warnings": [],
+      "area": 40.84070449666999,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "drill_bit",
+      "recommendedOperation": "drilling",
+      "geometry": {
+        "status": "ok",
+        "center": [
+          0.0,
+          25.0,
+          1.0
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 6.5,
+        "depth": 1.0,
+        "top_z": 1.0,
+        "bottom_z": 0.0
+      }
+    },
+    {
+      "id": "feat_02061a1d",
+      "type": "hole",
+      "subtype": "through_hole",
+      "name": "Through Hole",
+      "face_ids": [
+        "face_28"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_28",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        25.0,
+        0.0,
+        6.01
+      ],
+      "center": [
+        25.0,
+        0.0,
+        6.01
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "dimensions": {
+        "diameter": 7.0,
+        "depth": 5.01
+      },
+      "confidence": 0.95,
+      "warnings": [],
+      "area": 110.17565436138678,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "drill_bit",
+      "recommendedOperation": "drilling",
+      "geometry": {
+        "status": "ok",
+        "center": [
+          25.0,
+          0.0,
+          6.01
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 3.5,
+        "depth": 5.01,
+        "top_z": -1.0,
+        "bottom_z": -6.01
+      }
+    },
+    {
+      "id": "feat_cf3ae12a",
+      "type": "hole",
+      "subtype": "through_hole",
+      "name": "Through Hole",
+      "face_ids": [
+        "face_31"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_31",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        25.0,
+        0.0,
+        1.0
+      ],
+      "center": [
+        25.0,
+        0.0,
+        1.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "dimensions": {
+        "diameter": 13.0,
+        "depth": 2.0
+      },
+      "confidence": 0.95,
+      "warnings": [],
+      "area": 81.68140899333999,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "drill_bit",
+      "recommendedOperation": "drilling",
+      "geometry": {
+        "status": "ok",
+        "center": [
+          25.0,
+          0.0,
+          1.0
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 6.5,
+        "depth": 2.0,
+        "top_z": 1.0,
+        "bottom_z": -1.0
+      }
+    },
+    {
+      "id": "feat_4e5ba84f",
+      "type": "hole",
+      "subtype": "through_hole",
+      "name": "Through Hole",
+      "face_ids": [
+        "face_33"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_33",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        25.0,
+        0.0,
+        6.01
+      ],
+      "center": [
+        25.0,
+        0.0,
+        6.01
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "dimensions": {
+        "diameter": 7.0,
+        "depth": 5.01
+      },
+      "confidence": 0.95,
+      "warnings": [],
+      "area": 110.17565436140129,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "drill_bit",
+      "recommendedOperation": "drilling",
+      "geometry": {
+        "status": "ok",
+        "center": [
+          25.0,
+          0.0,
+          6.01
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 3.5,
+        "depth": 5.01,
+        "top_z": 6.01,
+        "bottom_z": 1.0
+      }
+    },
+    {
+      "id": "feat_2530ea5f",
+      "type": "boss",
+      "subtype": "cylindrical_boss",
+      "name": "Cylindrical Boss",
+      "face_ids": [
+        "face_0"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_0",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        -1.0,
+        -0.0,
+        0.0
+      ],
+      "dimensions": {
+        "diameter": 28.0,
+        "height": 81.0
+      },
+      "confidence": 0.9,
+      "warnings": [],
+      "area": 5939.051978320627,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "flat_end_mill",
+      "recommendedOperation": "2d_contour",
+      "geometry": {
+        "status": "failed",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      }
+    },
+    {
+      "id": "feat_fbd06e3f",
+      "type": "boss",
+      "subtype": "cylindrical_boss",
+      "name": "Cylindrical Boss",
+      "face_ids": [
+        "face_2"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_2",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions": {
+        "diameter": 36.0,
+        "height": 112.0
+      },
+      "confidence": 0.9,
+      "warnings": [],
+      "area": 12512.114215670434,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "flat_end_mill",
+      "recommendedOperation": "2d_contour",
+      "geometry": {
+        "status": "failed",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      }
+    },
+    {
+      "id": "feat_436dbe61",
+      "type": "boss",
+      "subtype": "cylindrical_boss",
+      "name": "Cylindrical Boss",
+      "face_ids": [
+        "face_4"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_4",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions": {
+        "diameter": 65.0,
+        "height": 12.968266
+      },
+      "confidence": 0.9,
+      "warnings": [],
+      "area": 93.11767884428275,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "flat_end_mill",
+      "recommendedOperation": "2d_contour",
+      "geometry": {
+        "status": "failed",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      }
+    },
+    {
+      "id": "feat_47665ba5",
+      "type": "boss",
+      "subtype": "cylindrical_boss",
+      "name": "Cylindrical Boss",
+      "face_ids": [
+        "face_9"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_9",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions": {
+        "diameter": 65.0,
+        "height": 12.968266
+      },
+      "confidence": 0.9,
+      "warnings": [],
+      "area": 93.1176716815068,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "flat_end_mill",
+      "recommendedOperation": "2d_contour",
+      "geometry": {
+        "status": "failed",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      }
+    },
+    {
+      "id": "feat_11ccd9b0",
+      "type": "boss",
+      "subtype": "cylindrical_boss",
+      "name": "Cylindrical Boss",
+      "face_ids": [
+        "face_13"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": "face_13",
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "dimensions": {
+        "diameter": 65.0,
+        "height": 51.234754
+      },
+      "confidence": 0.9,
+      "warnings": [],
+      "area": 354.0897762265499,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "flat_end_mill",
+      "recommendedOperation": "2d_contour",
+      "geometry": {
+        "status": "failed",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      }
+    },
+    {
+      "id": "feat_fdad28de",
+      "type": "contour",
+      "subtype": "outer_profile",
+      "name": "Outer Profile",
+      "face_ids": [
+        "face_3",
+        "face_5",
+        "face_10",
+        "face_24",
+        "face_25",
+        "face_26",
+        "face_27",
+        "face_29",
+        "face_30",
+        "face_32",
+        "face_34"
+      ],
+      "edge_ids": [],
+      "cylinder_face_id": null,
+      "floor_face_id": null,
+      "wall_face_ids": [],
+      "parent_feature_id": null,
+      "child_feature_ids": [],
+      "location": [
+        24.25,
+        0.0,
+        52.0
+      ],
+      "center": [
+        24.25,
+        0.0,
+        52.0
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "dimensions": {
+        "width": 113.5,
+        "length": 78.61,
+        "depth": 132.0,
+        "z_top": 118.0,
+        "z_bottom": -14.0
+      },
+      "confidence": 1.0,
+      "warnings": [],
+      "area": 0.0,
+      "volume_estimate": 0.0,
+      "recommendedToolType": "flat_end_mill",
+      "recommendedOperation": "2d_contour",
+      "geometry": {
+        "status": "ok",
+        "profile_points": [
+          [
+            18.0,
+            0.0,
+            118.0
+          ],
+          [
+            17.88682,
+            2.015361,
+            118.0
+          ],
+          [
+            17.548702,
+            4.005377,
+            118.0
+          ],
+          [
+            16.9899,
+            5.945023,
+            118.0
+          ],
+          [
+            16.21744,
+            7.809907,
+            118.0
+          ],
+          [
+            15.241036,
+            9.576577,
+            118.0
+          ],
+          [
+            14.072967,
+            11.222816,
+            118.0
+          ],
+          [
+            12.727922,
+            12.727922,
+            118.0
+          ],
+          [
+            11.222816,
+            14.072967,
+            118.0
+          ],
+          [
+            9.576577,
+            15.241036,
+            118.0
+          ],
+          [
+            7.809907,
+            16.21744,
+            118.0
+          ],
+          [
+            5.945023,
+            16.9899,
+            118.0
+          ],
+          [
+            4.005377,
+            17.548702,
+            118.0
+          ],
+          [
+            2.015361,
+            17.88682,
+            118.0
+          ],
+          [
+            0.0,
+            18.0,
+            118.0
+          ],
+          [
+            -2.015361,
+            17.88682,
+            118.0
+          ],
+          [
+            -4.005377,
+            17.548702,
+            118.0
+          ],
+          [
+            -5.945023,
+            16.9899,
+            118.0
+          ],
+          [
+            -7.809907,
+            16.21744,
+            118.0
+          ],
+          [
+            -9.576577,
+            15.241036,
+            118.0
+          ],
+          [
+            -11.222816,
+            14.072967,
+            118.0
+          ],
+          [
+            -12.727922,
+            12.727922,
+            118.0
+          ],
+          [
+            -14.072967,
+            11.222816,
+            118.0
+          ],
+          [
+            -15.241036,
+            9.576577,
+            118.0
+          ],
+          [
+            -16.21744,
+            7.809907,
+            118.0
+          ],
+          [
+            -16.9899,
+            5.945023,
+            118.0
+          ],
+          [
+            -17.548702,
+            4.005377,
+            118.0
+          ],
+          [
+            -17.88682,
+            2.015361,
+            118.0
+          ],
+          [
+            -18.0,
+            0.0,
+            118.0
+          ],
+          [
+            -17.88682,
+            -2.015361,
+            118.0
+          ],
+          [
+            -17.548702,
+            -4.005377,
+            118.0
+          ],
+          [
+            -16.9899,
+            -5.945023,
+            118.0
+          ],
+          [
+            -16.21744,
+            -7.809907,
+            118.0
+          ],
+          [
+            -15.241036,
+            -9.576577,
+            118.0
+          ],
+          [
+            -14.072967,
+            -11.222816,
+            118.0
+          ],
+          [
+            -12.727922,
+            -12.727922,
+            118.0
+          ],
+          [
+            -11.222816,
+            -14.072967,
+            118.0
+          ],
+          [
+            -9.576577,
+            -15.241036,
+            118.0
+          ],
+          [
+            -7.809907,
+            -16.21744,
+            118.0
+          ],
+          [
+            -5.945023,
+            -16.9899,
+            118.0
+          ],
+          [
+            -4.005377,
+            -17.548702,
+            118.0
+          ],
+          [
+            -2.015361,
+            -17.88682,
+            118.0
+          ],
+          [
+            -0.0,
+            -18.0,
+            118.0
+          ],
+          [
+            2.015361,
+            -17.88682,
+            118.0
+          ],
+          [
+            4.005377,
+            -17.548702,
+            118.0
+          ],
+          [
+            5.945023,
+            -16.9899,
+            118.0
+          ],
+          [
+            7.809907,
+            -16.21744,
+            118.0
+          ],
+          [
+            9.576577,
+            -15.241036,
+            118.0
+          ],
+          [
+            11.222816,
+            -14.072967,
+            118.0
+          ],
+          [
+            12.727922,
+            -12.727922,
+            118.0
+          ],
+          [
+            14.072967,
+            -11.222816,
+            118.0
+          ],
+          [
+            15.241036,
+            -9.576577,
+            118.0
+          ],
+          [
+            16.21744,
+            -7.809907,
+            118.0
+          ],
+          [
+            16.9899,
+            -5.945023,
+            118.0
+          ],
+          [
+            17.548702,
+            -4.005377,
+            118.0
+          ],
+          [
+            17.88682,
+            -2.015361,
+            118.0
+          ],
+          [
+            18.0,
+            -0.0,
+            118.0
+          ]
+        ],
+        "z_top": 118.0,
+        "z_bottom": -14.0,
+        "plane_normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "plane_origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "point_count": 57
+      }
+    }
+  ],
+  "operations": [
+    {
+      "id": "op_auto_1782278690702_0",
+      "name": "Hole Operation",
+      "type": "drilling",
+      "toolId": "tool_1782278690702_0",
+      "feature_id": "feat_f9b39818",
+      "parameters": {
+        "feedRate": 716,
+        "plungeRate": 358,
+        "maxStepdown": 2,
+        "totalDepth": 73.005,
+        "spindleSpeed": 4775,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood"
+      },
+      "geometry": {
+        "status": "ok",
+        "center": [
+          0.0,
+          0.0,
+          -59.005
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "radius": 13.0,
+        "depth": 73.005,
+        "top_z": 59.005,
+        "bottom_z": -14.0
+      },
+      "tool": {
+        "id": "tool_1782278690702_0",
+        "dbId": "cmqgk1zl50079u6fovumnq6ju",
+        "name": "Carbide flat end_mill \u00d820mm DLC",
+        "number": "T2",
+        "type": "flat_end_mill",
+        "diameter": 20,
+        "flutes": 3,
+        "stickout": 60,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "toolpaths": [
+        {
+          "type": "rapid",
+          "start": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "end": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 2.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690702_0",
+          "operationId": "op_auto_1782278690702_0",
+          "featureId": "feat_f9b39818",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 59.005
+          },
+          "end": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": -14.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690702_0",
+          "operationId": "op_auto_1782278690702_0",
+          "featureId": "feat_f9b39818",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "retract",
+          "start": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": -14.0
+          },
+          "end": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690702_0",
+          "operationId": "op_auto_1782278690702_0",
+          "featureId": "feat_f9b39818",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        }
+      ]
+    },
+    {
+      "id": "op_auto_1782278690719_1",
+      "name": "Hole Operation",
+      "type": "drilling",
+      "toolId": "tool_1782278690719_1",
+      "feature_id": "feat_da01e8c9",
+      "parameters": {
+        "feedRate": 2387,
+        "plungeRate": 1194,
+        "maxStepdown": 2,
+        "totalDepth": 5,
+        "spindleSpeed": 15915,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood"
+      },
+      "geometry": {
+        "status": "ok",
+        "center": [
+          -0.0,
+          -25.0,
+          6.01
+        ],
+        "axis": [
+          0.0,
+          -0.0,
+          -1.0
+        ],
+        "radius": 3.5,
+        "depth": 5.0,
+        "top_z": 6.0,
+        "bottom_z": 1.0
+      },
+      "tool": {
+        "id": "tool_1782278690719_1",
+        "dbId": "cmqgk1zjm003tu6foadva7ckr",
+        "name": "Carbide flat end_mill \u00d86mm DLC",
+        "number": "T3",
+        "type": "flat_end_mill",
+        "diameter": 6,
+        "flutes": 3,
+        "stickout": 18,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "toolpaths": [
+        {
+          "type": "rapid",
+          "start": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 15.0
+          },
+          "end": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 2.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690719_1",
+          "featureId": "feat_da01e8c9",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 6.0
+          },
+          "end": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 1.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690719_1",
+          "featureId": "feat_da01e8c9",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "retract",
+          "start": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 1.0
+          },
+          "end": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 15.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690719_1",
+          "featureId": "feat_da01e8c9",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        }
+      ]
+    },
+    {
+      "id": "op_auto_1782278690735_2",
+      "name": "Hole Operation",
+      "type": "drilling",
+      "toolId": "tool_1782278690719_1",
+      "feature_id": "feat_1582e37d",
+      "parameters": {
+        "feedRate": 2387,
+        "plungeRate": 1194,
+        "maxStepdown": 2,
+        "totalDepth": 5,
+        "spindleSpeed": 15915,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood"
+      },
+      "geometry": {
+        "status": "ok",
+        "center": [
+          -25.0,
+          0.0,
+          6.01
+        ],
+        "axis": [
+          -0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 3.5,
+        "depth": 5.0,
+        "top_z": 6.0,
+        "bottom_z": 1.0
+      },
+      "tool": {
+        "id": "tool_1782278690719_1",
+        "dbId": "cmqgk1zjm003tu6foadva7ckr",
+        "name": "Carbide flat end_mill \u00d86mm DLC",
+        "number": "T3",
+        "type": "flat_end_mill",
+        "diameter": 6,
+        "flutes": 3,
+        "stickout": 18,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "toolpaths": [
+        {
+          "type": "rapid",
+          "start": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "end": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 2.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690735_2",
+          "featureId": "feat_1582e37d",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 6.0
+          },
+          "end": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690735_2",
+          "featureId": "feat_1582e37d",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "retract",
+          "start": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "end": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690735_2",
+          "featureId": "feat_1582e37d",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        }
+      ]
+    },
+    {
+      "id": "op_auto_1782278690754_3",
+      "name": "Hole Operation",
+      "type": "drilling",
+      "toolId": "tool_1782278690719_1",
+      "feature_id": "feat_fc1a8a08",
+      "parameters": {
+        "feedRate": 2387,
+        "plungeRate": 1194,
+        "maxStepdown": 2,
+        "totalDepth": 5,
+        "spindleSpeed": 15915,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood"
+      },
+      "geometry": {
+        "status": "ok",
+        "center": [
+          0.0,
+          25.0,
+          6.01
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 3.5,
+        "depth": 5.0,
+        "top_z": 6.0,
+        "bottom_z": 1.0
+      },
+      "tool": {
+        "id": "tool_1782278690719_1",
+        "dbId": "cmqgk1zjm003tu6foadva7ckr",
+        "name": "Carbide flat end_mill \u00d86mm DLC",
+        "number": "T3",
+        "type": "flat_end_mill",
+        "diameter": 6,
+        "flutes": 3,
+        "stickout": 18,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "toolpaths": [
+        {
+          "type": "rapid",
+          "start": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 15.0
+          },
+          "end": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 2.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690754_3",
+          "featureId": "feat_fc1a8a08",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 6.0
+          },
+          "end": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 1.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690754_3",
+          "featureId": "feat_fc1a8a08",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "retract",
+          "start": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 1.0
+          },
+          "end": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 15.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690754_3",
+          "featureId": "feat_fc1a8a08",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        }
+      ]
+    },
+    {
+      "id": "op_auto_1782278690771_4",
+      "name": "Hole Operation",
+      "type": "drilling",
+      "toolId": "tool_1782278690771_4",
+      "feature_id": "feat_6204156b",
+      "parameters": {
+        "feedRate": 1194,
+        "plungeRate": 597,
+        "maxStepdown": 2,
+        "totalDepth": 1,
+        "spindleSpeed": 7958,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood"
+      },
+      "geometry": {
+        "status": "ok",
+        "center": [
+          -0.0,
+          -25.0,
+          1.0
+        ],
+        "axis": [
+          0.0,
+          -0.0,
+          -1.0
+        ],
+        "radius": 6.5,
+        "depth": 1.0,
+        "top_z": 1.0,
+        "bottom_z": 0.0
+      },
+      "tool": {
+        "id": "tool_1782278690771_4",
+        "dbId": "cmqgk1zki005tu6fo4rgxwwnr",
+        "name": "Carbide flat end_mill \u00d812mm DLC",
+        "number": "T4",
+        "type": "flat_end_mill",
+        "diameter": 12,
+        "flutes": 3,
+        "stickout": 36,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "toolpaths": [
+        {
+          "type": "rapid",
+          "start": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 15.0
+          },
+          "end": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 2.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690771_4",
+          "featureId": "feat_6204156b",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 2.0
+          },
+          "end": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 1.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690771_4",
+          "featureId": "feat_6204156b",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 1.0
+          },
+          "end": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 0.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690771_4",
+          "featureId": "feat_6204156b",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "retract",
+          "start": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 0.0
+          },
+          "end": {
+            "x": -0.0,
+            "y": -25.0,
+            "z": 15.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690771_4",
+          "featureId": "feat_6204156b",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        }
+      ]
+    },
+    {
+      "id": "op_auto_1782278690785_5",
+      "name": "Hole Operation",
+      "type": "drilling",
+      "toolId": "tool_1782278690771_4",
+      "feature_id": "feat_0b3b7fec",
+      "parameters": {
+        "feedRate": 1194,
+        "plungeRate": 597,
+        "maxStepdown": 2,
+        "totalDepth": 1,
+        "spindleSpeed": 7958,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood"
+      },
+      "geometry": {
+        "status": "ok",
+        "center": [
+          -25.0,
+          0.0,
+          1.0
+        ],
+        "axis": [
+          -0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 6.5,
+        "depth": 1.0,
+        "top_z": 1.0,
+        "bottom_z": 0.0
+      },
+      "tool": {
+        "id": "tool_1782278690771_4",
+        "dbId": "cmqgk1zki005tu6fo4rgxwwnr",
+        "name": "Carbide flat end_mill \u00d812mm DLC",
+        "number": "T4",
+        "type": "flat_end_mill",
+        "diameter": 12,
+        "flutes": 3,
+        "stickout": 36,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "toolpaths": [
+        {
+          "type": "rapid",
+          "start": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "end": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 2.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690785_5",
+          "featureId": "feat_0b3b7fec",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 2.0
+          },
+          "end": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690785_5",
+          "featureId": "feat_0b3b7fec",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "end": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690785_5",
+          "featureId": "feat_0b3b7fec",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "retract",
+          "start": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "end": {
+            "x": -25.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690785_5",
+          "featureId": "feat_0b3b7fec",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        }
+      ]
+    },
+    {
+      "id": "op_auto_1782278690803_6",
+      "name": "Hole Operation",
+      "type": "drilling",
+      "toolId": "tool_1782278690771_4",
+      "feature_id": "feat_33286f51",
+      "parameters": {
+        "feedRate": 1194,
+        "plungeRate": 597,
+        "maxStepdown": 2,
+        "totalDepth": 1,
+        "spindleSpeed": 7958,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood"
+      },
+      "geometry": {
+        "status": "ok",
+        "center": [
+          0.0,
+          25.0,
+          1.0
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 6.5,
+        "depth": 1.0,
+        "top_z": 1.0,
+        "bottom_z": 0.0
+      },
+      "tool": {
+        "id": "tool_1782278690771_4",
+        "dbId": "cmqgk1zki005tu6fo4rgxwwnr",
+        "name": "Carbide flat end_mill \u00d812mm DLC",
+        "number": "T4",
+        "type": "flat_end_mill",
+        "diameter": 12,
+        "flutes": 3,
+        "stickout": 36,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "toolpaths": [
+        {
+          "type": "rapid",
+          "start": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 15.0
+          },
+          "end": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 2.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690803_6",
+          "featureId": "feat_33286f51",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 2.0
+          },
+          "end": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 1.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690803_6",
+          "featureId": "feat_33286f51",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 1.0
+          },
+          "end": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 0.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690803_6",
+          "featureId": "feat_33286f51",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "retract",
+          "start": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 0.0
+          },
+          "end": {
+            "x": 0.0,
+            "y": 25.0,
+            "z": 15.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690803_6",
+          "featureId": "feat_33286f51",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        }
+      ]
+    },
+    {
+      "id": "op_auto_1782278690818_7",
+      "name": "Hole Operation",
+      "type": "drilling",
+      "toolId": "tool_1782278690719_1",
+      "feature_id": "feat_02061a1d",
+      "parameters": {
+        "feedRate": 2387,
+        "plungeRate": 1194,
+        "maxStepdown": 2,
+        "totalDepth": 5.01,
+        "spindleSpeed": 15915,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood"
+      },
+      "geometry": {
+        "status": "ok",
+        "center": [
+          25.0,
+          0.0,
+          6.01
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 3.5,
+        "depth": 5.01,
+        "top_z": -1.0,
+        "bottom_z": -6.01
+      },
+      "tool": {
+        "id": "tool_1782278690719_1",
+        "dbId": "cmqgk1zjm003tu6foadva7ckr",
+        "name": "Carbide flat end_mill \u00d86mm DLC",
+        "number": "T3",
+        "type": "flat_end_mill",
+        "diameter": 6,
+        "flutes": 3,
+        "stickout": 18,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "toolpaths": [
+        {
+          "type": "rapid",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 2.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690818_7",
+          "featureId": "feat_02061a1d",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 2.0
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": -1.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690818_7",
+          "featureId": "feat_02061a1d",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": -1.0
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": -6.01
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690818_7",
+          "featureId": "feat_02061a1d",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "retract",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": -6.01
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690818_7",
+          "featureId": "feat_02061a1d",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        }
+      ]
+    },
+    {
+      "id": "op_auto_1782278690834_8",
+      "name": "Hole Operation",
+      "type": "drilling",
+      "toolId": "tool_1782278690771_4",
+      "feature_id": "feat_cf3ae12a",
+      "parameters": {
+        "feedRate": 1194,
+        "plungeRate": 597,
+        "maxStepdown": 2,
+        "totalDepth": 2,
+        "spindleSpeed": 7958,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood"
+      },
+      "geometry": {
+        "status": "ok",
+        "center": [
+          25.0,
+          0.0,
+          1.0
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 6.5,
+        "depth": 2.0,
+        "top_z": 1.0,
+        "bottom_z": -1.0
+      },
+      "tool": {
+        "id": "tool_1782278690771_4",
+        "dbId": "cmqgk1zki005tu6fo4rgxwwnr",
+        "name": "Carbide flat end_mill \u00d812mm DLC",
+        "number": "T4",
+        "type": "flat_end_mill",
+        "diameter": 12,
+        "flutes": 3,
+        "stickout": 36,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "toolpaths": [
+        {
+          "type": "rapid",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 2.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690834_8",
+          "featureId": "feat_cf3ae12a",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 2.0
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690834_8",
+          "featureId": "feat_cf3ae12a",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": -1.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690834_8",
+          "featureId": "feat_cf3ae12a",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "retract",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": -1.0
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690771_4",
+          "operationId": "op_auto_1782278690834_8",
+          "featureId": "feat_cf3ae12a",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        }
+      ]
+    },
+    {
+      "id": "op_auto_1782278690851_9",
+      "name": "Hole Operation",
+      "type": "drilling",
+      "toolId": "tool_1782278690719_1",
+      "feature_id": "feat_4e5ba84f",
+      "parameters": {
+        "feedRate": 2387,
+        "plungeRate": 1194,
+        "maxStepdown": 2,
+        "totalDepth": 5.01,
+        "spindleSpeed": 15915,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood"
+      },
+      "geometry": {
+        "status": "ok",
+        "center": [
+          25.0,
+          0.0,
+          6.01
+        ],
+        "axis": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "radius": 3.5,
+        "depth": 5.01,
+        "top_z": 6.01,
+        "bottom_z": 1.0
+      },
+      "tool": {
+        "id": "tool_1782278690719_1",
+        "dbId": "cmqgk1zjm003tu6foadva7ckr",
+        "name": "Carbide flat end_mill \u00d86mm DLC",
+        "number": "T3",
+        "type": "flat_end_mill",
+        "diameter": 6,
+        "flutes": 3,
+        "stickout": 18,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "toolpaths": [
+        {
+          "type": "rapid",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 2.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690851_9",
+          "featureId": "feat_4e5ba84f",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "plunge",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 6.01
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690851_9",
+          "featureId": "feat_4e5ba84f",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        },
+        {
+          "type": "retract",
+          "start": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "end": {
+            "x": 25.0,
+            "y": 0.0,
+            "z": 15.0
+          },
+          "coordinateMode": "mill_xyz",
+          "feedrate": null,
+          "spindle": null,
+          "toolId": "tool_1782278690719_1",
+          "operationId": "op_auto_1782278690851_9",
+          "featureId": "feat_4e5ba84f",
+          "setupId": "setup_1",
+          "center": null,
+          "radius": null,
+          "clockwise": null,
+          "plane": null,
+          "source": "strategy",
+          "gcodeLineStart": null,
+          "gcodeLineEnd": null
+        }
+      ]
+    },
+    {
+      "id": "op_auto_1782278690867_10",
+      "name": "Boss Operation",
+      "type": "2d_contour",
+      "toolId": "tool_1782278690702_0",
+      "feature_id": "feat_2530ea5f",
+      "parameters": {
+        "feedRate": 716,
+        "plungeRate": 358,
+        "maxStepdown": 2,
+        "totalDepth": 5,
+        "spindleSpeed": 4775,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      },
+      "geometry": {
+        "status": "failed",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      },
+      "tool": {
+        "id": "tool_1782278690702_0",
+        "dbId": "cmqgk1zl50079u6fovumnq6ju",
+        "name": "Carbide flat end_mill \u00d820mm DLC",
+        "number": "T2",
+        "type": "flat_end_mill",
+        "diameter": 20,
+        "flutes": 3,
+        "stickout": 60,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "status": "error"
+    },
+    {
+      "id": "op_auto_1782278690884_11",
+      "name": "Boss Operation",
+      "type": "2d_contour",
+      "toolId": "tool_1782278690702_0",
+      "feature_id": "feat_fbd06e3f",
+      "parameters": {
+        "feedRate": 716,
+        "plungeRate": 358,
+        "maxStepdown": 2,
+        "totalDepth": 5,
+        "spindleSpeed": 4775,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      },
+      "geometry": {
+        "status": "failed",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      },
+      "tool": {
+        "id": "tool_1782278690702_0",
+        "dbId": "cmqgk1zl50079u6fovumnq6ju",
+        "name": "Carbide flat end_mill \u00d820mm DLC",
+        "number": "T2",
+        "type": "flat_end_mill",
+        "diameter": 20,
+        "flutes": 3,
+        "stickout": 60,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "status": "error"
+    },
+    {
+      "id": "op_auto_1782278690901_12",
+      "name": "Boss Operation",
+      "type": "2d_contour",
+      "toolId": "tool_1782278690702_0",
+      "feature_id": "feat_436dbe61",
+      "parameters": {
+        "feedRate": 716,
+        "plungeRate": 358,
+        "maxStepdown": 2,
+        "totalDepth": 5,
+        "spindleSpeed": 4775,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      },
+      "geometry": {
+        "status": "failed",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      },
+      "tool": {
+        "id": "tool_1782278690702_0",
+        "dbId": "cmqgk1zl50079u6fovumnq6ju",
+        "name": "Carbide flat end_mill \u00d820mm DLC",
+        "number": "T2",
+        "type": "flat_end_mill",
+        "diameter": 20,
+        "flutes": 3,
+        "stickout": 60,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "status": "error"
+    },
+    {
+      "id": "op_auto_1782278690916_13",
+      "name": "Boss Operation",
+      "type": "2d_contour",
+      "toolId": "tool_1782278690702_0",
+      "feature_id": "feat_47665ba5",
+      "parameters": {
+        "feedRate": 716,
+        "plungeRate": 358,
+        "maxStepdown": 2,
+        "totalDepth": 5,
+        "spindleSpeed": 4775,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      },
+      "geometry": {
+        "status": "failed",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      },
+      "tool": {
+        "id": "tool_1782278690702_0",
+        "dbId": "cmqgk1zl50079u6fovumnq6ju",
+        "name": "Carbide flat end_mill \u00d820mm DLC",
+        "number": "T2",
+        "type": "flat_end_mill",
+        "diameter": 20,
+        "flutes": 3,
+        "stickout": 60,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "status": "error"
+    },
+    {
+      "id": "op_auto_1782278690935_14",
+      "name": "Boss Operation",
+      "type": "2d_contour",
+      "toolId": "tool_1782278690702_0",
+      "feature_id": "feat_11ccd9b0",
+      "parameters": {
+        "feedRate": 716,
+        "plungeRate": 358,
+        "maxStepdown": 2,
+        "totalDepth": 5,
+        "spindleSpeed": 4775,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      },
+      "geometry": {
+        "status": "failed",
+        "error": "No containing face found. Boss operations must not generate toolpaths directly from the boss boundary."
+      },
+      "tool": {
+        "id": "tool_1782278690702_0",
+        "dbId": "cmqgk1zl50079u6fovumnq6ju",
+        "name": "Carbide flat end_mill \u00d820mm DLC",
+        "number": "T2",
+        "type": "flat_end_mill",
+        "diameter": 20,
+        "flutes": 3,
+        "stickout": 60,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "status": "error"
+    },
+    {
+      "id": "op_auto_1782278690951_15",
+      "name": "Contour Operation",
+      "type": "2d_contour",
+      "toolId": "tool_1782278690951_15",
+      "feature_id": "feat_fdad28de",
+      "parameters": {
+        "feedRate": 9549,
+        "plungeRate": 4775,
+        "maxStepdown": 2,
+        "totalDepth": 132,
+        "spindleSpeed": 95493,
+        "stepoverPercentage": 40,
+        "tolerance": 0.01,
+        "coolant": "flood",
+        "diagnostics": {
+          "region_area": 1015.74,
+          "toolpath_area": 1046.23
+        },
+        "error": "Segment count 1254 exceeds limit 1000 for 2d_contour"
+      },
+      "geometry": {
+        "status": "ok",
+        "profile_points": [
+          [
+            18.0,
+            0.0,
+            118.0
+          ],
+          [
+            17.88682,
+            2.015361,
+            118.0
+          ],
+          [
+            17.548702,
+            4.005377,
+            118.0
+          ],
+          [
+            16.9899,
+            5.945023,
+            118.0
+          ],
+          [
+            16.21744,
+            7.809907,
+            118.0
+          ],
+          [
+            15.241036,
+            9.576577,
+            118.0
+          ],
+          [
+            14.072967,
+            11.222816,
+            118.0
+          ],
+          [
+            12.727922,
+            12.727922,
+            118.0
+          ],
+          [
+            11.222816,
+            14.072967,
+            118.0
+          ],
+          [
+            9.576577,
+            15.241036,
+            118.0
+          ],
+          [
+            7.809907,
+            16.21744,
+            118.0
+          ],
+          [
+            5.945023,
+            16.9899,
+            118.0
+          ],
+          [
+            4.005377,
+            17.548702,
+            118.0
+          ],
+          [
+            2.015361,
+            17.88682,
+            118.0
+          ],
+          [
+            0.0,
+            18.0,
+            118.0
+          ],
+          [
+            -2.015361,
+            17.88682,
+            118.0
+          ],
+          [
+            -4.005377,
+            17.548702,
+            118.0
+          ],
+          [
+            -5.945023,
+            16.9899,
+            118.0
+          ],
+          [
+            -7.809907,
+            16.21744,
+            118.0
+          ],
+          [
+            -9.576577,
+            15.241036,
+            118.0
+          ],
+          [
+            -11.222816,
+            14.072967,
+            118.0
+          ],
+          [
+            -12.727922,
+            12.727922,
+            118.0
+          ],
+          [
+            -14.072967,
+            11.222816,
+            118.0
+          ],
+          [
+            -15.241036,
+            9.576577,
+            118.0
+          ],
+          [
+            -16.21744,
+            7.809907,
+            118.0
+          ],
+          [
+            -16.9899,
+            5.945023,
+            118.0
+          ],
+          [
+            -17.548702,
+            4.005377,
+            118.0
+          ],
+          [
+            -17.88682,
+            2.015361,
+            118.0
+          ],
+          [
+            -18.0,
+            0.0,
+            118.0
+          ],
+          [
+            -17.88682,
+            -2.015361,
+            118.0
+          ],
+          [
+            -17.548702,
+            -4.005377,
+            118.0
+          ],
+          [
+            -16.9899,
+            -5.945023,
+            118.0
+          ],
+          [
+            -16.21744,
+            -7.809907,
+            118.0
+          ],
+          [
+            -15.241036,
+            -9.576577,
+            118.0
+          ],
+          [
+            -14.072967,
+            -11.222816,
+            118.0
+          ],
+          [
+            -12.727922,
+            -12.727922,
+            118.0
+          ],
+          [
+            -11.222816,
+            -14.072967,
+            118.0
+          ],
+          [
+            -9.576577,
+            -15.241036,
+            118.0
+          ],
+          [
+            -7.809907,
+            -16.21744,
+            118.0
+          ],
+          [
+            -5.945023,
+            -16.9899,
+            118.0
+          ],
+          [
+            -4.005377,
+            -17.548702,
+            118.0
+          ],
+          [
+            -2.015361,
+            -17.88682,
+            118.0
+          ],
+          [
+            -0.0,
+            -18.0,
+            118.0
+          ],
+          [
+            2.015361,
+            -17.88682,
+            118.0
+          ],
+          [
+            4.005377,
+            -17.548702,
+            118.0
+          ],
+          [
+            5.945023,
+            -16.9899,
+            118.0
+          ],
+          [
+            7.809907,
+            -16.21744,
+            118.0
+          ],
+          [
+            9.576577,
+            -15.241036,
+            118.0
+          ],
+          [
+            11.222816,
+            -14.072967,
+            118.0
+          ],
+          [
+            12.727922,
+            -12.727922,
+            118.0
+          ],
+          [
+            14.072967,
+            -11.222816,
+            118.0
+          ],
+          [
+            15.241036,
+            -9.576577,
+            118.0
+          ],
+          [
+            16.21744,
+            -7.809907,
+            118.0
+          ],
+          [
+            16.9899,
+            -5.945023,
+            118.0
+          ],
+          [
+            17.548702,
+            -4.005377,
+            118.0
+          ],
+          [
+            17.88682,
+            -2.015361,
+            118.0
+          ],
+          [
+            18.0,
+            -0.0,
+            118.0
+          ]
+        ],
+        "z_top": 118.0,
+        "z_bottom": -14.0,
+        "plane_normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "plane_origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "point_count": 57
+      },
+      "tool": {
+        "id": "tool_1782278690951_15",
+        "dbId": "cmqgk1zi2000ru6fo7bm7vjt5",
+        "name": "Carbide flat end_mill \u00d81mm DLC",
+        "number": "T5",
+        "type": "flat_end_mill",
+        "diameter": 1,
+        "flutes": 2,
+        "stickout": 3,
+        "material": "CARBIDE",
+        "coating": "Diamond-Like Carbon (DLC)"
+      },
+      "status": "error"
+    }
+  ],
+  "validation": {
+    "status": "error",
+    "warnings": [],
+    "errors": [
+      "Geometry validation failed: Through Hole toolpath segments are disconnected by 57.005mm.",
+      "Geometry validation failed: Through Hole toolpath segments are disconnected by 4.000mm.",
+      "Geometry validation failed: Through Hole toolpath segments are disconnected by 4.000mm.",
+      "Geometry validation failed: Through Hole toolpath segments are disconnected by 4.000mm.",
+      "Geometry validation failed: Through Hole toolpath segments are disconnected by 4.010mm.",
+      "Toolpath validation failed: - Cylindrical Boss (feat_2530ea5f) operation error: No containing face found. Boss operations must not generate toolpaths directly from the boss boundary.",
+      "Toolpath validation failed: - Cylindrical Boss (feat_fbd06e3f) operation error: No containing face found. Boss operations must not generate toolpaths directly from the boss boundary.",
+      "Toolpath validation failed: - Cylindrical Boss (feat_436dbe61) operation error: No containing face found. Boss operations must not generate toolpaths directly from the boss boundary.",
+      "Toolpath validation failed: - Cylindrical Boss (feat_47665ba5) operation error: No containing face found. Boss operations must not generate toolpaths directly from the boss boundary.",
+      "Toolpath validation failed: - Cylindrical Boss (feat_11ccd9b0) operation error: No containing face found. Boss operations must not generate toolpaths directly from the boss boundary.",
+      "Toolpath validation failed: - Outer Profile (feat_fdad28de) operation error: Segment count 1254 exceeds limit 1000 for 2d_contour"
+    ]
+  },
+  "coordinate_validation": {
+    "status": "ok",
+    "warnings": [
+      "Missing model bounding box for validation"
+    ],
+    "errors": []
+  }
+}

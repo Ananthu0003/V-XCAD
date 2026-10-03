@@ -1,0 +1,533 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model CadSession {
+  id           String          @id @default(cuid())
+  prompt       String
+  fileName     String?
+  pythonScript String?
+  parameters   Json?
+  featureMap   Json?
+  annotations  Json?
+  stlUrl       String?
+  stepUrl      String?
+  isShared     Boolean         @default(false)
+  userId       String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  currentVersion Int             @default(1)
+  user         User?           @relation(fields: [userId], references: [id])
+  camSetups    CamSetup[]
+  simulations  SimulationRun[]
+  iterations   CadIteration[]
+}
+
+model CadIteration {
+  id           String      @id @default(cuid())
+  sessionId    String
+  version      Int
+  prompt       String?
+  source       String      @default("prompt")
+  pythonScript String
+  parameters   Json?
+  featureMap   Json?
+  annotations  Json?
+  stlUrl       String?
+  stepUrl      String?
+  dxfUrl       String?
+  createdAt    DateTime    @default(now())
+  session      CadSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, version])
+  @@index([sessionId])
+}
+
+model User {
+  id               String                @id @default(cuid())
+  email            String                @unique
+  createdAt        DateTime              @default(now())
+  name             String                @default("User")
+  password         String                @default("")
+  isAdmin          Boolean               @default(false)
+  tokenVersion     Int                   @default(0)
+  updatedAt        DateTime              @default(now()) @updatedAt
+  sessions         CadSession[]
+  passwordResets   PasswordResetRequest[]
+}
+
+model ToolMaterial {
+  id                              String           @id @default(cuid())
+  material_code                   String           @unique
+  material_name                   String
+  description                     String?
+  recommended_workpiece_materials String[]
+  max_surface_speed               Float
+  default_feed_multiplier         Float
+  cost_factor                     Float
+  is_active                       Boolean          @default(true)
+  createdAt                       DateTime         @default(now())
+  updatedAt                       DateTime         @updatedAt
+  cuttingData                     CuttingData[]
+  tools                           ToolDefinition[]
+}
+
+model ToolCoating {
+  id                       String           @id @default(cuid())
+  coating_code             String           @unique
+  coating_name             String
+  description              String?
+  recommended_materials    String[]
+  surface_speed_multiplier Float
+  wear_resistance_factor   Float
+  is_active                Boolean          @default(true)
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+  cuttingData              CuttingData[]
+  tools                    ToolDefinition[]
+}
+
+model ToolHolder {
+  id          String           @id @default(cuid())
+  holder_name String           @unique
+  holder_type String
+  description String?
+  max_rpm     Int
+  is_active   Boolean          @default(true)
+  tools       ToolDefinition[]
+}
+
+model ToolDefinition {
+  id           String       @id @default(cuid())
+  name         String
+  type         String
+  diameter     Float
+  flutes       Int
+  stickout     Float
+  manufacturer String?
+  material_id  String
+  coating_id   String?
+  holder_id    String?
+  is_active    Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  coating      ToolCoating? @relation(fields: [coating_id], references: [id])
+  holder       ToolHolder?  @relation(fields: [holder_id], references: [id])
+  material     ToolMaterial @relation(fields: [material_id], references: [id])
+}
+
+model CuttingData {
+  id                 String       @id @default(cuid())
+  tool_material_id   String
+  coating_id         String?
+  workpiece_material String
+  surface_speed      Float
+  feed_per_tooth     Float
+  plunge_multiplier  Float
+  rpm_formula        String?
+  feed_formula       String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  coating            ToolCoating? @relation(fields: [coating_id], references: [id])
+  tool_material      ToolMaterial @relation(fields: [tool_material_id], references: [id])
+
+  @@unique([tool_material_id, coating_id, workpiece_material])
+}
+
+model CamSetup {
+  id                    String          @id @default(cuid())
+  job_id                String
+  machine_id            String?
+  material_id           String?
+  stock_length          Float?
+  stock_width           Float?
+  stock_height          Float?
+  wcs                   String?
+  origin                String?
+  clearance_height      Float?
+  retract_height        Float?
+  feed_height           Float?
+  setupSchemaVersion    Int             @default(1)
+  machineType           String?
+  machineProfileId      String?
+  controllerId          String?
+  postProcessorId       String?
+  internalUnits         String          @default("mm")
+  displayUnits          String          @default("mm")
+  postOutputUnits       String          @default("mm")
+  modelHash             String?
+  setupHash             String?
+  validationStatus      String          @default("incomplete")
+  requiresSetupReview   Boolean         @default(true)
+  stockDefinition       Json?
+  originDefinition      Json?
+  workCoordinateSystem  Json?
+  orientation           Json?
+  modelToSetupTransform Json?
+  modelPlacement        Json?
+  safetyHeights         Json?
+  workholding           Json?
+  tolerances            Json?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  operations            CamOperation[]
+  session               CadSession      @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  tools                 CamTool[]
+  costEstimate          CostEstimate?
+  simulations           SimulationRun[]
+}
+
+model WorkpieceMaterial {
+  id            String   @id @default(cuid())
+  name          String
+  grade         String?
+  density_g_cm3 Float
+  cost_per_kg   Float
+  currency      String   @default("USD")
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model MachineProfile {
+  id          String   @id @default(cuid())
+  name        String
+  hourly_rate Float
+  currency    String   @default("USD")
+  setup_rate  Float?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CostEstimate {
+  id                        String   @id @default(cuid())
+  camSetupId                String   @unique
+  currency                  String   @default("USD")
+  materialCost              Float?
+  machiningCost             Float?
+  setupCost                 Float?
+  totalCost                 Float?
+  stockVolumeMm3            Float?
+  stockMassKg               Float?
+  partVolumeMm3             Float?
+  removedVolumeMm3          Float?
+  totalMachiningTimeSec     Float?
+  setupTimeSec              Float?
+  materialNameSnapshot      String?
+  materialGradeSnapshot     String?
+  materialDensitySnapshot   Float?
+  materialCostPerKgSnapshot Float?
+  machineNameSnapshot       String?
+  machineHourlyRateSnapshot Float?
+  machineSetupRateSnapshot  Float?
+  status                    String   @default("incomplete")
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+  camSetup                  CamSetup @relation(fields: [camSetupId], references: [id], onDelete: Cascade)
+}
+
+model CamTool {
+  id                     String            @id @default(cuid())
+  setup_id               String
+  tool_number            Int?
+  tool_name              String?
+  tool_type              String
+  diameter_mm            Float
+  length_mm              Float
+  flute_count            Int
+  tool_material          String?
+  coating                String?
+  holder_type            String?
+  h_offset               Float?
+  d_offset               Float?
+  length_offset_number   Int?
+  diameter_offset_number Int?
+  stickout_mm            Float?
+  material_compatibility String?
+  operations             CamOperation[]
+  setup                  CamSetup          @relation(fields: [setup_id], references: [id], onDelete: Cascade)
+  segments               ToolpathSegment[]
+}
+
+model CamOperation {
+  id              String            @id @default(cuid())
+  setup_id        String
+  feature_id      String?
+  tool_id         String
+  operation_type  String
+  operation_order Int
+  rpm             Int?
+  feed_rate       Float?
+  plunge_rate     Float?
+  stepdown        Float?
+  stepover        Float?
+  coolant_mode    String?
+  status          String?
+  blocked_reason  String?
+  setup           CamSetup          @relation(fields: [setup_id], references: [id], onDelete: Cascade)
+  tool            CamTool           @relation(fields: [tool_id], references: [id])
+  segments        ToolpathSegment[]
+}
+
+model ToolpathSegment {
+  id                 String        @id @default(cuid())
+  simulation_run_id  String
+  operation_id       String?
+  tool_id            String?
+  segment_index      Int
+  move_type          String
+  units              String        @default("mm")
+  feed_mode          String?
+  start_x            Float
+  start_y            Float
+  start_z            Float
+  start_i            Float         @default(0)
+  start_j            Float         @default(0)
+  start_k            Float         @default(-1)
+  end_x              Float
+  end_y              Float
+  end_z              Float
+  end_i              Float         @default(0)
+  end_j              Float         @default(0)
+  end_k              Float         @default(-1)
+  center_x           Float?
+  center_y           Float?
+  center_z           Float?
+  radius             Float?
+  feed_rate          Float?
+  rpm                Int?
+  length_mm          Float
+  estimated_time_sec Float
+  operation          CamOperation? @relation(fields: [operation_id], references: [id])
+  simulation_run     SimulationRun @relation(fields: [simulation_run_id], references: [id], onDelete: Cascade)
+  tool               CamTool?      @relation(fields: [tool_id], references: [id])
+}
+
+model SimulationRun {
+  id                  String            @id @default(cuid())
+  job_id              String
+  setup_id            String
+  total_runtime_sec   Float
+  total_distance_mm   Float
+  cutting_distance_mm Float
+  rapid_distance_mm   Float
+  status              String
+  validation_status   String?
+  validation_errors   Json?
+  validation_warnings Json?
+  created_at          DateTime          @default(now())
+  events              SimulationEvent[]
+  session             CadSession        @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  setup               CamSetup          @relation(fields: [setup_id], references: [id], onDelete: Cascade)
+  segments            ToolpathSegment[]
+}
+
+model SimulationEvent {
+  id                String        @id @default(cuid())
+  simulation_run_id String
+  event_type        String
+  time_sec          Float
+  operation_id      String?
+  tool_id           String?
+  message           String?
+  simulation_run    SimulationRun @relation(fields: [simulation_run_id], references: [id], onDelete: Cascade)
+}
+
+model Tool {
+  id            String             @id @default(uuid())
+  name          String             @unique
+  category      String
+  type          String
+  description   String?
+  manufacturer  String?
+  partNumber    String?
+  unit          String             @default("mm")
+  isActive      Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  assembly      ToolAssembly?
+  compatibility ToolCompatibility?
+  cuttingData   ToolCuttingData?
+  geometry      ToolGeometry?
+  offsets       ToolOffset?
+}
+
+model ToolGeometry {
+  id                String  @id @default(uuid())
+  toolId            String  @unique
+  diameter          Float
+  cuttingDiameter   Float?
+  cornerRadius      Float?
+  ballRadius        Float?
+  fluteLength       Float
+  cuttingLength     Float?
+  overallLength     Float
+  shankDiameter     Float?
+  neckDiameter      Float?
+  neckLength        Float?
+  fluteCount        Int?
+  helixAngle        Float?
+  taperAngle        Float?
+  pointAngle        Float?
+  includedAngle     Float?
+  cuttingWidth      Float?
+  insertCount       Int?
+  leadAngle         Float?
+  arborDiameter     Float?
+  profilePointsJson String?
+  tool              Tool    @relation(fields: [toolId], references: [id], onDelete: Cascade)
+}
+
+model ToolOffset {
+  id               String  @id @default(uuid())
+  toolId           String  @unique
+  lengthOffset     Int
+  diameterOffset   Int
+  headNumber       Int?
+  compensationType String?
+  tool             Tool    @relation(fields: [toolId], references: [id], onDelete: Cascade)
+}
+
+model Holder {
+  id           String         @id @default(uuid())
+  name         String         @unique
+  type         String
+  gaugeLength  Float
+  diameter     Float
+  shankSize    Float?
+  taperType    String?
+  manufacturer String?
+  description  String?
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  assemblies   ToolAssembly[]
+}
+
+model ToolAssembly {
+  id                  String  @id @default(uuid())
+  toolId              String  @unique
+  holderId            String?
+  stickoutLength      Float
+  totalLength         Float?
+  safeClearanceLength Float?
+  holder              Holder? @relation(fields: [holderId], references: [id])
+  tool                Tool    @relation(fields: [toolId], references: [id], onDelete: Cascade)
+}
+
+model ToolCuttingData {
+  id           String @id @default(uuid())
+  toolId       String @unique
+  spindleRpm   Int
+  feedRate     Float
+  plungeRate   Float
+  retractRate  Float
+  coolant      String
+  stepdown     Float?
+  stepover     Float?
+  chipLoad     Float?
+  surfaceSpeed Float?
+  feedPerTooth Float?
+  tool         Tool   @relation(fields: [toolId], references: [id], onDelete: Cascade)
+}
+
+model ToolCompatibility {
+  id                       String  @id @default(uuid())
+  toolId                   String  @unique
+  compatibleOperationsJson String?
+  compatibleMachinesJson   String?
+  compatibleMaterialsJson  String?
+  unsupportedReason        String?
+  tool                     Tool    @relation(fields: [toolId], references: [id], onDelete: Cascade)
+}
+
+model KnowledgeDocument {
+  id          String            @id @default(cuid())
+  filename    String
+  version     String            @default("1.0")
+  pageCount   Int
+  status      String            @default("processing")
+  failedPages Json?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  rules       EngineeringRule[]
+}
+
+model OntologyNode {
+  id          String            @id @default(cuid())
+  name        String            @unique
+  description String?
+  parentId    String?
+  rules       EngineeringRule[]
+  parent      OntologyNode?     @relation("OntologyHierarchy", fields: [parentId], references: [id])
+  children    OntologyNode[]    @relation("OntologyHierarchy")
+}
+
+model EngineeringRule {
+  id               String            @id @default(cuid())
+  rule_id          String            @unique
+  version          String            @default("1.0")
+  source_id        String
+  topic            String?
+  confidence       Float             @default(1.0)
+  status           String            @default("active")
+  reviewer         String?
+  ontology_node_id String?
+  concept          String?
+  description      String
+  input_signals    Json?
+  required_context Json?
+  validation_rules Json?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  ontology_node    OntologyNode?     @relation(fields: [ontology_node_id], references: [id])
+  source_document  KnowledgeDocument @relation(fields: [source_id], references: [id])
+}
+
+model PasswordResetRequest {
+  id           String   @id @default(cuid())
+  userId       String
+  passwordHash String
+  status       String   @default("pending")
+  rejectReason String?
+  createdAt    DateTime @default(now())
+  reviewedAt   DateTime?
+  reviewedBy   String?
+  expiresAt    DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // A user must be able to have unlimited historical requests (multiple approved,
+  // multiple rejected, over time) — only "at most one PENDING request per user" is an
+  // actual invariant. Prisma's schema language has no partial/filtered unique index
+  // (verified against the installed Prisma version: `@@unique(..., where: ...)` is not
+  // valid PSL), so `@@unique([userId, status])` previously over-constrained this to "at
+  // most one request per user PER STATUS EVER", which broke a user's second-ever
+  // approved (or rejected) request with a unique-constraint violation.
+  //
+  // The real invariant is enforced at the database level by a partial unique index
+  // created in scripts/db-bootstrap.js's grants phase (which already runs after every
+  // `prisma db push`, via the existing migrate command — no Docker/compose change
+  // needed): CREATE UNIQUE INDEX ... ON "PasswordResetRequest" ("userId") WHERE status
+  // = 'pending'. `db push` does not manage or drop indexes it does not declare (verified
+  // empirically), so that index survives every future push undisturbed.
+  @@index([status])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Attempt counters for abuse controls (lib/rateLimit.ts). One row per (rule, identity) key; the
+/// window is fixed and reset atomically by an upsert. Expired rows are purged opportunistically.
+model RateLimitBucket {
+  key         String   @id
+  count       Int
+  windowStart DateTime @default(now())
+
+  @@index([windowStart])
+}

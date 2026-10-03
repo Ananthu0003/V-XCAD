@@ -1,0 +1,122 @@
+export interface ModelMetadata {
+    id: string;
+    name: string;
+    vendor: 'google' | 'deepseek' | 'anthropic' | 'openai' | 'ollama' | 'openrouter';
+    tier: 'flash' | 'pro' | 'ultra';
+    maxTokens: number;
+    supportsThinking: boolean;
+    fallbackModelId?: string;
+    description: string;
+    badge: string;
+}
+
+export const MODEL_REGISTRY: ModelMetadata[] = [
+    {
+        id: 'gemini-3.8-flash',
+        name: 'Gemini 3.8 Flash',
+        vendor: 'google',
+        tier: 'flash',
+        maxTokens: 1000000,
+        supportsThinking: true,
+        fallbackModelId: 'gemini-3.5-flash-lite',
+        description: 'Google latest flagship hybrid reasoning model with dynamic thinking.',
+        badge: 'thinking',
+    },
+
+    {
+        id: 'gemini-3.7-flash',
+        name: 'Gemini 3.7 Flash',
+        vendor: 'google',
+        tier: 'flash',
+        maxTokens: 1000000,
+        supportsThinking: true,
+        fallbackModelId: 'gemini-3.5-flash-lite',
+        description: 'Google latest flagship hybrid reasoning model with dynamic thinking.',
+        badge: 'thinking',
+    },
+    {
+        id: 'gemini-3.5-flash-lite',
+        name: 'Gemini 3.5 Flash Lite',
+        vendor: 'google',
+        tier: 'flash',
+        maxTokens: 1000000,
+        supportsThinking: true,
+        fallbackModelId: 'gemini-3.1-flash-lite',
+        description: 'Google next-gen reasoning model optimized for code and speed.',
+        badge: 'thinking',
+    },
+    {
+        id: 'gemini-3.6-flash',
+        name: 'Gemini 3.6 Flash',
+        vendor: 'google',
+        tier: 'flash',
+        maxTokens: 1000000,
+        supportsThinking: true,
+        fallbackModelId: 'gemini-3.1-flash-lite',
+        description: 'Google next-gen model from OpenRouter.',
+        badge: 'thinking',
+    },
+    {
+        id: 'gemini-3.1-flash-lite',
+        name: 'Gemini 3.1 Flash Lite',
+        vendor: 'google',
+        tier: 'flash',
+        maxTokens: 256000,
+        supportsThinking: false,
+        description: 'Ultra-fast, lightweight fallback model for quick edits.',
+        badge: 'fast',
+    },
+    {
+        id: 'anthropic/claude-sonnet-5',
+        name: 'Claude 5 Sonnet',
+        vendor: 'openrouter',
+        tier: 'ultra',
+        maxTokens: 200000,
+        supportsThinking: true,
+        fallbackModelId: 'gemini-3.5-flash-lite',
+        description: 'Anthropic flagship model for unmatched creative spatial engineering.',
+        badge: 'thinking',
+    },
+    {
+        id: 'anthropic/claude-3.5-sonnet',
+        name: 'Claude 3.5 Sonnet',
+        vendor: 'openrouter',
+        tier: 'pro',
+        maxTokens: 200000,
+        supportsThinking: false,
+        fallbackModelId: 'gemini-3.5-flash-lite',
+        description: 'Anthropic highly capable and fast model.',
+        badge: 'fast',
+    },
+    {
+        id: 'anthropic/claude-3.5-haiku',
+        name: 'Claude 3.5 Haiku',
+        vendor: 'openrouter',
+        tier: 'flash',
+        maxTokens: 200000,
+        supportsThinking: false,
+        fallbackModelId: 'gemini-3.5-flash-lite',
+        description: 'Anthropic fastest and most compact model.',
+        badge: 'fast',
+    },
+    {
+        id: 'anthropic/claude-5-fable',
+        name: 'Claude 5 Fable',
+        vendor: 'openrouter',
+        tier: 'ultra',
+        maxTokens: 200000,
+        supportsThinking: true,
+        fallbackModelId: 'gemini-3.5-flash-lite',
+        description: 'Anthropic Claude 5 Fable model.',
+        badge: 'thinking',
+    }
+];
+
+export function getModelById(id: string): ModelMetadata | undefined {
+    return MODEL_REGISTRY.find(m => m.id === id);
+}
+
+export function getFallbackModelId(id: string): string {
+    const model = getModelById(id);
+    return model?.fallbackModelId || 'gemini-3.5-flash-lite';
+}

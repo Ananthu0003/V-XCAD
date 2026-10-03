@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+local_branch_name="$(git rev-parse --abbrev-ref HEAD)"
+valid_branch_regex="^(main|develop|(feature|bugfix|hotfix|release)\/[a-zA-Z0-9\-]+)$"
+
+if [[ ! $local_branch_name =~ $valid_branch_regex ]]; then
+    echo "ERROR: Invalid branch name '$local_branch_name'."
+    echo "Branch names in this project must adhere to this standard:"
+    echo "- main"
+    echo "- develop"
+    echo "- feature/*"
+    echo "- bugfix/*"
+    echo "- hotfix/*"
+    echo "- release/*"
+    exit 1
+fi
+exit 0

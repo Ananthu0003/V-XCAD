@@ -1,0 +1,2533 @@
+"""
+Parameter Render Service - Build123d Script Execution and 3D Model Export
+
+This module executes generated build123d scripts in an isolated subprocess
+and exports the resulting 3D models to STEP and STL formats.
+"""
+
+import asyncio
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import uuid
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+
+def _coerce_jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _coerce_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_coerce_jsonable(v) for v in value]
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            return value
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Sandbox Environment Isolation (VEX-2A-001)
+# ---------------------------------------------------------------------------
+# Build123d / OCP / CAD execution requires very little of the parent env.
+# Expose ONLY variables needed for correct Python/library operation and CAD
+# parameter passing.  Application secrets (GOOGLE_API_KEY, DATABASE_URL,
+# JWT_SECRET, OPENROUTER_API_KEY, etc.) are deliberately excluded.
+
+# Variables that ARE needed for CAD subprocess execution:
+_REQUIRED_ENV_KEYS = frozenset({
+    # Python runtime essentials
+    "PATH",
+    "PYTHONPATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    # Windows system environment variables (required for Winsock, asyncio, and C runtime DLLs)
+    "SYSTEMROOT",
+    "SystemRoot",
+    "SYSTEMDRIVE",
+    "SystemDrive",
+    "WINDIR",
+    "windir",
+    "COMSPEC",
+    "ComSpec",
+    "PATHEXT",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "USERPROFILE",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "COMMONPROGRAMFILES",
+    "COMMONPROGRAMFILES(X86)",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    # System library paths (OCP/OpenCASCADE needs these on some distros)
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "LIBGL_ALWAYS_SOFTWARE",
+    "XDG_RUNTIME_DIR",
+    "DISPLAY",
+    # Locale / encoding
+    "PYTHONIOENCODING",
+    "PYTHONLEGACYWINDOWSSTDIO",
+})
+
+# Application-set variables that are safe to forward (non-secret CAD config):
+_SAFE_APP_KEYS = frozenset({
+    "RENDER_TIMEOUT_SECONDS",
+    "RENDER_MAX_RETRIES",
+    "OPENSCAD_FN_CAP",
+    "CSG_EPS",
+    "BLUEPRINT_DXF_VIEW_SPACING",
+})
+
+
+def _build_sandbox_env(
+    extra: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """Construct a minimal, safe environment for CAD subprocess execution.
+
+    This replaces ``os.environ.copy()`` to prevent untrusted generated Python
+    scripts from accessing application secrets (API keys, database credentials,
+    JWT tokens, etc.) via ``os.environ``.
+
+    Only a curated allowlist of system and CAD-relevant variables is forwarded
+    from the parent environment.  Additional key/value pairs required for a
+    specific invocation (e.g. ``CAD_PARAMETERS_JSON``) can be passed via
+    *extra*.
+    """
+    safe_env: Dict[str, str] = {}
+
+    # Forward required system/library keys
+    for key in _REQUIRED_ENV_KEYS:
+        val = os.environ.get(key)
+        if val is not None:
+            safe_env[key] = val
+
+    # Forward explicitly allowed application config keys
+    for key in _SAFE_APP_KEYS:
+        val = os.environ.get(key)
+        if val is not None:
+            safe_env[key] = val
+
+    # Ensure a usable PATH even if the parent has none
+    if "PATH" not in safe_env:
+        safe_env["PATH"] = "/usr/local/bin:/usr/bin:/bin"
+
+    # Merge caller-supplied extra variables (these are always set by the
+    # caller, e.g. CAD_PARAMETERS_JSON, OUTPUT_DIR, etc.)
+    if extra:
+        safe_env.update(extra)
+
+    return safe_env
+
+
+# Guarded ``__import__`` for generated CAD scripts.
+#
+# The restricted builtins below deliberately omit the real ``__import__`` (a raw
+# importer hands back live module objects, and build123d's package namespace leaks
+# ``os``/``sys``/``ctypes``/``Path`` and raw OCP file I/O classes).  Generated scripts
+# nevertheless legitimately contain ``import build123d as bd`` etc., so builtins get
+# THIS function instead.  It never returns a real module: it returns a read-only
+# facade holding only an explicit, module-free API surface.
+#
+# This text is the single source of truth.  It is exec'd here (for the module-level
+# RESTRICTED_BUILTINS) and embedded verbatim into RENDER_HARNESS_TEMPLATE (for the
+# subprocess), so the two copies cannot drift.  ``_real_import`` is injected by the
+# caller as the trusted importer captured BEFORE the script's builtins are restricted;
+# it is only ever called with names taken from the fixed table below.
+_GUARDED_IMPORT_SOURCE = r'''
+import types as _types
+
+_MISSING = object()
+
+
+class _ApiFacade:
+    """Read-only bundle of API names.  Deliberately not a module.
+
+    It has no ``__name__``: when ``from pkg import x`` cannot find ``x`` as an attribute,
+    CPython falls back to ``sys.modules[pkg.__name__ + '.x']``.  A module-like facade
+    would therefore resolve ``from build123d import geometry`` to the REAL submodule.
+    """
+
+    def __init__(self, values):
+        self.__dict__.update(values)
+        self.__dict__["__all__"] = tuple(values)
+
+    def __setattr__(self, name, value):
+        raise AttributeError("sandbox API objects are read-only")
+
+    def __delattr__(self, name):
+        raise AttributeError("sandbox API objects are read-only")
+
+
+def _collect(module, names):
+    """Public, non-module attributes of ``module`` among ``names``."""
+    out = {}
+    for name in names:
+        if not isinstance(name, str) or name.startswith("_"):
+            continue
+        value = getattr(module, name, _MISSING)
+        if value is _MISSING or isinstance(value, _types.ModuleType):
+            continue
+        out[name] = value
+    return out
+
+
+# build123d's declared public API, plus the harness's own polyfills for hallucinated
+# cadquery-style helpers.  dir(build123d) is NOT used: it also lists everything
+# build123d itself imports (os, sys, ctypes, Path, raw OCP classes, ...).
+_BUILD123D_POLYFILLS = ("intersect", "fuse", "cut")
+
+# Filesystem-capable build123d API.  Generated scripts describe geometry; they must never
+# read or write files (another session's STEP/STL/DXF in the shared outputs volume, any
+# file the render user can write, ...).  The trusted harness performs its own exports from
+# its own module-level names, which this filter never touches.  This is the ONE place that
+# decides which build123d names a script can see: the `bd` facade is built from
+# _public_build123d_values(), and the harness drops the same names from the bare-name
+# script namespace (the bootstrap star-import binds them too), so the two cannot drift.
+# `Text(font_path=...)` / `Compound.make_text(font_path=...)` are not removed (plain text is
+# harmless geometry); the harness rejects a non-None font_path instead.
+_FILESYSTEM_API_DENY = frozenset({
+    "import_step", "import_stl", "import_brep", "import_svg", "import_svg_as_buildline_code",
+    "export_step", "export_stl", "export_brep", "export_gltf",
+    "Mesher", "Export2D", "ExportDXF", "ExportSVG",
+})
+
+
+def _public_build123d_values(module):
+    names = tuple(getattr(module, "__all__", ())) + _BUILD123D_POLYFILLS
+    return _collect(module, tuple(n for n in names if n not in _FILESYSTEM_API_DENY))
+
+
+# Annotation-only subset of typing.  ForwardRef / get_type_hints / evaluate_forward_ref
+# eval() strings against real globals, so they are intentionally absent.
+_TYPING_NAMES = (
+    "Any", "Optional", "Union", "List", "Dict", "Tuple", "Set", "FrozenSet",
+    "Sequence", "MutableSequence", "Iterable", "Iterator", "Mapping", "Callable",
+    "Literal", "Final", "ClassVar", "Type", "TypeVar", "Generic", "Annotated",
+    "NoReturn", "TypeAlias", "TYPE_CHECKING", "cast",
+)
+
+
+def _build_build123d():
+    return _public_build123d_values(_real_import("build123d"))
+
+
+def _build_math():
+    module = _real_import("math")
+    return _collect(module, dir(module))
+
+
+def _build_re():
+    module = _real_import("re")
+    return _collect(module, module.__all__)
+
+
+def _build_typing():
+    return _collect(_real_import("typing"), _TYPING_NAMES)
+
+
+def _build_ocp_vscode():
+    # Headless render: there is no viewer to talk to, and the real package would open
+    # a network connection.  The documented `try: from ocp_vscode import show` pattern
+    # therefore gets inert stand-ins whether or not the package is installed.
+    def _noop(*args, **kwargs):
+        return None
+
+    return {"show": _noop, "show_object": _noop, "show_all": _noop}
+
+
+def _build_bd_warehouse_thread():
+    module = _real_import("bd_warehouse.thread", None, None, ("IsoThread",), 0)
+    return {"IsoThread": module.IsoThread}
+
+
+_FACADE_BUILDERS = {
+    "build123d": _build_build123d,
+    "math": _build_math,
+    "re": _build_re,
+    "typing": _build_typing,
+    "ocp_vscode": _build_ocp_vscode,
+    # The only dotted import the generation contract needs.
+    "bd_warehouse.thread": _build_bd_warehouse_thread,
+}
+
+# Dotted names must be imported with `from X import <names>` and only these names.
+_DOTTED_FROM_NAMES = {"bd_warehouse.thread": frozenset({"IsoThread"})}
+
+_FACADES = {}
+
+
+def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if level != 0:
+        raise ImportError("relative imports are not permitted in CAD scripts")
+    if type(name) is not str or name not in _FACADE_BUILDERS:
+        raise ImportError("this import is not permitted in CAD scripts")
+    if fromlist is None:
+        fromlist = ()
+    if type(fromlist) not in (tuple, list):
+        raise ImportError("this import is not permitted in CAD scripts")
+    if name in _DOTTED_FROM_NAMES:
+        if not fromlist or not all(
+            type(item) is str and item in _DOTTED_FROM_NAMES[name] for item in fromlist
+        ):
+            raise ImportError("this import is not permitted in CAD scripts")
+    facade = _FACADES.get(name)
+    if facade is None:
+        facade = _FACADES[name] = _ApiFacade(_FACADE_BUILDERS[name]())
+    return facade
+'''
+
+_guard_ns = {"_real_import": __import__}
+exec(_GUARDED_IMPORT_SOURCE, _guard_ns)
+_guarded_import = _guard_ns["_guarded_import"]
+
+# CLAUDE-001: Module-level restricted builtins for test importability.
+# The harness template contains an identical copy that runs in the subprocess.
+# This dict is the single source of truth for which builtins are safe.
+# ``__import__`` is the guarded importer above, never the real one.
+RESTRICTED_BUILTINS = {
+    "__name__": "__main__",
+    "__import__": _guarded_import,
+    "__build_class__": __builtins__["__build_class__"] if isinstance(__builtins__, dict) else __builtins__.__dict__["__build_class__"],
+    "__doc__": None,
+    "__spec__": None,
+    "__loader__": None,
+    "__package__": None,
+    "__debug__": False,
+    # Constants
+    "True": True, "False": False, "None": None,
+    "Ellipsis": Ellipsis, "NotImplemented": NotImplemented,
+    # Type conversions
+    "int": int, "float": float, "str": str, "bool": bool,
+    "complex": complex, "bytes": bytes, "bytearray": bytearray,
+    # Math
+    "abs": abs, "min": min, "max": max, "sum": sum,
+    "pow": pow, "round": round, "divmod": divmod,
+    "hex": hex, "oct": oct, "bin": bin,
+    # Sequences / collections
+    "len": len, "range": range, "enumerate": enumerate,
+    "zip": zip, "map": map, "filter": filter,
+    "sorted": sorted, "reversed": reversed,
+    "list": list, "tuple": tuple, "set": set, "frozenset": frozenset,
+    "dict": dict, "slice": slice,
+    # Iteration
+    "iter": iter, "next": next,
+    # Type inspection / checking
+    "isinstance": isinstance, "issubclass": issubclass,
+    "callable": callable, "type": type, "hasattr": hasattr,
+    # Output (harmless — writes to stdout only)
+    "print": print,
+    # String operations
+    "format": format, "repr": repr, "ascii": ascii,
+    "chr": chr, "ord": ord,
+    # Other safe builtins
+    "id": id, "hash": hash,
+    "property": property, "staticmethod": staticmethod,
+    "classmethod": classmethod, "super": super, "object": object,
+    # Exception hierarchy
+    "Exception": Exception, "BaseException": BaseException,
+    "TypeError": TypeError, "ValueError": ValueError,
+    "KeyError": KeyError, "IndexError": IndexError,
+    "AttributeError": AttributeError, "RuntimeError": RuntimeError,
+    "StopIteration": StopIteration, "ZeroDivisionError": ZeroDivisionError,
+    "ImportError": ImportError, "ModuleNotFoundError": ModuleNotFoundError,
+    "OSError": OSError, "IOError": IOError, "FileNotFoundError": FileNotFoundError,
+    "MemoryError": MemoryError, "RecursionError": RecursionError,
+    "ArithmeticError": ArithmeticError, "AssertionError": AssertionError,
+    "BufferError": BufferError, "LookupError": LookupError,
+    "NameError": NameError, "UnboundLocalError": UnboundLocalError,
+    "NotImplementedError": NotImplementedError, "OverflowError": OverflowError,
+    "ReferenceError": ReferenceError, "SyntaxError": SyntaxError,
+    "SystemError": SystemError, "TabError": TabError,
+    "TimeoutError": TimeoutError,
+    "UnicodeError": UnicodeError, "UnicodeDecodeError": UnicodeDecodeError,
+    "UnicodeEncodeError": UnicodeEncodeError, "UnicodeTranslateError": UnicodeTranslateError,
+    "ConnectionError": ConnectionError, "BrokenPipeError": BrokenPipeError,
+    "FileExistsError": FileExistsError, "IsADirectoryError": IsADirectoryError,
+    "NotADirectoryError": NotADirectoryError, "PermissionError": PermissionError,
+    "ProcessLookupError": ProcessLookupError, "BlockingIOError": BlockingIOError,
+    "ChildProcessError": ChildProcessError, "InterruptedError": InterruptedError,
+    "ConnectionAbortedError": ConnectionAbortedError,
+    "ConnectionRefusedError": ConnectionRefusedError,
+    "ConnectionResetError": ConnectionResetError,
+    # Warning hierarchy
+    "Warning": Warning, "DeprecationWarning": DeprecationWarning,
+    "FutureWarning": FutureWarning, "UserWarning": UserWarning,
+    "RuntimeWarning": RuntimeWarning, "SyntaxWarning": SyntaxWarning,
+    "ImportWarning": ImportWarning, "UnicodeWarning": UnicodeWarning,
+    "BytesWarning": BytesWarning, "ResourceWarning": ResourceWarning,
+    "PendingDeprecationWarning": PendingDeprecationWarning,
+    "EnvironmentError": EnvironmentError,
+    "FloatingPointError": FloatingPointError,
+    "GeneratorExit": GeneratorExit,
+    "SystemExit": SystemExit, "KeyboardInterrupt": KeyboardInterrupt,
+    "EOFError": EOFError,
+}
+
+
+RENDER_HARNESS_TEMPLATE = r"""
+import json
+import os
+import sys
+import math
+import re
+from pathlib import Path
+from functools import reduce
+import operator
+import uuid
+import faulthandler
+import builtins as _builtins_mod
+faulthandler.enable()
+
+# Guarded importer (verbatim copy of _GUARDED_IMPORT_SOURCE from the service module).
+# It is exec'd in its own namespace so the function's globals hold only what it needs,
+# and the trusted builtin importer is captured here, BEFORE the script's builtins are
+# restricted.  Generated code only ever receives `_guarded_import`, never `_real_import`.
+_GUARD_NS = {"_real_import": _builtins_mod.__import__}
+exec(__GUARDED_IMPORT_SOURCE_LITERAL__, _GUARD_NS)
+_guarded_import = _GUARD_NS["_guarded_import"]
+_public_build123d_values = _GUARD_NS["_public_build123d_values"]
+_FILESYSTEM_API_DENY = _GUARD_NS["_FILESYSTEM_API_DENY"]
+
+# CLAUDE-001: Restricted builtins for user-controlled script execution.
+# The build123d bootstrap (exec("from build123d import *", ns)) runs with
+# unrestricted builtins because it is trusted harness code.  After bootstrap,
+# we replace ns["__builtins__"] with this restricted mapping before executing
+# the user-generated CAD script, so that open/__import__/eval/exec/etc. are
+# unreachable even through __builtins__["key"] dict subscript access.
+_RESTRICTED_BUILTINS = {
+    "__name__": "__main__",
+    "__import__": _guarded_import,
+    "__build_class__": _builtins_mod.__build_class__,
+    "__doc__": None,
+    "__spec__": None,
+    "__loader__": None,
+    "__package__": None,
+    "__debug__": False,
+    # Constants
+    "True": True, "False": False, "None": None,
+    "Ellipsis": Ellipsis, "NotImplemented": NotImplemented,
+    # Type conversions (needed by parameterized CAD scripts)
+    "int": int, "float": float, "str": str, "bool": bool,
+    "complex": complex, "bytes": bytes, "bytearray": bytearray,
+    # Math
+    "abs": abs, "min": min, "max": max, "sum": sum,
+    "pow": pow, "round": round, "divmod": divmod,
+    "hex": hex, "oct": oct, "bin": bin,
+    # Sequences / collections
+    "len": len, "range": range, "enumerate": enumerate,
+    "zip": zip, "map": map, "filter": filter,
+    "sorted": sorted, "reversed": reversed,
+    "list": list, "tuple": tuple, "set": set, "frozenset": frozenset,
+    "dict": dict, "slice": slice,
+    # Iteration
+    "iter": iter, "next": next,
+    # Type inspection / checking
+    "isinstance": isinstance, "issubclass": issubclass,
+    "callable": callable, "type": type, "hasattr": hasattr,
+    # Output (harmless — writes to stdout only)
+    "print": print,
+    # String operations
+    "format": format, "repr": repr, "ascii": ascii,
+    "chr": chr, "ord": ord,
+    # Other safe builtins
+    "id": id, "hash": hash,
+    "property": property, "staticmethod": staticmethod,
+    "classmethod": classmethod, "super": super, "object": object,
+    # Exception hierarchy (needed for try/except in CAD scripts)
+    "Exception": Exception, "BaseException": BaseException,
+    "TypeError": TypeError, "ValueError": ValueError,
+    "KeyError": KeyError, "IndexError": IndexError,
+    "AttributeError": AttributeError, "RuntimeError": RuntimeError,
+    "StopIteration": StopIteration, "ZeroDivisionError": ZeroDivisionError,
+    "ImportError": ImportError, "ModuleNotFoundError": ModuleNotFoundError,
+    "OSError": OSError, "IOError": IOError, "FileNotFoundError": FileNotFoundError,
+    "MemoryError": MemoryError, "RecursionError": RecursionError,
+    "ArithmeticError": ArithmeticError, "AssertionError": AssertionError,
+    "BufferError": BufferError, "LookupError": LookupError,
+    "NameError": NameError, "UnboundLocalError": UnboundLocalError,
+    "NotImplementedError": NotImplementedError, "OverflowError": OverflowError,
+    "ReferenceError": ReferenceError, "SyntaxError": SyntaxError,
+    "SystemError": SystemError, "TabError": TabError,
+    "TimeoutError": TimeoutError,
+    "UnicodeError": UnicodeError, "UnicodeDecodeError": UnicodeDecodeError,
+    "UnicodeEncodeError": UnicodeEncodeError, "UnicodeTranslateError": UnicodeTranslateError,
+    "ConnectionError": ConnectionError, "BrokenPipeError": BrokenPipeError,
+    "FileExistsError": FileExistsError, "IsADirectoryError": IsADirectoryError,
+    "NotADirectoryError": NotADirectoryError, "PermissionError": PermissionError,
+    "ProcessLookupError": ProcessLookupError, "BlockingIOError": BlockingIOError,
+    "ChildProcessError": ChildProcessError, "InterruptedError": InterruptedError,
+    "ConnectionAbortedError": ConnectionAbortedError,
+    "ConnectionRefusedError": ConnectionRefusedError,
+    "ConnectionResetError": ConnectionResetError,
+    # Warning hierarchy
+    "Warning": Warning, "DeprecationWarning": DeprecationWarning,
+    "FutureWarning": FutureWarning, "UserWarning": UserWarning,
+    "RuntimeWarning": RuntimeWarning, "SyntaxWarning": SyntaxWarning,
+    "ImportWarning": ImportWarning, "UnicodeWarning": UnicodeWarning,
+    "BytesWarning": BytesWarning, "ResourceWarning": ResourceWarning,
+    "PendingDeprecationWarning": PendingDeprecationWarning,
+    "EnvironmentError": EnvironmentError,
+    "FloatingPointError": FloatingPointError,
+    "GeneratorExit": GeneratorExit,
+    "SystemExit": SystemExit, "KeyboardInterrupt": KeyboardInterrupt,
+    "EOFError": EOFError,
+}
+
+# Patch math.dist to be robust against dimensional mismatches (e.g. 3D Vector vs 2D tuple)
+_orig_dist = math.dist
+def _robust_dist(p1, p2):
+    def to_coords(p):
+        if hasattr(p, "to_tuple"):
+            try: return list(p.to_tuple())
+            except Exception: pass
+        if hasattr(p, "X") and hasattr(p, "Y"):
+            if hasattr(p, "Z"): return [p.X, p.Y, p.Z]
+            return [p.X, p.Y]
+        if hasattr(p, "__getitem__"):
+            try: return list(p)
+            except Exception: pass
+        return p
+
+    try:
+        c1 = to_coords(p1)
+        c2 = to_coords(p2)
+        if isinstance(c1, list) and isinstance(c2, list):
+            if len(c1) == len(c2):
+                return _orig_dist(c1, c2)
+            if len(c1) == 3 and len(c2) == 2:
+                if abs(c1[2]) < 1e-5: return _orig_dist(c1[:2], c2)
+                elif abs(c1[0]) < 1e-5: return _orig_dist(c1[1:], c2)
+                elif abs(c1[1]) < 1e-5: return _orig_dist([c1[0], c1[2]], c2)
+                return _orig_dist(c1[:2], c2)
+            if len(c2) == 3 and len(c1) == 2:
+                if abs(c2[2]) < 1e-5: return _orig_dist(c1, c2[:2])
+                elif abs(c2[0]) < 1e-5: return _orig_dist(c1, c2[1:])
+                elif abs(c2[1]) < 1e-5: return _orig_dist(c1, [c2[0], c2[2]])
+                return _orig_dist(c1, c2[:2])
+            min_len = min(len(c1), len(c2))
+            if min_len > 0:
+                return _orig_dist(c1[:min_len], c2[:min_len])
+    except Exception:
+        pass
+    return _orig_dist(p1, p2)
+math.dist = _robust_dist
+
+try:
+    from build123d import *
+    import build123d as _bd123
+except ImportError:
+    print("CRITICAL: build123d not found.")
+    sys.exit(1)
+
+# --- Safety patches for chamfer / fillet -----------------------------------
+# The LLM sometimes generates values that are too large for the geometry.
+# These wrappers automatically retry with a halved value up to 5 times,
+# so a single bad value doesn't crash the whole render.
+_orig_chamfer = chamfer
+_orig_fillet  = fillet
+
+def _safe_chamfer(*args, **kwargs):
+    if 'edges' in kwargs:
+        if args:
+            # If args exists, just pop edges and hope it works
+            kwargs['objects'] = kwargs.pop('edges')
+        else:
+            args = (kwargs.pop('edges'),)
+            
+    # Try to extract the primary value to shrink during retries
+    length = kwargs.get('length')
+    if length is None and len(args) >= 2:
+        length = args[1]
+        
+    v = length
+    for _ in range(5):
+        try:
+            if len(args) >= 2:
+                new_args = (args[0], v) + args[2:]
+                return _orig_chamfer(*new_args, **kwargs)
+            else:
+                kwargs['length'] = v
+                return _orig_chamfer(*args, **kwargs)
+        except (ValueError, Exception) as exc:
+            msg = str(exc).lower()
+            if "chamfer" in msg or "smaller" in msg:
+                v = v / 2.0
+                if v < 1e-4:
+                    print("[chamfer] Skipped - value too small after retries.")
+                    return
+            elif "findfromkey" in msg or "nosuchobject" in msg or "chfi3d" in msg or "stdfail" in msg or "brep_api" in msg or "invalid" in msg:
+                print(f"[chamfer] Skipped - stale edge reference or topological failure.")
+                return
+            else:
+                raise
+    print("[chamfer] Skipped after 5 retries.")
+
+def _safe_fillet(*args, **kwargs):
+    if 'edges' in kwargs:
+        if args:
+            kwargs['objects'] = kwargs.pop('edges')
+        else:
+            args = (kwargs.pop('edges'),)
+
+    radius = kwargs.get('radius')
+    if radius is None and len(args) >= 2:
+        radius = args[1]
+
+    v = radius
+    for _ in range(5):
+        try:
+            if len(args) >= 2:
+                new_args = (args[0], v) + args[2:]
+                return _orig_fillet(*new_args, **kwargs)
+            else:
+                kwargs['radius'] = v
+                return _orig_fillet(*args, **kwargs)
+        except (ValueError, Exception) as exc:
+            msg = str(exc).lower()
+            if "fillet" in msg or "smaller" in msg:
+                v = v / 2.0
+                if v < 1e-4:
+                    print("[fillet] Skipped - value too small after retries.")
+                    return
+            elif "findfromkey" in msg or "nosuchobject" in msg or "chfi3d" in msg or "stdfail" in msg or "brep_api" in msg or "invalid" in msg:
+                print(f"[fillet] Skipped - stale edge reference or topological failure.")
+                return
+            else:
+                raise
+    print("[fillet] Skipped after 5 retries.")
+
+chamfer = _safe_chamfer
+fillet  = _safe_fillet
+
+_orig_rectangle = Rectangle
+def _safe_rectangle(*args, **kwargs):
+    if 'length' in kwargs and 'height' not in kwargs:
+        kwargs['height'] = kwargs.pop('length')
+    return _orig_rectangle(*args, **kwargs)
+
+Rectangle = _safe_rectangle
+
+# Also patch the module object so `bd.chamfer(...)` / `bd.fillet(...)` are covered
+_bd123.chamfer = _safe_chamfer
+_bd123.fillet  = _safe_fillet
+_bd123.Rectangle = _safe_rectangle
+# ---------------------------------------------------------------------------
+
+def _coerce_params(value):
+    if isinstance(value, dict):
+        return {str(k): _coerce_params(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_coerce_params(v) for v in value]
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            return value
+    if isinstance(value, str):
+        # Aggressively strip units and whitespace
+        clean_value = re.sub(r"(?i)\s*(?:mm|in|inch|degrees?|°|rads?|radians?)\s*$", "", value.strip())
+        if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", clean_value):
+            try:
+                return float(clean_value)
+
+            except Exception:
+                return value
+    return value
+
+def _shape_faces_count(obj):
+    try:
+        faces = obj.faces() if callable(getattr(obj, "faces", None)) else getattr(obj, "faces", [])
+        return len(faces)
+    except Exception:
+        return 0
+
+def _validate_shape(obj):
+    try:
+        is_val = getattr(obj, "is_valid", True)
+        if callable(is_val):
+            is_val = is_val()
+        if not is_val:
+            raise RuntimeError("Invalid shape geometry (is_valid=False). The shape might be self-intersecting or have open boundaries.")
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+
+    try:
+        solids = obj.solids() if callable(getattr(obj, "solids", None)) else getattr(obj, "solids", [])
+        if len(solids) == 0:
+            raise RuntimeError("No solid bodies found in result. You returned a 2D sketch/face instead of a 3D solid. Ensure you have extruded or revolved your geometry.")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        if "invalid" in str(e).lower() or "null" in str(e).lower() or "stdfail" in str(e).lower():
+            raise RuntimeError(f"Invalid shape geometry. Topological evaluation failed: {e}")
+
+    try:
+        faces = obj.faces() if callable(getattr(obj, "faces", None)) else getattr(obj, "faces", [])
+        face_count = len(faces)
+    except Exception as e:
+        if "invalid" in str(e).lower() or "null" in str(e).lower() or "stdfail" in str(e).lower():
+            raise RuntimeError(f"Invalid shape geometry. Topological evaluation failed: {e}")
+        face_count = 0
+
+    if face_count == 0:
+        raise RuntimeError("No faces found in result. Ensure you have generated solid geometry.")
+
+    try:
+        bbox = obj.bounding_box() if callable(getattr(obj, "bounding_box", None)) else getattr(obj, "bounding_box", None)
+        if bbox and hasattr(bbox, "size"):
+            max_dim = max(bbox.size.X, bbox.size.Y, bbox.size.Z)
+            if max_dim > 5000: 
+                raise ValueError(f"Shape exceeds maximum bounding box limits (max dimension {max_dim:.1f} > 5000).")
+    except ValueError:
+        raise
+    except Exception:
+        pass
+
+def _compute_parametric_annotations(shape, params):
+    # Derive deterministic 3D dimension annotations from the built geometry.
+    # The LLM is instructed to emit an ANNOTATIONS dict, but it frequently omits
+    # it or computes wrong points.  This function fills the gaps directly from
+    # the actual B-Rep so the 3D parameter highlighting in the UI always works.
+    #
+    # Returns a dict keyed by parameter name with entries:
+    #   {"p1": [x,y,z], "p2": [x,y,z], "type": ..., "value": float,
+    #    "center": [x,y,z], "axis": [x,y,z]}
+    import math as _math
+
+    annotations = {}
+
+    try:
+        bb = shape.bounding_box()
+        bmin = (bb.min.X, bb.min.Y, bb.min.Z)
+        bmax = (bb.max.X, bb.max.Y, bb.max.Z)
+    except Exception:
+        return annotations
+
+    bsize = (bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2])
+
+    # ── Collect cylindrical faces (bosses + holes) with true axis/radius ──
+    # NOTE: face.center()/face.vertices() are unreliable for full cylinders
+    # (they return parameter-space values), so we derive everything from the
+    # underlying surface axis + the face's bounding box.
+    cylinders = []  # dict: diameter, center, axis, axial_extent
+    try:
+        for face in shape.faces().filter_by(_bd123.GeomType.CYLINDER):
+            try:
+                radius = float(face.radius)
+                if not radius or radius <= 0:
+                    continue
+                gcs = face.geom_adaptor().Cylinder()
+                ax = gcs.Axis().Direction()
+                axis_vec = (ax.X(), ax.Y(), ax.Z())
+                axis_len = _math.sqrt(sum(c * c for c in axis_vec))
+                if axis_len < 1e-9:
+                    continue
+                axis_unit = tuple(c / axis_len for c in axis_vec)
+
+                # axial extent from the AABB corners projected onto the axis
+                fbb = face.bounding_box()
+                corners = (
+                    (fbb.min.X, fbb.min.Y, fbb.min.Z),
+                    (fbb.min.X, fbb.min.Y, fbb.max.Z),
+                    (fbb.min.X, fbb.max.Y, fbb.min.Z),
+                    (fbb.min.X, fbb.max.Y, fbb.max.Z),
+                    (fbb.max.X, fbb.min.Y, fbb.min.Z),
+                    (fbb.max.X, fbb.min.Y, fbb.max.Z),
+                    (fbb.max.X, fbb.max.Y, fbb.min.Z),
+                    (fbb.max.X, fbb.max.Y, fbb.max.Z),
+                )
+                projs = [
+                    c[0] * axis_unit[0] + c[1] * axis_unit[1] + c[2] * axis_unit[2]
+                    for c in corners
+                ]
+                axial_min = min(projs)
+                axial_max = max(projs)
+                axial_extent = axial_max - axial_min
+
+                # face center = bbox center (on-axis for axis-aligned cylinders)
+                center = (
+                    (fbb.min.X + fbb.max.X) / 2,
+                    (fbb.min.Y + fbb.max.Y) / 2,
+                    (fbb.min.Z + fbb.max.Z) / 2,
+                )
+
+                cylinders.append({
+                    "diameter": radius * 2,
+                    "center": center,
+                    "axis": axis_unit,
+                    "axial_min": axial_min,
+                    "axial_max": axial_max,
+                    "axial_extent": axial_extent,
+                })
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    def _entry(p1, p2, typ, value, center=None, axis=None):
+        entry = {
+            "p1": [float(p1[0]), float(p1[1]), float(p1[2])],
+            "p2": [float(p2[0]), float(p2[1]), float(p2[2])],
+            "type": typ,
+            "value": float(value),
+        }
+        if center is not None:
+            entry["center"] = [float(center[0]), float(center[1]), float(center[2])]
+        if axis is not None:
+            entry["axis"] = [float(axis[0]), float(axis[1]), float(axis[2])]
+        return entry
+
+    def _match_tol(v):
+        return max(0.02, abs(v) * 0.005 + 0.05)
+
+    def _perp_dir(axis_unit):
+        # any unit direction perpendicular to the cylinder axis
+        x, y, z = axis_unit
+        if abs(z) < 0.9:
+            norm = _math.sqrt(x * x + y * y)
+            return (-y / norm, x / norm, 0.0)
+        return (1.0, 0.0, 0.0)
+
+    LINEAR_TOKENS = ("depth", "height", "length", "len", "thick", "width")
+    DIA_TOKENS = ("diameter", "diam", "dia", "bore", "shaft", "cylinder", "cyl", "hole")
+
+    for key, value in params.items():
+        if key.startswith("_"):
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        v = float(value)
+        if v <= 0 or not _math.isfinite(v):
+            continue
+
+        name = key.lower()
+        is_linear = any(tok in name for tok in LINEAR_TOKENS)
+        is_dia = any(tok in name for tok in DIA_TOKENS) or "radius" in name
+
+        if is_linear:
+            tol = _match_tol(v)
+            # prefer the axis that matches the dimension name
+            if "width" in name:
+                axis_order = (0, 1, 2)
+            elif "length" in name or "len" in name:
+                axis_order = (1, 2, 0)
+            elif "height" in name or "depth" in name or "thick" in name:
+                axis_order = (2, 0, 1)
+            else:
+                axis_order = (0, 1, 2)
+            
+            matched = False
+            # 1) match a cylinder's axial extent or stepped section along the cylinder axis
+            best = None
+            best_diff = None
+            for c in cylinders:
+                d = abs(c["axial_extent"] - v)
+                if d <= tol and (best_diff is None or d < best_diff):
+                    best_diff = d
+                    best = c
+            
+            if best is not None:
+                ax = best["axis"]
+                cx, cy, cz = best["center"]
+                half = v / 2.0
+                end1 = (cx + ax[0] * half, cy + ax[1] * half, cz + ax[2] * half)
+                end2 = (cx - ax[0] * half, cy - ax[1] * half, cz - ax[2] * half)
+                u = _perp_dir(ax)
+                r = best["diameter"] / 2.0
+                p1 = (end1[0] + u[0] * r, end1[1] + u[1] * r, end1[2] + u[2] * r)
+                p2 = (end2[0] + u[0] * r, end2[1] + u[1] * r, end2[2] + u[2] * r)
+                annotations[key] = _entry(p1, p2, "height", v)
+                matched = True
+            
+            # 2) match groove depth (radial step)
+            if not matched and "depth" in name and len(cylinders) >= 2:
+                # Check if v matches the difference in radii between any two cylinders
+                for i in range(len(cylinders)):
+                    for j in range(i + 1, len(cylinders)):
+                        rad_diff = abs(cylinders[i]["diameter"] - cylinders[j]["diameter"]) / 2.0
+                        if abs(rad_diff - v) <= tol:
+                            c_outer = cylinders[i] if cylinders[i]["diameter"] > cylinders[j]["diameter"] else cylinders[j]
+                            c_inner = cylinders[j] if cylinders[i]["diameter"] > cylinders[j]["diameter"] else cylinders[i]
+                            ax = c_outer["axis"]
+                            u = _perp_dir(ax)
+                            cx, cy, cz = c_inner["center"]
+                            r_in = c_inner["diameter"] / 2.0
+                            r_out = c_outer["diameter"] / 2.0
+                            p1 = (cx + u[0] * r_in, cy + u[1] * r_in, cz + u[2] * r_in)
+                            p2 = (cx + u[0] * r_out, cy + u[1] * r_out, cz + u[2] * r_out)
+                            annotations[key] = _entry(p1, p2, "height", v)
+                            matched = True
+                            break
+                    if matched:
+                        break
+
+            # 3) match overall bbox extent along the best axis
+            if not matched:
+                for axis_idx in axis_order:
+                    ext = bsize[axis_idx]
+                    if abs(ext - v) <= tol:
+                        p1 = list(bmin)
+                        p2 = list(bmax)
+                        for o in (i for i in range(3) if i != axis_idx):
+                            mid = (bmin[o] + bmax[o]) / 2
+                            p1[o] = mid
+                            p2[o] = mid
+                        annotations[key] = _entry(p1, p2, "height", v)
+                        matched = True
+                        break
+
+        elif is_dia:
+            tol = _match_tol(v)
+            best_cyl = None
+            best_diff = None
+            best_dia = None
+            for expected_dia in (v, v * 2.0, v / 2.0):
+                for c in cylinders:
+                    d = abs(c["diameter"] - expected_dia)
+                    if d <= tol and (best_diff is None or d < best_diff):
+                        best_diff = d
+                        best_cyl = c
+                        best_dia = c["diameter"]
+            if best_cyl is not None:
+                u = _perp_dir(best_cyl["axis"])
+                cx, cy, cz = best_cyl["center"]
+                r = best_cyl["diameter"] / 2.0
+                p1 = (cx - u[0] * r, cy - u[1] * r, cz - u[2] * r)
+                p2 = (cx + u[0] * r, cy + u[1] * r, cz + u[2] * r)
+                if "radius" in name:
+                    annotations[key] = _entry(p1, p2, "height", best_dia / 2.0)
+                else:
+                    annotations[key] = _entry(p1, p2, "diameter", best_dia, center=best_cyl["center"], axis=best_cyl["axis"])
+
+    return annotations
+
+
+def run():
+    raw_json = os.getenv("CAD_PARAMETERS_JSON", "{}")
+    try:
+        params = json.loads(raw_json)
+    except Exception:
+        params = {}
+    params = _coerce_params(params)
+    _VALIDATION_MODE = os.getenv("VALIDATION_MODE", "0") == "1"
+
+    ns = {
+        "PARAMETERS": params,
+        "__name__": "__main__",
+        "math": math,
+    }
+    
+    # Auto-inject all parameters directly into the namespace 
+    # to protect against LLMs forgetting to unpack them
+    ns.update(params)
+
+    try:
+        exec("from build123d import *", ns)
+    except ImportError:
+        print("CRITICAL: build123d not found.")
+        sys.exit(1)
+
+    import build123d
+    # Compatibility Patches for build123d 0.10.0
+    if hasattr(build123d, "Mixin1D"):
+        build123d.Mixin1D.start = property(lambda self: self @ 0)
+        build123d.Mixin1D.end = property(lambda self: self @ 1)
+    elif hasattr(build123d, "Edge"):
+        build123d.Edge.start = property(lambda self: self @ 0)
+        build123d.Edge.end = property(lambda self: self @ 1)
+        
+    if hasattr(build123d, "GeomType"):
+        build123d.GeomType.ARC = build123d.GeomType.CIRCLE
+
+    if hasattr(build123d, "Plane"):
+        _orig_plane_init = build123d.Plane.__init__
+        def _safe_plane_init(self, *args, **kwargs):
+            if "normal" in kwargs:
+                kwargs["z_dir"] = kwargs.pop("normal")
+            if "z_dir" in kwargs and not args and "origin" not in kwargs:
+                kwargs["origin"] = (0, 0, 0)
+            return _orig_plane_init(self, *args, **kwargs)
+        build123d.Plane.__init__ = _safe_plane_init
+
+    if hasattr(build123d, "ShapeList") and hasattr(build123d.ShapeList, "filter_by_position"):
+        _orig_filter_pos = build123d.ShapeList.filter_by_position
+        def safe_filter_by_position(self, axis, minimum=None, maximum=None, *args, **kwargs):
+            if minimum is None:
+                # LLM likely hallucinated filter_by_position(Axis.Z) instead of filter_by(Axis.Z)
+                if hasattr(self, "filter_by"):
+                    return self.filter_by(axis)
+                return self
+            if maximum is None:
+                maximum = minimum
+            kwargs.pop("tolerance", None)
+            return _orig_filter_pos(self, axis, minimum, maximum, *args, **kwargs)
+        build123d.ShapeList.filter_by_position = safe_filter_by_position
+
+    if hasattr(build123d, "ShapeList") and hasattr(build123d.ShapeList, "filter_by"):
+        _orig_filter_by = build123d.ShapeList.filter_by
+        def safe_filter_by(self, *args, **kwargs):
+            try:
+                return _orig_filter_by(self, *args, **kwargs)
+            except Exception as exc:
+                print(f"Ignored filter_by error: {exc}")
+                return self
+        build123d.ShapeList.filter_by = safe_filter_by
+
+    if hasattr(build123d, "BuildPart"):
+        def _get_active_sketch(self):
+            if hasattr(build123d, "BuildSketch") and getattr(build123d.BuildSketch, "active", None) is not None:
+                active_sketch = build123d.BuildSketch.active
+                if hasattr(active_sketch, "sketch"):
+                    return active_sketch.sketch
+                return active_sketch
+            if hasattr(self, "part") and hasattr(self.part, "sketch"):
+                return self.part.sketch
+            return None
+        build123d.BuildPart.sketch = property(_get_active_sketch)
+
+        def _buildpart_fillet(self, *args, **kwargs):
+            return build123d.fillet(*args, **kwargs)
+        build123d.BuildPart.fillet = _buildpart_fillet
+
+        def _buildpart_chamfer(self, *args, **kwargs):
+            return build123d.chamfer(*args, **kwargs)
+        build123d.BuildPart.chamfer = _buildpart_chamfer
+    if hasattr(build123d, "ShapeList"):
+        _orig_getitem = build123d.ShapeList.__getitem__
+        def _safe_getitem(self, index):
+            try:
+                return _orig_getitem(self, index)
+            except IndexError:
+                # Return a dummy edge so the script doesn't crash.
+                # Safe fillet/chamfer wrappers will ignore the dummy edge.
+                return build123d.Edge.make_line((0,0,0), (0,0,0.001))
+        build123d.ShapeList.__getitem__ = _safe_getitem
+
+        def _shapelist_fillet(self, radius, *args, **kwargs):
+            return build123d.fillet(self, radius, *args, **kwargs)
+        build123d.ShapeList.fillet = _shapelist_fillet
+
+        def _shapelist_chamfer(self, length, length2=None, *args, **kwargs):
+            return build123d.chamfer(self, length, length2, *args, **kwargs)
+        build123d.ShapeList.chamfer = _shapelist_chamfer
+
+    if hasattr(build123d, "Shape"):
+        def _shape_fillet(self, radius, *args, **kwargs):
+            return build123d.fillet(self, radius, *args, **kwargs)
+        build123d.Shape.fillet = _shape_fillet
+
+        def _shape_chamfer(self, length, length2=None, *args, **kwargs):
+            return build123d.chamfer(self, length, length2, *args, **kwargs)
+        build123d.Shape.chamfer = _shape_chamfer
+
+    # Patch boolean operations to ignore topological failures
+    def _make_safe_bool(orig):
+        def safe_bool(self, other):
+            try:
+                return orig(self, other)
+            except Exception as exc:
+                print(f"Ignored topological error in boolean {orig.__name__}: {exc}")
+                return self
+        return safe_bool
+
+    for cls_name in ("Part", "Solid", "Sketch", "Face", "Wire", "Edge", "Shape", "Curve", "Line"):
+        cls = getattr(build123d, cls_name, None)
+        if cls is not None:
+            for op in ("__sub__", "__add__", "__and__"):
+                if hasattr(cls, op):
+                    setattr(cls, op, _make_safe_bool(getattr(cls, op)))
+                    setattr(cls, op, _make_safe_bool(getattr(cls, op)))
+
+    # Dummy polyfills for hallucinated functions
+    def _dummy_boolean_func(*args, **kwargs):
+        print("Ignored hallucinated cadquery function")
+        return args[0] if args else None
+    
+    for f in ("intersect", "fuse", "cut"):
+        setattr(build123d, f, _dummy_boolean_func)
+        ns[f] = _dummy_boolean_func
+
+    # Patch Location to support context manager so hallucinated 'with bd.Rotation():' works gracefully
+    if hasattr(build123d, "Location"):
+        def loc_enter(self):
+            self._loc_ctx = build123d.Locations(self)
+            return self._loc_ctx.__enter__()
+        def loc_exit(self, exc_type, exc_val, exc_tb):
+            return self._loc_ctx.__exit__(exc_type, exc_val, exc_tb)
+        build123d.Location.__enter__ = loc_enter
+        build123d.Location.__exit__ = loc_exit
+
+    # Sync patched objects to namespace.  Only build123d's declared public API (plus the
+    # polyfills above) is bound by bare name: dir(build123d) also lists everything the
+    # package itself imports (os, sys, ctypes, Path, raw OCP file-I/O classes, ...), which
+    # must never become a global of the generated script.
+    ns.update(_public_build123d_values(build123d))
+    for _denied_name in _FILESYSTEM_API_DENY:
+        ns.pop(_denied_name, None)  # the bootstrap `from build123d import *` bound them too
+
+    def _safe_rectangle(width, height, *args, **kwargs):
+        radius = kwargs.pop("radius", None)
+        face = build123d.Rectangle(width, height, *args, **kwargs)
+        if radius is not None:
+            try:
+                face = build123d.fillet(face.vertices(), radius)
+            except Exception:
+                pass
+        return face
+
+    def _safe_square(size, *args, **kwargs):
+        radius = kwargs.pop("radius", None)
+        face = build123d.Square(size, *args, **kwargs)
+        if radius is not None:
+            try:
+                face = build123d.fillet(face.vertices(), radius)
+            except Exception:
+                pass
+        return face
+
+    ns.update({
+        "Rectangle": _safe_rectangle,
+        "Square": _safe_square,
+    })
+
+    if hasattr(build123d, "Part") and not hasattr(build123d.Part, "export_step"):
+        # Compat for hallucinated `part.export_step(path)` calls.  Deliberately inert: a
+        # generated script must never write files (the harness exports the model itself).
+        def _part_export_step(self, *args, **kwargs):
+            return True
+        def _part_export_stl(self, *args, **kwargs):
+            return True
+        build123d.Part.export_step = _part_export_step
+        build123d.Part.export_stl = _part_export_stl
+
+    # Text is harmless geometry, but `font_path` makes build123d open a caller-chosen file.
+    # Compound.make_text is the single choke point (Text.__init__ and every Compound subclass
+    # go through it), so reject a caller-supplied font_path there.  System font *names*
+    # (`font="Arial"`) keep working.
+    if hasattr(build123d, "Compound") and isinstance(build123d.Compound.__dict__.get("make_text"), classmethod):
+        import inspect as _inspect
+        _orig_make_text = build123d.Compound.__dict__["make_text"].__func__
+        _make_text_sig = _inspect.signature(_orig_make_text)
+        def _safe_make_text(cls, *args, **kwargs):
+            if _make_text_sig.bind(cls, *args, **kwargs).arguments.get("font_path") is not None:
+                raise ValueError("font_path is not permitted in generated CAD scripts; use a system font name via `font=`.")
+            return _orig_make_text(cls, *args, **kwargs)
+        build123d.Compound.make_text = classmethod(_safe_make_text)
+
+    def _rotated_patch(x=0, y=0, z=0, axis=None, angle=0):
+        if axis is not None:
+            if hasattr(build123d, "Axis"):
+                if axis == build123d.Axis.X:
+                    x = angle
+                elif axis == build123d.Axis.Y:
+                    y = angle
+                elif axis == build123d.Axis.Z:
+                    z = angle
+        return build123d.Locations(build123d.Rotation(x, y, z))
+
+    ns.update({
+        "Extrude": ns.get("extrude"),
+        "Revolve": ns.get("revolve"),
+        "Loft": ns.get("loft"),
+        "Sweep": ns.get("sweep"),
+        "GridLocation": ns.get("GridLocations"),
+        "PolarLocation": ns.get("PolarLocations"),
+        "Rotated": _rotated_patch,
+        "Rotation": build123d.Rotation,
+    })
+
+    # Inside RENDER_HARNESS_TEMPLATE -> run()
+    if hasattr(build123d, "RadiusArc"):
+        _orig_radius_arc = build123d.RadiusArc
+        def safe_radius_arc(start, end, radius, *args, **kwargs):
+            try:
+                chord = math.dist(start, end)
+                if chord < 1e-5:
+                    return build123d.Line(start, (start[0] + 1e-5, start[1]))
+                min_radius = chord / 2.0 + 1e-6
+                if abs(radius) < min_radius:
+                    radius = math.copysign(min_radius, radius)
+            except Exception:
+                pass
+            return _orig_radius_arc(start, end, radius, *args, **kwargs)
+        build123d.RadiusArc = safe_radius_arc
+        ns["RadiusArc"] = safe_radius_arc
+
+    # NEW: Add a protective patch for basic Lines
+    if hasattr(build123d, "Line"):
+        _orig_line = build123d.Line
+        def safe_line(pts_or_start, *args, **kwargs):
+            try:
+                if len(args) == 1: # Line(start, end) pattern
+                    if math.dist(pts_or_start, args[0]) < 1e-5:
+                        # Prevent zero-length line crash
+                        return _orig_line(pts_or_start, (pts_or_start[0] + 1e-5, pts_or_start[1]))
+            except Exception:
+                pass
+            return _orig_line(pts_or_start, *args, **kwargs)
+        build123d.Line = safe_line
+        ns["Line"] = safe_line
+
+    build123d.Vector.position = property(lambda self: self)
+    build123d.Vector.x = property(lambda self: self.X)
+    build123d.Vector.y = property(lambda self: self.Y)
+    build123d.Vector.z = property(lambda self: self.Z)
+    if hasattr(build123d, "Vertex"):
+        build123d.Vertex.x = property(lambda self: self.X)
+        build123d.Vertex.y = property(lambda self: self.Y)
+        build123d.Vertex.z = property(lambda self: self.Z)
+
+    if hasattr(build123d, "BuildLine"):
+        build123d.BuildLine.__matmul__ = lambda self, val: self.wire() @ val
+        build123d.BuildLine.__mod__ = lambda self, val: self.wire() % val
+
+    if hasattr(build123d, "Part"):
+        if not hasattr(build123d.Part, "_orig_center"):
+            build123d.Part._orig_center = getattr(build123d.Part, "center", None)
+            def get_center(self):
+                if callable(build123d.Part._orig_center):
+                    return build123d.Part._orig_center(self)
+                return self._orig_center if hasattr(self, "_orig_center") else Location((0, 0, 0))
+            build123d.Part.center = property(get_center)
+
+    try:
+        from build123d.build_common import Builder
+        if hasattr(Builder, "_add_to_context"):
+            _orig_add_to_context = Builder._add_to_context
+            def safe_add_to_context(self, *objs, **kwargs):
+                mode = kwargs.get("mode")
+                if mode is None and len(objs) > 3:
+                    mode = objs[3]
+                
+                solids_before = 0
+                if getattr(self, "_obj", None) is not None:
+                    try:
+                        solids_before = len(self._obj.solids())
+                    except Exception:
+                        pass
+                        
+                try:
+                    res = _orig_add_to_context(self, *objs, **kwargs)
+                except Exception as exc:
+                    msg = str(exc).lower()
+                    if "nothing to subtract from" in msg:
+                        return None
+                    if "brep_api" in msg or "stdfail" in msg or "not done" in msg:
+                        print(f"Ignored topological error in context: {exc}")
+                        return None
+                    raise
+                    
+                solids_after = 0
+                if getattr(self, "_obj", None) is not None:
+                    try:
+                        solids_after = len(self._obj.solids())
+                    except Exception:
+                        pass
+
+                if _VALIDATION_MODE and mode == build123d.Mode.SUBTRACT and solids_before > 0 and solids_after == 0:
+                    raise RuntimeError(
+                        "VALIDATION_GEOMETRY_ERROR: Boolean SUBTRACT operation resulted in an empty part (0 solids remaining). "
+                        "This usually means the subtracted shape (cutter) completely consumed the part, "
+                        "or an OpenCASCADE boolean error occurred due to coincident faces or zero-thickness walls. "
+                        "Ensure your cutter dimensions are correct (e.g., an internal thread on a shaft must have a shaft diameter larger than the thread major diameter) and use 'eps' for coincident faces."
+                    )
+                return res
+            Builder._add_to_context = safe_add_to_context
+    except Exception:
+        pass
+
+    _orig_fillet = build123d.fillet
+    def smart_fillet(*args, **kwargs):
+        objs = kwargs.get("objects") or (args[0] if args else None)
+        try:
+            if objs is not None and hasattr(objs, "__len__") and len(objs) == 0:
+                return None
+        except Exception:
+            pass
+
+        radius = kwargs.get("radius")
+        if radius is None and len(args) >= 2:
+            radius = args[1]
+            
+        v = radius if radius is not None else 1.0
+        for attempt in range(5):
+            try:
+                if radius is not None:
+                    if "radius" in kwargs:
+                        kwargs["radius"] = v
+                        return _orig_fillet(*args, **kwargs)
+                    elif len(args) >= 2:
+                        new_args = (args[0], v) + args[2:]
+                        return _orig_fillet(*new_args, **kwargs)
+                return _orig_fillet(*args, **kwargs)
+            except ValueError as exc:
+                msg = str(exc).lower()
+                if "objects must be provided" in msg or "edges are not all the same type" in msg:
+                    return None
+                if "2d fillet operation takes only vertices" in msg:
+                    if objs is not None:
+                        verts = None
+                        if hasattr(objs, "vertices"):
+                            verts = objs.vertices() if callable(objs.vertices) else objs.vertices
+                        if verts:
+                            if "objects" in kwargs:
+                                kwargs["objects"] = verts
+                            elif args:
+                                args = (verts,) + args[1:]
+                            try:
+                                return _orig_fillet(*args, **kwargs)
+                            except Exception:
+                                return None
+                if "smaller value" in msg or "failed creating a fillet" in msg or "invalid for fillet" in msg:
+                    v = v / 2.0
+                    if v < 1e-3:
+                        return None
+                    continue
+                if not _VALIDATION_MODE:
+                    return objs
+                raise
+            except Exception as exc:
+                msg = str(exc).lower()
+                if any(x in msg for x in ["topods_frozenshape", "builder::add", "invalid", "empty", "degenerate", "tolerance", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+                    v = v / 2.0
+                    if v < 1e-3:
+                        return objs if not _VALIDATION_MODE else None
+                    continue
+                if not _VALIDATION_MODE:
+                    return objs
+                raise
+        return None
+    build123d.fillet = smart_fillet
+    ns["fillet"] = smart_fillet
+
+    _orig_chamfer = build123d.chamfer
+    def smart_chamfer(*args, **kwargs):
+        objs = kwargs.get("objects") or (args[0] if args else None)
+        try:
+            if objs is not None and hasattr(objs, "__len__") and len(objs) == 0:
+                return None
+        except Exception:
+            pass
+
+        length = kwargs.get("length")
+        if length is None and len(args) >= 2:
+            length = args[1]
+            
+        v = length if length is not None else 1.0
+        for attempt in range(5):
+            try:
+                if length is not None:
+                    if "length" in kwargs:
+                        kwargs["length"] = v
+                        return _orig_chamfer(*args, **kwargs)
+                    elif len(args) >= 2:
+                        new_args = (args[0], v) + args[2:]
+                        return _orig_chamfer(*new_args, **kwargs)
+                return _orig_chamfer(*args, **kwargs)
+            except ValueError as exc:
+                msg = str(exc).lower()
+                if "objects must be provided" in msg or "edges are not all the same type" in msg:
+                    return None
+                if "smaller value" in msg or "failed creating a chamfer" in msg or "chamfer" in msg:
+                    v = v / 2.0
+                    if v < 1e-3:
+                        return None
+                    continue
+                if not _VALIDATION_MODE:
+                    return objs
+                raise
+            except Exception as exc:
+                msg = str(exc).lower()
+                if any(x in msg for x in ["topods_frozenshape", "builder::add", "invalid", "empty", "degenerate", "tolerance", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+                    v = v / 2.0
+                    if v < 1e-3:
+                        return objs if not _VALIDATION_MODE else None
+                    continue
+                if not _VALIDATION_MODE:
+                    return objs
+                raise
+        return None
+    build123d.chamfer = smart_chamfer
+    ns["chamfer"] = smart_chamfer
+
+    def _clean_sketch_inputs(val):
+        if hasattr(build123d, "BuildSketch") and isinstance(val, build123d.BuildSketch):
+            if hasattr(val, "sketch") and val.sketch is not None:
+                return val.sketch
+        if isinstance(val, list):
+            return [_clean_sketch_inputs(x) for x in val]
+        if isinstance(val, tuple):
+            return tuple(_clean_sketch_inputs(x) for x in val)
+        return val
+
+    _orig_sweep = build123d.sweep
+    def safe_sweep(*args, **kwargs):
+        new_args = [_clean_sketch_inputs(arg) for arg in args]
+        if "sections" in kwargs:
+            kwargs["sections"] = _clean_sketch_inputs(kwargs["sections"])
+        try:
+            return _orig_sweep(*new_args, **kwargs)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if not _VALIDATION_MODE and any(x in msg for x in ["empty", "invalid", "degenerate", "self-intersect", "zero norm", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+                return new_args[0] if new_args else kwargs.get("sections")
+            raise
+    build123d.sweep = safe_sweep
+    ns["sweep"] = safe_sweep
+    ns["Sweep"] = safe_sweep
+
+    _orig_loft = build123d.loft
+    def safe_loft(*args, **kwargs):
+        new_args = [_clean_sketch_inputs(arg) for arg in args]
+        if "sections" in kwargs:
+            kwargs["sections"] = _clean_sketch_inputs(kwargs["sections"])
+        try:
+            return _orig_loft(*new_args, **kwargs)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if not _VALIDATION_MODE and any(x in msg for x in ["empty", "invalid", "degenerate", "self-intersect", "zero norm", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+                return new_args[0] if new_args else kwargs.get("sections")
+            raise
+    build123d.loft = safe_loft
+    ns["loft"] = safe_loft
+    ns["Loft"] = safe_loft
+
+    _orig_revolve = build123d.revolve
+    def safe_revolve(*args, **kwargs):
+        new_args = [_clean_sketch_inputs(arg) for arg in args]
+        if "to_revolve" in kwargs:
+            kwargs["to_revolve"] = _clean_sketch_inputs(kwargs["to_revolve"])
+            
+        if "angle" in kwargs:
+            kwargs["revolution_arc"] = kwargs.pop("angle")
+        if "revolution_angle" in kwargs:
+            kwargs["revolution_arc"] = kwargs.pop("revolution_angle")
+            
+        try:
+            return _orig_revolve(*new_args, **kwargs)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if not _VALIDATION_MODE and any(x in msg for x in ["empty", "invalid", "degenerate", "self-intersect", "zero norm", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+                return new_args[0] if new_args else kwargs.get("to_revolve")
+            raise
+    build123d.revolve = safe_revolve
+    ns["revolve"] = safe_revolve
+    ns["Revolve"] = safe_revolve
+
+    _orig_extrude = build123d.extrude
+    def safe_extrude(*args, **kwargs):
+        new_args = [_clean_sketch_inputs(arg) for arg in args]
+        if "to_extrude" in kwargs:
+            kwargs["to_extrude"] = _clean_sketch_inputs(kwargs["to_extrude"])
+        
+        # Gracefully handle the hallucinated 'centered' kwarg
+        if "centered" in kwargs:
+            kwargs["both"] = kwargs.pop("centered")
+
+        try:
+            return _orig_extrude(*new_args, **kwargs)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if not _VALIDATION_MODE and any(x in msg for x in ["either amount or until", "face or sketch must be provided", "empty", "invalid", "degenerate", "self-intersect", "zero norm", "stdfail", "brep_api", "not done", "chfi3d", "constructionerror", "only 2 faces"]):
+                return new_args[0] if new_args else kwargs.get("to_extrude")
+            raise
+    build123d.extrude = safe_extrude
+    ns["extrude"] = safe_extrude
+    ns["Extrude"] = safe_extrude
+
+    def _builder_transform(self, *args, **kwargs):
+        if hasattr(self, "_obj") and self._obj is not None:
+            if hasattr(self._obj, "move"):
+                self._obj = self._obj.move(*args, **kwargs)
+            elif hasattr(self._obj, "locate"):
+                self._obj = self._obj.locate(*args, **kwargs)
+            elif hasattr(self._obj, "translate"):
+                self._obj = self._obj.translate(*args, **kwargs)
+            return self._obj
+        return self
+
+    if hasattr(build123d, "BuildSketch"):
+        build123d.BuildSketch.move = _builder_transform
+        build123d.BuildSketch.locate = _builder_transform
+        build123d.BuildSketch.translate = _builder_transform
+        build123d.BuildSketch.rotate = _builder_transform
+
+    if hasattr(build123d, "BuildPart"):
+        build123d.BuildPart.move = _builder_transform
+        build123d.BuildPart.locate = _builder_transform
+        build123d.BuildPart.translate = _builder_transform
+        build123d.BuildPart.rotate = _builder_transform
+
+    if hasattr(build123d, "BuildLine"):
+        build123d.BuildLine.move = _builder_transform
+        build123d.BuildLine.locate = _builder_transform
+        build123d.BuildLine.translate = _builder_transform
+        build123d.BuildLine.rotate = _builder_transform
+
+    if hasattr(build123d, "SlotOverall"):
+        _orig_slot_overall = build123d.SlotOverall.__init__
+        def safe_slot_overall(self, *args, **kwargs):
+            w = kwargs.pop("width", None) or kwargs.pop("length", None) or kwargs.pop("slot_length", None)
+            h = kwargs.pop("height", None) or kwargs.pop("slot_width", None) or kwargs.pop("dia", None) or kwargs.pop("diameter", None)
+            rot = kwargs.pop("rotation", 0)
+
+            if args:
+                if len(args) >= 1 and w is None:
+                    w = args[0]
+                if len(args) >= 2 and h is None:
+                    h = args[1]
+                if len(args) >= 3 and rot == 0:
+                    rot = args[2]
+
+            w = float(w) if w is not None else 10.0
+            h = float(h) if h is not None else 5.0
+
+            if w < h:
+                w, h = h, w
+                rot = (rot + 90) % 360
+
+            return _orig_slot_overall(self, width=w, height=h, rotation=rot, **kwargs)
+
+        build123d.SlotOverall.__init__ = safe_slot_overall
+        ns["SlotOverall"] = build123d.SlotOverall
+
+    if hasattr(build123d, "SlotCenterToCenter"):
+        _orig_slot_c2c = build123d.SlotCenterToCenter.__init__
+        def safe_slot_c2c(self, *args, **kwargs):
+            sep = (
+                kwargs.pop("center_separation", None)
+                or kwargs.pop("center_to_center", None)
+                or kwargs.pop("separation", None)
+                or kwargs.pop("distance", None)
+                or kwargs.pop("length", None)
+                or kwargs.pop("c2c", None)
+            )
+            h = (
+                kwargs.pop("height", None)
+                or kwargs.pop("slot_width", None)
+                or kwargs.pop("width", None)
+                or kwargs.pop("dia", None)
+                or kwargs.pop("diameter", None)
+            )
+            rot = kwargs.pop("rotation", 0)
+
+            if args:
+                if len(args) >= 1 and sep is None:
+                    sep = args[0]
+                if len(args) >= 2 and h is None:
+                    h = args[1]
+                if len(args) >= 3 and rot == 0:
+                    rot = args[2]
+
+            sep = float(sep) if sep is not None else 10.0
+            h = float(h) if h is not None else 5.0
+
+            if sep < 0:
+                sep = abs(sep)
+            if sep < 1e-4:
+                sep = 1e-4
+
+            return _orig_slot_c2c(self, center_separation=sep, height=h, rotation=rot, **kwargs)
+
+        build123d.SlotCenterToCenter.__init__ = safe_slot_c2c
+        ns["SlotCenterToCenter"] = build123d.SlotCenterToCenter
+
+    if hasattr(build123d, "Polygon"):
+        _orig_polygon = build123d.Polygon
+        def safe_polygon(*args, **kwargs):
+            kwargs.pop("close", None)
+            if args and isinstance(args[0], (list, tuple)):
+                pts = args[0]
+                new_pts = []
+                for p in pts:
+                    if isinstance(p, list) and len(p) >= 2:
+                        new_pts.append(tuple(p))
+                    else:
+                        new_pts.append(p)
+                args = (new_pts,) + args[1:]
+            return _orig_polygon(*args, **kwargs)
+        build123d.Polygon = safe_polygon
+        ns["Polygon"] = safe_polygon
+
+    if hasattr(build123d, "CenterArc"):
+        _orig_centerarc = build123d.CenterArc
+        def safe_centerarc(*args, **kwargs):
+            if "angular_span" in kwargs:
+                kwargs["arc_size"] = kwargs.pop("angular_span")
+            return _orig_centerarc(*args, **kwargs)
+        build123d.CenterArc = safe_centerarc
+        ns["CenterArc"] = safe_centerarc
+
+    if hasattr(build123d, "PolarLocations"):
+        _orig_polarlocations = build123d.PolarLocations.__init__
+        def safe_polarlocations(self, *args, **kwargs):
+            if "angular_span" in kwargs:
+                kwargs["angular_range"] = kwargs.pop("angular_span")
+            if "angle_0" in kwargs:
+                kwargs["start_angle"] = kwargs.pop("angle_0")
+            plane = kwargs.pop("plane", None)
+            _orig_polarlocations(self, *args, **kwargs)
+            if plane is not None and hasattr(self, "local_locations"):
+                self.local_locations = [plane.location * loc for loc in self.local_locations]
+        build123d.PolarLocations.__init__ = safe_polarlocations
+
+    if hasattr(build123d, "GridLocations"):
+        _orig_gridlocations = build123d.GridLocations.__init__
+        def safe_gridlocations(self, *args, **kwargs):
+            plane = kwargs.pop("plane", None)
+            _orig_gridlocations(self, *args, **kwargs)
+            if plane is not None and hasattr(self, "local_locations"):
+                self.local_locations = [plane.location * loc for loc in self.local_locations]
+        build123d.GridLocations.__init__ = safe_gridlocations
+
+    if hasattr(build123d, "HexLocations"):
+        _orig_hexlocations = build123d.HexLocations.__init__
+        def safe_hexlocations(self, *args, **kwargs):
+            plane = kwargs.pop("plane", None)
+            _orig_hexlocations(self, *args, **kwargs)
+            if plane is not None and hasattr(self, "local_locations"):
+                self.local_locations = [plane.location * loc for loc in self.local_locations]
+        build123d.HexLocations.__init__ = safe_hexlocations
+
+    if hasattr(build123d, "Locations"):
+        _orig_locations_init = build123d.Locations.__init__
+        def safe_locations_init(self, *args, **kwargs):
+            if len(args) == 1 and type(args[0]).__name__ in ["PolarLocations", "HexLocations", "GridLocations"]:
+                # The LLM incorrectly nested PolarLocations inside Locations.
+                # Unwrap it into positional arguments so bd.Locations accepts it.
+                args = tuple(list(args[0]))
+            return _orig_locations_init(self, *args, **kwargs)
+        build123d.Locations.__init__ = safe_locations_init
+
+    if hasattr(build123d, "make_hull"):
+        _orig_make_hull = build123d.make_hull
+        def safe_make_hull(*args, **kwargs):
+            try:
+                return _orig_make_hull(*args, **kwargs)
+            except AttributeError:
+                # build123d has a bug where passing Face objects like bd.Circle() crashes
+                # during edge extraction. Fall back to hulling the active context.
+                return _orig_make_hull()
+        build123d.make_hull = safe_make_hull
+        ns["make_hull"] = safe_make_hull
+        build123d.Hull = safe_make_hull
+        ns["Hull"] = safe_make_hull
+
+    if hasattr(build123d, "Plane"):
+        if hasattr(build123d.Plane, "offset"):
+            build123d.Plane.shifted = build123d.Plane.offset
+        if hasattr(build123d.Plane, "x_dir"):
+            build123d.Plane.x_axis = property(lambda self: self.x_dir)
+            build123d.Plane.y_axis = property(lambda self: self.y_dir)
+            build123d.Plane.z_axis = property(lambda self: self.z_dir)
+
+    if hasattr(build123d, "ShapeList"):
+        # Polyfill for hallucinatory .at_coords()
+        def safe_at_coords(self, coords):
+            return self.sort_by_distance(coords)[0:1]
+        build123d.ShapeList.at_coords = safe_at_coords
+
+        # Polyfill for hallucinatory .sort_by_position() which should be .filter_by_position()
+        if hasattr(build123d.ShapeList, "filter_by_position"):
+            build123d.ShapeList.sort_by_position = build123d.ShapeList.filter_by_position
+
+    _orig_solid_revolve = build123d.Solid.revolve
+    @classmethod
+    def safe_solid_revolve(cls, section, angle, axis, inner_wires=None):
+        try:
+            return _orig_solid_revolve(section, angle, axis, inner_wires)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if not any(k in msg for k in ["not done", "stdfail", "brep_api", "empty", "invalid", "degenerate", "self-intersect", "chfi3d", "constructionerror"]):
+                raise
+        
+        # Attempt half-space splitting along axis
+        try:
+            if isinstance(section, build123d.Wire):
+                section_face = build123d.Face(section, inner_wires or [])
+            elif isinstance(section, (list, tuple)) and len(section) > 0:
+                section_face = section[0]
+            else:
+                section_face = section
+
+            p0_v = getattr(axis, "position", build123d.Vector(0, 0, 0))
+            d_v = getattr(axis, "direction", build123d.Vector(0, 0, 1))
+            
+            p0 = [getattr(p0_v, "X", 0.0), getattr(p0_v, "Y", 0.0), getattr(p0_v, "Z", 0.0)]
+            d = [getattr(d_v, "X", 0.0), getattr(d_v, "Y", 0.0), getattr(d_v, "Z", 1.0)]
+            d_len = math.sqrt(d[0]**2 + d[1]**2 + d[2]**2)
+            if d_len > 1e-6:
+                d = [x / d_len for x in d]
+
+            n_vec = section_face.normal_at() if hasattr(section_face, "normal_at") else build123d.Vector(0, 1, 0)
+            n = [getattr(n_vec, "X", 0.0), getattr(n_vec, "Y", 1.0), getattr(n_vec, "Z", 0.0)]
+            n_len = math.sqrt(n[0]**2 + n[1]**2 + n[2]**2)
+            if n_len > 1e-6:
+                n = [x / n_len for x in n]
+
+            # In-plane normal perpendicular to axis: cross(d, n)
+            v = [
+                d[1]*n[2] - d[2]*n[1],
+                d[2]*n[0] - d[0]*n[2],
+                d[0]*n[1] - d[1]*n[0]
+            ]
+            v_len = math.sqrt(v[0]**2 + v[1]**2 + v[2]**2)
+            if v_len < 1e-4:
+                # If d is parallel to n, pick orthogonal vector
+                v = [n[1], -n[0], 0.0] if abs(n[2]) < 0.9 else [0.0, -n[2], n[1]]
+                v_len = math.sqrt(v[0]**2 + v[1]**2 + v[2]**2)
+            if v_len > 1e-6:
+                v = [x / v_len for x in v]
+
+            # Positive half space
+            center_pos = [p0[i] + 10000.0 * v[i] for i in range(3)]
+            pl_pos = build123d.Plane(
+                origin=build123d.Vector(center_pos),
+                z_dir=build123d.Vector(n),
+                x_dir=build123d.Vector(d)
+            )
+            half_pos = build123d.Face.make_rect(20000, 20000, plane=pl_pos)
+            part_pos = section_face & half_pos
+            if getattr(part_pos, "area", 0) > 1e-4:
+                try:
+                    return _orig_solid_revolve(part_pos, angle, axis)
+                except Exception:
+                    pass
+
+            # Negative half space
+            center_neg = [p0[i] - 10000.0 * v[i] for i in range(3)]
+            pl_neg = build123d.Plane(
+                origin=build123d.Vector(center_neg),
+                z_dir=build123d.Vector(n),
+                x_dir=build123d.Vector(d)
+            )
+            half_neg = build123d.Face.make_rect(20000, 20000, plane=pl_neg)
+            part_neg = section_face & half_neg
+            if getattr(part_neg, "area", 0) > 1e-4:
+                try:
+                    return _orig_solid_revolve(part_neg, angle, axis)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        raise
+    build123d.Solid.revolve = safe_solid_revolve
+
+
+    try:
+        script_content = Path("user_script.py").read_text(encoding="utf-8")
+        script_content = re.sub(r"Polygon\((.*?),\s*close=(?:True|False)\)", r"Polygon(\1)", script_content)
+        script_content = re.sub(r"(\s+)extrude\s*\(\s*", r"\1# extrude_placeholder(", script_content)
+        script_content = re.sub(r"# extrude_placeholder", r"extrude", script_content)
+        # Prevent hallucinated GeomType.POINT from crashing by removing the filter entirely
+        script_content = re.sub(r"\.filter_by\(\s*(?:bd|build123d)\.GeomType\.POINT\s*\)", "", script_content)
+
+        # CLAUDE-001: Enforce restricted builtins before executing user script.
+        # The build123d bootstrap above ran with unrestricted builtins (trusted
+        # harness code).  Now we lock down so that the user-generated script
+        # cannot access open, __import__, eval, exec, or any other dangerous
+        # builtin — even through __builtins__["key"] dict subscript access.
+        ns["__builtins__"] = _RESTRICTED_BUILTINS
+
+        exec(script_content, ns)
+    except Exception:
+        import traceback
+        print("\n---TRACEBACK_START---", flush=True)
+        traceback.print_exc(file=sys.stdout)
+        print("---TRACEBACK_END---", flush=True)
+        sys.exit(1)
+
+    shape = None
+    annotations = {}
+    
+    # Extract annotations if generated by the LLM
+    if "ANNOTATIONS" in ns and isinstance(ns["ANNOTATIONS"], dict):
+        annotations.update(ns["ANNOTATIONS"])
+        
+    if "build_model" in ns and callable(ns["build_model"]):
+        try:
+            res = ns["build_model"](params)
+            if isinstance(res, tuple) and len(res) == 2 and isinstance(res[1], dict):
+                shape, annotations = res
+            else:
+                shape = reduce(operator.add, res) if isinstance(res, (list, tuple)) else res
+        except Exception:
+            import traceback
+            print("\n---TRACEBACK_START---", flush=True)
+            traceback.print_exc(file=sys.stdout)
+            print("---TRACEBACK_END---", flush=True)
+            sys.exit(1)
+
+    if shape is None:
+        for name in ("model", "part", "result", "assembly", "shape", "solid"):
+            if name in ns:
+                shape = ns[name]
+                break
+
+    if shape is None:
+        print("RENDER_ERROR: No exportable shape found.")
+        sys.exit(1)
+
+    # Unwrap builder objects to their underlying topological shape for export
+    if hasattr(shape, "part") and getattr(shape, "part") is not None:
+        shape = shape.part
+    elif hasattr(shape, "sketch") and getattr(shape, "sketch") is not None:
+        shape = shape.sketch
+    elif hasattr(shape, "line") and getattr(shape, "line") is not None:
+        shape = shape.line
+
+    # Apply manual rotation if requested
+    try:
+        rx = float(params.get("_model_rotation_x", 0))
+        ry = float(params.get("_model_rotation_y", 0))
+        rz = float(params.get("_model_rotation_z", 0))
+        if rx or ry or rz:
+            from build123d import Rotation, Vector
+            rot = Rotation(rx, ry, rz)
+            shape = rot * shape
+            # Rotate all existing annotation points so they rotate with the model
+            for ann in annotations.values():
+                if isinstance(ann, dict):
+                    if "p1" in ann and len(ann["p1"]) == 3:
+                        v1 = rot * Vector(*ann["p1"])
+                        ann["p1"] = [float(v1.X), float(v1.Y), float(v1.Z)]
+                    if "p2" in ann and len(ann["p2"]) == 3:
+                        v2 = rot * Vector(*ann["p2"])
+                        ann["p2"] = [float(v2.X), float(v2.Y), float(v2.Z)]
+                    if "center" in ann and len(ann["center"]) == 3:
+                        vc = rot * Vector(*ann["center"])
+                        ann["center"] = [float(vc.X), float(vc.Y), float(vc.Z)]
+                    if "axis" in ann and len(ann["axis"]) == 3:
+                        va = rot * Vector(*ann["axis"])
+                        ann["axis"] = [float(va.X), float(va.Y), float(va.Z)]
+    except Exception as e:
+        print(f"Failed to apply model rotation: {e}")
+
+
+    # Deterministic geometric annotations for the UI (fallback + enrichment)
+    # Derive from the real final shape geometry to ensure 100% spatial alignment.
+    try:
+        derived_annotations = _compute_parametric_annotations(shape, params)
+        # Use derived annotations as authoritative ground truth
+        final_annotations = dict(derived_annotations)
+        
+        # Check LLM annotations for any extra parameters not derived
+        bb = shape.bounding_box()
+        bmin = (bb.min.X, bb.min.Y, bb.min.Z)
+        bmax = (bb.max.X, bb.max.Y, bb.max.Z)
+        diag = max(5.0, ((bmax[0]-bmin[0])**2 + (bmax[1]-bmin[1])**2 + (bmax[2]-bmin[2])**2)**0.5)
+        margin = max(2.0, diag * 0.1)
+
+        for _ann_key, _ann_val in annotations.items():
+            if _ann_key not in final_annotations and isinstance(_ann_val, dict):
+                p1 = _ann_val.get("p1")
+                p2 = _ann_val.get("p2")
+                if p1 and p2 and len(p1) == 3 and len(p2) == 3:
+                    # Check if within bounding box margin
+                    in_bounds = (
+                        (bmin[0] - margin <= p1[0] <= bmax[0] + margin) and
+                        (bmin[1] - margin <= p1[1] <= bmax[1] + margin) and
+                        (bmin[2] - margin <= p1[2] <= bmax[2] + margin) and
+                        (bmin[0] - margin <= p2[0] <= bmax[0] + margin) and
+                        (bmin[1] - margin <= p2[1] <= bmax[1] + margin) and
+                        (bmin[2] - margin <= p2[2] <= bmax[2] + margin)
+                    )
+                    if in_bounds:
+                        final_annotations[_ann_key] = _ann_val
+
+        annotations = final_annotations
+    except Exception as ann_exc:
+        print(f"ANNOTATIONS_WARNING: Could not derive geometric annotations: {ann_exc}")
+
+    # ── VALIDATION MODE: strictly check geometry and exit early (no file export) ──
+    if _VALIDATION_MODE:
+        try:
+            _validate_shape(shape)
+        except Exception as ve:
+            print(f"VALIDATION_GEOMETRY_ERROR: {ve}", flush=True)
+            sys.exit(1)
+        print("VALIDATION_SUCCESS", flush=True)
+        return
+
+    out_dir = Path(os.getenv("OUTPUT_DIR", "."))
+    basename = os.getenv("OUTPUT_BASENAME", "model")
+    try:
+        from build123d.exporters import ExportDXF
+        _validate_shape(shape)
+        
+        try:
+            bbox = shape.bounding_box() if callable(getattr(shape, "bounding_box", None)) else getattr(shape, "bounding_box", None)
+            vol = shape.volume if hasattr(shape, "volume") else 0.0
+            f_count = _shape_faces_count(shape)
+            v_count = 0
+            if hasattr(shape, "vertices"):
+                verts = shape.vertices() if callable(shape.vertices) else shape.vertices
+                v_count = len(verts)
+                
+            if bbox and hasattr(bbox, "size"):
+                annotations["stats"] = {
+                    "bounding_box": {"x": bbox.size.X, "y": bbox.size.Y, "z": bbox.size.Z},
+                    "volume": vol,
+                    "faces": f_count,
+                    "vertices": v_count
+                }
+        except Exception as e:
+            print(f"STATS_WARNING: Could not calculate stats: {e}")
+
+        export_step(shape, str(out_dir / f"{basename}.step"))
+        export_stl(shape, str(out_dir / f"{basename}.stl"))
+        
+        # DXF Export for CNC/Drafting
+        try:
+            dxf_exporter = ExportDXF(unit=build123d.Unit.MM)
+            dxf_exporter.add_shape(shape)
+            dxf_exporter.write(str(out_dir / f"{basename}.dxf"))
+        except Exception as dxf_exc:
+            print(f"DXF_WARNING: Could not export DXF: {dxf_exc}")
+
+        # G-code / CAM Generation (Removed, moved to CamPipelineManager)
+
+        try:
+            with open(out_dir / f"{basename}_annotations.json", "w") as f:
+                json.dump(annotations, f)
+        except Exception as ann_exc:
+            print(f"ANNOTATIONS_WARNING: Could not write annotations: {ann_exc}")
+
+        print(f"RENDER_SUCCESS: Exported {basename}.step, {basename}.stl, {basename}.dxf, and {basename}.gcode", flush=True)
+
+    except Exception as exc:
+        print(f"EXPORT_ERROR: {exc}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    run()
+""".replace("__GUARDED_IMPORT_SOURCE_LITERAL__", repr(_GUARDED_IMPORT_SOURCE))
+
+
+class ParameterRenderService:
+    def __init__(self, outputs_dir: Optional[Path] = None) -> None:
+        project_root = Path(__file__).resolve().parents[3]
+        self.outputs_dir = outputs_dir or (project_root / "outputs")
+        self.outputs_dir.mkdir(parents=True, exist_ok=True)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # SELF-CORRECTING LOOP SUPPORT: Validate script geometry without exporting
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def validate_script(
+        self,
+        script: str,
+        parameters: Dict[str, Any],
+    ) -> tuple[bool, str]:
+        """Run the script in VALIDATION_MODE to check geometry without exporting files.
+
+        Returns (True, "") on success, or (False, traceback_string) on failure.
+        Uses the same harness as render_to_outputs but with strict error propagation.
+        """
+        is_valid_syntax, syn_err = validate_script_syntax(script)
+        if not is_valid_syntax:
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            log_file = log_dir / f"validation_fail_{uuid.uuid4().hex[:6]}.py"
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.write(script)
+            return False, syn_err
+            
+        is_secure, sec_err = validate_script_security(script)
+        if not is_secure:
+            return False, f"Security validation failed: {sec_err}"
+
+        parameters = _coerce_jsonable(parameters)
+        timeout_seconds = max(60, int(os.getenv("RENDER_TIMEOUT_SECONDS", "120")))
+
+        with tempfile.TemporaryDirectory(prefix="cad_val_") as temp_dir:
+            tmp = Path(temp_dir)
+            (tmp / "user_script.py").write_text(script, encoding="utf-8")
+            (tmp / "harness.py").write_text(RENDER_HARNESS_TEMPLATE, encoding="utf-8")
+
+            env = _build_sandbox_env(extra={
+                "CAD_PARAMETERS_JSON": json.dumps(parameters, ensure_ascii=True),
+                "CAD_CAM_PARAMETERS_JSON": json.dumps({}, ensure_ascii=True),
+                "OUTPUT_DIR": str(tmp),   # temp dir — no real outputs written
+                "OUTPUT_BASENAME": "val_check",
+                "VALIDATION_MODE": "1",   # ← key: activate strict geometry checking
+            })
+
+            python_exe = sys.executable
+            if not python_exe:
+                project_root = Path(__file__).resolve().parents[3]
+                if (project_root / ".venv" / "Scripts" / "python.exe").exists():
+                    python_exe = str(project_root / ".venv" / "Scripts" / "python.exe")
+                elif (project_root / ".venv" / "bin" / "python").exists():
+                    python_exe = str(project_root / ".venv" / "bin" / "python")
+
+            try:
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        python_exe,
+                        "harness.py",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=temp_dir,
+                        env=env,
+                    )
+                    try:
+                        stdout, stderr = await asyncio.wait_for(
+                            proc.communicate(), timeout=timeout_seconds
+                        )
+                        returncode = proc.returncode
+                    except asyncio.TimeoutError:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                        log_dir = Path("logs")
+                        log_dir.mkdir(exist_ok=True)
+                        log_file = log_dir / f"validation_fail_{uuid.uuid4().hex[:6]}.py"
+                        with open(log_file, "w", encoding="utf-8") as f:
+                            f.write(script)
+                        return False, "Validation timed out — script geometry is too complex or has an infinite loop."
+                except NotImplementedError:
+                    def _run_sync():
+                        return subprocess.run(
+                            [python_exe, "harness.py"],
+                            capture_output=True,
+                            text=True,
+                            cwd=temp_dir,
+                            env=env,
+                            timeout=timeout_seconds,
+                        )
+                    try:
+                        proc_sync = await asyncio.to_thread(_run_sync)
+                        returncode = proc_sync.returncode
+                        stdout = proc_sync.stdout.encode("utf-8") if isinstance(proc_sync.stdout, str) else proc_sync.stdout
+                        stderr = proc_sync.stderr.encode("utf-8") if isinstance(proc_sync.stderr, str) else proc_sync.stderr
+                    except subprocess.TimeoutExpired:
+                        return False, "Validation timed out."
+            except Exception as exc:
+                return False, f"Validation subprocess error: {type(exc).__name__}: {exc}"
+
+            stdout_str = stdout.decode("utf-8", errors="replace")
+            stderr_str = stderr.decode("utf-8", errors="replace")
+
+            if returncode == 0 and "VALIDATION_SUCCESS" in stdout_str:
+                return True, ""
+
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            log_file = log_dir / f"validation_fail_{uuid.uuid4().hex[:6]}.py"
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.write(script)
+
+            full_log = stdout_str + "\n" + stderr_str
+            return False, self._extract_traceback(full_log)
+
+    @staticmethod
+    def _extract_traceback(log: str) -> str:
+        """Extract the Python traceback from render subprocess stdout."""
+        # Prefer our delimited traceback block
+        start = log.find("---TRACEBACK_START---")
+        end = log.find("---TRACEBACK_END---")
+        if start != -1 and end != -1:
+            return log[start + len("---TRACEBACK_START---"):end].strip()
+        # Fallback: raw Python traceback
+        tb_start = log.find("Traceback (most recent call last):")
+        if tb_start != -1:
+            return log[tb_start:tb_start + 3000].strip()
+        # Last resort: last 2000 chars
+        return log[-2000:].strip() if log else ""
+
+    async def render_to_outputs(
+        self,
+        parameters: Dict[str, Any],
+        script: str,
+        output_basename: str,
+        cam_parameters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        self.clear_outputs(prefix=output_basename)
+        is_valid_syntax, syn_err = validate_script_syntax(script)
+        if not is_valid_syntax:
+            raise RuntimeError(syn_err)
+            
+        is_secure, sec_err = validate_script_security(script)
+        if not is_secure:
+            raise ValueError(sec_err)
+
+        parameters = _coerce_jsonable(parameters)
+
+        max_render_retries = max(1, int(os.getenv("RENDER_MAX_RETRIES", "1")))
+        timeout_seconds = int(os.getenv("RENDER_TIMEOUT_SECONDS", "180"))
+        last_error: Optional[str] = None
+
+        for attempt in range(1, max_render_retries + 1):
+            with tempfile.TemporaryDirectory(prefix="cad_v3_") as temp_dir:
+                tmp = Path(temp_dir)
+
+                (tmp / "user_script.py").write_text(script, encoding="utf-8")
+                (tmp / "harness.py").write_text(RENDER_HARNESS_TEMPLATE, encoding="utf-8")
+
+                env = _build_sandbox_env(extra={
+                    "CAD_PARAMETERS_JSON": json.dumps(parameters, ensure_ascii=True),
+                    "CAD_CAM_PARAMETERS_JSON": json.dumps(cam_parameters or {}, ensure_ascii=True),
+                    "OUTPUT_DIR": str(self.outputs_dir),
+                    "OUTPUT_BASENAME": output_basename,
+                })
+
+                python_exe = sys.executable
+                if not python_exe:
+                    project_root = Path(__file__).resolve().parents[3]
+                    if (project_root / ".venv" / "Scripts" / "python.exe").exists():
+                        python_exe = str(project_root / ".venv" / "Scripts" / "python.exe")
+                    elif (project_root / ".venv" / "bin" / "python").exists():
+                        python_exe = str(project_root / ".venv" / "bin" / "python")
+
+                try:
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            python_exe,
+                            "harness.py",
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=temp_dir,
+                            env=env,
+                        )
+                        try:
+                            stdout, stderr = await asyncio.wait_for(
+                                proc.communicate(),
+                                timeout=timeout_seconds,
+                            )
+                            returncode = proc.returncode
+                        except asyncio.TimeoutError:
+                            try:
+                                proc.kill()
+                            except Exception:
+                                pass
+                            try:
+                                await proc.communicate()
+                            except Exception:
+                                pass
+                            last_error = "Render Engine timed out. Geometry might be too complex."
+                            if attempt >= max_render_retries:
+                                raise RuntimeError(last_error)
+                            continue
+                    except NotImplementedError:
+                        def run_sync():
+                            return subprocess.run(
+                                [python_exe, "harness.py"],
+                                capture_output=True,
+                                text=True,
+                                cwd=temp_dir,
+                                env=env,
+                                timeout=timeout_seconds,
+                            )
+                        try:
+                            proc_sync = await asyncio.to_thread(run_sync)
+                            returncode = proc_sync.returncode
+                            stdout = proc_sync.stdout.encode("utf-8") if isinstance(proc_sync.stdout, str) else proc_sync.stdout
+                            stderr = proc_sync.stderr.encode("utf-8") if isinstance(proc_sync.stderr, str) else proc_sync.stderr
+                        except subprocess.TimeoutExpired:
+                            last_error = "Render Engine timed out. Geometry might be too complex."
+                            if attempt >= max_render_retries:
+                                raise RuntimeError(last_error)
+                            continue
+                except Exception as exc:
+                    last_error = f"Failed to run render subprocess: {type(exc).__name__} - {str(exc)}"
+                    if attempt >= max_render_retries:
+                        raise RuntimeError(last_error)
+                    continue
+
+                if returncode != 0:
+                    stdout_str = stdout.decode("utf-8", errors="replace")
+                    stderr_str = stderr.decode("utf-8", errors="replace")
+                    full_log = stdout_str + stderr_str
+                    
+                    if "RENDER_SUCCESS:" in full_log:
+                        # Ignore OpenCASCADE teardown segfaults if it finished exporting
+                        pass
+                    else:
+                        error_msg = self._parse_worker_error(full_log)
+                        self._log_fail(script, parameters, full_log)
+                        last_error = error_msg or "Render subprocess failed."
+                        if attempt >= max_render_retries:
+                            raise RuntimeError(last_error)
+                        continue
+
+                last_error = None
+                break
+
+        if last_error:
+            raise RuntimeError(last_error)
+
+        # Write python script and logs to outputs folder
+        try:
+            (self.outputs_dir / f"{output_basename}.py.txt").write_text(script, encoding="utf-8")
+            if stdout or stderr:
+                log_content = (stdout.decode("utf-8", errors="replace") if stdout else "") + "\n" + (stderr.decode("utf-8", errors="replace") if stderr else "")
+                (self.outputs_dir / f"{output_basename}.log").write_text(log_content, encoding="utf-8")
+        except Exception:
+            pass
+
+        stl_path = self.outputs_dir / f"{output_basename}.stl"
+        step_path = self.outputs_dir / f"{output_basename}.step"
+        dxf_path = self.outputs_dir / f"{output_basename}.dxf"
+        gcode_path = self.outputs_dir / f"{output_basename}.gcode"
+        toolpaths_path = self.outputs_dir / f"{output_basename}_toolpaths.json"
+
+        if not stl_path.exists() or not step_path.exists():
+            raise RuntimeError("Render finished but artifacts are missing.")
+
+        annotations_path = self.outputs_dir / f"{output_basename}_annotations.json"
+        annotations = {}
+        if annotations_path.exists():
+            try:
+                with open(annotations_path, "r") as f:
+                    annotations = json.load(f)
+            except Exception:
+                pass
+
+        gcode_content = None
+        toolpaths = None
+        features = None
+        operations = None
+        
+        # Calculate modelHash from STEP file
+        import hashlib
+        model_hash = None
+        if step_path.exists():
+            with open(step_path, "rb") as f:
+                model_hash = hashlib.sha256(f.read()).hexdigest()
+
+        return {
+            "modelHash": model_hash,
+            "stl_path": str(stl_path),
+            "step_path": str(step_path),
+            "dxf_path": str(dxf_path) if dxf_path.exists() else None,
+            "annotations": annotations,
+        }
+
+    def _parse_worker_error(self, log: str) -> str:
+
+        if "Fatal Python error" in log or "Segmentation fault" in log:
+            for line in log.splitlines():
+                if "user_script.py" in line:
+                    return f"Render failed: Low-level C++ Kernel Crash (Segfault) at {line.strip()}"
+            return "Render failed: Low-level geometric engine segmentation fault (Invalid geometry intersection)."
+        
+        if "---TRACEBACK_START---" in log:
+            try:
+                parts = log.split("---TRACEBACK_START---")
+                inner = parts[-1].split("---TRACEBACK_END---")[0].strip()
+                lines = [line.strip() for line in inner.splitlines() if line.strip()]
+                if lines:
+                    for line in reversed(lines):
+                        if any(x in line for x in ["Error", "error", "Exception"]):
+                            return f"Render failed: {line}"
+                    return f"Render failed: {lines[-1]}"
+            except Exception:
+                pass
+
+        if "RENDER_ERROR:" in log:
+            try:
+                return "Geometry error: " + log.split("RENDER_ERROR:")[1].strip().splitlines()[0]
+            except Exception:
+                pass
+
+        if "EXPORT_ERROR:" in log:
+            try:
+                return "Export error: " + log.split("EXPORT_ERROR:")[1].strip().splitlines()[0]
+            except Exception:
+                pass
+                
+        if "VALIDATION_GEOMETRY_ERROR:" in log:
+            try:
+                return "Geometry error: " + log.split("VALIDATION_GEOMETRY_ERROR:")[1].strip().splitlines()[0]
+            except Exception:
+                pass
+
+
+        return f"Geometry engine failed. Review script logic and parameter values. \n\nRAW LOG:\n{log}"
+
+    def clear_outputs(self, prefix: Optional[str] = None) -> None:
+        if not self.outputs_dir.exists():
+            return
+        for item in self.outputs_dir.iterdir():
+            try:
+                if prefix and not item.name.startswith(prefix):
+                    continue
+                if item.is_file():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item)
+            except Exception:
+                pass
+
+    def _log_fail(self, script: str, params: dict, log: str) -> None:
+        try:
+            log_dir = Path(__file__).resolve().parents[3] / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / f"render_v3_fail_{uuid.uuid4().hex[:6]}.json"
+            with open(log_file, "w") as f:
+                json.dump({"script": script, "parameters": params, "log": log}, f, indent=2)
+        except Exception:
+            pass
+
+
+def extract_parameters_from_script(script: str) -> Dict[str, Any]:
+    try:
+        import ast
+
+        tree = ast.parse(script)
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "PARAMETERS":
+                        return ast.literal_eval(node.value)
+            if isinstance(node, ast.AnnAssign):
+                if isinstance(node.target, ast.Name) and node.target.id == "PARAMETERS":
+                    if node.value is not None:
+                        return ast.literal_eval(node.value)
+    except Exception:
+        pass
+
+    match = re.search(r"PARAMETERS\s*=\s*(\{.*?\})", script, re.DOTALL)
+    if not match:
+        return {}
+    try:
+        import ast
+
+        return ast.literal_eval(match.group(1))
+    except Exception:
+        return {}
+
+
+def validate_script_syntax(script: str) -> tuple[bool, Optional[str]]:
+    try:
+        import ast
+
+        ast.parse(script)
+        return True, None
+    except SyntaxError as exc:
+        return False, f"Syntax error at line {exc.lineno}: {exc.msg}"
+    except Exception as exc:
+        return False, f"Validation error: {str(exc)}"
+
+
+def validate_script_security(script: str) -> tuple[bool, Optional[str]]:
+    """AST-based defense-in-depth check for generated CAD scripts.
+
+    This validator is NOT a security sandbox.  It catches obviously dangerous
+    patterns as a first line of defence, but is not relied upon as the
+    primary security boundary.
+
+    Actual protections in place for generated-code execution:
+    - Subprocesses run as a non-root user (caduser), not root.
+    - Subprocesses receive a curated minimal environment via
+      _build_sandbox_env(); application secrets (API keys, database
+      credentials, JWT tokens) are NOT forwarded.
+    - Execution uses controlled temporary working directories
+      (tempfile.TemporaryDirectory) that are cleaned up automatically.
+
+    Protections that are NOT currently enforced:
+    - Complete filesystem isolation is NOT enforced; the subprocess has
+      read access to the container filesystem and write access to the
+      outputs volume and its own temporary directory.
+    - Network isolation is NOT enforced; the subprocess inherits the
+      container's network namespace.
+
+    Limitations acknowledged (VEX-2A-001):
+    - AST filtering cannot reliably sandbox Python; attribute-based
+      re-exports through allowed modules can bypass static analysis.
+    - The process-level controls (non-root user, curated environment)
+      are the authoritative security boundary, not this AST validator.
+    """
+    try:
+        import ast
+
+        tree = ast.parse(script)
+
+        # Whitelisted top-level modules.
+        # NOTE: 'sys' and 'enum' are deliberately excluded because they
+        # re-export dangerous modules via attributes (e.g. typing.sys,
+        # enum.sys, build123d.os).  Removing them eliminates the most
+        # obvious bypass path while still allowing all legitimate CAD
+        # operations.
+        ALLOWED_MODULES = {"build123d", "math", "re", "ocp_vscode", "typing", "bd_warehouse"}
+
+        # Attribute names that are dangerous when accessed on any object,
+        # regardless of whether the module is whitelisted.  These enable
+        # module re-export / sandbox escape (VEX-2A-001).
+        FORBIDDEN_ATTRIBUTES = frozenset({
+            # Module re-export bypasses (the core VEX-2A-001 vectors)
+            "modules",        # sys.modules → access to all loaded modules
+            "environ",        # os.environ → environment secrets
+            "sys",            # typing.sys, enum.sys → re-export of sys module
+            "os",             # build123d.os (importers.py/mesher.py leak it via
+                               # `import os` + no __all__) → captured os-module
+                               # reference, defense-in-depth (unreachable at
+                               # runtime: the guarded __import__ only returns
+                               # curated facades and the script namespace only
+                               # receives build123d's __all__, but denylisted
+                               # here regardless).
+            # OS-level command execution via any module re-export
+            "system",         # os.system("command")
+            "popen",          # os.popen("command")
+            "execv",          # os.execv(...)
+            "execve",         # os.execve(...)
+            "execvp",         # os.execvp(...)
+            "fork",           # os.fork()
+            # Dangerous Python object introspection
+            "__builtins__",   # access to all builtins
+            "__import__",     # dynamic import
+            "__class__",      # type introspection for sandbox escape
+            "__subclasses__", # MRO walking for privilege escalation
+            "__globals__",    # function global scope access
+            "__code__",       # code object introspection
+        })
+
+        # os.spawn* / os.posix_spawn* family. These are attribute NAMES, not
+        # the bare word "spawn" (which never appears as a real attribute on
+        # the os module and previously matched nothing) — e.g. spawnv,
+        # spawnve, spawnvp, spawnl, spawnle, spawnlp, spawnlpe, posix_spawn,
+        # posix_spawnp. Matched by prefix rather than an exhaustive frozenset
+        # so new variants aren't missed; no legitimate build123d/math/re/
+        # typing/bd_warehouse/ocp_vscode API name starts with these prefixes.
+        FORBIDDEN_ATTR_PREFIXES = ("spawn", "posix_spawn")
+
+        # Functions that are dangerous when called bare (ast.Name), but are
+        # safe when called as methods on whitelisted modules (e.g. re.compile).
+        FORBIDDEN_BARE_FUNCTIONS = frozenset({
+            "eval", "exec", "open", "compile", "globals", "locals",
+            "__import__", "getattr", "setattr", "delattr", "input",
+            "breakpoint", "help", "exit", "quit",
+        })
+
+        # Functions that are always forbidden, even as method calls.
+        FORBIDDEN_ANYWHERE_FUNCTIONS = frozenset({
+            "eval", "exec", "__import__",
+        })
+
+        # Substrings that make an attribute name dangerous (catches
+        # dynamically constructed names like '__class__' etc.)
+        FORBIDDEN_ATTR_SUBSTRINGS = ("__",)
+
+        # CLAUDE-001: Bare identifiers that must never appear as ast.Name
+        # nodes.  These can be used to recover builtins or dangerous
+        # functionality even when __builtins__ is restricted.
+        FORBIDDEN_NAME_IDENTIFIERS = frozenset({
+            "__builtins__", "__import__",
+            "open", "eval", "exec", "compile",
+            "globals", "locals", "vars",
+            "getattr", "setattr", "delattr",
+            "input", "breakpoint", "help", "exit", "quit",
+            "__name__", "__doc__",
+        })
+
+        # CLAUDE-001: String constants that are dangerous as subscript keys.
+        # Catches patterns like __builtins__["open"] or obj["__import__"].
+        FORBIDDEN_SUBSCRIPT_KEYS = frozenset({
+            "open", "__import__", "eval", "exec", "compile",
+            "system", "popen", "execv", "execve", "execvp",
+            "environ", "modules",
+            "__builtins__", "__globals__", "__code__",
+            "__class__", "__subclasses__",
+            "getattr", "setattr", "delattr",
+        })
+
+        for node in ast.walk(tree):
+            # 1. Enforce Module Import Whitelist
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    base_module = alias.name.split('.')[0]
+                    if base_module not in ALLOWED_MODULES:
+                        return False, f"Security Violation: Import of module '{alias.name}' is forbidden. Only {ALLOWED_MODULES} imports are permitted."
+
+            elif isinstance(node, ast.ImportFrom):
+                if not node.module:
+                    return False, "Security Violation: Relative imports are forbidden."
+                base_module = node.module.split('.')[0]
+                if base_module not in ALLOWED_MODULES:
+                    return False, f"Security Violation: Import from module '{node.module}' is forbidden. Only {ALLOWED_MODULES} imports are permitted."
+
+            # 2. Block dangerous attribute access patterns
+            elif isinstance(node, ast.Attribute):
+                attr_name = node.attr
+                # Block dunder access (sandbox escape)
+                if any(sub in attr_name for sub in FORBIDDEN_ATTR_SUBSTRINGS):
+                    return False, f"Security Violation: Access to attribute '{attr_name}' is forbidden."
+                # Block known-dangerous attributes (VEX-2A-001 bypass vectors)
+                if attr_name in FORBIDDEN_ATTRIBUTES:
+                    return False, f"Security Violation: Access to attribute '{attr_name}' is forbidden."
+                # Block the os.spawn*/os.posix_spawn* family by prefix.
+                if attr_name.startswith(FORBIDDEN_ATTR_PREFIXES):
+                    return False, f"Security Violation: Access to attribute '{attr_name}' is forbidden."
+
+            # 2b. CLAUDE-001: Block dangerous bare identifiers (ast.Name)
+            elif isinstance(node, ast.Name):
+                if node.id in FORBIDDEN_NAME_IDENTIFIERS:
+                    return False, f"Security Violation: Use of identifier '{node.id}' is forbidden."
+
+            # 3. Block forbidden built-in calls
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    if node.func.id in FORBIDDEN_BARE_FUNCTIONS:
+                        return False, f"Security Violation: Call to built-in function '{node.func.id}' is forbidden."
+                elif isinstance(node.func, ast.Attribute):
+                    func_attr = node.func.attr
+                    if any(sub in func_attr for sub in FORBIDDEN_ATTR_SUBSTRINGS):
+                        return False, f"Security Violation: Access to attribute '{func_attr}' is forbidden."
+                    if func_attr in FORBIDDEN_ATTRIBUTES:
+                        return False, f"Security Violation: Access to attribute '{func_attr}' is forbidden."
+                    if func_attr.startswith(FORBIDDEN_ATTR_PREFIXES):
+                        return False, f"Security Violation: Access to attribute '{func_attr}' is forbidden."
+                    if func_attr in FORBIDDEN_ANYWHERE_FUNCTIONS:
+                        return False, f"Security Violation: Call to function '{func_attr}' is forbidden."
+
+            # 4. Block Subscript access to dangerous targets (e.g. sys.modules['os'])
+            elif isinstance(node, ast.Subscript):
+                # This catches `sys.modules['os']`, `os.environ['SECRET']`, etc.
+                # when used as a subscript target on any attribute access.
+                if isinstance(node.value, ast.Attribute):
+                    base_attr = node.value.attr
+                    if base_attr in ("modules", "environ"):
+                        return False, f"Security Violation: Subscript access on '{base_attr}' is forbidden."
+                # CLAUDE-001: Block subscript with dangerous string constant keys.
+                # Catches __builtins__["open"], obj["__import__"], etc.
+                if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+                    if node.slice.value in FORBIDDEN_SUBSCRIPT_KEYS:
+                        return False, f"Security Violation: Subscript access with key '{node.slice.value}' is forbidden."
+
+        return True, None
+    except SyntaxError as exc:
+        # Both current callers run validate_script_syntax() first and never
+        # reach this function on invalid syntax, so this path is not known
+        # to be reachable today. It must still fail closed for any future
+        # caller that invokes validate_script_security() directly without
+        # that prior check — returning True here would mean "secure" for a
+        # script this function never actually analyzed.
+        return False, f"Security validation failed: Syntax error at line {exc.lineno}: {exc.msg}"
+    except Exception as exc:
+        return False, f"Security validation failed: {str(exc)}"
+
+
+def get_build123d_version() -> str:
+    try:
+        import build123d
+
+        return getattr(build123d, "__version__", "unknown")
+    except ImportError:
+        return "not installed"

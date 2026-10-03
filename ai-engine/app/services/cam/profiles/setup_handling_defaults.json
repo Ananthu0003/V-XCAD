@@ -1,0 +1,14 @@
+{
+  "vmc_manual_vise": {
+    "load_time_seconds": null,
+    "unload_time_seconds": null,
+    "reorientation_time_seconds": null,
+    "inspection_time_seconds": null
+  },
+  "generic_handling": {
+    "load_time_seconds": null,
+    "unload_time_seconds": null,
+    "reorientation_time_seconds": null,
+    "inspection_time_seconds": null
+  }
+}

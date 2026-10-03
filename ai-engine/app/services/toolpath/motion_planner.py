@@ -1,0 +1,575 @@
+import uuid
+import math
+from typing import List, Dict, Any, Tuple
+from app.models.schemas import MotionCommand, ToolpathSegmentType, Point3D
+
+def _douglas_peucker(points: List[Tuple[float, float]], epsilon: float) -> List[Tuple[float, float]]:
+    """Simplifies a 2D line using the Douglas-Peucker algorithm."""
+    if len(points) < 3:
+        return points
+
+    def point_line_distance(pt: Tuple[float, float], start: Tuple[float, float], end: Tuple[float, float]) -> float:
+        num = abs((end[1] - start[1]) * pt[0] - (end[0] - start[0]) * pt[1] + end[0] * start[1] - end[1] * start[0])
+        den = math.hypot(end[1] - start[1], end[0] - start[0])
+        return num / den if den != 0 else math.hypot(pt[0] - start[0], pt[1] - start[1])
+
+    dmax = 0.0
+    index = 0
+    end_idx = len(points) - 1
+
+    for i in range(1, end_idx):
+        d = point_line_distance(points[i], points[0], points[end_idx])
+        if d > dmax:
+            index = i
+            dmax = d
+
+    if dmax > epsilon:
+        rec_results1 = _douglas_peucker(points[:index + 1], epsilon)
+        rec_results2 = _douglas_peucker(points[index:], epsilon)
+        return rec_results1[:-1] + rec_results2
+    else:
+        return [points[0], points[end_idx]]
+
+class MotionPlanner:
+    """
+    Translates MachiningRegion boundaries into raw machine MotionCommands.
+    This layer does NOT output ToolpathSegments directly, it only outputs 
+    MotionCommands, keeping geometry calculation separated from toolpath rendering.
+    """
+    def __init__(self):
+        pass
+
+    def generate_commands(self, op: Dict[str, Any], machiningRegion: Dict[str, Any], tool: Dict[str, Any], setup: Dict[str, Any]) -> List[MotionCommand]:
+        if not machiningRegion or not machiningRegion.get("valid"):
+            op["status"] = "error"
+            op.setdefault("parameters", {})["error"] = "Invalid machining region"
+            return []
+
+        op_type = op.get("type")
+        raw_tool_diameter = tool.get("diameter") or tool.get("diameter_mm") or 2.0 if tool else 2.0
+        internal_units = setup.get("internalUnits", "mm") if setup else "mm"
+        
+        # Heuristic: If the model is tiny (<= 15 units) and the tool is massively larger (> 3x),
+        # it is almost certainly an inch model being machined with a mm tool. 
+        # Correct the units to prevent generating gigantic toolpaths.
+        if internal_units == "mm" and raw_tool_diameter > 5.0:
+            raw_pts = machiningRegion.get("boundary")
+            if raw_pts and len(raw_pts) >= 3:
+                pts_2d = [(p[0], p[1]) for p in raw_pts]
+                min_x = min(p[0] for p in pts_2d)
+                max_x = max(p[0] for p in pts_2d)
+                min_y = min(p[1] for p in pts_2d)
+                max_y = max(p[1] for p in pts_2d)
+                stock_w = max(max_x - min_x, max_y - min_y)
+                
+                if 0.1 < stock_w <= 15.0 and raw_tool_diameter >= (stock_w * 1.5):
+                    internal_units = "in"
+                    print(f"[MotionPlanner] Unit mismatch heuristic: Assumed 'in' units. Tool={raw_tool_diameter}mm, Stock={stock_w:.2f}units.")
+
+        unit_scale = 1.0 / 25.4 if internal_units == "in" else 1.0
+        tool_diameter_setup_units = raw_tool_diameter * unit_scale
+        tool_radius = tool_diameter_setup_units / 2.0
+
+        if tool_radius <= 0:
+            tool_radius = 1.0 * unit_scale
+
+        commands: List[MotionCommand] = []
+
+        safe_heights = op.get("safe_heights", {})
+        clearance = safe_heights.get("clearance", 15.0) * unit_scale
+        feed_z = safe_heights.get("feed", 2.0) * unit_scale
+        top = safe_heights.get("top", 0.0)
+        bottom = safe_heights.get("bottom", -10.0 * unit_scale)
+        retract_z = safe_heights.get("retract", 15.0) * unit_scale
+
+        if machiningRegion.get("topZ") is not None: top = machiningRegion["topZ"]
+        if machiningRegion.get("bottomZ") is not None: bottom = machiningRegion["bottomZ"]
+
+        # Override with setup-local coordinates if available
+        local_feat = op.get("parameters", {}).get("setup_local_feature")
+        if local_feat:
+            top = local_feat.get("localTopZ", top)
+            bottom = local_feat.get("localBottomZ", bottom)
+            clearance = top + (15.0 * unit_scale)
+            retract_z = top + (5.0 * unit_scale)
+            feed_z = top + (2.0 * unit_scale)
+            # Update safe_heights so downstream functions (like _generate_drilling_path) use them
+            op["safe_heights"] = {
+                "clearance": clearance,
+                "retract": retract_z,
+                "feed": feed_z,
+                "top": top,
+                "bottom": bottom
+            }
+
+        op_source = "contour"
+        if op_type == "drilling": op_source = "drill"
+        elif op_type in ("2d_contour", "2d_contour_outer", "step"): op_source = "contour"
+        elif op_type == "pocketing": op_source = "pocket"
+        elif op_type == "boss_clearing": op_source = "boss"
+        elif op_type == "facing": op_source = "face"
+        elif op_type in ("od_turning", "turning"): op_source = "turning"
+        elif op_type in ("indexed_4axis_milling", "rotary_milling", "multi_axis_surface_milling"): op_source = "contour"
+
+        def add_cmd(cmd_type: ToolpathSegmentType, start_pt: Point3D, end_pt: Point3D):
+            commands.append(
+                MotionCommand(
+                    commandId=str(uuid.uuid4()),
+                    commandType=cmd_type,
+                    start=start_pt,
+                    end=end_pt,
+                    toolId=op.get("toolId", op.get("tool_id", "unknown_tool")),
+                    operationId=op.get("id", "unknown_op"),
+                    featureId=op.get("featureId", op.get("feature_id", "unknown_feat")),
+                    setupId=op.get("setupId", op.get("setup_id", "setup_1")),
+                    source=op_source
+                )
+            )
+
+        if op_type == "drilling":
+            self._generate_drilling_path(op, machiningRegion, clearance, feed_z, top, bottom, add_cmd, setup)
+        elif op_type in ("2d_contour", "2d_contour_outer", "step"):
+            self._generate_contour_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
+        elif op_type == "boss_clearing":
+            self._generate_boss_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
+        elif op_type == "pocketing":
+            self._generate_pocket_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
+        elif op_type == "facing":
+            self._generate_facing_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
+        elif op_type == "od_turning":
+            self._generate_od_turning_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd)
+        elif op_type in ("indexed_4axis_milling", "rotary_milling", "multi_axis_surface_milling"):
+            self._generate_indexed_4axis_path(op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale)
+        else:
+            raise NotImplementedError(f"Motion generation not implemented for {op_type}")
+
+        return commands
+
+    def _generate_drilling_path(self, op, machiningRegion, clearance, feed_z, top, bottom, add_cmd, setup):
+        # Attempt to use setup-local center first, fallback to raw geometry center
+        local_feat_dict = op.get("parameters", {}).get("setup_local_feature")
+        
+        if local_feat_dict and "localCenter" in local_feat_dict:
+            center = local_feat_dict["localCenter"]
+        else:
+            center = machiningRegion.get("center")
+            
+        axis = machiningRegion.get("axis")
+
+        if not center or not axis:
+            raise ValueError("Drilling geometry missing center or axis")
+
+        import math
+        cx, cy, cz = center
+        if not math.isfinite(cx) or not math.isfinite(cy):
+            raise ValueError("Invalid drill center: X or Y is not finite")
+        
+        retract_z = op.get("safe_heights", {}).get("retract", clearance)
+        
+        # Calculate correct bottom Z
+        if machiningRegion.get("bottomZ") is None:
+            depth = machiningRegion.get("depth", op.get("parameters", {}).get("depth", 10.0))
+            bottom = top - depth
+
+        # Output safe approach segments for the hole
+        add_cmd(ToolpathSegmentType.RAPID_CLEARANCE,
+                Point3D(x=cx, y=cy, z=clearance),
+                Point3D(x=cx, y=cy, z=clearance))
+        add_cmd(ToolpathSegmentType.RAPID_XY,
+                Point3D(x=cx, y=cy, z=clearance),
+                Point3D(x=cx, y=cy, z=clearance))
+        add_cmd(ToolpathSegmentType.APPROACH_RETRACT,
+                Point3D(x=cx, y=cy, z=clearance),
+                Point3D(x=cx, y=cy, z=retract_z))
+        
+        # The post-processor will handle G81/G83 logic safely.
+        add_cmd(ToolpathSegmentType.DRILL_CYCLE, 
+                Point3D(x=cx, y=cy, z=feed_z), 
+                Point3D(x=cx, y=cy, z=bottom))
+
+        add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE,
+                Point3D(x=cx, y=cy, z=bottom),
+                Point3D(x=cx, y=cy, z=clearance))
+
+    def _generate_contour_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale=1.0):
+        try:
+            from shapely.geometry import Polygon, LineString
+        except ImportError:
+            raise RuntimeError("Shapely required for toolpath offset generation")
+
+        raw_pts = machiningRegion.get("boundary")
+        if not raw_pts or len(raw_pts) < 3:
+            raise ValueError("Contour missing valid boundary")
+
+        source = machiningRegion.get("source", "")
+        if source in ("bbox", "silhouette", "fallback"):
+            raise ValueError(f"Contour operation cannot use fallback source: {source}")
+
+        pts_2d = [(p[0], p[1]) for p in raw_pts]
+        poly = Polygon(pts_2d)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+
+        # Single offset, no expanding XY loops
+        current_poly = poly.buffer(tool_radius, join_style=2)
+        if current_poly.is_empty:
+            raise ValueError("Tool radius too large for contour")
+
+        paths_2d = []
+        if current_poly.geom_type == "Polygon":
+            paths_2d.append(list(current_poly.exterior.coords))
+        elif current_poly.geom_type == "MultiPolygon":
+            for p in current_poly.geoms:
+                paths_2d.append(list(p.exterior.coords))
+
+        self._apply_z_stepdowns_to_paths(paths_2d, clearance, top, bottom, op, add_cmd, unit_scale)
+
+    def _generate_pocket_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale=1.0):
+        try:
+            from shapely.geometry import Polygon
+        except ImportError:
+            raise RuntimeError("Shapely required for toolpath offset generation")
+
+        raw_pts = machiningRegion.get("boundary")
+        if not raw_pts or len(raw_pts) < 3:
+            raise ValueError("Pocket missing valid boundary")
+
+        pts_2d = [(p[0], p[1]) for p in raw_pts]
+        poly = Polygon(pts_2d)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+
+        stepover_pct = op.get("parameters", {}).get("stepoverPercentage", 40.0)
+        stepover_abs = op.get("parameters", {}).get("stepover")
+        if stepover_abs is None or float(stepover_abs) <= 0:
+            stepover = (tool_radius * 2.0) * (float(stepover_pct) / 100.0)
+        else:
+            stepover = float(stepover_abs) * unit_scale
+        all_paths_2d = []
+
+        current_poly = poly.buffer(-tool_radius, join_style=2)
+        while not current_poly.is_empty:
+            if current_poly.geom_type == "Polygon":
+                all_paths_2d.append(list(current_poly.exterior.coords))
+            elif current_poly.geom_type == "MultiPolygon":
+                for p in current_poly.geoms:
+                    all_paths_2d.append(list(p.exterior.coords))
+            current_poly = current_poly.buffer(-stepover, join_style=2)
+            
+        all_paths_2d.reverse()
+        self._apply_z_stepdowns_to_paths(all_paths_2d, clearance, top, bottom, op, add_cmd, unit_scale)
+
+    def _generate_boss_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale=1.0):
+        """
+        Uses raster/zigzag strategy instead of nested offsets to prevent segment explosion.
+        """
+        try:
+            from shapely.geometry import Polygon, LineString
+            import numpy as np
+        except ImportError:
+            raise RuntimeError("Shapely/Numpy required for toolpath generation")
+
+        boss_pts = machiningRegion.get("islands", [[]])[0]
+        containing_pts = machiningRegion.get("boundary")
+        
+        if not boss_pts or not containing_pts:
+            raise ValueError("Boss geometry missing inner island or outer boundary")
+
+        pts_ext = [(p[0], p[1]) for p in containing_pts]
+        pts_int = [(p[0], p[1]) for p in boss_pts]
+
+        stock_poly = Polygon(pts_ext)
+        if not stock_poly.is_valid:
+            stock_poly = stock_poly.buffer(0)
+            
+        boss_poly = Polygon(pts_int)
+        if not boss_poly.is_valid:
+            boss_poly = boss_poly.buffer(0)
+
+        # For an external boss, the tool can enter from outside the stock.
+        # We expand the stock boundary by tool_radius + 2mm (scaled) to allow the tool center to go outside.
+        machining_area = stock_poly.buffer(tool_radius + (2.0 * unit_scale), join_style=2)
+        
+        # We expand the boss by tool_radius + small clearance to prevent gouging
+        boss_keepout = boss_poly.buffer(tool_radius + (0.1 * unit_scale), join_style=2)
+        
+        safe_area = machining_area.difference(boss_keepout)
+        
+        if safe_area.is_empty:
+            raise ValueError(f"Tool radius ({tool_radius}mm) is too large to machine this boss without gouging, even from the outside")
+
+        bounds = safe_area.bounds # minx, miny, maxx, maxy
+        if not bounds:
+            raise ValueError("Failed to compute valid boundaries for boss clearing")
+            
+        minx, miny, maxx, maxy = bounds
+        stepover_pct = op.get("parameters", {}).get("stepoverPercentage", 40.0)
+        stepover_abs = op.get("parameters", {}).get("stepover")
+        if stepover_abs is None or float(stepover_abs) <= 0:
+            stepover = (tool_radius * 2.0) * (float(stepover_pct) / 100.0)
+        else:
+            stepover = float(stepover_abs) * unit_scale
+        
+        raster_lines = []
+        y = miny + stepover / 2.0
+        direction = 1
+        
+        while y < maxy:
+            line = LineString([(minx - (10.0 * unit_scale), y), (maxx + (10.0 * unit_scale), y)])
+            intersection = safe_area.intersection(line)
+            
+            segs = []
+            if intersection.geom_type == "LineString":
+                segs = [list(intersection.coords)]
+            elif intersection.geom_type == "MultiLineString":
+                segs = [list(ls.coords) for ls in intersection.geoms]
+                
+            for seg in segs:
+                if len(seg) >= 2:
+                    if direction == -1:
+                        seg.reverse()
+                    raster_lines.append(seg)
+            
+            y += stepover
+            direction *= -1
+
+        # Profile pass around the boss
+        profile_area = Polygon(pts_int).buffer(tool_radius, join_style=2)
+        if profile_area.geom_type == "Polygon":
+            raster_lines.append(list(profile_area.exterior.coords))
+            
+        # Simplify geometry heavily for boss
+        simplified_lines = []
+        for line in raster_lines:
+            simped = _douglas_peucker(line, 0.05)
+            simplified_lines.append(simped)
+
+        total_segs = sum(len(ln)-1 for ln in simplified_lines)
+        if total_segs > 2000:
+            raise ValueError(f"Boss segment budget exceeded (generated {total_segs}, limit 2000). Try a larger tool.")
+
+        self._apply_z_stepdowns_to_paths(simplified_lines, clearance, top, bottom, op, add_cmd, unit_scale)
+
+    def _generate_facing_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd, unit_scale=1.0):
+        try:
+            from shapely.geometry import Polygon, LineString
+        except ImportError:
+            raise RuntimeError("Shapely required for toolpath generation")
+            
+        raw_pts = machiningRegion.get("boundary")
+        if not raw_pts or len(raw_pts) < 3:
+            raise ValueError("Face missing valid boundary")
+            
+        pts_2d = [(p[0], p[1]) for p in raw_pts]
+        poly = Polygon(pts_2d)
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+            
+        # Add buffer to allow tool to go past the stock edges
+        poly = poly.buffer(tool_radius * 1.1)
+            
+        bounds = poly.bounds
+        if not bounds:
+            return
+            
+        minx, miny, maxx, maxy = bounds
+        stepover_pct = op.get("parameters", {}).get("stepoverPercentage", 40.0)
+        stepover_abs = op.get("parameters", {}).get("stepover")
+        if stepover_abs is None or float(stepover_abs) <= 0:
+            stepover = (tool_radius * 2.0) * (float(stepover_pct) / 100.0)
+        else:
+            stepover = float(stepover_abs) * unit_scale
+        
+        raster_lines = []
+        y = miny
+        direction = 1
+        
+        while y <= maxy + stepover:
+            line = LineString([(minx - (10.0 * unit_scale), y), (maxx + (10.0 * unit_scale), y)])
+            intersection = poly.intersection(line)
+            
+            segs = []
+            if intersection.geom_type == "LineString":
+                segs = [list(intersection.coords)]
+            elif intersection.geom_type == "MultiLineString":
+                segs = [list(ls.coords) for ls in intersection.geoms]
+                
+            for seg in segs:
+                if len(seg) >= 2:
+                    if direction == -1:
+                        seg.reverse()
+                    raster_lines.append(seg)
+                    
+            y += stepover
+            direction *= -1
+
+        self._apply_z_stepdowns_to_paths(raster_lines, clearance, top, bottom, op, add_cmd, unit_scale)
+
+    def _apply_z_stepdowns_to_paths(self, paths_2d, clearance, top, bottom, op, add_cmd, unit_scale=1.0):
+        if not paths_2d:
+            return
+
+        params = (op.get("parameters") or {})
+        feeds = params.get("feeds_and_speeds") or {}
+        
+        tool = op.get("tool") or {}
+        tool_diameter = tool.get("geometry", {}).get("DC", 10.0)
+        # default_stepdown is in mm, scale it if units are inches
+        default_stepdown = (tool_diameter * 0.5) * unit_scale
+        
+        depth_cuts_enabled = params.get("depthCutsEnabled", True)
+        rough_stepdown = params.get("maxStepdown", params.get("stepdown", feeds.get("stepdown", default_stepdown)))
+        finish_stepdown = params.get("finishStepdown", rough_stepdown)
+        finish_cuts = int(params.get("finishCuts", 0))
+
+        if not depth_cuts_enabled:
+            rough_stepdown = top - bottom
+            finish_stepdown = top - bottom
+            finish_cuts = 0
+
+        if rough_stepdown <= 0:
+            rough_stepdown = default_stepdown
+        if finish_stepdown <= 0:
+            finish_stepdown = rough_stepdown
+
+        if rough_stepdown != default_stepdown:
+            rough_stepdown *= unit_scale
+        if finish_stepdown != default_stepdown and finish_stepdown != rough_stepdown:
+            finish_stepdown *= unit_scale
+
+        z_passes = []
+        target_rough_z = bottom
+        if finish_cuts > 0:
+            target_rough_z = bottom + (finish_cuts * finish_stepdown)
+
+        if target_rough_z < top:
+            curr_z = top
+            while curr_z > target_rough_z + 0.001:
+                curr_z -= rough_stepdown
+                if curr_z < target_rough_z: curr_z = target_rough_z
+                z_passes.append(curr_z)
+        
+        if finish_cuts > 0:
+            curr_z = target_rough_z
+            for _ in range(finish_cuts):
+                curr_z -= finish_stepdown
+                if curr_z < bottom: curr_z = bottom
+                z_passes.append(curr_z)
+                
+        if not z_passes:
+            z_passes = [bottom]
+        
+        safe_heights = op.get("safe_heights", {})
+        retract = safe_heights.get("retract", clearance)
+
+        for path in paths_2d:
+            if not path or len(path) < 2:
+                continue
+
+            for i, z in enumerate(z_passes):
+
+                start_pt_2d = path[0]
+                pt_retract = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=retract)
+                pt_z = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=z)
+
+                pt_lead_in_retract = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=retract)
+                pt_lead_in_z = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=z)
+
+                if i == 0:
+                    pt_clearance = Point3D(x=start_pt_2d[0], y=start_pt_2d[1], z=clearance)
+                    add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_clearance, pt_lead_in_retract)
+                else:
+                    add_cmd(ToolpathSegmentType.RAPID_XY, pt_end_retract, pt_lead_in_retract)
+                    
+                add_cmd(ToolpathSegmentType.PLUNGE, pt_lead_in_retract, pt_lead_in_z)
+
+                for j in range(1, len(path)):
+                    p1 = path[j-1]
+                    p2 = path[j]
+                    add_cmd(ToolpathSegmentType.CUT, Point3D(x=p1[0], y=p1[1], z=z), Point3D(x=p2[0], y=p2[1], z=z))
+
+                end_pt_2d = path[-1]
+                pt_end = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=z)
+                pt_end_retract = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=retract)
+                
+                if i == len(z_passes) - 1:
+                    pt_end_clearance = Point3D(x=end_pt_2d[0], y=end_pt_2d[1], z=clearance)
+                    add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE, pt_end, pt_end_clearance)
+                else:
+                    add_cmd(ToolpathSegmentType.APPROACH_RETRACT, pt_end, pt_end_retract)
+
+    def _generate_od_turning_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
+        # Simplified turning profile (Z = spindle axis, X = radius, Y = 0)
+        # OD Turning runs along the Z-axis while varying X to match the cylinder profile.
+        length = machiningRegion.get("length", 50.0)
+        radius = machiningRegion.get("radius", 20.0)
+
+        # Start away from part
+        start_pt = Point3D(x=radius + clearance, y=0, z=length + clearance)
+        feed_pt = Point3D(x=radius + clearance, y=0, z=length)
+
+        add_cmd(ToolpathSegmentType.RAPID_CLEARANCE, start_pt, feed_pt)
+
+        stepdown = (op.get("parameters") or {}).get("stepdown", 2.0)
+        current_radius = radius + stepdown * 3  # Start from stock radius roughly
+
+        while current_radius > radius:
+            next_radius = max(radius, current_radius - stepdown)
+
+            # Plunge to next pass diameter
+            add_cmd(ToolpathSegmentType.PLUNGE,
+                    Point3D(x=current_radius, y=0, z=length),
+                    Point3D(x=next_radius, y=0, z=length))
+
+            # Cut along Z
+            add_cmd(ToolpathSegmentType.CUT,
+                    Point3D(x=next_radius, y=0, z=length),
+                    Point3D(x=next_radius, y=0, z=0))
+
+            # Retract X
+            add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE,
+                    Point3D(x=next_radius, y=0, z=0),
+                    Point3D(x=next_radius + 1.0, y=0, z=0))
+
+            # Rapid back to start Z
+            add_cmd(ToolpathSegmentType.RAPID_XY,
+                    Point3D(x=next_radius + 1.0, y=0, z=0),
+                    Point3D(x=next_radius + 1.0, y=0, z=length))
+
+            current_radius = next_radius
+
+        # Final retract
+        add_cmd(ToolpathSegmentType.RAPID_CLEARANCE,
+                Point3D(x=radius + 1.0, y=0, z=length),
+                Point3D(x=radius + clearance, y=0, z=length + clearance))
+
+    def _generate_indexed_4axis_path(self, op, machiningRegion, tool_radius, clearance, feed_z, top, bottom, add_cmd):
+        # Treat as a 2D contour on a rotary axis.
+        # Typically the CAM generates index (A/B) command, then runs 3-axis motion.
+        # For simplicity, we just generate a wrapped contour path.
+        radius = machiningRegion.get("radius", 20.0)
+        length = machiningRegion.get("length", 50.0)
+        retract_z = op.get("safe_heights", {}).get("retract", clearance)
+
+        # Start above the cylinder
+        add_cmd(ToolpathSegmentType.APPROACH_RETRACT,
+                Point3D(x=0, y=radius + clearance, z=length + clearance),
+                Point3D(x=0, y=radius + retract_z, z=length))
+
+        add_cmd(ToolpathSegmentType.PLUNGE,
+                Point3D(x=0, y=radius + retract_z, z=length),
+                Point3D(x=0, y=radius, z=length))
+
+        # Basic linear cut across the length
+        add_cmd(ToolpathSegmentType.CUT,
+                Point3D(x=0, y=radius, z=length),
+                Point3D(x=0, y=radius, z=0))
+
+        add_cmd(ToolpathSegmentType.RETRACT_CLEARANCE,
+                Point3D(x=0, y=radius, z=0),
+                Point3D(x=0, y=radius + clearance, z=0))
+
+        # Move back to safe
+        add_cmd(ToolpathSegmentType.RAPID_CLEARANCE,
+                Point3D(x=0, y=radius + clearance, z=0),
+                Point3D(x=0, y=radius + clearance, z=length + clearance))

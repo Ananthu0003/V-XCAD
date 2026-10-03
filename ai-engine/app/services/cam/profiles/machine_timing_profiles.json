@@ -1,0 +1,54 @@
+{
+  "haas_vf2_standard": {
+    "profile_version": "1.0",
+    "rapid_rate_x_mm_min": 25400,
+    "rapid_rate_y_mm_min": 25400,
+    "rapid_rate_z_mm_min": 25400,
+    "acceleration_x_mm_s2": 2500,
+    "acceleration_y_mm_s2": 2500,
+    "acceleration_z_mm_s2": 2000,
+    "spindle_accel_rpm_per_sec": 4000,
+    "spindle_decel_rpm_per_sec": 5000,
+    "coolant_on_delay_sec": 0.3,
+    "coolant_off_delay_sec": 0.2,
+    "tool_change": {
+      "timing_mode": "chip_to_chip",
+      "duration_seconds": 4.2,
+      "includes_spindle_stop": true,
+      "includes_spindle_orientation": true,
+      "includes_axis_positioning": true,
+      "includes_spindle_restart": false,
+      "includes_return_positioning": false
+    }
+  },
+  "generic_vmc_3axis": {
+    "profile_version": "1.0",
+    "rapid_rate_x_mm_min": null,
+    "rapid_rate_y_mm_min": null,
+    "rapid_rate_z_mm_min": null,
+    "tool_change": {
+      "timing_mode": "tool_to_tool",
+      "duration_seconds": null,
+      "includes_spindle_stop": false,
+      "includes_spindle_orientation": false,
+      "includes_axis_positioning": false,
+      "includes_spindle_restart": false,
+      "includes_return_positioning": false
+    }
+  },
+  "generic_router": {
+    "profile_version": "1.0",
+    "rapid_rate_x_mm_min": null,
+    "rapid_rate_y_mm_min": null,
+    "rapid_rate_z_mm_min": null,
+    "tool_change": {
+      "timing_mode": "exchange_only",
+      "duration_seconds": null,
+      "includes_spindle_stop": false,
+      "includes_spindle_orientation": false,
+      "includes_axis_positioning": false,
+      "includes_spindle_restart": false,
+      "includes_return_positioning": false
+    }
+  }
+}

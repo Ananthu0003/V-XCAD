@@ -1,0 +1,589 @@
+'use client';
+
+import { FormEvent, useRef, useEffect, useState, useMemo } from 'react';
+import { 
+	Bot, LogOut, Loader2, SendHorizontal, Zap, Upload, FileImage, 
+	Settings, BrainCircuit, Cuboid, Trash2, Crosshair, Sparkles, 
+	ChevronDown, ChevronRight, Check, SlidersHorizontal, Wrench, Layers, Tag, X,
+	Target, PlusCircle, RefreshCw, Paperclip, Send, Plus
+} from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import Image from 'next/image';
+import { ChatBubble } from '@/components/chat/ChatBubble';
+import { SettingsPanel } from '@/components/workspace/SettingsPanel';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { 
+	deriveTargetPortions, 
+	TargetPortion, 
+	ADD_NEW_FEATURE_TEMPLATES, 
+	TargetPortionSource 
+} from '@/lib/derive-target-portions';
+import type { CamFeature } from '@/types/cam';
+import type { StlGeometryInfo } from '@/components/viewport/StlMesh';
+
+export type { TargetPortion, TargetPortionSource };
+
+export const CAD_PORTION_PRESETS: TargetPortion[] = ADD_NEW_FEATURE_TEMPLATES;
+
+type ChatRole = 'user' | 'assistant' | 'system';
+
+type ChatMessage = {
+	id: string;
+	role: ChatRole;
+	content: string;
+	fileName?: string;
+	targetPortion?: string;
+	revisionId?: string;
+	revisionNumber?: number;
+	changeLog?: any;
+};
+
+type ChatPanelProps = {
+	messages: ChatMessage[];
+	prompt: string;
+	setPrompt: (v: string) => void;
+	selectedModel: string;
+	setSelectedModel: (v: string) => void;
+	modelOptions: { value: string; label: string }[];
+	selectedFile: File | null;
+	handleFileChange: (file: File | null) => void;
+	isGenerating: boolean;
+	onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+	onClear: () => void;
+	width: number;
+	isOpen: boolean;
+	setIsOpen: (v: boolean) => void;
+	fileInputRef?: React.RefObject<HTMLInputElement | null>;
+	selectionContext?: [number, number, number] | null;
+	onClearSelectionContext?: () => void;
+	hasActiveModel?: boolean;
+	parameters?: Record<string, unknown>;
+	parameterEntries?: [string, unknown][];
+	parameterMetadata?: Record<string, any>;
+	annotations?: Record<string, any>;
+	camFeatures?: CamFeature[];
+	geometryInfo?: StlGeometryInfo | null;
+	targetPortion?: TargetPortion | null;
+	setTargetPortion?: (portion: TargetPortion | null) => void;
+	blueprintUrl?: string | null;
+	onToggleBlueprintView?: () => void;
+	activeRevisionId?: string | null;
+	onRestoreRevision?: (revisionId: string) => void;
+	onDeleteRevision?: (revisionId: string) => void;
+};
+
+export function ChatPanel({
+	messages,
+	prompt,
+	setPrompt,
+	selectedModel,
+	setSelectedModel,
+	modelOptions,
+	selectedFile,
+	handleFileChange,
+	isGenerating,
+	onSubmit,
+	onClear,
+	width,
+	isOpen,
+	setIsOpen,
+	fileInputRef,
+	selectionContext,
+	onClearSelectionContext,
+	hasActiveModel = false,
+	parameters = {},
+	parameterEntries = [],
+	parameterMetadata = {},
+	annotations = {},
+	camFeatures = [],
+	geometryInfo = null,
+	targetPortion = null,
+	setTargetPortion,
+	blueprintUrl = null,
+	onToggleBlueprintView,
+	activeRevisionId,
+	onRestoreRevision,
+	onDeleteRevision,
+}: ChatPanelProps) {
+	const scrollRef = useRef<HTMLDivElement | null>(null);
+	const router = useRouter();
+	const [isLoggingOut, setIsLoggingOut] = useState(false);
+	const [user, setUser] = useState<{name?: string; email?: string} | null>(null);
+	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+	const [isPortionPickerOpen, setIsPortionPickerOpen] = useState(false);
+
+	const activeParams = useMemo(() => {
+		if (parameters && Object.keys(parameters).length > 0) return parameters;
+		if (parameterEntries && parameterEntries.length > 0) {
+			return Object.fromEntries(parameterEntries);
+		}
+		return {};
+	}, [parameters, parameterEntries]);
+
+	const { existingPortions, newFeaturePortions, allPortions } = useMemo(() => {
+		return deriveTargetPortions({
+			parameters: activeParams,
+			parameterMetadata,
+			annotations,
+			camFeatures,
+			geometryInfo,
+		});
+	}, [activeParams, parameterMetadata, annotations, camFeatures, geometryInfo]);
+
+	useEffect(() => {
+		fetch('/api/auth/me')
+			.then(res => res.json())
+			.then(data => {
+				if (data.success && data.user) {
+					setUser(data.user);
+				}
+			})
+			.catch(() => {});
+	}, []);
+
+	useEffect(() => {
+		if (scrollRef.current) {
+			scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+		}
+	}, [messages, isGenerating]);
+
+	const handleLogout = async () => {
+		setIsLoggingOut(true);
+		try {
+			await fetch('/api/auth/logout', { method: 'POST' });
+			router.push('/login');
+		} catch (error) {
+			console.error('Logout error:', error);
+			setIsLoggingOut(false);
+		}
+	};
+
+	const handleSelectPortion = (portion: TargetPortion) => {
+		if (setTargetPortion) {
+			setTargetPortion(portion);
+		}
+		setIsPortionPickerOpen(false);
+	};
+
+	const handleApplyQuickPrompt = (quickText: string) => {
+		setPrompt(quickText);
+	};
+
+	return (
+		<>
+			<div className="flex h-full flex-col bg-card dark:bg-[#070b14]/95 backdrop-blur-2xl border-r border-border dark:border-white/[0.08] select-none text-foreground">
+				{/* Top Ambient Highlight */}
+				<div className="h-[1px] w-full bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent" />
+
+				{/* Header */}
+				<div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-white/[0.06] bg-muted/30 dark:bg-white/[0.01]">
+					<div className="flex items-center gap-2.5">
+						<div className="flex size-7 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.2)]">
+							<Cuboid className="size-4" />
+						</div>
+						<div className="flex items-center gap-2">
+							<span className="text-sm font-extrabold tracking-wider text-foreground dark:text-white font-mono">
+								VEXCAD
+							</span>
+							<span className="text-[9px] text-cyan-700 dark:text-cyan-300 font-mono font-bold bg-cyan-500/10 px-1.5 py-0.5 rounded-md border border-cyan-500/25">
+								v0.1.0
+							</span>
+						</div>
+					</div>
+
+					{/* Action Buttons Cluster */}
+					<div className="flex items-center gap-1">
+						<button
+							onClick={onClear}
+							className="flex size-7 items-center justify-center rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-all cursor-pointer shadow-sm"
+							title="New Blueprint CAD Project"
+						>
+							<PlusCircle className="size-3.5" />
+						</button>
+						{messages.length > 0 && (
+							<button
+								onClick={onClear}
+								className="flex size-7 items-center justify-center rounded-lg bg-muted/60 hover:bg-muted dark:bg-white/[0.03] dark:hover:bg-white/[0.08] border border-border dark:border-white/10 text-muted-foreground hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+								title="Clear active workspace"
+							>
+								<Trash2 className="size-3.5" />
+							</button>
+						)}
+						<button
+							onClick={() => setIsSettingsOpen(true)}
+							className="flex size-7 items-center justify-center rounded-lg bg-muted/60 hover:bg-muted dark:bg-white/[0.03] dark:hover:bg-white/[0.08] border border-border dark:border-white/10 text-muted-foreground hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+							title="Settings"
+						>
+							<Settings className="size-3.5" />
+						</button>
+						<button
+							onClick={handleLogout}
+							disabled={isLoggingOut}
+							className="flex size-7 items-center justify-center rounded-lg bg-muted/60 hover:bg-muted dark:bg-white/[0.03] dark:hover:bg-white/[0.08] border border-border dark:border-white/10 text-muted-foreground hover:text-rose-500 dark:hover:text-rose-400 transition-colors disabled:opacity-50 cursor-pointer"
+							title="Logout"
+						>
+							{isLoggingOut ? (
+								<Loader2 className="size-3.5 animate-spin text-cyan-500" />
+							) : (
+								<LogOut className="size-3.5" />
+							)}
+						</button>
+					</div>
+				</div>
+
+				<SettingsPanel
+					isOpen={isSettingsOpen}
+					onClose={() => setIsSettingsOpen(false)}
+					user={user}
+				/>
+
+				{/* Chat Messages Stream */}
+				<div className="flex-1 overflow-y-auto px-4 py-4 space-y-3.5 no-scrollbar">
+					{messages.length === 0 ? (
+						<div className="flex flex-col items-center justify-center h-full text-center px-4 space-y-5 max-w-xs mx-auto animate-in fade-in duration-300">
+							<div className="relative flex items-center justify-center">
+								<div className="absolute -inset-3 rounded-full bg-cyan-500/10 blur-xl" />
+								<div className="relative flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
+									<Cuboid className="size-6" />
+								</div>
+							</div>
+
+							<div className="space-y-1">
+								<h3 className="text-xs font-bold uppercase tracking-wider text-foreground dark:text-white font-mono">
+									Parametric CAD Copilot
+								</h3>
+								<p className="text-[11px] text-muted-foreground leading-relaxed">
+									Upload a 2D engineering blueprint or enter parametric CAD prompts below.
+								</p>
+							</div>
+
+							{/* Quick Start Cards */}
+							<div className="flex flex-col gap-2 w-full pt-1">
+								<button
+									type="button"
+									onClick={() => setPrompt('Design a stepped shaft with dual O-ring seal grooves and internal bore.')}
+									className="w-full px-3.5 py-2.5 rounded-xl border border-border/80 dark:border-white/10 bg-gradient-to-r from-blue-500/[0.04] to-cyan-500/[0.02] dark:bg-white/[0.02] hover:bg-muted/80 dark:hover:bg-white/[0.06] hover:border-cyan-500/50 hover:shadow-md text-left text-xs text-foreground dark:text-muted-foreground dark:hover:text-white transition-all flex items-center justify-between gap-2 cursor-pointer group shadow-sm hover:-translate-y-0.5"
+								>
+									<div className="flex items-center gap-2.5 min-w-0">
+										<div className="size-6 rounded-lg bg-cyan-500/10 dark:bg-cyan-400/15 text-cyan-600 dark:text-cyan-400 flex items-center justify-center text-xs shrink-0 group-hover:scale-110 transition-transform">
+											⚡
+										</div>
+										<span className="truncate font-medium text-[11.5px]">Stepped Shaft with Grooves</span>
+									</div>
+									<ChevronRight className="size-3.5 text-muted-foreground/40 group-hover:text-cyan-500 group-hover:translate-x-0.5 transition-all shrink-0" />
+								</button>
+
+								<button
+									type="button"
+									onClick={() => setPrompt('Convert attached 2D blueprint drawing into a fully parametric 3D model.')}
+									className="w-full px-3.5 py-2.5 rounded-xl border border-border/80 dark:border-white/10 bg-gradient-to-r from-emerald-500/[0.04] to-teal-500/[0.02] dark:bg-white/[0.02] hover:bg-muted/80 dark:hover:bg-white/[0.06] hover:border-emerald-500/50 hover:shadow-md text-left text-xs text-foreground dark:text-muted-foreground dark:hover:text-white transition-all flex items-center justify-between gap-2 cursor-pointer group shadow-sm hover:-translate-y-0.5"
+								>
+									<div className="flex items-center gap-2.5 min-w-0">
+										<div className="size-6 rounded-lg bg-emerald-500/10 dark:bg-emerald-400/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0 group-hover:scale-110 transition-transform">
+											📐
+										</div>
+										<span className="truncate font-medium text-[11.5px]">Convert Blueprint to 3D CAD</span>
+									</div>
+									<ChevronRight className="size-3.5 text-muted-foreground/40 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all shrink-0" />
+								</button>
+							</div>
+						</div>
+					) : (
+						<div className="space-y-3.5">
+							{messages.map((msg) => (
+								<ChatBubble
+									key={msg.id}
+									{...msg}
+									activeRevisionId={activeRevisionId}
+									onRestoreRevision={onRestoreRevision}
+									onDeleteRevision={onDeleteRevision}
+									onRestorePrompt={(text, portionName) => {
+										setPrompt(text);
+										if (portionName && setTargetPortion) {
+											const found = allPortions.find(
+												(p) => p.name === portionName || p.id === portionName
+											);
+											if (found) {
+												setTargetPortion(found);
+											}
+										}
+									}}
+								/>
+							))}
+
+							{isGenerating && (
+								<div className="flex items-center gap-2.5 p-3 rounded-2xl bg-cyan-500/[0.05] border border-cyan-500/20 text-cyan-300 text-xs animate-pulse">
+									<RefreshCw className="size-3.5 animate-spin text-cyan-400" />
+									<span>Computing CAD Geometry & B-Rep Topology...</span>
+								</div>
+							)}
+							<div ref={scrollRef} />
+						</div>
+					)}
+				</div>
+
+				{/* Floating Command Input Dock */}
+				<div className="px-3.5 pb-3.5 pt-1.5 border-t border-border dark:border-white/[0.06] bg-card dark:bg-[#070b14]">
+					<form onSubmit={onSubmit} className="relative flex flex-col gap-1.5">
+						{/* Target Feature Pill (When Model Active) */}
+						{hasActiveModel && (
+							<div className="flex flex-col gap-1">
+								<div className="flex items-center justify-between gap-2">
+									<div className="relative">
+										<button
+											type="button"
+											onClick={() => setIsPortionPickerOpen(!isPortionPickerOpen)}
+											className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold transition-all border cursor-pointer ${
+												targetPortion
+ 													? targetPortion.isExistingGeometry === false
+ 														? 'bg-amber-500/15 border-amber-500/40 text-amber-600 dark:text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
+ 														: 'bg-cyan-500/15 border-cyan-500/40 text-cyan-600 dark:text-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.2)]'
+ 													: 'bg-muted/60 dark:bg-white/[0.03] border-border dark:border-white/10 text-muted-foreground hover:text-foreground dark:hover:text-white hover:border-cyan-500/40'
+											}`}
+											title="Target specific CAD feature"
+										>
+											<Target className={`size-3 ${
+												targetPortion 
+ 													? targetPortion.isExistingGeometry === false 
+ 														? 'text-amber-500 dark:text-amber-400' 
+ 														: 'text-cyan-500 dark:text-cyan-400' 
+ 													: 'text-muted-foreground'
+											}`} />
+											<span className="truncate max-w-[150px]">
+												{targetPortion ? targetPortion.name : 'Target: Whole Model'}
+											</span>
+											<ChevronDown className="size-2.5 opacity-60 ml-0.5" />
+										</button>
+
+										{/* Dropdown Menu for CAD Portions */}
+										{isPortionPickerOpen && (
+											<div className="absolute bottom-full left-0 mb-2 w-80 rounded-2xl border border-border dark:border-white/10 bg-popover dark:bg-[#0c1222]/95 backdrop-blur-2xl shadow-2xl p-2 z-50 space-y-1.5 animate-in fade-in zoom-in-95 duration-150 text-foreground">
+												<div className="flex items-center justify-between px-2 py-1 border-b border-border dark:border-white/[0.06] text-[10px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400 font-mono">
+													<span>Select CAD Feature Focus</span>
+													<button
+														type="button"
+														onClick={() => setIsPortionPickerOpen(false)}
+														className="text-muted-foreground hover:text-foreground dark:hover:text-white p-0.5 cursor-pointer"
+													>
+														<X className="size-3" />
+													</button>
+												</div>
+
+												<button
+													type="button"
+													onClick={() => {
+														if (setTargetPortion) setTargetPortion(null);
+														setIsPortionPickerOpen(false);
+													}}
+													className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-muted dark:hover:bg-white/10 text-foreground dark:text-white flex items-center justify-between cursor-pointer"
+												>
+													<div className="flex items-center gap-1.5">
+														<Cuboid className="size-3.5 text-cyan-500 dark:text-cyan-400" />
+														<span className="font-semibold">Whole Model (Default)</span>
+													</div>
+													{!targetPortion && <Check className="size-3 text-cyan-500 dark:text-cyan-400" />}
+												</button>
+
+												<div className="max-h-60 overflow-y-auto space-y-2 no-scrollbar pr-0.5">
+													{/* 1. Recognized Model Features */}
+													<div>
+														<div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-mono flex items-center gap-1">
+															<span className="size-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
+															<span>Active Model Features ({existingPortions.length})</span>
+														</div>
+														<div className="mt-1 space-y-0.5">
+															{existingPortions.map((p) => (
+																<button
+																	key={p.id}
+																	type="button"
+																	onClick={() => handleSelectPortion(p)}
+																	className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
+																		targetPortion?.id === p.id
+																			? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-bold border border-cyan-500/30'
+																			: 'hover:bg-muted dark:hover:bg-white/[0.06] text-muted-foreground hover:text-foreground dark:hover:text-white'
+																	}`}
+																>
+																	<div className="flex flex-col truncate pr-2">
+																		<span className="truncate font-medium text-foreground dark:text-white">{p.name}</span>
+																		{p.description && (
+																			<span className="text-[10px] text-muted-foreground dark:text-zinc-400 truncate">{p.description}</span>
+																		)}
+																	</div>
+																	{targetPortion?.id === p.id && <Check className="size-3 text-cyan-500 dark:text-cyan-400 shrink-0" />}
+																</button>
+															))}
+														</div>
+													</div>
+
+													{/* 2. Add New Feature Templates */}
+													<div className="pt-1 border-t border-border dark:border-white/[0.06]">
+														<div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 font-mono flex items-center gap-1">
+															<Plus className="size-2.5 text-amber-500 dark:text-amber-400" />
+															<span>Add Missing Feature</span>
+														</div>
+														<div className="mt-1 space-y-0.5">
+															{newFeaturePortions.map((p) => (
+																<button
+																	key={p.id}
+																	type="button"
+																	onClick={() => handleSelectPortion(p)}
+																	className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
+																		targetPortion?.id === p.id
+																			? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold border border-amber-500/30'
+																			: 'hover:bg-muted dark:hover:bg-white/[0.06] text-muted-foreground hover:text-foreground dark:hover:text-white'
+																	}`}
+																>
+																	<div className="flex flex-col truncate pr-2">
+																		<span className="truncate font-medium text-amber-700 dark:text-amber-200">{p.name}</span>
+																		{p.description && (
+																			<span className="text-[10px] text-muted-foreground dark:text-zinc-400 truncate">{p.description}</span>
+																		)}
+																	</div>
+																	{targetPortion?.id === p.id && <Check className="size-3 text-amber-500 dark:text-amber-400 shrink-0" />}
+																</button>
+															))}
+														</div>
+													</div>
+												</div>
+											</div>
+										)}
+									</div>
+
+									{targetPortion && (
+										<button
+											type="button"
+											onClick={() => {
+												if (setTargetPortion) setTargetPortion(null);
+											}}
+											className="text-[10px] text-muted-foreground hover:text-rose-500 dark:hover:text-rose-400 flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded cursor-pointer"
+											title="Clear targeted portion"
+										>
+											<X className="size-3" />
+											<span>Clear</span>
+										</button>
+									)}
+								</div>
+							</div>
+						)}
+
+						{/* Attached File Preview */}
+						{selectedFile && (
+							<div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-700 dark:text-emerald-300 font-mono">
+								<Upload className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+								<span className="truncate flex-1 font-semibold">{selectedFile.name}</span>
+								<button
+									type="button"
+									onClick={() => handleFileChange(null)}
+									className="p-0.5 hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+								>
+									<X className="size-3.5" />
+								</button>
+							</div>
+						)}
+
+						{/* 3D Coordinate Targeting Chip */}
+						{selectionContext && (
+							<div className="flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-700 dark:text-rose-300 font-mono">
+								<Crosshair className="size-3.5 shrink-0 text-rose-600 dark:text-rose-400" />
+								<span className="truncate flex-1">
+									Target [{selectionContext[0].toFixed(1)}, {selectionContext[1].toFixed(1)}, {selectionContext[2].toFixed(1)}]
+								</span>
+								<button
+									type="button"
+									onClick={onClearSelectionContext}
+									className="p-0.5 hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+								>
+									<X className="size-3.5" />
+								</button>
+							</div>
+						)}
+
+						{/* Main Floating Glass Input Bar */}
+						<div className="relative flex flex-col rounded-2xl bg-muted/40 dark:bg-white/[0.03] border border-border dark:border-white/10 focus-within:border-cyan-500 dark:focus-within:border-cyan-400/60 focus-within:bg-card dark:focus-within:bg-white/[0.05] shadow-sm dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-all duration-200">
+							<textarea
+								value={prompt}
+								onChange={(e) => setPrompt(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === 'Enter' && !e.shiftKey) {
+										e.preventDefault();
+										onSubmit(e as any);
+									}
+								}}
+								rows={2}
+								placeholder={
+									targetPortion
+										? `Describe revisions for ${targetPortion.name}...`
+										: hasActiveModel
+											? "Iterate on geometry (e.g. increase boss height, add 4x holes)..."
+											: "Ask VEXCAD AI or describe your part..."
+								}
+								className="w-full resize-none bg-transparent px-3.5 pt-3 pb-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none font-sans leading-relaxed"
+							/>
+
+							<div className="flex items-center justify-between px-3 pb-2.5 pt-1 border-t border-border/50 dark:border-white/[0.04]">
+								<div className="flex items-center gap-1.5">
+									{/* Attach File Button */}
+									<label
+										className={`flex size-7 cursor-pointer items-center justify-center rounded-xl transition-all duration-200 ${
+											selectedFile
+												? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
+												: 'text-muted-foreground hover:bg-muted dark:hover:bg-white/10 hover:text-foreground dark:hover:text-white'
+										}`}
+										title="Attach technical blueprint (PDF/PNG/JPG)"
+									>
+										<Paperclip className="size-3.5" />
+										<input
+											ref={fileInputRef}
+											type="file"
+											accept="image/*,.pdf"
+											className="hidden"
+											onChange={(e) => {
+												const file = e.target.files?.[0] || null;
+												if (file && file.size > 10 * 1024 * 1024) {
+													alert('File size exceeds the 10MB limit. Please select a smaller blueprint file.');
+													e.target.value = '';
+													return;
+												}
+												handleFileChange(file);
+											}}
+										/>
+									</label>
+
+									{/* Model Selector Dropdown */}
+									<Select value={selectedModel} onValueChange={(val: string | null) => val && setSelectedModel(val)}>
+										<SelectTrigger className="h-7 px-2 border-0 bg-transparent hover:bg-muted dark:hover:bg-white/5 text-[10.5px] font-mono font-semibold text-muted-foreground hover:text-foreground dark:hover:text-white rounded-lg focus:ring-0 gap-1">
+											<Sparkles className="size-3 text-cyan-600 dark:text-cyan-400" />
+											<SelectValue placeholder="Model" />
+										</SelectTrigger>
+										<SelectContent className="rounded-xl border border-border dark:border-white/10 bg-popover dark:bg-[#090e1a]/95 backdrop-blur-xl text-xs z-50 text-foreground">
+											{modelOptions.map((opt) => (
+												<SelectItem key={opt.value} value={opt.value} className="text-xs font-mono">
+													{opt.label}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+
+								{/* High-Emphasis Send Button */}
+								<button
+									type="submit"
+									disabled={isGenerating || (!prompt.trim() && !selectedFile)}
+									className="size-7.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 dark:bg-cyan-400 dark:hover:bg-cyan-300 disabled:opacity-30 text-white dark:text-black flex items-center justify-center transition-all shadow-sm dark:shadow-[0_0_12px_rgba(34,211,238,0.3)] shrink-0 cursor-pointer font-bold"
+									title="Generate CAD Model (Enter)"
+								>
+									{isGenerating ? (
+										<Loader2 className="size-3.5 animate-spin" />
+									) : (
+										<Send className="size-3.5" />
+									)}
+								</button>
+							</div>
+						</div>
+					</form>
+				</div>
+			</div>
+		</>
+	);
+}
