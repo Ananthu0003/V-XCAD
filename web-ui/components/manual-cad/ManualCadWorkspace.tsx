@@ -8,6 +8,7 @@ import { HistoryTimelineBar, HistoryOperation } from './HistoryTimelineBar';
 import { CadViewport } from '@/components/viewport/CadViewport';
 import { SubShapeRaycaster, findFaceFromHit } from './SubShapeRaycaster';
 import { StlMesh } from '@/components/viewport/StlMesh';
+import { ContextMenu } from './operations/ContextMenu';
 import { Loader2 } from 'lucide-react';
 
 interface ManualCadWorkspaceProps {
@@ -163,6 +164,8 @@ export function ManualCadWorkspace({
   const [isPreviewActive, setIsPreviewActive] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [stlUrl, setStlUrl] = useState<string | null>(initialStlUrl || null);
+  const [hoveredEntity, setHoveredEntity] = useState<any | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entity: any } | null>(null);
 
   // Scoped workspace ref for keyboard shortcuts
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -318,12 +321,32 @@ export function ManualCadWorkspace({
   };
 
   // Cancel Preview
-  const handleCancelPreview = () => {
+  const handleCancelPreview = useCallback(() => {
     setIsPreviewActive(false);
     setPreviewResult(null);
     setStlUrl(`/api/cad/modify/file/${sessionId}/revisions/${activeRevision}.stl`);
     toast.info('Preview discarded');
-  };
+  }, [sessionId, activeRevision]);
+
+  // Escape key cancels active tool / task panel or closes context menu
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (contextMenu) {
+          setContextMenu(null);
+          return;
+        }
+        if (activeTool !== 'select') {
+          if (isPreviewActive) {
+            handleCancelPreview();
+          }
+          setActiveTool('select');
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [contextMenu, activeTool, isPreviewActive, handleCancelPreview]);
 
   // Commit Operation
   const handleCommit = async () => {
@@ -520,7 +543,20 @@ export function ManualCadWorkspace({
           </div>
 
           {/* 3D viewport */}
-          <div style={{ flex: 1, position: 'relative', background: 'var(--mcad-viewport)', minHeight: 0 }}>
+          <div
+            style={{ flex: 1, position: 'relative', background: 'var(--mcad-viewport)', minHeight: 0 }}
+            onContextMenu={(e) => {
+              const targetEntity = hoveredEntity || selectedEntity;
+              if (targetEntity) {
+                e.preventDefault();
+                setContextMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  entity: targetEntity,
+                });
+              }
+            }}
+          >
             {/* Dot-grid background */}
             <div
               aria-hidden
@@ -552,9 +588,28 @@ export function ManualCadWorkspace({
                 topology={topology}
                 selectedEntity={selectedEntity}
                 onSelectEntity={handleSelectTopologyEntity}
+                hoveredEntity={hoveredEntity}
+                onHoverEntity={setHoveredEntity}
                 selectionMode={selectionMode}
               />
             </CadViewport>
+
+            {/* Right-click Context Menu */}
+            {contextMenu && (
+              <ContextMenu
+                x={contextMenu.x}
+                y={contextMenu.y}
+                entity={contextMenu.entity}
+                onSelectOperation={(opId) => {
+                  if (selectedEntity?.transient_id !== contextMenu.entity?.transient_id) {
+                    handleSelectTopologyEntity(contextMenu.entity);
+                  }
+                  handleSetActiveTool(opId);
+                  setContextMenu(null);
+                }}
+                onClose={() => setContextMenu(null)}
+              />
+            )}
 
             {/* Bottom-left status line */}
             <ViewportStatus selectedEntity={selectedEntity} isLoading={isLoading} />

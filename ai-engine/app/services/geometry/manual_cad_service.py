@@ -605,6 +605,18 @@ class ManualCADService:
     # Geometry Execution Engine
     # --------------------------------------------------------------------------
 
+    @property
+    def _operation_registry(self):
+        """Registry of supported CAD operations."""
+        return {
+            "fillet": self._apply_fillet,
+            "chamfer": self._apply_chamfer,
+            "hole": self._apply_hole,
+            "pocket": self._apply_pocket,
+            "pad": self._apply_pad,
+            "edit_feature": self._apply_edit_feature,
+        }
+
     def _execute_operation(
         self,
         base_shape: bd.Shape,
@@ -613,21 +625,11 @@ class ManualCADService:
         parameters: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
         """Dispatch operation to specific geometry builder."""
+        handler = self._operation_registry.get(op_type)
+        if not handler:
+            return None, OperationStatus.INVALID_REFERENCE, f"Unsupported operation type: {op_type}", [], []
         try:
-            if op_type == "fillet":
-                return self._apply_fillet(base_shape, references, parameters)
-            elif op_type == "chamfer":
-                return self._apply_chamfer(base_shape, references, parameters)
-            elif op_type == "hole":
-                return self._apply_hole(base_shape, references, parameters)
-            elif op_type == "pocket":
-                return self._apply_pocket(base_shape, references, parameters)
-            elif op_type == "pad":
-                return self._apply_pad(base_shape, references, parameters)
-            elif op_type == "boolean":
-                return self._apply_boolean(base_shape, references, parameters)
-            else:
-                return None, OperationStatus.INVALID_REFERENCE, f"Unsupported operation type: {op_type}", [], []
+            return handler(base_shape, references, parameters)
         except Exception as exc:
             return None, OperationStatus.GEOMETRY_FAILURE, str(exc), [], []
 
@@ -893,10 +895,93 @@ class ManualCADService:
         except Exception as e:
             return None, OperationStatus.GEOMETRY_FAILURE, f"Pad boolean union failed: {e}", [], []
 
-    def _apply_boolean(
+    def _apply_edit_feature(
         self,
         shape: bd.Shape,
         refs: List[GeometricReference],
         params: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
-        return shape, OperationStatus.VALID, "No-op boolean", [], []
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Cylinder
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.GeomLProp import GeomLProp_SLProps
+        from OCP.gp import gp_Dir
+        import itertools
+
+        if not refs or refs[0].entity_type != "face":
+            return None, OperationStatus.INVALID_REFERENCE, "Edit feature requires a cylindrical face reference.", [], []
+
+        face, status, msg = ReferenceResolver.resolve_face(shape, refs[0])
+        if status != OperationStatus.VALID or face is None:
+            return None, status, msg, [], []
+
+        surf = BRepAdaptor_Surface(face.wrapped)
+        if surf.GetType() != GeomAbs_Cylinder:
+            return None, OperationStatus.INVALID_REFERENCE, "Edit feature is only supported on cylindrical faces.", [], []
+
+        cyl = surf.Cylinder()
+        old_radius = cyl.Radius()
+        loc = cyl.Location()
+        axis = cyl.Axis().Direction()
+
+        props = GeomLProp_SLProps(surf, 0.0, 0.0, 1, 1e-4)
+        n = props.Normal()
+        if face.wrapped.Orientation() != TopAbs_FACE:
+            n.Reverse()
+
+        pnt = props.Value()
+        v = gp_Dir(loc.X() - pnt.X(), loc.Y() - pnt.Y(), loc.Z() - pnt.Z())
+        dot = n.X()*v.X() + n.Y()*v.Y() + n.Z()*v.Z()
+        is_hole = dot > 0
+
+        bnd = Bnd_Box()
+        BRepBndLib.Add_s(face.wrapped, bnd)
+        xmin, ymin, zmin, xmax, ymax, zmax = bnd.Get()
+
+        pts = list(itertools.product([xmin, xmax], [ymin, ymax], [zmin, zmax]))
+        t_vals = []
+        for px, py, pz in pts:
+            t = (px - loc.X()) * axis.X() + (py - loc.Y()) * axis.Y() + (pz - loc.Z()) * axis.Z()
+            t_vals.append(t)
+
+        t_min = min(t_vals)
+        t_max = max(t_vals)
+        
+        # Extend slightly to ensure clean boolean operations
+        t_min -= 0.1
+        t_max += 0.1
+        old_len = t_max - t_min
+
+        origin = bd.Vector(loc.X(), loc.Y(), loc.Z())
+        z_dir = bd.Vector(axis.X(), axis.Y(), axis.Z())
+        old_origin = origin + z_dir * t_min
+        workplane = bd.Plane(origin=old_origin, z_dir=z_dir)
+
+        old_solid = bd.Cylinder(radius=old_radius, height=old_len)
+        old_solid = old_solid.located(workplane.location * bd.Location(bd.Vector(0, 0, old_len / 2.0)))
+
+        try:
+            if is_hole:
+                shape_filled = shape + old_solid
+            else:
+                shape_filled = shape - old_solid
+
+            new_dia = float(params.get("diameter", old_radius * 2.0))
+            new_depth = float(params.get("depth", old_len - 0.2)) # Subtract extension
+            req_kind = str(params.get("kind", "hole" if is_hole else "boss")).lower()
+
+            new_solid = bd.Cylinder(radius=new_dia / 2.0, height=new_depth)
+            
+            # Use original face start position
+            new_origin = origin + z_dir * (min(t_vals))
+            new_workplane = bd.Plane(origin=new_origin, z_dir=z_dir)
+            new_solid = new_solid.located(new_workplane.location * bd.Location(bd.Vector(0, 0, new_depth / 2.0)))
+
+            if req_kind == "hole":
+                final_shape = shape_filled - new_solid
+            else:
+                final_shape = shape_filled + new_solid
+
+            return final_shape, OperationStatus.VALID, f"Feature edited ({req_kind}, dia {new_dia:.1f}mm).", ["face_edited"], []
+        except Exception as e:
+            return None, OperationStatus.GEOMETRY_FAILURE, f"Edit feature failed: {e}", [], []

@@ -2,30 +2,19 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Eye,
-  Check,
-  X,
-  AlertTriangle,
-  Loader2,
-  Activity,
   ChevronDown,
   ChevronRight,
   Search,
-  CircleDot,
-  Square,
-  Layers,
-  CornerDownRight,
-  Scissors,
-  Ruler,
-  type LucideIcon,
 } from 'lucide-react';
 import { CADToolType } from './ManualCadToolbar';
 import { SectionLabel, Divider, PropRow } from './shared';
-import { FilletForm } from './forms/FilletForm';
-import { ChamferForm } from './forms/ChamferForm';
-import { HoleForm } from './forms/HoleForm';
-import { PocketForm } from './forms/PocketForm';
-import { PadForm } from './forms/PadForm';
+import {
+  humanEntityLabel,
+  getSelectionReadout,
+  getApplicableOperations,
+} from './operations/capabilities';
+import { getOperationDefinition } from './operations/registry';
+import { TaskPanel } from './operations/TaskPanel';
 
 export interface TopologyPropertiesPanelProps {
   selectedEntity: any | null;
@@ -45,58 +34,7 @@ export interface TopologyPropertiesPanelProps {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function humanFaceType(entity: any): string {
-  if (!entity) return '';
-  if (entity.entity_type === 'body') {
-    return '3D Solid Model (Sub-shape)';
-  }
-  if (entity.entity_type === 'edge') {
-    const t = entity.curve_type || 'edge';
-    return t.charAt(0).toUpperCase() + t.slice(1) + ' edge';
-  }
-  const st = entity.surface_type || '';
-  const map: Record<string, string> = {
-    plane: 'Planar face',
-    cylinder: 'Cylindrical face',
-    cone: 'Conical face',
-    sphere: 'Spherical face',
-    torus: 'Toroidal face',
-    bspline: 'B-spline face',
-  };
-  return map[st] || (st ? st.charAt(0).toUpperCase() + st.slice(1) + ' face' : 'Face');
-}
-
-function normalLabel(n: number[]): string {
-  if (!n) return '';
-  const labels = ['+X', '-X', '+Y', '-Y', '+Z', '-Z'];
-  const axes = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
-  let best = 0, bestDot = -2;
-  axes.forEach(([ax, ay, az], i) => {
-    const dot = ax*n[0] + ay*n[1] + az*n[2];
-    if (dot > bestDot) { bestDot = dot; best = i; }
-  });
-  return bestDot > 0.9 ? labels[best] : `[${n.map(v => v.toFixed(2)).join(', ')}]`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Other actions catalog
-// ─────────────────────────────────────────────────────────────────────────────
-
-const FACE_ACTIONS: Array<{ id: CADToolType; label: string; icon: LucideIcon }> = [
-  { id: 'hole', label: 'Hole', icon: CircleDot },
-  { id: 'pocket', label: 'Pocket', icon: Square },
-  { id: 'pad', label: 'Pad', icon: Layers },
-  { id: 'measure', label: 'Measure', icon: Ruler },
-];
-
-const EDGE_ACTIONS: Array<{ id: CADToolType; label: string; icon: LucideIcon }> = [
-  { id: 'fillet', label: 'Fillet', icon: CornerDownRight },
-  { id: 'chamfer', label: 'Chamfer', icon: Scissors },
-  { id: 'measure', label: 'Measure', icon: Ruler },
-];
+// (Helpers now provided by capabilities.ts and registry.ts)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main panel
@@ -132,8 +70,6 @@ export function TopologyPropertiesPanel({
   const isBody = e?.entity_type === 'body';
   const isFace = e?.entity_type === 'face';
   const isEdge = e?.entity_type === 'edge';
-  const isPlanar = isFace && e?.surface_type === 'plane';
-  const isCylinder = isFace && e?.surface_type === 'cylinder';
   const hasOp = activeTool !== 'select' && activeTool !== 'measure';
 
   // Debounced live preview when enabled
@@ -143,7 +79,7 @@ export function TopologyPropertiesPanel({
       onPreview();
     }, 600);
     return () => clearTimeout(timer);
-  }, [livePreview, params, e, activeTool]);
+  }, [livePreview, params, e, activeTool, hasOp, isLoading, onPreview]);
 
   // Topology entities
   const allFaces = topology ? Object.values(topology.faces || {}) as any[] : [];
@@ -155,15 +91,8 @@ export function TopologyPropertiesPanel({
     ? allEdges.filter((ed: any) => ed.transient_id?.toLowerCase().includes(topoSearch.toLowerCase()) || ed.curve_type?.toLowerCase().includes(topoSearch.toLowerCase()))
     : allEdges;
 
-  const applyLabel = activeTool === 'select' || activeTool === 'measure'
-    ? 'Apply'
-    : `Apply ${activeTool}`;
-
-  const normalStr = e?.normal ? normalLabel(e.normal) : null;
-
-  // Secondary actions grid: 2x2
-  const candidateActions = isFace ? FACE_ACTIONS : isEdge ? EDGE_ACTIONS : FACE_ACTIONS;
-  const otherOps = candidateActions.filter(a => a.id !== activeTool);
+  // Secondary actions: only applicable operations from capabilities matrix
+  const applicableOps = e ? getApplicableOperations(e).filter(opId => opId !== activeTool) : [];
 
   return (
     <div style={{
@@ -218,7 +147,7 @@ export function TopologyPropertiesPanel({
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--mcad-text-primary)', fontFamily: 'var(--font-sans)' }}>
-                  {humanFaceType(e)}
+                  {humanEntityLabel(e)}
                 </span>
                 <span style={{
                   fontFamily: 'var(--font-mono)', fontSize: 11,
@@ -230,77 +159,35 @@ export function TopologyPropertiesPanel({
                 </span>
               </div>
 
-              {/* Three compact rows */}
+              {/* Selection readout adapted to class */}
               <div style={{
                 background: 'var(--mcad-input)', border: '1px solid var(--mcad-border-ctrl)',
                 borderRadius: 8, padding: '6px 10px', marginBottom: 4,
               }}>
-                {isBody && (
-                  <>
-                    <PropRow label="Volume" value={`${e.volume_mm3 != null ? e.volume_mm3.toFixed(1) : '—'} mm³`} />
-                    {(() => {
-                      const bbox = e.bounding_box;
-                      if (bbox?.min && bbox?.max) {
-                        const dx = bbox.max[0] - bbox.min[0];
-                        const dy = bbox.max[1] - bbox.min[1];
-                        const dz = bbox.max[2] - bbox.min[2];
-                        return (
-                          <PropRow
-                            label="Bounding Box"
-                            value={`${dx.toFixed(1)} × ${dy.toFixed(1)} × ${dz.toFixed(1)} mm`}
-                          />
-                        );
-                      }
-                      return null;
-                    })()}
-                    <PropRow label="Topology" value={`${e.face_count || 0} faces · ${e.edge_count || 0} edges`} />
-                    <PropRow label="Status" value={e.is_valid ? 'Valid B-Rep Solid' : 'Check Geometry'} />
-                  </>
-                )}
-
-                {isFace && (
-                  <>
-                    <PropRow label="Area" value={`${e.area != null ? e.area.toFixed(1) : '—'} mm²`} />
-                    <PropRow label="Normal" value={normalStr || '—'} />
-                    {isPlanar && (
-                      <PropRow
-                        label="Height"
-                        value={e.height != null ? `${e.height.toFixed(1)} mm` : e.centroid?.[2] != null ? `Z ${e.centroid[2].toFixed(1)} mm` : '—'}
-                      />
-                    )}
-                    {isCylinder && (
-                      <PropRow label="Radius" value={`R${e.radius != null ? e.radius.toFixed(2) : '—'} mm`} />
-                    )}
-                    {!isPlanar && !isCylinder && (
-                      <PropRow label="Type" value={e.surface_type || 'Custom'} />
-                    )}
-                  </>
-                )}
-
-                {isEdge && (
-                  <>
-                    <PropRow label="Length" value={`${e.length != null ? e.length.toFixed(1) : '—'} mm`} />
-                    <PropRow label="Type" value={e.curve_type ? e.curve_type.charAt(0).toUpperCase() + e.curve_type.slice(1) : 'Line'} />
-                    <PropRow label="Radius" value={e.radius != null ? `R${e.radius.toFixed(2)} mm` : '—'} />
-                  </>
-                )}
+                {getSelectionReadout(e).map((prop) => (
+                  <PropRow key={prop.label} label={prop.label} value={prop.value} />
+                ))}
 
                 {/* Collapsed "More" disclosure for centroid */}
-                <button
-                  type="button"
-                  onClick={() => setMoreExpanded(p => !p)}
-                  style={{
-                    marginTop: 4, display: 'flex', alignItems: 'center', gap: 4,
-                    fontSize: 11, color: 'var(--mcad-text-muted)', background: 'transparent',
-                    border: 'none', cursor: 'pointer', padding: 0,
-                    fontFamily: 'var(--font-sans)',
-                  }}
-                >
-                  {moreExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                  More
-                </button>
-                {moreExpanded && e.centroid && (
-                  <PropRow label="Centroid" value={`[${e.centroid.map((c: number) => c.toFixed(1)).join(', ')}]`} />
+                {e.centroid && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setMoreExpanded(p => !p)}
+                      style={{
+                        marginTop: 4, display: 'flex', alignItems: 'center', gap: 4,
+                        fontSize: 11, color: 'var(--mcad-text-muted)', background: 'transparent',
+                        border: 'none', cursor: 'pointer', padding: 0,
+                        fontFamily: 'var(--font-sans)',
+                      }}
+                    >
+                      {moreExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      More
+                    </button>
+                    {moreExpanded && (
+                      <PropRow label="Centroid" value={`[${e.centroid.map((c: number) => c.toFixed(1)).join(', ')}]`} />
+                    )}
+                  </>
                 )}
               </div>
             </>
@@ -365,16 +252,26 @@ export function TopologyPropertiesPanel({
             </>
           )}
 
-          {/* ─── B. Active operation form ─── */}
+          {/* ─── B. Active operation task panel ─── */}
           {hasOp && (
             <>
               <Divider />
-              <SectionLabel>{activeTool.toUpperCase()}</SectionLabel>
-              {activeTool === 'fillet'  && <FilletForm  params={params} onChange={handleParamChange} />}
-              {activeTool === 'chamfer' && <ChamferForm params={params} onChange={handleParamChange} />}
-              {activeTool === 'hole'    && <HoleForm    params={params} onChange={handleParamChange} />}
-              {activeTool === 'pocket'  && <PocketForm  params={params} onChange={handleParamChange} />}
-              {activeTool === 'pad'     && <PadForm     params={params} onChange={handleParamChange} />}
+              <TaskPanel
+                definition={getOperationDefinition(activeTool)}
+                params={params}
+                onChangeParam={handleParamChange}
+                selectedEntity={selectedEntity}
+                onPreview={onPreview}
+                onCancelPreview={onCancelPreview}
+                onCommit={onCommit}
+                onClose={() => onSelectTool?.('select')}
+                isPreviewActive={isPreviewActive}
+                isLoading={isLoading}
+                livePreview={livePreview}
+                setLivePreview={setLivePreview}
+                validationReport={validationReport}
+                errorDiagnostic={errorDiagnostic}
+              />
             </>
           )}
 
@@ -389,136 +286,33 @@ export function TopologyPropertiesPanel({
             </>
           )}
 
-          {/* ─── C. Footer of the form ─── */}
-          {hasOp && (
-            <>
-              <Divider />
-              {/* Live preview checkbox row */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <label style={{
-                  display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-                  fontSize: 12, fontFamily: 'var(--font-sans)', color: 'var(--mcad-text-secondary)',
-                  userSelect: 'none',
-                }}>
-                  <input
-                    type="checkbox"
-                    checked={livePreview}
-                    onChange={e2 => setLivePreview(e2.target.checked)}
-                    style={{ accentColor: 'var(--mcad-teal)', cursor: 'pointer', width: 14, height: 14 }}
-                  />
-                  Live preview
-                </label>
-                {!livePreview && (
-                  <button
-                    type="button"
-                    onClick={onPreview}
-                    disabled={isLoading || !e}
-                    style={{
-                      height: 26, padding: '0 10px', borderRadius: 8,
-                      background: 'var(--mcad-input)', border: '1px solid var(--mcad-teal)',
-                      color: 'var(--mcad-teal)', fontSize: 11, fontFamily: 'var(--font-sans)',
-                      cursor: (isLoading || !e) ? 'not-allowed' : 'pointer',
-                      display: 'flex', alignItems: 'center', gap: 4,
-                      opacity: (isLoading || !e) ? 0.45 : 1,
-                    }}
-                  >
-                    {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
-                    Preview
-                  </button>
-                )}
-              </div>
-
-              {/* Action buttons row: Cancel (flex 1) | Apply (flex 2) */}
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={isPreviewActive ? onCancelPreview : () => onSelectTool?.('select')}
-                  disabled={isLoading}
-                  style={{
-                    ...actionBtnBase,
-                    flex: 1,
-                    background: 'var(--mcad-input)',
-                    border: '1px solid var(--mcad-border-ctrl)',
-                    color: 'var(--mcad-text-secondary)',
-                  }}
-                >
-                  <X size={14} /> Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={onCommit}
-                  disabled={isLoading || !e}
-                  style={{
-                    ...actionBtnBase,
-                    flex: 2,
-                    background: 'var(--mcad-teal)',
-                    border: 'none',
-                    color: '#04201c',
-                    fontWeight: 600,
-                    opacity: (isLoading || !e) ? 0.45 : 1,
-                    cursor: (isLoading || !e) ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {isLoading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                  {applyLabel}
-                </button>
-              </div>
-
-              {/* Backend errors appear directly under this row in #f08a8a, 12px */}
-              {errorDiagnostic && (
-                <div style={{
-                  marginTop: 8, padding: '8px 10px', borderRadius: 8,
-                  background: 'rgba(240,138,138,0.08)', border: '1px solid rgba(240,138,138,0.3)',
-                  fontSize: 12, color: 'var(--mcad-danger)', fontFamily: 'var(--font-sans)',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, marginBottom: 2 }}>
-                    <AlertTriangle size={13} />
-                    {errorDiagnostic.code || 'Error'}
-                  </div>
-                  <p style={{ fontSize: 12, margin: 0, color: 'var(--mcad-danger)' }}>{errorDiagnostic.message}</p>
-                </div>
-              )}
-
-              {/* B-Rep Validation info */}
-              {validationReport?.is_valid && (
-                <div style={{
-                  marginTop: 8, padding: '6px 10px', borderRadius: 8,
-                  background: 'var(--mcad-teal-tint)', border: '1px solid rgba(45,212,191,0.3)',
-                  fontSize: 11, color: 'var(--mcad-teal)', display: 'flex', alignItems: 'center', gap: 6,
-                }}>
-                  <Activity size={12} />
-                  <span style={{ fontFamily: 'var(--font-mono)' }}>
-                    B-Rep Valid · {validationReport.volume_mm3?.toFixed(1)} mm³
-                  </span>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* ─── D. Other actions on this face/edge ─── */}
-          {e && otherOps.length > 0 && (
+          {/* ─── C. Other actions on this face/edge ─── */}
+          {e && applicableOps.length > 0 && (
             <>
               <Divider />
               <SectionLabel>
                 {isFace ? 'Other actions on this face' : isEdge ? 'Other actions on this edge' : 'Other actions'}
               </SectionLabel>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                {otherOps.slice(0, 4).map(op => {
-                  const Icon = op.icon;
+                {applicableOps.slice(0, 4).map((opId) => {
+                  const def = getOperationDefinition(opId);
+                  const Icon = def.icon;
                   return (
                     <button
-                      key={op.id}
+                      key={opId}
                       type="button"
-                      onClick={() => onSelectTool?.(op.id)}
+                      onClick={() => onSelectTool?.(opId)}
                       style={{
                         ...actionBtnBase,
-                        background: 'var(--mcad-input)', border: '1px solid var(--mcad-border-ctrl)',
-                        color: 'var(--mcad-text-secondary)', fontSize: 11,
+                        background: 'var(--mcad-input)',
+                        border: '1px solid var(--mcad-border-ctrl)',
+                        color: 'var(--mcad-text-secondary)',
+                        fontSize: 11,
                         padding: '0 8px',
                       }}
-                      title={`Switch to ${op.label}`}
+                      title={`Switch to ${def.label}`}
                     >
-                      <Icon size={13} /> {op.label}
+                      <Icon size={13} /> {def.label}
                     </button>
                   );
                 })}

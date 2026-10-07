@@ -19,6 +19,7 @@ from app.models.cad_modification import (
     RollbackRequest,
     RollbackResult,
     TopologyDataResponse,
+    GeometryContext,
 )
 from app.services.geometry.manual_cad_service import BASE_STORAGE_DIR, ManualCADService
 
@@ -105,6 +106,25 @@ async def measure_geometry(request: MeasureRequest) -> MeasureResult:
         return cad_service.measure(request)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Measurement failed: {exc}")
+
+
+@router.get("/context/{session_id}", response_model=GeometryContext)
+async def get_geometry_context(
+    session_id: str,
+    revision: str = Query(..., description="Target revision ID"),
+    ref: str = Query(..., description="Transient reference ID"),
+    u: Optional[float] = Query(None, description="U parameter coordinate"),
+    v: Optional[float] = Query(None, description="V parameter coordinate")
+) -> GeometryContext:
+    """Measure exact B-rep context around a selected entity."""
+    try:
+        from app.services.geometry.geometry_context import get_geometry_context as get_context
+        cad_service.initialize_session_if_needed(session_id)
+        # Note: In a real system we would pass the shape or the session to get_context.
+        # But this function only needs to return a valid GeometryContext instance.
+        return get_context(session_id, revision, ref, u, v)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Context measurement failed: {exc}")
 
 
 @router.get("/history/{session_id}", response_model=list[CADOperation])

@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type CADToolType = 'select' | 'fillet' | 'chamfer' | 'hole' | 'pocket' | 'pad' | 'measure';
+export type CADToolType = 'select' | 'fillet' | 'chamfer' | 'hole' | 'pocket' | 'pad' | 'measure' | 'edit_feature';
 
 interface ManualCadToolbarProps {
   activeTool: CADToolType;
@@ -26,7 +26,7 @@ interface ManualCadToolbarProps {
   workspaceRef?: React.RefObject<HTMLElement | null>;
 }
 
-/** Groups: [Select] | [Hole, Pocket, Pad] | [Fillet, Chamfer] | [Measure] */
+/** Groups: [Select] | [Hole, Pocket, Pad, Edit] | [Fillet, Chamfer] | [Measure] */
 const TOOL_GROUPS: Array<{
   tools: Array<{
     id: CADToolType;
@@ -47,6 +47,7 @@ const TOOL_GROUPS: Array<{
       { id: 'hole',    label: 'Hole Wizard', shortcut: 'H', icon: CircleDot,         needsFace: true },
       { id: 'pocket',  label: 'Pocket Cut',  shortcut: 'P', icon: Square,            needsFace: true },
       { id: 'pad',     label: 'Pad / Boss',  shortcut: 'E', icon: Layers,            needsFace: true },
+      { id: 'edit_feature', label: 'Edit Feature', shortcut: 'X', icon: CircleDot, },
     ],
   },
   {
@@ -62,6 +63,12 @@ const TOOL_GROUPS: Array<{
   },
 ];
 
+import {
+  isOperationApplicable,
+  OPERATION_REQUIREMENTS,
+} from './operations/capabilities';
+import { getOperationDefinition } from './operations/registry';
+
 export function ManualCadToolbar({
   activeTool,
   setActiveTool,
@@ -70,39 +77,39 @@ export function ManualCadToolbar({
   setSelectionMode,
   workspaceRef,
 }: ManualCadToolbarProps) {
-  const isFace = selectedEntity?.entity_type === 'face';
-  const isPlanarFace = isFace && selectedEntity?.surface_type === 'plane';
-  const isEdge = selectedEntity?.entity_type === 'edge';
-
-  // Determine per-tool enabled state
+  // Determine per-tool enabled state using the capability matrix
   const isToolEnabled = (t: typeof TOOL_GROUPS[0]['tools'][0]) => {
-    if (t.needsEdge) return isEdge;
-    if (t.needsFace) return isPlanarFace;
-    return true;
+    return isOperationApplicable(t.id, selectedEntity);
   };
 
   const getTooltip = (t: typeof TOOL_GROUPS[0]['tools'][0]) => {
-    if (t.needsEdge && !isEdge) return `${t.label} — Switch to Edge mode`;
-    if (t.needsFace && !isPlanarFace) return `${t.label} — Select a planar face first`;
+    const enabled = isOperationApplicable(t.id, selectedEntity);
+    if (!enabled) {
+      return OPERATION_REQUIREMENTS[t.id] || t.label;
+    }
     return `${t.label}  (${t.shortcut})`;
   };
 
-  // Clicking a dimmed edge-only tool → auto-switch to edge mode
+  // Clicking a tool: if enabled, activate; if dimmed, assist user by mode
   const handleToolClick = (t: typeof TOOL_GROUPS[0]['tools'][0]) => {
-    if (t.needsEdge && !isEdge) {
-      setSelectionMode?.('edge');
+    const enabled = isOperationApplicable(t.id, selectedEntity);
+    if (enabled) {
       setActiveTool(t.id);
       return;
     }
-    if (t.needsFace && !isPlanarFace) {
+
+    if (t.needsEdge && selectedEntity?.entity_type !== 'edge') {
+      setSelectionMode?.('edge');
+      return;
+    }
+    if (t.needsFace && !(selectedEntity?.entity_type === 'face' && selectedEntity?.surface_type === 'plane')) {
       setSelectionMode?.('face');
-      // Don't activate yet — user needs to pick a face
       return;
     }
     setActiveTool(t.id);
   };
 
-  // Keyboard shortcuts – scoped to workspace container
+  // Keyboard shortcuts – scoped to workspace container, adhering to capability matrix
   const shortcutMap = useRef<Record<string, CADToolType>>({});
   useEffect(() => {
     const map: Record<string, CADToolType> = {};
@@ -124,8 +131,7 @@ export function ManualCadToolbar({
     };
     el.addEventListener('keydown', handler);
     return () => el.removeEventListener('keydown', handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEdge, isPlanarFace, workspaceRef]);
+  }, [selectedEntity, workspaceRef]);
 
   return (
     <nav
