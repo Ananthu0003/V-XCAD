@@ -20,6 +20,9 @@ from OCP.GProp import GProp_GProps
 from OCP.Bnd import Bnd_Box
 from OCP.BRepBndLib import BRepBndLib
 from OCP.TopoDS import TopoDS
+from OCP.BRep import BRep_Tool
+from OCP.TopLoc import TopLoc_Location
+from OCP.BRepMesh import BRepMesh_IncrementalMesh
 
 from app.models.cad_modification import GeometricReference, OperationStatus
 
@@ -108,6 +111,47 @@ class ReferenceResolver:
         except Exception:
             pass
 
+        triangles: Optional[List[float]] = None
+        boundary_points: List[List[float]] = []
+
+        try:
+            loc = TopLoc_Location()
+            tri = BRep_Tool.Triangulation_s(occ_face, loc)
+            if tri is None or tri.NbTriangles() == 0:
+                BRepMesh_IncrementalMesh(occ_face, 0.5)
+                tri = BRep_Tool.Triangulation_s(occ_face, loc)
+
+            if tri is not None and tri.NbTriangles() > 0:
+                nb_tri = tri.NbTriangles()
+                nb_nodes = tri.NbNodes()
+                trsf = loc.Transformation()
+                nodes = []
+                for i in range(1, nb_nodes + 1):
+                    p = tri.Node(i)
+                    p_t = p.Transformed(trsf)
+                    nodes.append([round(float(p_t.X()), 4), round(float(p_t.Y()), 4), round(float(p_t.Z()), 4)])
+
+                tri_coords: List[float] = []
+                for i in range(1, nb_tri + 1):
+                    t = tri.Triangle(i)
+                    n1, n2, n3 = t.Get()
+                    p1 = nodes[n1 - 1]
+                    p2 = nodes[n2 - 1]
+                    p3 = nodes[n3 - 1]
+                    tri_coords.extend([p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2]])
+                triangles = tri_coords
+        except Exception:
+            triangles = None
+
+        try:
+            if hasattr(face, "wires"):
+                for wire in face.wires():
+                    for edge in wire.edges():
+                        for v in edge.vertices():
+                            boundary_points.append([round(float(v.X), 4), round(float(v.Y), 4), round(float(v.Z), 4)])
+        except Exception:
+            pass
+
         return GeometricReference(
             ref_id=ref_id or f"ref_{transient_id}",
             transient_id=transient_id,
@@ -120,7 +164,9 @@ class ReferenceResolver:
             bounding_box=bbox,
             area=area,
             radius=radius,
-            confidence=1.0
+            confidence=1.0,
+            triangles=triangles,
+            boundary_points=boundary_points
         )
 
     @staticmethod

@@ -1,24 +1,33 @@
 'use client';
 
-import React from 'react';
-import { 
-  Eye, 
-  Check, 
-  X, 
-  AlertTriangle, 
-  Info, 
-  Loader2, 
+import React, { useState, useEffect } from 'react';
+import {
+  Eye,
+  Check,
+  X,
+  AlertTriangle,
+  Loader2,
   Activity,
+  ChevronDown,
+  ChevronRight,
+  Search,
+  CircleDot,
+  Square,
   Layers,
-  Sparkles
+  CornerDownRight,
+  Scissors,
+  Ruler,
+  type LucideIcon,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { CADToolType } from './ManualCadToolbar';
-import { cn } from '@/lib/utils';
+import { SectionLabel, Divider, PropRow } from './shared';
+import { FilletForm } from './forms/FilletForm';
+import { ChamferForm } from './forms/ChamferForm';
+import { HoleForm } from './forms/HoleForm';
+import { PocketForm } from './forms/PocketForm';
+import { PadForm } from './forms/PadForm';
 
-interface TopologyPropertiesPanelProps {
+export interface TopologyPropertiesPanelProps {
   selectedEntity: any | null;
   activeTool: CADToolType;
   params: Record<string, any>;
@@ -30,7 +39,68 @@ interface TopologyPropertiesPanelProps {
   isLoading: boolean;
   validationReport: any | null;
   errorDiagnostic: any | null;
+  topology?: any | null;
+  onSelectTopologyEntity?: (entity: any) => void;
+  onSelectTool?: (tool: CADToolType) => void;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function humanFaceType(entity: any): string {
+  if (!entity) return '';
+  if (entity.entity_type === 'body') {
+    return '3D Solid Model (Sub-shape)';
+  }
+  if (entity.entity_type === 'edge') {
+    const t = entity.curve_type || 'edge';
+    return t.charAt(0).toUpperCase() + t.slice(1) + ' edge';
+  }
+  const st = entity.surface_type || '';
+  const map: Record<string, string> = {
+    plane: 'Planar face',
+    cylinder: 'Cylindrical face',
+    cone: 'Conical face',
+    sphere: 'Spherical face',
+    torus: 'Toroidal face',
+    bspline: 'B-spline face',
+  };
+  return map[st] || (st ? st.charAt(0).toUpperCase() + st.slice(1) + ' face' : 'Face');
+}
+
+function normalLabel(n: number[]): string {
+  if (!n) return '';
+  const labels = ['+X', '-X', '+Y', '-Y', '+Z', '-Z'];
+  const axes = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+  let best = 0, bestDot = -2;
+  axes.forEach(([ax, ay, az], i) => {
+    const dot = ax*n[0] + ay*n[1] + az*n[2];
+    if (dot > bestDot) { bestDot = dot; best = i; }
+  });
+  return bestDot > 0.9 ? labels[best] : `[${n.map(v => v.toFixed(2)).join(', ')}]`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Other actions catalog
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FACE_ACTIONS: Array<{ id: CADToolType; label: string; icon: LucideIcon }> = [
+  { id: 'hole', label: 'Hole', icon: CircleDot },
+  { id: 'pocket', label: 'Pocket', icon: Square },
+  { id: 'pad', label: 'Pad', icon: Layers },
+  { id: 'measure', label: 'Measure', icon: Ruler },
+];
+
+const EDGE_ACTIONS: Array<{ id: CADToolType; label: string; icon: LucideIcon }> = [
+  { id: 'fillet', label: 'Fillet', icon: CornerDownRight },
+  { id: 'chamfer', label: 'Chamfer', icon: Scissors },
+  { id: 'measure', label: 'Measure', icon: Ruler },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main panel
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function TopologyPropertiesPanel({
   selectedEntity,
@@ -43,655 +113,524 @@ export function TopologyPropertiesPanel({
   isPreviewActive,
   isLoading,
   validationReport,
-  errorDiagnostic
+  errorDiagnostic,
+  topology,
+  onSelectTopologyEntity,
+  onSelectTool,
 }: TopologyPropertiesPanelProps) {
+  const [activeTab, setActiveTab] = useState<'selection' | 'base'>('selection');
+  const [moreExpanded, setMoreExpanded] = useState(false);
+  const [topologyExpanded, setTopologyExpanded] = useState(false);
+  const [topoSearch, setTopoSearch] = useState('');
+  const [livePreview, setLivePreview] = useState(false);
 
   const handleParamChange = (key: string, val: any) => {
     setParams(prev => ({ ...prev, [key]: val }));
   };
 
-  return (
-    <div className="flex flex-col h-full bg-transparent p-4 space-y-5 overflow-y-auto text-sm">
-      {/* 1. Selected Geometry Details */}
-      <div className="space-y-2.5">
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground font-semibold">
-            Selected Topology
-          </span>
-          {selectedEntity && (
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-primary/10 text-primary font-bold">
-              {selectedEntity.transient_id}
-            </span>
-          )}
-        </div>
+  const e = selectedEntity;
+  const isBody = e?.entity_type === 'body';
+  const isFace = e?.entity_type === 'face';
+  const isEdge = e?.entity_type === 'edge';
+  const isPlanar = isFace && e?.surface_type === 'plane';
+  const isCylinder = isFace && e?.surface_type === 'cylinder';
+  const hasOp = activeTool !== 'select' && activeTool !== 'measure';
 
-        {selectedEntity ? (
-          <div className="p-3 bg-muted/40 rounded-xl border border-border/60 space-y-2 text-xs font-mono">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Type:</span>
-              <span className="font-semibold capitalize">{selectedEntity.entity_type} ({selectedEntity.surface_type || selectedEntity.curve_type || 'analytical'})</span>
-            </div>
-            {selectedEntity.area && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Area:</span>
-                <span>{selectedEntity.area.toFixed(1)} mm²</span>
-              </div>
-            )}
-            {selectedEntity.length && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Length:</span>
-                <span>{selectedEntity.length.toFixed(1)} mm</span>
-              </div>
-            )}
-            {selectedEntity.radius && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Radius:</span>
-                <span>R{selectedEntity.radius.toFixed(2)} mm</span>
-              </div>
-            )}
-            {selectedEntity.normal && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Normal:</span>
-                <span>[{selectedEntity.normal.map((n: number) => n.toFixed(1)).join(', ')}]</span>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Centroid:</span>
-              <span>[{selectedEntity.centroid.map((c: number) => c.toFixed(1)).join(', ')}]</span>
-            </div>
-          </div>
-        ) : (
-          <div className="p-4 rounded-xl border border-dashed border-border/60 text-center text-xs text-muted-foreground">
-            Click any face or edge in the 3D viewport to inspect and modify.
-          </div>
-        )}
+  // Debounced live preview when enabled
+  useEffect(() => {
+    if (!livePreview || !e || !hasOp || isLoading) return;
+    const timer = setTimeout(() => {
+      onPreview();
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [livePreview, params, e, activeTool]);
+
+  // Topology entities
+  const allFaces = topology ? Object.values(topology.faces || {}) as any[] : [];
+  const allEdges = topology ? Object.values(topology.edges || {}) as any[] : [];
+  const filteredFaces = topoSearch
+    ? allFaces.filter((f: any) => f.transient_id?.toLowerCase().includes(topoSearch.toLowerCase()) || f.surface_type?.toLowerCase().includes(topoSearch.toLowerCase()))
+    : allFaces;
+  const filteredEdges = topoSearch
+    ? allEdges.filter((ed: any) => ed.transient_id?.toLowerCase().includes(topoSearch.toLowerCase()) || ed.curve_type?.toLowerCase().includes(topoSearch.toLowerCase()))
+    : allEdges;
+
+  const applyLabel = activeTool === 'select' || activeTool === 'measure'
+    ? 'Apply'
+    : `Apply ${activeTool}`;
+
+  const normalStr = e?.normal ? normalLabel(e.normal) : null;
+
+  // Secondary actions grid: 2x2
+  const candidateActions = isFace ? FACE_ACTIONS : isEdge ? EDGE_ACTIONS : FACE_ACTIONS;
+  const otherOps = candidateActions.filter(a => a.id !== activeTool);
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', height: '100%',
+      background: 'var(--mcad-panel)', overflow: 'hidden',
+      fontFamily: 'var(--font-sans)',
+    }}>
+      {/* ─── Two Tabs ─── */}
+      <div style={{
+        display: 'flex', borderBottom: '1px solid var(--mcad-border)',
+        paddingLeft: 12, paddingRight: 12, paddingTop: 4, flexShrink: 0,
+      }}>
+        {(['selection', 'base'] as const).map(tab => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            style={{
+              padding: '8px 12px',
+              borderBottom: activeTab === tab ? '2px solid var(--mcad-teal)' : '2px solid transparent',
+              color: activeTab === tab ? 'var(--mcad-text-primary)' : 'var(--mcad-text-muted)',
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              fontSize: 12, fontFamily: 'var(--font-sans)',
+              fontWeight: activeTab === tab ? 600 : 400,
+              transition: 'color 0.15s, border-color 0.15s',
+            }}
+          >
+            {tab === 'selection' ? 'Selection' : 'Base parameters'}
+          </button>
+        ))}
       </div>
 
-      {/* 2. Active Operation Parameters */}
-      {activeTool !== 'select' && activeTool !== 'measure' && (
-        <div className="space-y-4 pt-2 border-t border-border/60">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-primary font-bold">
-              Operation: {activeTool.toUpperCase()}
-            </span>
+      {/* Tab: Base parameters */}
+      {activeTab === 'base' && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ textAlign: 'center', color: 'var(--mcad-text-muted)', fontSize: 13, fontFamily: 'var(--font-sans)' }}>
+            <p style={{ marginBottom: 4, fontWeight: 500, color: 'var(--mcad-text-secondary)' }}>Base parameters</p>
+            <p style={{ fontSize: 11, color: 'var(--mcad-text-muted)' }}>Coming soon</p>
           </div>
+        </div>
+      )}
 
-          {/* FILLET */}
-          {activeTool === 'fillet' && (
-            <div className="space-y-3">
-              <div className="flex justify-between text-xs">
-                <Label>Fillet Radius</Label>
-                <span className="font-mono text-primary font-bold">{(params.radius || 2.0).toFixed(1)} mm</span>
+      {/* Tab: Selection */}
+      {activeTab === 'selection' && (
+        <div style={{
+          flex: 1, overflowY: 'auto', padding: '12px 14px',
+          display: 'flex', flexDirection: 'column', gap: 0,
+        }}>
+
+          {/* ─── A. Header ─── */}
+          {e ? (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--mcad-text-primary)', fontFamily: 'var(--font-sans)' }}>
+                  {humanFaceType(e)}
+                </span>
+                <span style={{
+                  fontFamily: 'var(--font-mono)', fontSize: 11,
+                  padding: '2px 8px', borderRadius: 999,
+                  background: 'var(--mcad-teal-tint)', color: 'var(--mcad-teal)',
+                  border: '1px solid rgba(45,212,191,0.3)',
+                }}>
+                  {e.transient_id}
+                </span>
               </div>
-              <div className="flex gap-1.5">
-                {[1.0, 2.0, 3.0, 5.0, 8.0].map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => handleParamChange('radius', r)}
-                    className={cn(
-                      'px-2 py-0.5 text-[10px] font-mono rounded border transition-colors cursor-pointer',
-                      params.radius === r
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-muted/60 hover:bg-muted text-muted-foreground border-border/80'
+
+              {/* Three compact rows */}
+              <div style={{
+                background: 'var(--mcad-input)', border: '1px solid var(--mcad-border-ctrl)',
+                borderRadius: 8, padding: '6px 10px', marginBottom: 4,
+              }}>
+                {isBody && (
+                  <>
+                    <PropRow label="Volume" value={`${e.volume_mm3 != null ? e.volume_mm3.toFixed(1) : '—'} mm³`} />
+                    {(() => {
+                      const bbox = e.bounding_box;
+                      if (bbox?.min && bbox?.max) {
+                        const dx = bbox.max[0] - bbox.min[0];
+                        const dy = bbox.max[1] - bbox.min[1];
+                        const dz = bbox.max[2] - bbox.min[2];
+                        return (
+                          <PropRow
+                            label="Bounding Box"
+                            value={`${dx.toFixed(1)} × ${dy.toFixed(1)} × ${dz.toFixed(1)} mm`}
+                          />
+                        );
+                      }
+                      return null;
+                    })()}
+                    <PropRow label="Topology" value={`${e.face_count || 0} faces · ${e.edge_count || 0} edges`} />
+                    <PropRow label="Status" value={e.is_valid ? 'Valid B-Rep Solid' : 'Check Geometry'} />
+                  </>
+                )}
+
+                {isFace && (
+                  <>
+                    <PropRow label="Area" value={`${e.area != null ? e.area.toFixed(1) : '—'} mm²`} />
+                    <PropRow label="Normal" value={normalStr || '—'} />
+                    {isPlanar && (
+                      <PropRow
+                        label="Height"
+                        value={e.height != null ? `${e.height.toFixed(1)} mm` : e.centroid?.[2] != null ? `Z ${e.centroid[2].toFixed(1)} mm` : '—'}
+                      />
                     )}
-                  >
-                    R{r}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="range"
-                min="0.25"
-                max="15.0"
-                step="0.25"
-                value={params.radius || 2.0}
-                onChange={(e) => handleParamChange('radius', parseFloat(e.target.value))}
-                className="w-full accent-primary cursor-pointer"
-              />
-              <Input
-                type="number"
-                step="0.1"
-                min="0.1"
-                value={params.radius || 2.0}
-                onChange={(e) => handleParamChange('radius', parseFloat(e.target.value) || 0.5)}
-                className="h-8 font-mono text-xs"
-              />
-            </div>
-          )}
-
-          {/* CHAMFER */}
-          {activeTool === 'chamfer' && (
-            <div className="space-y-3">
-              <div className="flex justify-between text-xs">
-                <Label>Chamfer Distance</Label>
-                <span className="font-mono text-primary font-bold">{(params.distance || 1.0).toFixed(1)} mm</span>
-              </div>
-              <div className="flex gap-1.5">
-                {[0.5, 1.0, 1.5, 2.0, 3.0].map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => handleParamChange('distance', d)}
-                    className={cn(
-                      'px-2 py-0.5 text-[10px] font-mono rounded border transition-colors cursor-pointer',
-                      params.distance === d
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-muted/60 hover:bg-muted text-muted-foreground border-border/80'
+                    {isCylinder && (
+                      <PropRow label="Radius" value={`R${e.radius != null ? e.radius.toFixed(2) : '—'} mm`} />
                     )}
-                  >
-                    {d}mm
-                  </button>
-                ))}
-              </div>
-              <input
-                type="range"
-                min="0.25"
-                max="10.0"
-                step="0.25"
-                value={params.distance || 1.0}
-                onChange={(e) => handleParamChange('distance', parseFloat(e.target.value))}
-                className="w-full accent-primary cursor-pointer"
-              />
-              <Input
-                type="number"
-                step="0.1"
-                min="0.1"
-                value={params.distance || 1.0}
-                onChange={(e) => handleParamChange('distance', parseFloat(e.target.value) || 0.5)}
-                className="h-8 font-mono text-xs"
-              />
-            </div>
-          )}
-
-          {/* HOLE WIZARD */}
-          {activeTool === 'hole' && (
-            <div className="space-y-3.5 text-xs">
-              {/* Hole Type */}
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground">Hole Type</Label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {(['blind', 'through', 'counterbore', 'countersink'] as const).map((ht) => (
-                    <button
-                      key={ht}
-                      type="button"
-                      onClick={() => handleParamChange('hole_type', ht)}
-                      className={cn(
-                        'py-1 px-2 text-[11px] font-medium rounded-md border capitalize text-center transition-colors cursor-pointer',
-                        (params.hole_type || 'blind') === ht
-                          ? 'bg-primary text-primary-foreground border-primary font-bold shadow-sm'
-                          : 'bg-muted/40 hover:bg-muted text-foreground border-border/80'
-                      )}
-                    >
-                      {ht}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Standard Tap/Clearance Presets */}
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground">Standard Clearance Preset</Label>
-                <div className="flex flex-wrap gap-1">
-                  {[
-                    { label: 'M3', dia: 3.4, cbDia: 6.0, cbDepth: 3.5 },
-                    { label: 'M4', dia: 4.5, cbDia: 8.0, cbDepth: 4.5 },
-                    { label: 'M5', dia: 5.5, cbDia: 10.0, cbDepth: 5.5 },
-                    { label: 'M6', dia: 6.6, cbDia: 11.5, cbDepth: 6.5 },
-                    { label: 'M8', dia: 9.0, cbDia: 15.0, cbDepth: 8.5 },
-                    { label: '1/4"', dia: 6.7, cbDia: 11.0, cbDepth: 6.5 },
-                  ].map((p) => (
-                    <button
-                      key={p.label}
-                      type="button"
-                      onClick={() => {
-                        handleParamChange('diameter', p.dia);
-                        handleParamChange('cbore_diameter', p.cbDia);
-                        handleParamChange('cbore_depth', p.cbDepth);
-                        handleParamChange('csink_diameter', p.cbDia);
-                      }}
-                      className="px-2 py-0.5 text-[10px] font-mono rounded bg-muted hover:bg-muted/80 text-foreground border border-border/80 cursor-pointer"
-                    >
-                      {p.label} (⌀{p.dia})
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Diameter & Depth */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-[11px]">Diameter (⌀ mm)</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    value={params.diameter || 6.0}
-                    onChange={(e) => handleParamChange('diameter', parseFloat(e.target.value) || 1.0)}
-                    className="h-8 font-mono text-xs"
-                  />
-                </div>
-                {params.hole_type !== 'through' && (
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">Depth (mm)</Label>
-                    <Input
-                      type="number"
-                      step="0.5"
-                      min="0.5"
-                      value={params.depth || 10.0}
-                      onChange={(e) => handleParamChange('depth', parseFloat(e.target.value) || 1.0)}
-                      className="h-8 font-mono text-xs"
-                    />
-                  </div>
+                    {!isPlanar && !isCylinder && (
+                      <PropRow label="Type" value={e.surface_type || 'Custom'} />
+                    )}
+                  </>
                 )}
-              </div>
 
-              {/* Counterbore Parameters */}
-              {params.hole_type === 'counterbore' && (
-                <div className="grid grid-cols-2 gap-2 p-2 rounded-lg bg-muted/30 border border-border/60">
-                  <div className="space-y-1">
-                    <Label className="text-[10px] text-muted-foreground">C-Bore Dia (mm)</Label>
-                    <Input
-                      type="number"
-                      step="0.5"
-                      value={params.cbore_diameter || (params.diameter || 6.0) * 1.8}
-                      onChange={(e) => handleParamChange('cbore_diameter', parseFloat(e.target.value) || 1.0)}
-                      className="h-7 font-mono text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] text-muted-foreground">C-Bore Depth (mm)</Label>
-                    <Input
-                      type="number"
-                      step="0.5"
-                      value={params.cbore_depth || 4.0}
-                      onChange={(e) => handleParamChange('cbore_depth', parseFloat(e.target.value) || 1.0)}
-                      className="h-7 font-mono text-xs"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Countersink Parameters */}
-              {params.hole_type === 'countersink' && (
-                <div className="grid grid-cols-2 gap-2 p-2 rounded-lg bg-muted/30 border border-border/60">
-                  <div className="space-y-1">
-                    <Label className="text-[10px] text-muted-foreground">C-Sink Dia (mm)</Label>
-                    <Input
-                      type="number"
-                      step="0.5"
-                      value={params.csink_diameter || (params.diameter || 6.0) * 1.8}
-                      onChange={(e) => handleParamChange('csink_diameter', parseFloat(e.target.value) || 1.0)}
-                      className="h-7 font-mono text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] text-muted-foreground">Angle (°)</Label>
-                    <Input
-                      type="number"
-                      step="1"
-                      value={params.csink_angle || 90.0}
-                      onChange={(e) => handleParamChange('csink_angle', parseFloat(e.target.value) || 90.0)}
-                      className="h-7 font-mono text-xs"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* 2D Position Offsets */}
-              <div className="space-y-1.5 pt-1">
-                <Label className="text-[11px] text-muted-foreground">Face Offset Position (X / Y mm)</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    type="number"
-                    step="1.0"
-                    placeholder="X offset"
-                    value={params.pos_x ?? 0.0}
-                    onChange={(e) => handleParamChange('pos_x', parseFloat(e.target.value) || 0.0)}
-                    className="h-7 font-mono text-xs"
-                  />
-                  <Input
-                    type="number"
-                    step="1.0"
-                    placeholder="Y offset"
-                    value={params.pos_y ?? 0.0}
-                    onChange={(e) => handleParamChange('pos_y', parseFloat(e.target.value) || 0.0)}
-                    className="h-7 font-mono text-xs"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* POCKET */}
-          {activeTool === 'pocket' && (
-            <div className="space-y-3.5 text-xs">
-              {/* Profile Shape */}
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground">Pocket Shape</Label>
-                <div className="grid grid-cols-3 gap-1">
-                  {(['rectangle', 'circle', 'slot'] as const).map((ps) => (
-                    <button
-                      key={ps}
-                      type="button"
-                      onClick={() => handleParamChange('profile', ps)}
-                      className={cn(
-                        'py-1 px-1.5 text-[11px] font-medium rounded-md border capitalize text-center transition-colors cursor-pointer',
-                        (params.profile || 'rectangle') === ps
-                          ? 'bg-primary text-primary-foreground border-primary font-bold shadow-sm'
-                          : 'bg-muted/40 hover:bg-muted text-foreground border-border/80'
-                      )}
-                    >
-                      {ps}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Dimensions */}
-              {(params.profile || 'rectangle') === 'rectangle' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">Width (X mm)</Label>
-                    <Input
-                      type="number"
-                      step="1.0"
-                      value={params.width || 25.0}
-                      onChange={(e) => handleParamChange('width', parseFloat(e.target.value) || 1.0)}
-                      className="h-8 font-mono text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">Height (Y mm)</Label>
-                    <Input
-                      type="number"
-                      step="1.0"
-                      value={params.height || 18.0}
-                      onChange={(e) => handleParamChange('height', parseFloat(e.target.value) || 1.0)}
-                      className="h-8 font-mono text-xs"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {params.profile === 'circle' && (
-                <div className="space-y-1">
-                  <Label className="text-[11px]">Pocket Diameter (⌀ mm)</Label>
-                  <Input
-                    type="number"
-                    step="1.0"
-                    value={params.diameter || params.width || 25.0}
-                    onChange={(e) => handleParamChange('diameter', parseFloat(e.target.value) || 1.0)}
-                    className="h-8 font-mono text-xs"
-                  />
-                </div>
-              )}
-
-              {params.profile === 'slot' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">Slot Length (mm)</Label>
-                    <Input
-                      type="number"
-                      step="1.0"
-                      value={params.length || 35.0}
-                      onChange={(e) => handleParamChange('length', parseFloat(e.target.value) || 1.0)}
-                      className="h-8 font-mono text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">Slot Width (mm)</Label>
-                    <Input
-                      type="number"
-                      step="1.0"
-                      value={params.width || 12.0}
-                      onChange={(e) => handleParamChange('width', parseFloat(e.target.value) || 1.0)}
-                      className="h-8 font-mono text-xs"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Depth & Corner Radius */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-[11px]">Depth (mm)</Label>
-                  <Input
-                    type="number"
-                    step="0.5"
-                    value={params.depth || 6.0}
-                    onChange={(e) => handleParamChange('depth', parseFloat(e.target.value) || 1.0)}
-                    className="h-8 font-mono text-xs"
-                  />
-                </div>
-                {(params.profile || 'rectangle') === 'rectangle' && (
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">Corner Fillet (R mm)</Label>
-                    <Input
-                      type="number"
-                      step="0.5"
-                      min="0.0"
-                      value={params.corner_radius ?? 2.0}
-                      onChange={(e) => handleParamChange('corner_radius', parseFloat(e.target.value) || 0.0)}
-                      className="h-8 font-mono text-xs"
-                    />
-                  </div>
+                {isEdge && (
+                  <>
+                    <PropRow label="Length" value={`${e.length != null ? e.length.toFixed(1) : '—'} mm`} />
+                    <PropRow label="Type" value={e.curve_type ? e.curve_type.charAt(0).toUpperCase() + e.curve_type.slice(1) : 'Line'} />
+                    <PropRow label="Radius" value={e.radius != null ? `R${e.radius.toFixed(2)} mm` : '—'} />
+                  </>
                 )}
-              </div>
 
-              {/* Position and Rotation */}
-              <div className="grid grid-cols-3 gap-1.5 pt-1">
-                <div className="space-y-1">
-                  <Label className="text-[10px] text-muted-foreground">Pos X</Label>
-                  <Input
-                    type="number"
-                    step="1.0"
-                    value={params.pos_x ?? 0.0}
-                    onChange={(e) => handleParamChange('pos_x', parseFloat(e.target.value) || 0.0)}
-                    className="h-7 font-mono text-xs"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] text-muted-foreground">Pos Y</Label>
-                  <Input
-                    type="number"
-                    step="1.0"
-                    value={params.pos_y ?? 0.0}
-                    onChange={(e) => handleParamChange('pos_y', parseFloat(e.target.value) || 0.0)}
-                    className="h-7 font-mono text-xs"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] text-muted-foreground">Rot (°)</Label>
-                  <Input
-                    type="number"
-                    step="15"
-                    value={params.rotation_deg ?? 0.0}
-                    onChange={(e) => handleParamChange('rotation_deg', parseFloat(e.target.value) || 0.0)}
-                    className="h-7 font-mono text-xs"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* PAD (BOSS EXTRUSION) */}
-          {activeTool === 'pad' && (
-            <div className="space-y-3.5 text-xs">
-              {/* Profile Shape */}
-              <div className="space-y-1.5">
-                <Label className="text-[11px] text-muted-foreground">Pad Shape</Label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {(['rectangle', 'circle'] as const).map((ps) => (
-                    <button
-                      key={ps}
-                      type="button"
-                      onClick={() => handleParamChange('profile', ps)}
-                      className={cn(
-                        'py-1 px-2 text-[11px] font-medium rounded-md border capitalize text-center transition-colors cursor-pointer',
-                        (params.profile || 'rectangle') === ps
-                          ? 'bg-primary text-primary-foreground border-primary font-bold shadow-sm'
-                          : 'bg-muted/40 hover:bg-muted text-foreground border-border/80'
-                      )}
-                    >
-                      {ps}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {(params.profile || 'rectangle') === 'rectangle' ? (
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">Width (X mm)</Label>
-                    <Input
-                      type="number"
-                      step="1.0"
-                      value={params.width || 20.0}
-                      onChange={(e) => handleParamChange('width', parseFloat(e.target.value) || 1.0)}
-                      className="h-8 font-mono text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">Length (Y mm)</Label>
-                    <Input
-                      type="number"
-                      step="1.0"
-                      value={params.length || 20.0}
-                      onChange={(e) => handleParamChange('length', parseFloat(e.target.value) || 1.0)}
-                      className="h-8 font-mono text-xs"
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <Label className="text-[11px]">Diameter (⌀ mm)</Label>
-                  <Input
-                    type="number"
-                    step="1.0"
-                    value={params.diameter || params.width || 20.0}
-                    onChange={(e) => handleParamChange('diameter', parseFloat(e.target.value) || 1.0)}
-                    className="h-8 font-mono text-xs"
-                  />
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-[11px]">Boss Height (mm)</Label>
-                  <Input
-                    type="number"
-                    step="0.5"
-                    value={params.height || 6.0}
-                    onChange={(e) => handleParamChange('height', parseFloat(e.target.value) || 1.0)}
-                    className="h-8 font-mono text-xs"
-                  />
-                </div>
-                {(params.profile || 'rectangle') === 'rectangle' && (
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">Corner Fillet (R mm)</Label>
-                    <Input
-                      type="number"
-                      step="0.5"
-                      min="0.0"
-                      value={params.corner_radius ?? 1.5}
-                      onChange={(e) => handleParamChange('corner_radius', parseFloat(e.target.value) || 0.0)}
-                      className="h-8 font-mono text-xs"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Position and Rotation */}
-              <div className="grid grid-cols-3 gap-1.5 pt-1">
-                <div className="space-y-1">
-                  <Label className="text-[10px] text-muted-foreground">Pos X</Label>
-                  <Input
-                    type="number"
-                    step="1.0"
-                    value={params.pos_x ?? 0.0}
-                    onChange={(e) => handleParamChange('pos_x', parseFloat(e.target.value) || 0.0)}
-                    className="h-7 font-mono text-xs"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] text-muted-foreground">Pos Y</Label>
-                  <Input
-                    type="number"
-                    step="1.0"
-                    value={params.pos_y ?? 0.0}
-                    onChange={(e) => handleParamChange('pos_y', parseFloat(e.target.value) || 0.0)}
-                    className="h-7 font-mono text-xs"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] text-muted-foreground">Rot (°)</Label>
-                  <Input
-                    type="number"
-                    step="15"
-                    value={params.rotation_deg ?? 0.0}
-                    onChange={(e) => handleParamChange('rotation_deg', parseFloat(e.target.value) || 0.0)}
-                    className="h-7 font-mono text-xs"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Diagnostics / Error Output */}
-          {errorDiagnostic && (
-            <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/30 space-y-1.5 text-xs text-destructive">
-              <div className="flex items-center gap-1.5 font-bold">
-                <AlertTriangle className="size-4 shrink-0" />
-                <span>{errorDiagnostic.code || 'Operation Error'}</span>
-              </div>
-              <p className="font-mono text-[11px] leading-relaxed">{errorDiagnostic.message}</p>
-            </div>
-          )}
-
-          {validationReport?.is_valid && (
-            <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-xs font-mono text-primary flex items-center gap-2">
-              <Activity className="size-4 shrink-0" />
-              <span>B-Rep Valid (Volume: {validationReport.volume_mm3?.toFixed(1)} mm³)</span>
-            </div>
-          )}
-
-          {/* Action Buttons: Preview vs. Commit */}
-          <div className="space-y-2 pt-2">
-            {!isPreviewActive ? (
-              <Button
-                onClick={onPreview}
-                disabled={isLoading || !selectedEntity}
-                variant="outline"
-                className="w-full gap-2 border-primary/40 text-primary hover:bg-primary/10 cursor-pointer"
-              >
-                {isLoading ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-                <span>Generate Preview</span>
-              </Button>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  onClick={onCancelPreview}
-                  disabled={isLoading}
-                  variant="outline"
-                  className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 cursor-pointer"
+                {/* Collapsed "More" disclosure for centroid */}
+                <button
+                  type="button"
+                  onClick={() => setMoreExpanded(p => !p)}
+                  style={{
+                    marginTop: 4, display: 'flex', alignItems: 'center', gap: 4,
+                    fontSize: 11, color: 'var(--mcad-text-muted)', background: 'transparent',
+                    border: 'none', cursor: 'pointer', padding: 0,
+                    fontFamily: 'var(--font-sans)',
+                  }}
                 >
-                  <X className="size-4" />
-                  <span>Cancel</span>
-                </Button>
-                <Button
+                  {moreExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  More
+                </button>
+                {moreExpanded && e.centroid && (
+                  <PropRow label="Centroid" value={`[${e.centroid.map((c: number) => c.toFixed(1)).join(', ')}]`} />
+                )}
+              </div>
+            </>
+          ) : (
+            <div style={{
+              padding: '16px 12px', textAlign: 'center',
+              border: '1px dashed var(--mcad-border)', borderRadius: 8,
+              marginBottom: 4,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--mcad-text-secondary)', marginBottom: 2, fontFamily: 'var(--font-sans)' }}>
+                Nothing selected
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--mcad-text-muted)', fontFamily: 'var(--font-sans)' }}>
+                Click a face, edge, or 3D model.
+              </div>
+            </div>
+          )}
+
+          {/* ─── Body actions guidance ─── */}
+          {isBody && (
+            <>
+              <Divider />
+              <SectionLabel>3D MODEL SUB-SHAPE</SectionLabel>
+              <div style={{
+                background: 'var(--mcad-input)', border: '1px solid var(--mcad-border-ctrl)',
+                borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8,
+              }}>
+                <p style={{ fontSize: 11, color: 'var(--mcad-text-secondary)', margin: 0, lineHeight: 1.4 }}>
+                  Solid sub-shape selected. Switch to <strong style={{ color: 'var(--mcad-text-primary)' }}>Face</strong> selection on the left to add Holes, Pockets, or Pads, or <strong style={{ color: 'var(--mcad-text-primary)' }}>Edge</strong> for Fillets and Chamfers.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTool?.('select')}
+                    style={{
+                      ...actionBtnBase,
+                      height: 28,
+                      fontSize: 11,
+                      background: 'var(--mcad-panel)',
+                      border: '1px solid var(--mcad-teal)',
+                      color: 'var(--mcad-teal)',
+                    }}
+                  >
+                    Select Face
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTool?.('measure')}
+                    style={{
+                      ...actionBtnBase,
+                      height: 28,
+                      fontSize: 11,
+                      background: 'var(--mcad-panel)',
+                      border: '1px solid var(--mcad-border-ctrl)',
+                      color: 'var(--mcad-text-secondary)',
+                    }}
+                  >
+                    Measure
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ─── B. Active operation form ─── */}
+          {hasOp && (
+            <>
+              <Divider />
+              <SectionLabel>{activeTool.toUpperCase()}</SectionLabel>
+              {activeTool === 'fillet'  && <FilletForm  params={params} onChange={handleParamChange} />}
+              {activeTool === 'chamfer' && <ChamferForm params={params} onChange={handleParamChange} />}
+              {activeTool === 'hole'    && <HoleForm    params={params} onChange={handleParamChange} />}
+              {activeTool === 'pocket'  && <PocketForm  params={params} onChange={handleParamChange} />}
+              {activeTool === 'pad'     && <PadForm     params={params} onChange={handleParamChange} />}
+            </>
+          )}
+
+          {/* Measure tool info */}
+          {activeTool === 'measure' && (
+            <>
+              <Divider />
+              <SectionLabel>MEASURE</SectionLabel>
+              <p style={{ fontSize: 12, color: 'var(--mcad-text-muted)', fontFamily: 'var(--font-sans)', margin: 0 }}>
+                Select any face or edge to inspect dimensions in the panel.
+              </p>
+            </>
+          )}
+
+          {/* ─── C. Footer of the form ─── */}
+          {hasOp && (
+            <>
+              <Divider />
+              {/* Live preview checkbox row */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                  fontSize: 12, fontFamily: 'var(--font-sans)', color: 'var(--mcad-text-secondary)',
+                  userSelect: 'none',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={livePreview}
+                    onChange={e2 => setLivePreview(e2.target.checked)}
+                    style={{ accentColor: 'var(--mcad-teal)', cursor: 'pointer', width: 14, height: 14 }}
+                  />
+                  Live preview
+                </label>
+                {!livePreview && (
+                  <button
+                    type="button"
+                    onClick={onPreview}
+                    disabled={isLoading || !e}
+                    style={{
+                      height: 26, padding: '0 10px', borderRadius: 8,
+                      background: 'var(--mcad-input)', border: '1px solid var(--mcad-teal)',
+                      color: 'var(--mcad-teal)', fontSize: 11, fontFamily: 'var(--font-sans)',
+                      cursor: (isLoading || !e) ? 'not-allowed' : 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      opacity: (isLoading || !e) ? 0.45 : 1,
+                    }}
+                  >
+                    {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                    Preview
+                  </button>
+                )}
+              </div>
+
+              {/* Action buttons row: Cancel (flex 1) | Apply (flex 2) */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={isPreviewActive ? onCancelPreview : () => onSelectTool?.('select')}
+                  disabled={isLoading}
+                  style={{
+                    ...actionBtnBase,
+                    flex: 1,
+                    background: 'var(--mcad-input)',
+                    border: '1px solid var(--mcad-border-ctrl)',
+                    color: 'var(--mcad-text-secondary)',
+                  }}
+                >
+                  <X size={14} /> Cancel
+                </button>
+                <button
+                  type="button"
                   onClick={onCommit}
-                  disabled={isLoading}
-                  className="gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
+                  disabled={isLoading || !e}
+                  style={{
+                    ...actionBtnBase,
+                    flex: 2,
+                    background: 'var(--mcad-teal)',
+                    border: 'none',
+                    color: '#04201c',
+                    fontWeight: 600,
+                    opacity: (isLoading || !e) ? 0.45 : 1,
+                    cursor: (isLoading || !e) ? 'not-allowed' : 'pointer',
+                  }}
                 >
-                  {isLoading ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-                  <span>Apply / Commit</span>
-                </Button>
+                  {isLoading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  {applyLabel}
+                </button>
               </div>
-            )}
-          </div>
+
+              {/* Backend errors appear directly under this row in #f08a8a, 12px */}
+              {errorDiagnostic && (
+                <div style={{
+                  marginTop: 8, padding: '8px 10px', borderRadius: 8,
+                  background: 'rgba(240,138,138,0.08)', border: '1px solid rgba(240,138,138,0.3)',
+                  fontSize: 12, color: 'var(--mcad-danger)', fontFamily: 'var(--font-sans)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, marginBottom: 2 }}>
+                    <AlertTriangle size={13} />
+                    {errorDiagnostic.code || 'Error'}
+                  </div>
+                  <p style={{ fontSize: 12, margin: 0, color: 'var(--mcad-danger)' }}>{errorDiagnostic.message}</p>
+                </div>
+              )}
+
+              {/* B-Rep Validation info */}
+              {validationReport?.is_valid && (
+                <div style={{
+                  marginTop: 8, padding: '6px 10px', borderRadius: 8,
+                  background: 'var(--mcad-teal-tint)', border: '1px solid rgba(45,212,191,0.3)',
+                  fontSize: 11, color: 'var(--mcad-teal)', display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <Activity size={12} />
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>
+                    B-Rep Valid · {validationReport.volume_mm3?.toFixed(1)} mm³
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ─── D. Other actions on this face/edge ─── */}
+          {e && otherOps.length > 0 && (
+            <>
+              <Divider />
+              <SectionLabel>
+                {isFace ? 'Other actions on this face' : isEdge ? 'Other actions on this edge' : 'Other actions'}
+              </SectionLabel>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                {otherOps.slice(0, 4).map(op => {
+                  const Icon = op.icon;
+                  return (
+                    <button
+                      key={op.id}
+                      type="button"
+                      onClick={() => onSelectTool?.(op.id)}
+                      style={{
+                        ...actionBtnBase,
+                        background: 'var(--mcad-input)', border: '1px solid var(--mcad-border-ctrl)',
+                        color: 'var(--mcad-text-secondary)', fontSize: 11,
+                        padding: '0 8px',
+                      }}
+                      title={`Switch to ${op.label}`}
+                    >
+                      <Icon size={13} /> {op.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* ─── E. Topology (collapsed by default) ─── */}
+          {topology && (allFaces.length > 0 || allEdges.length > 0) && (
+            <>
+              <Divider />
+              <button
+                type="button"
+                onClick={() => setTopologyExpanded(p => !p)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  color: 'var(--mcad-text-secondary)', width: '100%', padding: '2px 0',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <SectionLabel>Topology</SectionLabel>
+                  <span style={{
+                    fontSize: 11, fontFamily: 'var(--font-sans)', color: 'var(--mcad-text-muted)',
+                    marginBottom: 6,
+                  }}>
+                    {allFaces.length} faces · {allEdges.length} edges
+                  </span>
+                </div>
+                <div style={{ marginBottom: 6, color: 'var(--mcad-text-muted)' }}>
+                  {topologyExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                </div>
+              </button>
+
+              {topologyExpanded && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                  <div style={{ position: 'relative' }}>
+                    <Search size={12} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--mcad-text-muted)', pointerEvents: 'none' }} />
+                    <input
+                      type="text"
+                      placeholder="Search faces, edges…"
+                      value={topoSearch}
+                      onChange={e2 => setTopoSearch(e2.target.value)}
+                      style={{
+                        width: '100%', height: 28, paddingLeft: 26, paddingRight: 8,
+                        background: 'var(--mcad-input)', border: '1px solid var(--mcad-border-ctrl)',
+                        borderRadius: 8, fontSize: 11, fontFamily: 'var(--font-sans)',
+                        color: 'var(--mcad-text-primary)', outline: 'none',
+                      }}
+                    />
+                  </div>
+                  <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {filteredFaces.map((f: any) => {
+                      const isSelected = selectedEntity?.transient_id === f.transient_id;
+                      return (
+                        <button
+                          key={f.transient_id}
+                          type="button"
+                          onClick={() => onSelectTopologyEntity?.(f)}
+                          style={{
+                            ...topoRowStyle,
+                            background: isSelected ? 'var(--mcad-teal-tint)' : 'transparent',
+                            color: isSelected ? 'var(--mcad-teal)' : 'var(--mcad-text-secondary)',
+                            border: `1px solid ${isSelected ? 'rgba(45,212,191,0.3)' : 'transparent'}`,
+                          }}
+                        >
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{f.transient_id}</span>
+                          <span style={{ fontSize: 11, fontFamily: 'var(--font-sans)', color: 'var(--mcad-text-muted)' }}>{f.surface_type}</span>
+                        </button>
+                      );
+                    })}
+                    {filteredEdges.map((ed: any) => {
+                      const isSelected = selectedEntity?.transient_id === ed.transient_id;
+                      return (
+                        <button
+                          key={ed.transient_id}
+                          type="button"
+                          onClick={() => onSelectTopologyEntity?.(ed)}
+                          style={{
+                            ...topoRowStyle,
+                            background: isSelected ? 'var(--mcad-teal-tint)' : 'transparent',
+                            color: isSelected ? 'var(--mcad-teal)' : 'var(--mcad-text-secondary)',
+                            border: `1px solid ${isSelected ? 'rgba(45,212,191,0.3)' : 'transparent'}`,
+                          }}
+                        >
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{ed.transient_id}</span>
+                          <span style={{ fontSize: 11, fontFamily: 'var(--font-sans)', color: 'var(--mcad-text-muted)' }}>{ed.curve_type}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Bottom spacing for comfortable scrolling */}
+          <div style={{ height: 12 }} />
         </div>
       )}
     </div>
   );
 }
+
+const actionBtnBase: React.CSSProperties = {
+  height: 34, borderRadius: 8, display: 'flex', alignItems: 'center',
+  justifyContent: 'center', gap: 6, fontSize: 12,
+  fontFamily: 'var(--font-sans)', cursor: 'pointer', transition: 'opacity 0.15s',
+};
+
+const topoRowStyle: React.CSSProperties = {
+  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+  padding: '4px 8px', borderRadius: 6, cursor: 'pointer',
+  transition: 'background 0.12s', textAlign: 'left', width: '100%',
+};

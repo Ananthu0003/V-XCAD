@@ -1,6 +1,6 @@
 import { Toaster } from '@/components/ui/sonner';
 import type { Metadata } from 'next';
-import { IBM_Plex_Mono } from 'next/font/google';
+import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from '@/components/shared/theme-provider';
 import { ThemeToggle } from '@/components/shared/theme-toggle';
@@ -8,6 +8,12 @@ import { ThemeToggle } from '@/components/shared/theme-toggle';
 const ibmPlexMono = IBM_Plex_Mono({
 	weight: ['400', '500', '600', '700'],
 	variable: '--font-ibm-plex-mono',
+	subsets: ['latin'],
+});
+
+const ibmPlexSans = IBM_Plex_Sans({
+	weight: ['300', '400', '500', '600', '700'],
+	variable: '--font-ibm-plex-sans',
 	subsets: ['latin'],
 });
 
@@ -28,7 +34,7 @@ export default function RootLayout({
 	children: React.ReactNode;
 }>) {
 	return (
-		<html lang="en" className={`${ibmPlexMono.variable} h-full antialiased`} suppressHydrationWarning>
+		<html lang="en" className={`${ibmPlexMono.variable} ${ibmPlexSans.variable} h-full antialiased`} suppressHydrationWarning>
 			<body className={`${ibmPlexMono.className} min-h-full flex flex-col`}>
 				<ThemeProvider
 					attribute="class"

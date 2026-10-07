@@ -1,15 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { ManualCadToolbar, CADToolType } from './ManualCadToolbar';
 import { TopologyPropertiesPanel } from './TopologyPropertiesPanel';
 import { HistoryTimelineBar, HistoryOperation } from './HistoryTimelineBar';
 import { CadViewport } from '@/components/viewport/CadViewport';
-import { SubShapeRaycaster } from './SubShapeRaycaster';
+import { SubShapeRaycaster, findFaceFromHit } from './SubShapeRaycaster';
 import { StlMesh } from '@/components/viewport/StlMesh';
-import { Loader2, ArrowRight } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-react';
 
 interface ManualCadWorkspaceProps {
   sessionId: string;
@@ -18,6 +17,131 @@ interface ManualCadWorkspaceProps {
   onProceedToCam?: () => void;
   onSwitchStage?: (stage: 'cad' | 'manual_cad' | 'cam') => void;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Filter segmented control
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Filter segmented control
+// ─────────────────────────────────────────────────────────────────────────────
+function FilterControl({
+  selectionMode,
+  setSelectionMode,
+}: {
+  selectionMode: 'body' | 'face' | 'edge';
+  setSelectionMode: (m: 'body' | 'face' | 'edge') => void;
+}) {
+  const segments: Array<{ value: 'body' | 'face' | 'edge'; label: string }> = [
+    { value: 'body', label: '3D Model' },
+    { value: 'face', label: 'Face' },
+    { value: 'edge', label: 'Edge' },
+  ];
+
+  return (
+    <div style={{
+      display: 'flex', borderRadius: 8, overflow: 'hidden',
+      border: '1px solid var(--mcad-border-ctrl)',
+      background: 'var(--mcad-input)',
+      height: 30,
+    }}>
+      {segments.map((s, i) => {
+        const isCurrent = selectionMode === s.value;
+        return (
+          <button
+            key={s.value}
+            type="button"
+            title={`Select ${s.label}`}
+            onClick={() => setSelectionMode(s.value)}
+            style={{
+              padding: '0 10px',
+              borderRight: i < segments.length - 1 ? '1px solid var(--mcad-border-ctrl)' : 'none',
+              background: isCurrent ? 'var(--mcad-segment-active)' : 'transparent',
+              color: isCurrent
+                ? '#fff'
+                : 'var(--mcad-text-secondary)',
+              border: 'none',
+              fontSize: 11,
+              fontFamily: 'var(--font-sans)',
+              cursor: 'pointer',
+              fontWeight: isCurrent ? 600 : 400,
+              transition: 'background 0.15s, color 0.15s',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {s.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Status overlay (bottom-left of viewport)
+// ─────────────────────────────────────────────────────────────────────────────
+function ViewportStatus({
+  selectedEntity,
+  isLoading,
+}: {
+  selectedEntity: any | null;
+  isLoading: boolean;
+}) {
+  let text = 'Nothing selected: click a face or 3D model, or press V';
+
+  if (isLoading) {
+    text = 'Computing geometry…';
+  } else if (selectedEntity) {
+    const e = selectedEntity;
+    const parts: string[] = [];
+    parts.push(e.transient_id);
+    if (e.entity_type === 'body') {
+      parts.push('3D Solid Model');
+      if (e.volume_mm3 != null) parts.push(`${e.volume_mm3.toFixed(1)} mm³`);
+      const bbox = e.bounding_box;
+      if (bbox?.min && bbox?.max) {
+        parts.push(`${(bbox.max[0] - bbox.min[0]).toFixed(1)}×${(bbox.max[1] - bbox.min[1]).toFixed(1)}×${(bbox.max[2] - bbox.min[2]).toFixed(1)} mm`);
+      }
+    } else {
+      if (e.surface_type) parts.push(e.surface_type);
+      if (e.curve_type) parts.push(e.curve_type);
+      if (e.area != null) parts.push(`${e.area.toFixed(1)} mm²`);
+      if (e.length != null) parts.push(`${e.length.toFixed(1)} mm`);
+      if (e.normal) {
+        const n = e.normal as number[];
+        const labels = ['+X','-X','+Y','-Y','+Z','-Z'];
+        const axes = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+        let best = 0, bestDot = -2;
+        axes.forEach(([ax,ay,az],i)=>{
+          const dot = ax*n[0]+ay*n[1]+az*n[2];
+          if(dot>bestDot){bestDot=dot;best=i;}
+        });
+        if(bestDot > 0.9) parts.push(`normal ${labels[best]}`);
+      }
+    }
+    text = parts.join(' · ');
+  }
+
+  return (
+    <div
+      style={{
+        position: 'absolute', bottom: 12, left: 12, zIndex: 15,
+        fontSize: 11, fontFamily: 'var(--font-mono)',
+        color: 'var(--mcad-text-muted)',
+        pointerEvents: 'none', userSelect: 'none',
+        maxWidth: 420, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      }}
+    >
+      {isLoading && (
+        <Loader2 size={11} className="inline mr-1 animate-spin" style={{ color: 'var(--mcad-teal)', verticalAlign: 'middle' }} />
+      )}
+      {text}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workspace
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function ManualCadWorkspace({
   sessionId,
@@ -28,14 +152,63 @@ export function ManualCadWorkspace({
 }: ManualCadWorkspaceProps) {
   const [activeRevision, setActiveRevision] = useState<string>('rev_000');
   const [activeTool, setActiveTool] = useState<CADToolType>('select');
+  const [selectionMode, setSelectionMode] = useState<'body' | 'face' | 'edge'>('face');
   const [selectedEntity, setSelectedEntity] = useState<any | null>(null);
-  const [params, setParams] = useState<Record<string, any>>({ radius: 2.0, distance: 1.0, diameter: 6.0, depth: 10.0, width: 20.0, height: 15.0 });
+  const [params, setParams] = useState<Record<string, any>>({
+    radius: 2.0, distance: 1.0, diameter: 6.0, depth: 10.0, width: 20.0, height: 15.0
+  });
   const [topology, setTopology] = useState<any | null>(null);
   const [history, setHistory] = useState<HistoryOperation[]>([]);
   const [previewResult, setPreviewResult] = useState<any | null>(null);
   const [isPreviewActive, setIsPreviewActive] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [stlUrl, setStlUrl] = useState<string | null>(initialStlUrl || null);
+
+  // Scoped workspace ref for keyboard shortcuts
+  const workspaceRef = useRef<HTMLDivElement>(null);
+
+  // Helper to build 3D Model / Sub-shape entity
+  const createBodyEntity = useCallback((topo: any, rev: string) => {
+    if (!topo) return null;
+    return {
+      entity_type: 'body',
+      transient_id: `solid_${rev}`,
+      name: '3D Solid Model',
+      volume_mm3: topo.volume_mm3 ?? 0,
+      bounding_box: topo.bounding_box ?? {},
+      face_count: Object.keys(topo.faces || {}).length,
+      edge_count: Object.keys(topo.edges || {}).length,
+      is_valid: topo.is_valid ?? true,
+      revision: rev,
+      centroid: [
+        ((topo.bounding_box?.min?.[0] ?? 0) + (topo.bounding_box?.max?.[0] ?? 0)) / 2,
+        ((topo.bounding_box?.min?.[1] ?? 0) + (topo.bounding_box?.max?.[1] ?? 0)) / 2,
+        ((topo.bounding_box?.min?.[2] ?? 0) + (topo.bounding_box?.max?.[2] ?? 0)) / 2,
+      ],
+    };
+  }, []);
+
+  const handleSetSelectionMode = (mode: 'body' | 'face' | 'edge') => {
+    setSelectionMode(mode);
+    if (mode === 'body') {
+      if (topology) {
+        setSelectedEntity(createBodyEntity(topology, activeRevision));
+      }
+    } else if (mode === 'face' && selectedEntity?.entity_type === 'body') {
+      setSelectedEntity(null);
+    } else if (mode === 'edge' && selectedEntity?.entity_type === 'body') {
+      setSelectedEntity(null);
+    }
+  };
+
+  const handleSetActiveTool = (tool: CADToolType) => {
+    setActiveTool(tool);
+    if (tool === 'fillet' || tool === 'chamfer') {
+      setSelectionMode('edge');
+    } else if (tool === 'hole' || tool === 'pocket' || tool === 'pad' || tool === 'select') {
+      setSelectionMode('face');
+    }
+  };
 
   // 1. Fetch Topology for active revision
   const fetchTopology = useCallback(async (revId: string) => {
@@ -73,15 +246,32 @@ export function ManualCadWorkspace({
     }
   }, [sessionId, activeRevision, fetchTopology, fetchHistory]);
 
-  // Handle entity selection (simulate or pick from face/edge map)
+  // Handle entity selection
   const handleSelectTopologyEntity = (entity: any) => {
     setSelectedEntity(entity);
     setIsPreviewActive(false);
     setPreviewResult(null);
     if (entity.entity_type === 'edge') {
+      setSelectionMode('edge');
       setActiveTool('fillet');
-    } else if (entity.entity_type === 'face' && entity.surface_type === 'plane') {
-      setActiveTool('hole');
+    } else if (entity.entity_type === 'face') {
+      setSelectionMode('face');
+      if (entity.surface_type === 'plane') {
+        setActiveTool('hole');
+      }
+    }
+  };
+
+  // Direct click on 3D solid model surface
+  const handleDirectMeshClick = (point: [number, number, number], normal?: [number, number, number]) => {
+    if (!topology) return;
+    if (selectionMode === 'body') {
+      setSelectedEntity(createBodyEntity(topology, activeRevision));
+    } else if (selectionMode === 'face' && topology.faces) {
+      const face = findFaceFromHit(point, normal, topology.faces);
+      if (face) {
+        handleSelectTopologyEntity(face);
+      }
     }
   };
 
@@ -259,161 +449,191 @@ export function ManualCadWorkspace({
     }
   };
 
+  // Preview pill label for timeline
+  const previewPillLabel = isPreviewActive && activeTool !== 'select'
+    ? activeTool.charAt(0).toUpperCase() + activeTool.slice(1)
+    : undefined;
+
   return (
-    <div className="flex h-full w-full relative bg-background text-foreground select-none overflow-hidden">
-      {/* Center + Left Viewport Column */}
-      <div className="flex-1 flex flex-col h-full relative overflow-hidden">
-        {/* Top Viewport Header */}
-        <div className="h-14 px-4 flex items-center justify-between border-b border-border/50 bg-background/50 dark:bg-background/20 backdrop-blur-md z-10 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 font-mono text-xs">
-              <span className="text-muted-foreground font-semibold">STAGE:</span>
-              <span className="font-bold text-primary px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20">
-                MANUAL CAD REFINEMENT
-              </span>
-            </div>
+    <div
+      ref={workspaceRef}
+      className="mcad-workspace"
+      style={{
+        display: 'flex', flexDirection: 'column',
+        width: '100%', height: '100%',
+        background: 'var(--mcad-bg)',
+        overflow: 'hidden',
+        fontFamily: 'var(--font-sans)',
+      }}
+      // Prevent shortcuts from triggering while workspace is not focused
+      tabIndex={-1}
+    >
+      {/* ─── Main row: toolbar | viewport | inspector ─── */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+
+        {/* Left toolbar rail */}
+        <ManualCadToolbar
+          activeTool={activeTool}
+          setActiveTool={handleSetActiveTool}
+          selectedEntity={selectedEntity}
+          selectionMode={selectionMode}
+          setSelectionMode={handleSetSelectionMode}
+          workspaceRef={workspaceRef}
+        />
+
+        {/* ─── Viewport column ─── */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
+
+          {/* Viewport header bar */}
+          <div style={{
+            height: 44,
+            background: 'var(--mcad-panel)',
+            borderBottom: '1px solid var(--mcad-border)',
+            display: 'flex', alignItems: 'center',
+            paddingLeft: 12, paddingRight: 12, gap: 10,
+            flexShrink: 0, zIndex: 10,
+          }}>
+            {/* Filter segmented control */}
+            <FilterControl selectionMode={selectionMode} setSelectionMode={handleSetSelectionMode} />
+
+            <div style={{ flex: 1 }} />
+
+            {/* Hint text */}
+            <span style={{ fontSize: 11, color: 'var(--mcad-text-muted)', fontFamily: 'var(--font-sans)' }}>
+              Shift: multi-select
+            </span>
+
+            {/* Fit hint button */}
+            <button
+              type="button"
+              style={{
+                height: 26, padding: '0 10px', borderRadius: 8,
+                background: 'var(--mcad-input)', border: '1px solid var(--mcad-border-ctrl)',
+                color: 'var(--mcad-text-secondary)', fontSize: 11,
+                fontFamily: 'var(--font-sans)', cursor: 'pointer',
+              }}
+              onClick={() => {/* CadViewport exposes no direct fit API; this is a hint */}}
+              title="Fit model to view (F key in viewport)"
+            >
+              Fit
+            </button>
+          </div>
+
+          {/* 3D viewport */}
+          <div style={{ flex: 1, position: 'relative', background: 'var(--mcad-viewport)', minHeight: 0 }}>
+            {/* Dot-grid background */}
+            <div
+              aria-hidden
+              style={{
+                position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
+                backgroundImage: 'radial-gradient(circle, #1b212a 1px, transparent 1px)',
+                backgroundSize: '24px 24px',
+              }}
+            />
+
+            <CadViewport
+              stlUrl={stlUrl}
+              statusText={isLoading ? 'Computing geometry...' : 'Ready'}
+              isRecompiling={isLoading}
+              hasStl={!!stlUrl}
+              hasStep={true}
+              hasDxf={false}
+              hasGcode={false}
+              isDownloadingStl={false}
+              isDownloadingStep={false}
+              isDownloadingDxf={false}
+              onDownloadStl={() => {}}
+              onDownloadStep={() => {}}
+              onDownloadDxf={() => {}}
+              workflowStage="manual_cad"
+            >
+              {stlUrl && <StlMesh url={stlUrl} onDirectClick={handleDirectMeshClick} />}
+              <SubShapeRaycaster
+                topology={topology}
+                selectedEntity={selectedEntity}
+                onSelectEntity={handleSelectTopologyEntity}
+                selectionMode={selectionMode}
+              />
+            </CadViewport>
+
+            {/* Bottom-left status line */}
+            <ViewportStatus selectedEntity={selectedEntity} isLoading={isLoading} />
           </div>
         </div>
 
-        {/* 3D Viewport Center */}
-        <div className="flex-1 h-full w-full relative">
-          {/* Left Floating Toolbar */}
-          <div className="absolute left-4 top-4 z-20 w-52">
-            <ManualCadToolbar
+        {/* ─── Right inspector panel ─── */}
+        <div style={{
+          width: 320, minWidth: 280, maxWidth: 360,
+          display: 'flex', flexDirection: 'column',
+          background: 'var(--mcad-panel)',
+          borderLeft: '1px solid var(--mcad-border)',
+          flexShrink: 0, height: '100%', overflow: 'hidden',
+        }}>
+          {/* Stage switcher header — kept identical to other stages */}
+          <div style={{
+            height: 56, display: 'flex', alignItems: 'center',
+            justifyContent: 'center', paddingLeft: 12, paddingRight: 12,
+            borderBottom: '1px solid var(--mcad-border)',
+            flexShrink: 0,
+          }}>
+            {onSwitchStage && (
+              <div className="flex bg-black/5 dark:bg-black/40 p-1 rounded-lg border border-black/5 dark:border-white/5 w-full max-w-[360px] gap-1">
+                <button
+                  onClick={() => onSwitchStage('cad')}
+                  className="flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 whitespace-nowrap text-center cursor-pointer"
+                >
+                  📐 AI CAD
+                </button>
+                <button
+                  className="flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md bg-purple-100/50 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(168,85,247,0.15)] transition-all duration-200 whitespace-nowrap text-center cursor-default"
+                >
+                  🛠️ Manual CAD
+                </button>
+                <button
+                  onClick={() => onSwitchStage('cam')}
+                  className="flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 whitespace-nowrap text-center cursor-pointer"
+                >
+                  ⚙️ CAM Setup
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Properties panel — scrolls internally if needed */}
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <TopologyPropertiesPanel
+              selectedEntity={selectedEntity}
               activeTool={activeTool}
-              setActiveTool={setActiveTool}
-              selectedEntity={selectedEntity}
+              params={params}
+              setParams={setParams}
+              onPreview={handlePreview}
+              onCancelPreview={handleCancelPreview}
+              onCommit={handleCommit}
+              isPreviewActive={isPreviewActive}
+              isLoading={isLoading}
+              validationReport={previewResult?.validation || null}
+              errorDiagnostic={previewResult?.error_diagnostic || null}
+              topology={topology}
+              onSelectTopologyEntity={handleSelectTopologyEntity}
+              onSelectTool={handleSetActiveTool}
             />
           </div>
-
-          <CadViewport
-            stlUrl={stlUrl}
-            statusText={isLoading ? 'Computing geometry...' : 'Ready'}
-            isRecompiling={isLoading}
-            hasStl={!!stlUrl}
-            hasStep={true}
-            hasDxf={false}
-            hasGcode={false}
-            isDownloadingStl={false}
-            isDownloadingStep={false}
-            isDownloadingDxf={false}
-            onDownloadStl={() => {}}
-            onDownloadStep={() => {}}
-            onDownloadDxf={() => {}}
-            workflowStage="manual_cad"
-          >
-            {stlUrl && <StlMesh url={stlUrl} />}
-            <SubShapeRaycaster
-              topology={topology}
-              selectedEntity={selectedEntity}
-              onSelectEntity={handleSelectTopologyEntity}
-            />
-          </CadViewport>
-
-          {/* Quick Sub-shape Selection List Overlay */}
-          {topology && topology.faces && Object.keys(topology.faces).length > 0 && (
-            <div className="absolute left-4 bottom-4 z-30 flex items-center gap-2 bg-[#09090b]/90 px-3.5 py-2 rounded-xl border border-white/10 backdrop-blur-xl shadow-2xl max-w-xl overflow-x-auto custom-scrollbar">
-              <div className="flex items-center gap-1.5 shrink-0 pr-1 border-r border-white/10">
-                <span className="text-[10px] font-mono text-muted-foreground font-bold uppercase tracking-wider">Topology</span>
-                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-400">
-                  {Object.keys(topology.faces).length}F
-                </span>
-                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400">
-                  {Object.keys(topology.edges || {}).length}E
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth py-0.5">
-                {Object.keys(topology.faces).map((fKey) => (
-                  <button
-                    key={fKey}
-                    onClick={() => handleSelectTopologyEntity(topology.faces[fKey])}
-                    className={`text-[10px] font-mono px-2.5 py-1 rounded-md transition-all cursor-pointer shrink-0 ${
-                      selectedEntity?.transient_id === fKey
-                        ? 'bg-blue-600 text-white font-bold shadow-md shadow-blue-600/30 ring-1 ring-blue-400'
-                        : 'bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-foreground border border-white/5'
-                    }`}
-                  >
-                    {fKey}
-                  </button>
-                ))}
-                {Object.keys(topology.edges || {}).map((eKey) => (
-                  <button
-                    key={eKey}
-                    onClick={() => handleSelectTopologyEntity(topology.edges[eKey])}
-                    className={`text-[10px] font-mono px-2.5 py-1 rounded-md transition-all cursor-pointer shrink-0 ${
-                      selectedEntity?.transient_id === eKey
-                        ? 'bg-amber-500 text-white font-bold shadow-md shadow-amber-500/30 ring-1 ring-amber-300'
-                        : 'bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-foreground border border-white/5'
-                    }`}
-                  >
-                    {eKey}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Bottom Timeline Bar */}
-        <div className="shrink-0 z-10 border-t border-border/50">
-          <HistoryTimelineBar
-            history={history}
-            activeRevision={activeRevision}
-            onRollback={handleRollback}
-            onUndo={handleUndo}
-            onRedo={handleRedo}
-            onDeleteOperation={handleDeleteOperation}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            isRecomputing={isLoading}
-          />
         </div>
       </div>
 
-      {/* Right Properties Panel with Stable Stage Switcher Header */}
-      <div className="w-[30%] min-w-[320px] max-w-[420px] h-full shrink-0 z-20 flex flex-col border-l border-border/50 bg-card/40 backdrop-blur-md">
-        {/* Segmented Control Header - 100% Identical to AI CAD & CAM SETUP */}
-        <div className="flex h-14 shrink-0 items-center justify-center px-4 border-b border-border/50 bg-background/50 dark:bg-background/20 backdrop-blur-md">
-          {onSwitchStage && (
-            <div className="flex bg-black/5 dark:bg-black/40 p-1 rounded-lg border border-black/5 dark:border-white/5 w-full max-w-[360px] gap-1">
-              <button
-                onClick={() => onSwitchStage('cad')}
-                className="flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 whitespace-nowrap text-center cursor-pointer"
-              >
-                📐 AI CAD
-              </button>
-              <button
-                className="flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md bg-purple-100/50 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(168,85,247,0.15)] transition-all duration-200 whitespace-nowrap text-center cursor-default"
-              >
-                🛠️ Manual CAD
-              </button>
-              <button
-                onClick={() => onSwitchStage('cam')}
-                className="flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 whitespace-nowrap text-center cursor-pointer"
-              >
-                ⚙️ CAM Setup
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Scrollable Topology Properties */}
-        <div className="flex-1 overflow-y-auto">
-          <TopologyPropertiesPanel
-            selectedEntity={selectedEntity}
-            activeTool={activeTool}
-            params={params}
-            setParams={setParams}
-            onPreview={handlePreview}
-            onCancelPreview={handleCancelPreview}
-            onCommit={handleCommit}
-            isPreviewActive={isPreviewActive}
-            isLoading={isLoading}
-            validationReport={previewResult?.validation || null}
-            errorDiagnostic={previewResult?.error_diagnostic || null}
-          />
-        </div>
-      </div>
+      {/* ─── Bottom: History timeline ─── */}
+      <HistoryTimelineBar
+        history={history}
+        activeRevision={activeRevision}
+        onRollback={handleRollback}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onDeleteOperation={handleDeleteOperation}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        isRecomputing={isLoading}
+        previewLabel={previewPillLabel}
+      />
     </div>
   );
 }

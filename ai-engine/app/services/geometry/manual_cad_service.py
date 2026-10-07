@@ -270,7 +270,10 @@ class ManualCADService:
         if topo_path.exists():
             try:
                 data_dict = json.loads(topo_path.read_text())
-                return TopologyDataResponse(**data_dict)
+                faces_dict = data_dict.get("faces", {})
+                first_face = next(iter(faces_dict.values()), None)
+                if first_face and first_face.get("triangles"):
+                    return TopologyDataResponse(**data_dict)
             except Exception:
                 pass
         shape = self.load_revision_shape(session_id, revision_id)

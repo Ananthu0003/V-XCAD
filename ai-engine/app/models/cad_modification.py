@@ -46,6 +46,14 @@ class GeometricReference(BaseModel):
     adjacent_edge_ids: List[str] = Field(default_factory=list)
     adjacent_face_ids: List[str] = Field(default_factory=list)
     confidence: float = Field(1.0, description="Match confidence score between 0.0 and 1.0")
+    triangles: Optional[List[float]] = Field(
+        None, 
+        description="Flattened 3D triangle coordinates [x1, y1, z1, x2, y2, z2, x3, y3, z3, ...] for viewport face surface rendering & picking"
+    )
+    boundary_points: Optional[List[List[float]]] = Field(
+        default_factory=list,
+        description="Sampled points along boundary wires of the face"
+    )
 
 
 class ValidationReport(BaseModel):
