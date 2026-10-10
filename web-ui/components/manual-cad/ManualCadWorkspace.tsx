@@ -578,8 +578,21 @@ export function ManualCadWorkspace({
               isDownloadingStl={false}
               isDownloadingStep={false}
               isDownloadingDxf={false}
-              onDownloadStl={() => {}}
-              onDownloadStep={() => {}}
+              onDownloadStl={() => {
+                if (stlUrl) {
+                  const a = document.createElement('a');
+                  a.href = stlUrl;
+                  a.download = `cad_${sessionId}.stl`;
+                  a.click();
+                }
+              }}
+              onDownloadStep={() => {
+                const target = initialStepUrl || `/api/outputs/cad_${sessionId}.step`;
+                const a = document.createElement('a');
+                a.href = target;
+                a.download = `cad_${sessionId}.step`;
+                a.click();
+              }}
               onDownloadDxf={() => {}}
               workflowStage="manual_cad"
             >

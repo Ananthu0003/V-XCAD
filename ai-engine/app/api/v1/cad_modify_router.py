@@ -145,3 +145,57 @@ async def get_session_file(session_id: str, path: str):
         raise HTTPException(status_code=404, detail="File not found")
     media_type = "model/stl" if file_path.suffix == ".stl" else "application/octet-stream"
     return FileResponse(file_path, media_type=media_type)
+
+
+from pydantic import BaseModel
+import shutil
+
+
+class ImportStepRequest(BaseModel):
+    session_id: str
+    filename: Optional[str] = None
+
+
+@router.post("/import-step")
+async def import_step_model(request: ImportStepRequest):
+    """
+    Initializes a session from an imported STEP model, generates STL for 3D viewport,
+    and caches B-Rep topology metadata.
+    """
+    try:
+        session_id = request.session_id
+        candidate_paths = [
+            Path(__file__).resolve().parents[3] / "outputs" / f"cad_{session_id}.step",
+            Path(__file__).resolve().parents[2] / "outputs" / f"cad_{session_id}.step",
+            Path("outputs") / f"cad_{session_id}.step",
+            BASE_STORAGE_DIR / session_id / "revisions" / "rev_000.step",
+        ]
+        base_step = None
+        for p in candidate_paths:
+            if p.exists():
+                base_step = p
+                break
+
+        rev = cad_service.initialize_session_if_needed(session_id, base_step_path=base_step, force_sync=True)
+        sdir = cad_service._get_session_dir(session_id)
+        rev0_stl = sdir / "revisions" / f"{rev}.stl"
+
+        outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
+        if not outputs_dir.exists():
+            outputs_dir = Path("outputs")
+        outputs_dir.mkdir(parents=True, exist_ok=True)
+        target_stl = outputs_dir / f"cad_{session_id}.stl"
+        if rev0_stl.exists():
+            shutil.copy2(rev0_stl, target_stl)
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "revision": rev,
+            "step_url": f"/api/outputs/cad_{session_id}.step",
+            "stl_url": f"/api/outputs/cad_{session_id}.stl",
+            "preview_stl_url": f"/api/cad/modify/file/{session_id}/revisions/{rev}.stl",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to process imported STEP model: {exc}")
+

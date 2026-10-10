@@ -138,13 +138,18 @@ export function TopologyPropertiesPanel({
       {/* Tab: Selection */}
       {activeTab === 'selection' && (
         <div style={{
-          flex: 1, overflowY: 'auto', padding: '12px 14px',
-          display: 'flex', flexDirection: 'column', gap: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          padding: '12px 14px',
+          gap: 0,
         }}>
 
           {/* ─── A. Header ─── */}
           {e ? (
-            <>
+            <div style={{ flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--mcad-text-primary)', fontFamily: 'var(--font-sans)' }}>
                   {humanEntityLabel(e)}
@@ -190,9 +195,10 @@ export function TopologyPropertiesPanel({
                   </>
                 )}
               </div>
-            </>
+            </div>
           ) : (
             <div style={{
+              flexShrink: 0,
               padding: '16px 12px', textAlign: 'center',
               border: '1px dashed var(--mcad-border)', borderRadius: 8,
               marginBottom: 4,
@@ -208,7 +214,7 @@ export function TopologyPropertiesPanel({
 
           {/* ─── Body actions guidance ─── */}
           {isBody && (
-            <>
+            <div style={{ flexShrink: 0 }}>
               <Divider />
               <SectionLabel>3D MODEL SUB-SHAPE</SectionLabel>
               <div style={{
@@ -249,12 +255,12 @@ export function TopologyPropertiesPanel({
                   </button>
                 </div>
               </div>
-            </>
+            </div>
           )}
 
           {/* ─── B. Active operation task panel ─── */}
           {hasOp && (
-            <>
+            <div style={{ flexShrink: 0 }}>
               <Divider />
               <TaskPanel
                 definition={getOperationDefinition(activeTool)}
@@ -272,23 +278,23 @@ export function TopologyPropertiesPanel({
                 validationReport={validationReport}
                 errorDiagnostic={errorDiagnostic}
               />
-            </>
+            </div>
           )}
 
           {/* Measure tool info */}
           {activeTool === 'measure' && (
-            <>
+            <div style={{ flexShrink: 0 }}>
               <Divider />
               <SectionLabel>MEASURE</SectionLabel>
               <p style={{ fontSize: 12, color: 'var(--mcad-text-muted)', fontFamily: 'var(--font-sans)', margin: 0 }}>
                 Select any face or edge to inspect dimensions in the panel.
               </p>
-            </>
+            </div>
           )}
 
           {/* ─── C. Other actions on this face/edge ─── */}
           {e && applicableOps.length > 0 && (
-            <>
+            <div style={{ flexShrink: 0 }}>
               <Divider />
               <SectionLabel>
                 {isFace ? 'Other actions on this face' : isEdge ? 'Other actions on this edge' : 'Other actions'}
@@ -317,12 +323,12 @@ export function TopologyPropertiesPanel({
                   );
                 })}
               </div>
-            </>
+            </div>
           )}
 
           {/* ─── E. Topology (collapsed by default) ─── */}
           {topology && (allFaces.length > 0 || allEdges.length > 0) && (
-            <>
+            <div style={{ flexShrink: 0 }}>
               <Divider />
               <button
                 type="button"
@@ -406,11 +412,11 @@ export function TopologyPropertiesPanel({
                   </div>
                 </div>
               )}
-            </>
+            </div>
           )}
 
           {/* Bottom spacing for comfortable scrolling */}
-          <div style={{ height: 12 }} />
+          <div style={{ height: 12, flexShrink: 0 }} />
         </div>
       )}
     </div>

@@ -5,7 +5,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewcube, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { ViewportController } from '@/components/viewport/ViewportController';
-import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye, FileImage, Folder } from 'lucide-react';
+import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye, FileImage, Folder, Upload } from 'lucide-react';
 import { DimensionOverlay } from '@/components/viewport/DimensionOverlay';
 import { FeatureHighlight } from '@/components/viewport/FeatureHighlight';
 import { CameraRig } from '@/components/viewport/CameraRig';
@@ -131,6 +131,8 @@ type CadViewportProps = {
 	showBlueprintPIP?: boolean;
 	onToggleBlueprintPIP?: () => void;
 	onAttachBlueprint?: (file: File) => void;
+	onImportStep?: (file: File) => void;
+	onImportStl?: (file: File) => void;
 };
 
 function AnimatedSetupGroup({ setupToolAxis, children, isSetup, hasToolpaths }: { setupToolAxis?: [number, number, number], children: React.ReactNode, isSetup?: boolean, hasToolpaths?: boolean }) {
@@ -213,9 +215,14 @@ export function CadViewport({
 	showBlueprintPIP,
 	onToggleBlueprintPIP,
 	onAttachBlueprint,
+	onImportStep,
+	onImportStl,
 }: CadViewportProps) {
+	const handleImport = onImportStep || onImportStl;
 	const groupRef = useRef<THREE.Group>(null);
 	const exportRef = useRef<HTMLDivElement>(null);
+	const stepInputRef = useRef<HTMLInputElement>(null);
+	const [isDraggingStep, setIsDraggingStep] = useState(false);
 	const [exportOpen, setExportOpen] = useState(false);
 	const [viewMode, setViewMode] = useState<'both' | 'solid' | 'wireframe'>('both');
 	const [localShowPIP, setLocalShowPIP] = useState(false);
@@ -582,6 +589,33 @@ export function CadViewport({
 				<div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
 					{headerActions}
 
+					{handleImport && (
+						<>
+							<input
+								ref={stepInputRef}
+								type="file"
+								accept=".step,.stp,model/step,application/step"
+								className="hidden"
+								onChange={(e) => {
+									const file = e.target.files?.[0];
+									if (file) {
+										handleImport(file);
+										e.target.value = '';
+									}
+								}}
+							/>
+							<button
+								type="button"
+								onClick={() => stepInputRef.current?.click()}
+								className="flex h-8 items-center gap-1.5 rounded-xl border border-white/10 bg-black/30 hover:bg-cyan-500/10 hover:border-cyan-500/40 px-3 text-[11px] font-semibold text-muted-foreground hover:text-cyan-300 transition-all cursor-pointer"
+								title="Import 3D STEP solid model from local disk"
+							>
+								<Upload className="size-3 text-cyan-400" />
+								<span className="hidden sm:inline">Import STEP</span>
+							</button>
+						</>
+					)}
+
 					{onShare && (
 						<button
 							onClick={onShare}
@@ -664,7 +698,36 @@ export function CadViewport({
 				onClick={() => {
 					if (contextMenu) setContextMenu(null);
 				}}
+				onDragOver={(e) => {
+					if (handleImport && Array.from(e.dataTransfer.types).includes('Files')) {
+						e.preventDefault();
+						setIsDraggingStep(true);
+					}
+				}}
+				onDragLeave={(e) => {
+					if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+					setIsDraggingStep(false);
+				}}
+				onDrop={(e) => {
+					if (handleImport) {
+						e.preventDefault();
+						setIsDraggingStep(false);
+						const file = e.dataTransfer.files?.[0];
+						if (file) {
+							handleImport(file);
+						}
+					}
+				}}
 			>
+				{isDraggingStep && (
+					<div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/85 backdrop-blur-md border-2 border-dashed border-cyan-500/80 rounded-xl pointer-events-none transition-all">
+						<div className="size-16 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center mb-3 text-cyan-400 animate-pulse">
+							<Box className="size-8" />
+						</div>
+						<h3 className="text-sm font-bold text-foreground">Drop STEP file to import</h3>
+						<p className="text-[11px] text-muted-foreground font-mono mt-1">Instant 3D rendering, B-Rep analysis & CAM toolpath generation</p>
+					</div>
+				)}
 				{/* View Mode Controls - Floating Toolbar */}
 				{(hasStl || (toolpaths && toolpaths.length > 0)) && (
 					<div className={`absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-background/90 backdrop-blur-xl border border-border/60 rounded-full px-4 py-2 shadow-2xl ring-1 ring-white/5 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-32' : 'bottom-24'}`}>

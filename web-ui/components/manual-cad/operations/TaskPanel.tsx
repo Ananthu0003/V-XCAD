@@ -94,6 +94,7 @@ export function TaskPanel({
       style={{
         display: 'flex',
         flexDirection: 'column',
+        flexShrink: 0,
         borderRadius: 10,
         background: 'var(--mcad-input)',
         border: '1px solid var(--mcad-border-ctrl)',
@@ -364,7 +365,7 @@ export function TaskPanel({
             ) : (
               <Check size={14} />
             )}
-            OK
+            Apply {definition.id}
           </button>
         </div>
       </div>

@@ -554,7 +554,7 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         default: 10,
         initial: (ctx) => ctx.cylindrical?.length || 10,
         advanced: false,
-        visibleWhen: (v, entity) => {
+        visibleWhen: (_v, _entity) => {
            // We'll hide this if it's a through-hole (which we can check if we had access to ctx in visibleWhen)
            // But since visibleWhen doesn't have ctx directly, we'll keep it visible unless we add ctx to visibleWhen.
            return true;

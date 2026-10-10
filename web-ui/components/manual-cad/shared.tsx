@@ -18,7 +18,7 @@ export function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 export function Divider() {
-  return <div style={{ height: 1, background: 'var(--mcad-border)', margin: '12px 0' }} />;
+  return <div style={{ height: 1, background: 'var(--mcad-border)', margin: '12px 0', flexShrink: 0 }} />;
 }
 
 export function MonoValue({ children }: { children: React.ReactNode }) {

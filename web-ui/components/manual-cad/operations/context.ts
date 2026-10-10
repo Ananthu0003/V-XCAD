@@ -85,6 +85,7 @@ export function useGeometryContext(
 
   useEffect(() => {
     if (!selection || !sessionId || !revision) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCtx(null);
       return;
     }
