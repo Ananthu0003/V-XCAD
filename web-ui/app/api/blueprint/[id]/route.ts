@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { aiEngineFetch } from '@/lib/aiEngine';
 
 function getFastApiUrl(): string {
-	const value = process.env.FASTAPI_URL?.trim() || process.env.AI_ENGINE_URL?.trim() || 'http://127.0.0.1:8001/api/v1';
+	const value = process.env.FASTAPI_URL?.trim() || process.env.AI_ENGINE_URL?.trim() || 'http://127.0.0.1:8000/api/v1';
 	return value.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
 }
 
