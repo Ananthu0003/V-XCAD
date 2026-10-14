@@ -368,6 +368,8 @@ export default function HitlWorkspace() {
 	const [viewportContextMenu, setViewportContextMenu] = useState<{ x: number, y: number } | null>(null);
 	const isResizing = useRef(false);
 	const fileUploadRef = useRef<HTMLInputElement>(null);
+	const stepUploadRef = useRef<HTMLInputElement>(null);
+	const stlUploadRef = stepUploadRef;
 
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
@@ -685,6 +687,99 @@ export default function HitlWorkspace() {
 			}
 		}
 	}, [revisions, sessionId, updatePythonScript]);
+
+	const handleImportStep = useCallback(async (file: File) => {
+		if (!file) return;
+		const isStep = file.name.toLowerCase().endsWith('.step') || file.name.toLowerCase().endsWith('.stp');
+		if (!isStep) {
+			toast.error('Invalid file format', {
+				description: 'Please select a valid .step or .stp 3D solid model file',
+			});
+			return;
+		}
+
+		const localUrl = URL.createObjectURL(file);
+		const newSessionId = `step_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+
+		setStepUrl(localUrl);
+		setDxfUrl(null);
+		setGcodeUrl(null);
+		setGcodeContent(null);
+		setKlartextContent(null);
+		setPythonScript('');
+		setParameters({});
+		setToolpaths(null);
+		setSourceFilename(file.name);
+		setStatusText(`Loaded: ${file.name}`);
+		setWorkflowStage('cad');
+
+		// Create a CAD revision for the imported STEP solid model
+		recordRevision({
+			title: `Imported STEP (${file.name})`,
+			description: `Direct 3D STEP B-Rep solid model (${(file.size / (1024 * 1024)).toFixed(2)} MB)`,
+			script: '',
+			params: {},
+			step: localUrl,
+		});
+
+		// Log into chat conversation
+		setMessages((prev) => [
+			...prev,
+			{
+				id: makeId('user'),
+				role: 'user',
+				content: `Imported 3D STEP file **${file.name}** (${(file.size / (1024 * 1024)).toFixed(2)} MB)`,
+				fileName: file.name,
+			},
+			{
+				id: makeId('assistant'),
+				role: 'assistant',
+				content: `Successfully loaded **${file.name}** into the 3D workspace. The solid STEP B-Rep geometry is now available for direct inspection, face/edge selection, and CAM toolpath generation.`,
+			},
+		]);
+
+		toast.success(`Imported ${file.name}`, {
+			description: '3D STEP solid model loaded into workspace',
+		});
+
+		// Sync session to backend
+		try {
+			const fd = new FormData();
+			fd.append('file', file);
+			fd.append('session_id', newSessionId);
+			const res = await fetch('/api/cad/import-step', {
+				method: 'POST',
+				body: fd,
+			});
+			if (res.ok) {
+				const data = await res.json();
+				if (data.sessionId) {
+					setSessionId(data.sessionId);
+					if (data.stepUrl) {
+						setStepUrl(data.stepUrl);
+					}
+					if (data.stlUrl) {
+						setStlUrl(data.stlUrl);
+					}
+					if (typeof window !== 'undefined') {
+						window.history.replaceState(null, '', `/workspace?session_id=${data.sessionId}`);
+					}
+				}
+			}
+		} catch (err) {
+			console.warn('Backend session persistence skipped:', err);
+		}
+	}, [recordRevision]);
+
+	const handleImportStl = handleImportStep;
+
+	const handleFileChangeWithStep = useCallback((file: File | null) => {
+		if (file && (file.name.toLowerCase().endsWith('.step') || file.name.toLowerCase().endsWith('.stp'))) {
+			handleImportStep(file);
+			return;
+		}
+		setSelectedFile(file);
+	}, [handleImportStep]);
 
 	const canUndo = activeRevisionIndex > 0;
 	const canRedo = activeRevisionIndex >= 0 && activeRevisionIndex < revisions.length - 1;
@@ -2094,7 +2189,7 @@ export default function HitlWorkspace() {
 											setSelectedModel={setSelectedModel}
 											modelOptions={MODEL_OPTIONS}
 											selectedFile={selectedFile}
-											handleFileChange={setSelectedFile}
+											handleFileChange={handleFileChangeWithStep}
 											isGenerating={isGenerating}
 											onSubmit={handleGenerate}
 											onClear={handleClear}
@@ -2174,6 +2269,24 @@ export default function HitlWorkspace() {
 																	</div>
 																</div>
 																<ChevronRight className="size-3.5 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all shrink-0" />
+															</button>
+
+															<button
+																onClick={() => stepUploadRef.current?.click()}
+																className="group relative flex items-center gap-3.5 p-3.5 rounded-xl border border-border bg-card hover:border-cyan-500/50 hover:shadow-md transition-all text-left cursor-pointer"
+															>
+																<div className="size-9 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0 group-hover:scale-105 group-hover:bg-cyan-500/15 transition-all text-cyan-400">
+																	<Cuboid className="size-4" />
+																</div>
+																<div className="flex-1 min-w-0">
+																	<div className="text-xs font-bold text-foreground group-hover:text-cyan-400 transition-colors">
+																		Import STEP Model
+																	</div>
+																	<div className="text-[10px] text-muted-foreground font-mono mt-0.5">
+																		3D Solid (.STEP / .STP) for B-Rep reasoning & CAM
+																	</div>
+																</div>
+																<ChevronRight className="size-3.5 text-muted-foreground group-hover:text-cyan-400 group-hover:translate-x-0.5 transition-all shrink-0" />
 															</button>
 
 															<button
@@ -2285,6 +2398,8 @@ export default function HitlWorkspace() {
 															description: file.name
 														});
 													}}
+													onImportStep={handleImportStep}
+													onImportStl={handleImportStep}
 													headerActions={
 														<div className="flex items-center gap-2">
 															{/* Unified CAD Revision History with Undo / Redo */}
@@ -2688,6 +2803,21 @@ export default function HitlWorkspace() {
 				/>
 				<ThemeToggle />
 			</div>
+
+			{/* Hidden file input for direct STEP solid model import */}
+			<input
+				ref={stepUploadRef}
+				type="file"
+				accept=".step,.stp,model/step,application/step"
+				className="hidden"
+				onChange={(e) => {
+					const file = e.target.files?.[0];
+					if (file) {
+						handleImportStep(file);
+						e.target.value = '';
+					}
+				}}
+			/>
 		</div>
 	);
 }

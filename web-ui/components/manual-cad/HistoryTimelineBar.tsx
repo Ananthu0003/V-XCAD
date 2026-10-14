@@ -1,17 +1,7 @@
 'use client';
 
 import React from 'react';
-import { 
-  RotateCcw, 
-  RotateCw, 
-  Bot, 
-  User, 
-  Sparkles, 
-  Trash2,
-  CheckCircle2,
-  AlertCircle
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { RotateCcw, RotateCw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export interface HistoryOperation {
@@ -34,6 +24,34 @@ interface HistoryTimelineBarProps {
   canUndo: boolean;
   canRedo: boolean;
   isRecomputing?: boolean;
+  /** Optional preview pill data */
+  previewLabel?: string;
+}
+
+/** Build the human-readable label for a timeline pill */
+function buildPillLabel(op: HistoryOperation): string {
+  const p = op.parameters || {};
+  const base = op.input_revision === 'rev_000' && !op.output_revision;
+
+  if (base || op.operation_type === 'boolean' || op.operation_type === 'base') {
+    return 'Base';
+  }
+
+  switch (op.operation_type) {
+    case 'fillet':  return `Fillet R${p.radius ?? 2}`;
+    case 'chamfer': return `Chamfer ${p.distance ?? 1}mm`;
+    case 'hole': {
+      const ht = p.hole_type ? ` (${p.hole_type})` : '';
+      return `Hole ⌀${p.diameter ?? 6} d${p.depth ?? '—'}${ht}`;
+    }
+    case 'pocket': {
+      const w = p.width ?? p.diameter ?? '?';
+      const h = p.height ?? p.length ?? '?';
+      return `Pocket ${w}×${h} d${p.depth ?? '?'}`;
+    }
+    case 'pad': return `Pad +${p.height ?? p.length ?? '?'}mm`;
+    default: return op.operation_type.charAt(0).toUpperCase() + op.operation_type.slice(1);
+  }
 }
 
 export function HistoryTimelineBar({
@@ -45,116 +63,158 @@ export function HistoryTimelineBar({
   onDeleteOperation,
   canUndo,
   canRedo,
-  isRecomputing = false
+  isRecomputing = false,
+  previewLabel,
 }: HistoryTimelineBarProps) {
-
-  const formatParamSummary = (op: HistoryOperation) => {
-    const p = op.parameters || {};
-    if (op.operation_type === 'fillet') return `R${p.radius || 2}mm`;
-    if (op.operation_type === 'chamfer') return `${p.distance || 1}mm`;
-    if (op.operation_type === 'hole') return `Dia ${p.diameter || 6}mm`;
-    if (op.operation_type === 'pocket') return `${p.width || 20}x${p.height || 15}mm`;
-    if (op.operation_type === 'pad') return `+${p.height || 5}mm`;
-    return '';
-  };
-
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-card/90 backdrop-blur-md border-t border-border/80 text-xs">
-      {/* 1. Undo / Redo buttons */}
-      <div className="flex items-center gap-1.5 shrink-0 pr-4 border-r border-border/60">
-        <Button
+    <div style={{
+      height: 64,
+      background: 'var(--mcad-timeline)',
+      borderTop: '1px solid var(--mcad-border)',
+      display: 'flex', alignItems: 'center',
+      paddingLeft: 12, paddingRight: 12, gap: 0, flexShrink: 0,
+      overflow: 'hidden',
+    }}>
+      {/* Undo / Redo */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, paddingRight: 12, borderRight: '1px solid var(--mcad-border)', flexShrink: 0 }}>
+        <button
+          type="button"
           onClick={onUndo}
           disabled={!canUndo || isRecomputing}
-          size="sm"
-          variant="ghost"
-          className="h-7 px-2 gap-1 text-muted-foreground hover:text-foreground cursor-pointer"
           title="Undo (Ctrl+Z)"
+          style={undoRedoStyle(!canUndo || isRecomputing)}
         >
-          <RotateCcw className="size-3.5" />
-          <span className="text-[11px]">Undo</span>
-        </Button>
-        <Button
+          <RotateCcw size={14} />
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-sans)' }}>Undo</span>
+        </button>
+        <button
+          type="button"
           onClick={onRedo}
           disabled={!canRedo || isRecomputing}
-          size="sm"
-          variant="ghost"
-          className="h-7 px-2 gap-1 text-muted-foreground hover:text-foreground cursor-pointer"
           title="Redo (Ctrl+Y)"
+          style={undoRedoStyle(!canRedo || isRecomputing)}
         >
-          <RotateCw className="size-3.5" />
-          <span className="text-[11px]">Redo</span>
-        </Button>
+          <RotateCw size={14} />
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-sans)' }}>Redo</span>
+        </button>
       </div>
 
-      {/* 2. Revision History Pills */}
-      <div className="flex-1 flex items-center gap-2 overflow-x-auto px-4 scrollbar-thin">
-        <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground font-semibold shrink-0">
-          History:
-        </span>
-
+      {/* History pills */}
+      <div style={{
+        flex: 1, display: 'flex', alignItems: 'center', gap: 6,
+        overflowX: 'auto', paddingLeft: 12, paddingRight: 4,
+        scrollbarWidth: 'none',
+      }}>
         {history.map((op, idx) => {
           const revId = op.output_revision || op.input_revision;
           const isActive = revId === activeRevision;
-          const isAI = op.source === 'ai_generated';
+          const label = buildPillLabel(op);
           const isManual = op.source === 'manual';
-          const summary = formatParamSummary(op);
+          const hasFail = op.status === 'failed' || op.status === 'unresolved';
 
           return (
             <div
               key={op.operation_id || idx}
-              className={cn(
-                "group flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full text-[11px] font-mono transition-all shrink-0 border",
-                isActive
-                  ? "bg-primary text-primary-foreground border-primary font-bold shadow-sm"
-                  : "bg-muted/60 text-muted-foreground hover:bg-muted border-border/60 hover:text-foreground"
-              )}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 0,
+                borderRadius: 999, flexShrink: 0,
+                border: isActive
+                  ? '1.5px solid var(--mcad-teal)'
+                  : hasFail
+                    ? '1.5px solid var(--mcad-amber)'
+                    : '1px solid var(--mcad-border-ctrl)',
+                background: isActive
+                  ? 'var(--mcad-teal-tint)'
+                  : hasFail
+                    ? 'rgba(245,165,36,0.08)'
+                    : 'var(--mcad-input)',
+                transition: 'all 0.15s',
+              }}
             >
               <button
+                type="button"
                 onClick={() => onRollback(revId)}
-                className="flex items-center gap-1.5 cursor-pointer"
-                title={`Switch to revision ${revId}`}
+                title={`Switch to ${revId}`}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '4px 10px', background: 'transparent', border: 'none',
+                  cursor: 'pointer', borderRadius: 999,
+                }}
               >
-                {isAI ? (
-                  <Bot className="size-3 text-blue-400" />
-                ) : isManual ? (
-                  <User className="size-3 text-amber-400" />
-                ) : (
-                  <Sparkles className="size-3 text-purple-400" />
+                <span style={{
+                  fontSize: 11,
+                  fontFamily: 'var(--font-sans)',
+                  fontWeight: isActive ? 600 : 400,
+                  color: isActive
+                    ? 'var(--mcad-teal)'
+                    : hasFail
+                      ? 'var(--mcad-amber)'
+                      : 'var(--mcad-text-secondary)',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {label}
+                </span>
+                <span style={{
+                  fontSize: 9, fontFamily: 'var(--font-mono)',
+                  color: isActive ? 'rgba(45,212,191,0.6)' : 'var(--mcad-text-muted)',
+                }}>
+                  {revId}
+                </span>
+                {hasFail && (
+                  <span style={{ fontSize: 9, color: 'var(--mcad-amber)', fontFamily: 'var(--font-sans)' }}>
+                    · needs attention
+                  </span>
                 )}
-                <span>{op.operation_type.toUpperCase()}</span>
-                {summary && <span className="opacity-80 text-[10px]">({summary})</span>}
-                <span className="text-[9px] opacity-60">[{revId}]</span>
               </button>
 
-              {/* Delete operation action for manual modifications */}
               {isManual && onDeleteOperation && (
                 <button
-                  onClick={(e) => {
+                  type="button"
+                  onClick={e => {
                     e.stopPropagation();
-                    if (confirm(`Delete operation ${op.operation_id} (${op.operation_type}) and recompute downstream features?`)) {
+                    if (confirm(`Delete ${op.operation_type} (${op.operation_id}) and recompute?`)) {
                       onDeleteOperation(op.operation_id);
                     }
                   }}
-                  className={cn(
-                    "p-0.5 rounded-full hover:bg-destructive/20 hover:text-destructive transition-colors cursor-pointer ml-1",
-                    isActive ? "text-primary-foreground/70 hover:text-white" : "text-muted-foreground"
-                  )}
-                  title="Delete this operation and recompute downstream geometry"
+                  style={{
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    paddingRight: 8, paddingLeft: 0, display: 'flex', alignItems: 'center',
+                    color: 'var(--mcad-text-muted)',
+                  }}
+                  title="Delete this operation"
                 >
-                  <Trash2 className="size-3" />
+                  <Trash2 size={11} />
                 </button>
               )}
             </div>
           );
         })}
-      </div>
 
-      {/* 3. Status indicator */}
-      <div className="flex items-center gap-1.5 shrink-0 pl-4 border-l border-border/60 font-mono text-[11px] text-muted-foreground">
-        <CheckCircle2 className="size-3.5 text-primary" />
-        <span>Active: <strong className="text-foreground">{activeRevision}</strong></span>
+        {/* Preview pill */}
+        {previewLabel && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
+            borderRadius: 999, flexShrink: 0,
+            border: '1.5px dashed var(--mcad-teal)',
+            background: 'var(--mcad-teal-tint)',
+          }}>
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-sans)', color: 'var(--mcad-teal)', whiteSpace: 'nowrap' }}>
+              {previewLabel} · preview
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
+function undoRedoStyle(disabled: boolean): React.CSSProperties {
+  return {
+    display: 'flex', alignItems: 'center', gap: 4,
+    height: 30, padding: '0 10px', borderRadius: 8,
+    background: 'transparent', border: 'none', cursor: disabled ? 'default' : 'pointer',
+    color: disabled ? 'var(--mcad-text-muted)' : 'var(--mcad-text-secondary)',
+    opacity: disabled ? 0.4 : 1,
+    transition: 'color 0.15s, opacity 0.15s',
+  };
+}

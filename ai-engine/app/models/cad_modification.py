@@ -46,6 +46,14 @@ class GeometricReference(BaseModel):
     adjacent_edge_ids: List[str] = Field(default_factory=list)
     adjacent_face_ids: List[str] = Field(default_factory=list)
     confidence: float = Field(1.0, description="Match confidence score between 0.0 and 1.0")
+    triangles: Optional[List[float]] = Field(
+        None, 
+        description="Flattened 3D triangle coordinates [x1, y1, z1, x2, y2, z2, x3, y3, z3, ...] for viewport face surface rendering & picking"
+    )
+    boundary_points: Optional[List[List[float]]] = Field(
+        default_factory=list,
+        description="Sampled points along boundary wires of the face"
+    )
 
 
 class ValidationReport(BaseModel):
@@ -176,4 +184,70 @@ class RecomputeResult(BaseModel):
     replayed_operations: List[RecomputedOperationStatus] = Field(default_factory=list)
     broken_references: List[str] = Field(default_factory=list)
     validation: ValidationReport
+
+
+class FeatureOnFace(BaseModel):
+    kind: Optional[str] = None
+    diameter: Optional[float] = None
+    depth: Optional[float] = None
+    uv: Optional[list[float]] = None
+    face_id: Optional[str] = None
+
+class PlanarFaceContext(BaseModel):
+    origin: Optional[list[float]] = None
+    normal: Optional[list[float]] = None
+    u_axis: Optional[list[float]] = None
+    v_axis: Optional[list[float]] = None
+    extents_u: Optional[float] = None
+    extents_v: Optional[float] = None
+    is_rectangular: Optional[bool] = None
+    is_circular: Optional[bool] = None
+    circle_diameter: Optional[float] = None
+    center_uv: Optional[list[float]] = None
+    max_diameter: Optional[float] = None
+    material_depth: Optional[float] = None
+    is_through_clear: Optional[bool] = None
+    existing_features: list[FeatureOnFace] = []
+
+class CylFaceContext(BaseModel):
+    radius: Optional[float] = None
+    diameter: Optional[float] = None
+    length: Optional[float] = None
+    axis_origin: Optional[list[float]] = None
+    axis_dir: Optional[list[float]] = None
+    kind: Optional[Literal["hole", "boss"]] = None
+    is_through: Optional[bool] = None
+    bottom_depth: Optional[float] = None
+    parent_face_id: Optional[str] = None
+    stacked: Optional[bool] = None
+
+class EdgeContext(BaseModel):
+    length: Optional[float] = None
+    radius: Optional[float] = None
+    dihedral_deg: Optional[float] = None
+    max_radius_hint: Optional[float] = None
+    edge_type: Optional[Literal["line", "circle", "other"]] = None
+    adjacent_face_ids: list[str] = []
+
+class BodyContext(BaseModel):
+    extents: Optional[list[float]] = None
+    volume: Optional[float] = None
+    solid_count: Optional[int] = None
+    is_valid: Optional[bool] = None
+
+class GeometryContext(BaseModel):
+    status: Literal["ok", "partial", "unsupported", "error"] = "ok"
+    entity_class: Literal[
+        "face.planar", "face.cylindrical", "face.conical", "face.other",
+        "edge.linear", "edge.circular", "edge.other", "body"
+    ] = Field(..., alias="class")
+    ref: str
+    revision: str
+    warnings: list[str] = []
+    message: Optional[str] = None
+    area: Optional[float] = None
+    planar: Optional[PlanarFaceContext] = None
+    cylindrical: Optional[CylFaceContext] = None
+    edge: Optional[EdgeContext] = None
+    body: Optional[BodyContext] = None
 

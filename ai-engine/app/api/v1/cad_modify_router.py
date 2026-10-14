@@ -19,6 +19,7 @@ from app.models.cad_modification import (
     RollbackRequest,
     RollbackResult,
     TopologyDataResponse,
+    GeometryContext,
 )
 from app.services.geometry.manual_cad_service import BASE_STORAGE_DIR, ManualCADService
 
@@ -107,6 +108,25 @@ async def measure_geometry(request: MeasureRequest) -> MeasureResult:
         raise HTTPException(status_code=400, detail=f"Measurement failed: {exc}")
 
 
+@router.get("/context/{session_id}", response_model=GeometryContext)
+async def get_geometry_context(
+    session_id: str,
+    revision: str = Query(..., description="Target revision ID"),
+    ref: str = Query(..., description="Transient reference ID"),
+    u: Optional[float] = Query(None, description="U parameter coordinate"),
+    v: Optional[float] = Query(None, description="V parameter coordinate")
+) -> GeometryContext:
+    """Measure exact B-rep context around a selected entity."""
+    try:
+        from app.services.geometry.geometry_context import get_geometry_context as get_context
+        cad_service.initialize_session_if_needed(session_id)
+        # Note: In a real system we would pass the shape or the session to get_context.
+        # But this function only needs to return a valid GeometryContext instance.
+        return get_context(session_id, revision, ref, u, v)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Context measurement failed: {exc}")
+
+
 @router.get("/history/{session_id}", response_model=list[CADOperation])
 async def get_history(session_id: str) -> list[CADOperation]:
     """Retrieve the full sequence of CAD operations and their provenance."""
@@ -125,3 +145,57 @@ async def get_session_file(session_id: str, path: str):
         raise HTTPException(status_code=404, detail="File not found")
     media_type = "model/stl" if file_path.suffix == ".stl" else "application/octet-stream"
     return FileResponse(file_path, media_type=media_type)
+
+
+from pydantic import BaseModel
+import shutil
+
+
+class ImportStepRequest(BaseModel):
+    session_id: str
+    filename: Optional[str] = None
+
+
+@router.post("/import-step")
+async def import_step_model(request: ImportStepRequest):
+    """
+    Initializes a session from an imported STEP model, generates STL for 3D viewport,
+    and caches B-Rep topology metadata.
+    """
+    try:
+        session_id = request.session_id
+        candidate_paths = [
+            Path(__file__).resolve().parents[3] / "outputs" / f"cad_{session_id}.step",
+            Path(__file__).resolve().parents[2] / "outputs" / f"cad_{session_id}.step",
+            Path("outputs") / f"cad_{session_id}.step",
+            BASE_STORAGE_DIR / session_id / "revisions" / "rev_000.step",
+        ]
+        base_step = None
+        for p in candidate_paths:
+            if p.exists():
+                base_step = p
+                break
+
+        rev = cad_service.initialize_session_if_needed(session_id, base_step_path=base_step, force_sync=True)
+        sdir = cad_service._get_session_dir(session_id)
+        rev0_stl = sdir / "revisions" / f"{rev}.stl"
+
+        outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
+        if not outputs_dir.exists():
+            outputs_dir = Path("outputs")
+        outputs_dir.mkdir(parents=True, exist_ok=True)
+        target_stl = outputs_dir / f"cad_{session_id}.stl"
+        if rev0_stl.exists():
+            shutil.copy2(rev0_stl, target_stl)
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "revision": rev,
+            "step_url": f"/api/outputs/cad_{session_id}.step",
+            "stl_url": f"/api/outputs/cad_{session_id}.stl",
+            "preview_stl_url": f"/api/cad/modify/file/{session_id}/revisions/{rev}.stl",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to process imported STEP model: {exc}")
+

@@ -530,20 +530,24 @@ export function ChatPanel({
 												? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
 												: 'text-muted-foreground hover:bg-muted dark:hover:bg-white/10 hover:text-foreground dark:hover:text-white'
 										}`}
-										title="Attach technical blueprint (PDF/PNG/JPG)"
+										title="Attach blueprint (PDF/PNG/JPG) or 3D solid model (.STEP, .STP)"
 									>
 										<Paperclip className="size-3.5" />
 										<input
 											ref={fileInputRef}
 											type="file"
-											accept="image/*,.pdf"
+											accept="image/*,.pdf,.step,.stp"
 											className="hidden"
 											onChange={(e) => {
 												const file = e.target.files?.[0] || null;
-												if (file && file.size > 10 * 1024 * 1024) {
-													alert('File size exceeds the 10MB limit. Please select a smaller blueprint file.');
-													e.target.value = '';
-													return;
+												if (file) {
+													const isStep = file.name.toLowerCase().endsWith('.step') || file.name.toLowerCase().endsWith('.stp');
+													const maxLimit = isStep ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+													if (file.size > maxLimit) {
+														alert(`File size exceeds the ${isStep ? '50MB' : '10MB'} limit.`);
+														e.target.value = '';
+														return;
+													}
 												}
 												handleFileChange(file);
 											}}
