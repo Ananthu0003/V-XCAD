@@ -5,13 +5,14 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewcube, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { ViewportController } from '@/components/viewport/ViewportController';
-import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye, FileImage, Folder, Upload } from 'lucide-react';
+import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye, FileImage, Folder, Upload, AlertTriangle } from 'lucide-react';
 import { DimensionOverlay } from '@/components/viewport/DimensionOverlay';
 import { FeatureHighlight } from '@/components/viewport/FeatureHighlight';
 import { CameraRig } from '@/components/viewport/CameraRig';
 import { VolumetricStock } from '@/components/cam/VolumetricStock';
 import { BlueprintViewer } from '@/components/blueprint/BlueprintViewer';
 import { TargetPortion3DHighlight } from '@/components/viewport/TargetPortion3DHighlight';
+import { ThreeErrorBoundary, CanvasRootErrorBoundary } from '@/components/viewport/ThreeErrorBoundary';
 import type { TargetPortion } from '@/components/chat/ChatPanel';
 import type { StlGeometryInfo } from '@/components/viewport/StlMesh';
 
@@ -226,8 +227,13 @@ export function CadViewport({
 	const [exportOpen, setExportOpen] = useState(false);
 	const [viewMode, setViewMode] = useState<'both' | 'solid' | 'wireframe'>('both');
 	const [localShowPIP, setLocalShowPIP] = useState(false);
+	const [meshLoadError, setMeshLoadError] = useState<string | null>(null);
 	const isPIPOpen = showBlueprintPIP !== undefined ? showBlueprintPIP : localShowPIP;
 	const togglePIP = onToggleBlueprintPIP || (() => setLocalShowPIP(prev => !prev));
+
+	useEffect(() => {
+		setMeshLoadError(null);
+	}, [stlUrl]);
 
 	const dispatchViewportAction = (action: string) => {
 		window.dispatchEvent(new CustomEvent('viewport-action', { detail: action }));
@@ -840,11 +846,34 @@ export function CadViewport({
 					</div>
 				)}
 
-				<Canvas id="cad-three-canvas" shadows dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }} className="relative z-10" onPointerMissed={onClearSelection}>
-					<CanvasBridge />
-					<ViewportController 
-						modelGroupRef={groupRef}
-						geometryInfo={geometryInfo} 
+				{meshLoadError && (
+					<div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none p-4">
+						<div className="bg-slate-950/85 backdrop-blur-md px-6 py-5 rounded-2xl border border-amber-500/30 flex flex-col items-center gap-3 max-w-md text-center pointer-events-auto shadow-2xl">
+							<div className="p-3 bg-amber-500/10 rounded-full border border-amber-500/20 text-amber-400">
+								<AlertTriangle className="size-6" />
+							</div>
+							<div>
+								<p className="text-sm font-semibold text-slate-100">3D Model File Not Available</p>
+								<p className="text-xs text-slate-400 mt-1">
+									The CAD artifact for this session is not present on disk. Please create a new session or re-run CAD generation to create fresh geometry.
+								</p>
+							</div>
+							<button
+								onClick={() => setMeshLoadError(null)}
+								className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition-colors"
+							>
+								Dismiss
+							</button>
+						</div>
+					</div>
+				)}
+
+				<CanvasRootErrorBoundary>
+					<Canvas id="cad-three-canvas" shadows dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }} className="relative z-10" onPointerMissed={onClearSelection}>
+						<CanvasBridge />
+						<ViewportController 
+							modelGroupRef={groupRef}
+							geometryInfo={geometryInfo} 
 						activeFeatureId={activeFeatureId} 
 						camFeatures={camFeatures} 
 						hasStl={hasStl} 
@@ -905,7 +934,9 @@ export function CadViewport({
 										return (
 											<>
 												<group position={combinedPos} quaternion={quat} scale={scale}>
-													{isSolidVisible && children}
+													<ThreeErrorBoundary resetKey={stlUrl} onError={(err) => setMeshLoadError(err.message)}>
+														{isSolidVisible && children}
+													</ThreeErrorBoundary>
 													
                                                     {/* Overlays - placed next to children so they inherit the exact same transforms */}
                                                     {geometryInfo && annotations && (
@@ -1133,6 +1164,7 @@ export function CadViewport({
 					{/* Dimension overlay was moved inside Stage */}
 
 				</Canvas>
+			</CanvasRootErrorBoundary>
 
 				{!stlUrl && !isRecompiling && (
 					<div className="pointer-events-none absolute inset-0 flex items-center justify-center p-12 z-20">
