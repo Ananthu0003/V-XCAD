@@ -20,6 +20,9 @@ import {
   X,
   Loader2,
   Box,
+  Move3d,
+  Scaling,
+  Ruler,
 } from 'lucide-react';
 import { CADToolType } from './ManualCadToolbar';
 import { PropRow } from './shared';
@@ -32,6 +35,8 @@ import {
 import { getOperationDefinition } from './operations/registry';
 import { TaskPanel } from './operations/TaskPanel';
 import type { DetectedFeature, FeatureParam } from './useDetectedFeatures';
+import type { GeometryContext } from './operations/context';
+import type { ModelParametersResponse } from './useModelParameters';
 
 export interface TopologyPropertiesPanelProps {
   selectedEntity: any | null;
@@ -46,14 +51,18 @@ export interface TopologyPropertiesPanelProps {
   validationReport: any | null;
   errorDiagnostic: any | null;
   topology?: any | null;
-  onSelectTopologyEntity?: (entity: any) => void;
+  onSelectTopologyEntity?: (entity: any, multiSelect?: boolean) => void;
   onSelectTool?: (tool: CADToolType) => void;
   // Detected features
   detectedFeatures?: DetectedFeature[];
   isLoadingFeatures?: boolean;
   onRefetchFeatures?: () => void;
   onHighlightFaces?: (faceIds: string[] | null) => void;
-  selectionMode?: 'body' | 'face' | 'edge';
+  selectionMode?: 'body' | 'feature' | 'face' | 'edge';
+  ctx?: GeometryContext | null;
+  modelParams?: ModelParametersResponse | null;
+  isLoadingModelParams?: boolean;
+  onRefetchModelParams?: () => void;
 }
 
 function getFeatureIcon(kind: string) {
@@ -95,6 +104,10 @@ export function TopologyPropertiesPanel({
   onRefetchFeatures,
   onHighlightFaces,
   selectionMode = 'body',
+  ctx,
+  modelParams,
+  isLoadingModelParams = false,
+  onRefetchModelParams,
 }: TopologyPropertiesPanelProps) {
   const [moreExpanded, setMoreExpanded] = useState(false);
   const [topologyExpanded, setTopologyExpanded] = useState(false);
@@ -109,6 +122,7 @@ export function TopologyPropertiesPanel({
     chamfer: true,
   });
   const [livePreview, setLivePreview] = useState(false);
+  const lastPreviewHashRef = React.useRef<string>('');
 
   const handleParamChange = (key: string, val: any) => {
     setParams((prev) => ({ ...prev, [key]: val }));
@@ -118,14 +132,17 @@ export function TopologyPropertiesPanel({
   const isFeature = e?.entity_type === 'feature';
   const hasOp = activeTool !== 'select' && activeTool !== 'measure';
 
-  // Debounced live preview when enabled
+  // Debounced live preview when enabled - stable hash prevents infinite loop (A13)
+  const paramsHash = useMemo(() => JSON.stringify(params), [params]);
   useEffect(() => {
     if (!livePreview || !e || !hasOp || isLoading) return;
+    if (paramsHash === lastPreviewHashRef.current) return;
     const timer = setTimeout(() => {
+      lastPreviewHashRef.current = paramsHash;
       onPreview();
     }, 600);
     return () => clearTimeout(timer);
-  }, [livePreview, params, e, activeTool, hasOp, isLoading, onPreview]);
+  }, [livePreview, paramsHash, e?.transient_id, activeTool, hasOp, isLoading, onPreview]);
 
   // Topology lists
   const allFaces = useMemo(() => (topology ? Object.values(topology.faces || {}) as any[] : []), [topology]);
@@ -359,6 +376,155 @@ export function TopologyPropertiesPanel({
               </>
             )}
           </div>
+
+          {/* Extracted Base Primitive & Sub-Shape Dimensions (Part C) */}
+          {e.entity_type === 'body' && (
+            <div style={{ marginTop: 10 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 6,
+                }}
+              >
+                <span style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--mcad-text-muted)' }}>
+                  Base Primitive Classification
+                </span>
+                {isLoadingModelParams ? (
+                  <Loader2 size={11} className="animate-spin text-blue-400" />
+                ) : (
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10,
+                      padding: '1px 6px',
+                      borderRadius: 4,
+                      background: 'rgba(59,130,246,0.15)',
+                      color: 'var(--mcad-accent)',
+                      border: '1px solid rgba(59,130,246,0.3)',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {modelParams?.base_solid?.primitive_type || 'Solid'}
+                  </span>
+                )}
+              </div>
+
+              <div
+                style={{
+                  background: 'var(--mcad-input)',
+                  border: '1px solid var(--mcad-border-ctrl)',
+                  borderRadius: 8,
+                  padding: '6px 10px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 3,
+                }}
+              >
+                {modelParams?.base_solid?.description && (
+                  <div style={{ fontSize: 11, color: 'var(--mcad-text-secondary)', marginBottom: 4 }}>
+                    {modelParams.base_solid.description}
+                  </div>
+                )}
+
+                {/* Dimensions readout for Box / Cylinder / etc. */}
+                {modelParams?.base_solid?.dimensions && Object.entries(modelParams.base_solid.dimensions).length > 0 ? (
+                  Object.entries(modelParams.base_solid.dimensions).map(([dimKey, dimVal]) => (
+                    <PropRow
+                      key={dimKey}
+                      label={dimKey.charAt(0).toUpperCase() + dimKey.slice(1).replace('_', ' ')}
+                      value={`${Number(dimVal).toFixed(1)} mm`}
+                    />
+                  ))
+                ) : (
+                  <>
+                    {e.bounding_box?.min && e.bounding_box?.max && (
+                      <>
+                        <PropRow
+                          label="Length (X)"
+                          value={`${Math.abs(e.bounding_box.max[0] - e.bounding_box.min[0]).toFixed(1)} mm`}
+                        />
+                        <PropRow
+                          label="Width (Y)"
+                          value={`${Math.abs(e.bounding_box.max[1] - e.bounding_box.min[1]).toFixed(1)} mm`}
+                        />
+                        <PropRow
+                          label="Height (Z)"
+                          value={`${Math.abs(e.bounding_box.max[2] - e.bounding_box.min[2]).toFixed(1)} mm`}
+                        />
+                      </>
+                    )}
+                  </>
+                )}
+
+                {modelParams?.features && (
+                  <PropRow label="Extracted Features" value={`${modelParams.features.length} detected`} />
+                )}
+              </div>
+
+              {/* 3D Model Quick Action Bar: Move / Rotate / Scale / Edit Dimensions / Measure */}
+              <div style={{ marginTop: 10 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--mcad-text-muted)', display: 'block', marginBottom: 6 }}>
+                  Quick Operations
+                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTool?.('move')}
+                    className="mcad-btn"
+                    style={{ height: 30, fontSize: 11, padding: '0 6px', justifyContent: 'center', gap: 5 }}
+                    title="Move solid model"
+                  >
+                    <Move3d size={12} style={{ color: 'var(--mcad-accent)' }} />
+                    <span>Move</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTool?.('rotate')}
+                    className="mcad-btn"
+                    style={{ height: 30, fontSize: 11, padding: '0 6px', justifyContent: 'center', gap: 5 }}
+                    title="Rotate solid model"
+                  >
+                    <RotateCw size={12} style={{ color: 'var(--mcad-accent)' }} />
+                    <span>Rotate</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTool?.('scale')}
+                    className="mcad-btn"
+                    style={{ height: 30, fontSize: 11, padding: '0 6px', justifyContent: 'center', gap: 5 }}
+                    title="Scale solid model"
+                  >
+                    <Scaling size={12} style={{ color: 'var(--mcad-accent)' }} />
+                    <span>Scale</span>
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTool?.('edit_feature')}
+                    className="mcad-btn mcad-btn--primary"
+                    style={{ height: 30, fontSize: 11, padding: '0 8px', justifyContent: 'center', gap: 5 }}
+                    title="Edit Dimensions (Length, Width, Height, Area)"
+                  >
+                    <Sliders size={12} />
+                    <span>Edit Dimensions</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectTool?.('measure')}
+                    className="mcad-btn"
+                    style={{ height: 30, fontSize: 11, padding: '0 8px', justifyContent: 'center', gap: 5 }}
+                    title="Measure solid geometry"
+                  >
+                    <Ruler size={12} style={{ color: 'var(--mcad-accent)' }} />
+                    <span>Measure</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -380,6 +546,7 @@ export function TopologyPropertiesPanel({
             setLivePreview={setLivePreview}
             validationReport={validationReport}
             errorDiagnostic={errorDiagnostic}
+            ctx={ctx}
           />
         </div>
       )}

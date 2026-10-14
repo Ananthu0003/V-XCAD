@@ -9,7 +9,11 @@ import { CadViewport } from '@/components/viewport/CadViewport';
 import { SubShapeRaycaster, findFaceFromHit } from './SubShapeRaycaster';
 import { StlMesh } from '@/components/viewport/StlMesh';
 import { ContextMenu } from './operations/ContextMenu';
-import { getDefaultParams } from './operations/registry';
+import { getDefaultParams, getOperationDefinition } from './operations/registry';
+import { isOperationApplicable } from './operations/capabilities';
+import { useGeometryContext } from './operations/context';
+import { useModelParameters } from './useModelParameters';
+import { parseApiError } from './shared';
 import { SelectMoreMenu } from './SelectMoreMenu';
 import { useDetectedFeatures, DetectedFeature } from './useDetectedFeatures';
 import { StageSwitcher } from '@/components/workspace/StageSwitcher';
@@ -22,6 +26,7 @@ import {
   Box,
   Square,
   Slash,
+  Sliders,
   Download,
   ChevronDown,
   Layers,
@@ -51,13 +56,14 @@ export function ManualCadWorkspace({
 }: ManualCadWorkspaceProps) {
   const [activeRevision, setActiveRevision] = useState<string>('rev_000');
   const [activeTool, setActiveTool] = useState<CADToolType>('select');
-  const [selectionMode, setSelectionMode] = useState<'body' | 'face' | 'edge'>('face');
+  const [selectionMode, setSelectionMode] = useState<'body' | 'feature' | 'face' | 'edge'>('face');
   const [selectedEntity, setSelectedEntity] = useState<any | null>(null);
   const [selectedEntities, setSelectedEntities] = useState<any[]>([]);
   const [highlightedFaceIds, setHighlightedFaceIds] = useState<string[] | null>(null);
   const [params, setParams] = useState<Record<string, any>>({
     radius: 2.0, distance: 1.0, diameter: 6.0, depth: 10.0, width: 20.0, height: 15.0
   });
+  const [paramsByTool, setParamsByTool] = useState<Record<string, Record<string, any>>>({});
   const [topology, setTopology] = useState<any | null>(null);
   const [history, setHistory] = useState<HistoryOperation[]>([]);
   const [previewResult, setPreviewResult] = useState<any | null>(null);
@@ -68,6 +74,17 @@ export function ManualCadWorkspace({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entity: any } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
+  const previewAbortRef = useRef<AbortController | null>(null);
+
+  // Hook for geometry context of current selection
+  const { ctx: geometryContext } = useGeometryContext(sessionId, activeRevision, selectedEntity);
+
+  // Hook for 3D sub-shape parameters (Part C)
+  const {
+    data: modelParams,
+    isLoading: isLoadingModelParams,
+    refetch: refetchModelParams,
+  } = useModelParameters(sessionId, activeRevision);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -134,19 +151,62 @@ export function ManualCadWorkspace({
     };
   }, []);
 
-  const handleSetSelectionMode = (mode: 'body' | 'face' | 'edge') => {
+  // Compute initial params for a tool from defaults and geometryContext (A9 & A10)
+  const computeToolParams = useCallback(
+    (tool: CADToolType, ent: any, ctx: any, userEdits?: Record<string, any>) => {
+      const def = getOperationDefinition(tool);
+      const initial: Record<string, any> = {};
+      if (def?.fields) {
+        def.fields.forEach((f) => {
+          let val = f.default;
+          if (typeof f.initial === 'function' && ctx) {
+            const initVal = f.initial(ctx, initial);
+            if (initVal !== undefined && initVal !== null) {
+              val = initVal;
+            }
+          }
+          initial[f.key] = val;
+        });
+      }
+      return { ...initial, ...(userEdits || {}) };
+    },
+    []
+  );
+
+  const handleUpdateParams: React.Dispatch<React.SetStateAction<Record<string, any>>> = useCallback(
+    (updater) => {
+      setParams((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        setParamsByTool((all) => ({
+          ...all,
+          [activeTool]: next,
+        }));
+        return next;
+      });
+    },
+    [activeTool]
+  );
+
+  const handleSetSelectionMode = (mode: 'body' | 'feature' | 'face' | 'edge') => {
     setSelectionMode(mode);
     if (mode === 'body') {
       if (topology) {
-        setSelectedEntity(createBodyEntity(topology, activeRevision));
+        const b = createBodyEntity(topology, activeRevision);
+        setSelectedEntity(b);
+        setSelectedEntities([b]);
+      }
+    } else if (mode === 'feature') {
+      if (selectedEntity?.entity_type !== 'feature') {
+        setSelectedEntity(null);
+        setSelectedEntities([]);
       }
     } else if (mode === 'face') {
-      if (selectedEntity?.entity_type === 'body' || selectedEntity?.entity_type === 'edge') {
+      if (selectedEntity?.entity_type !== 'face') {
         setSelectedEntity(null);
         setSelectedEntities([]);
       }
     } else if (mode === 'edge') {
-      if (selectedEntity?.entity_type === 'body' || selectedEntity?.entity_type === 'face') {
+      if (selectedEntity?.entity_type !== 'edge') {
         setSelectedEntity(null);
         setSelectedEntities([]);
       }
@@ -155,6 +215,10 @@ export function ManualCadWorkspace({
 
   const handleSetActiveTool = (tool: CADToolType) => {
     setActiveTool(tool);
+    if (tool !== 'select' && selectedEntity?.entity_type !== 'feature') {
+      const toolP = computeToolParams(tool, selectedEntity, geometryContext, paramsByTool[tool]);
+      setParams(toolP);
+    }
     if (tool === 'fillet' || tool === 'chamfer') {
       setSelectionMode('edge');
     } else if (tool === 'hole' || tool === 'pocket' || tool === 'pad' || tool === 'push_pull' || tool === 'round_face_edges') {
@@ -166,7 +230,9 @@ export function ManualCadWorkspace({
         selectedEntity?.surface_type === 'plane';
       if (!keepFace && topology) {
         setSelectionMode('body');
-        setSelectedEntity(createBodyEntity(topology, activeRevision));
+        const b = createBodyEntity(topology, activeRevision);
+        setSelectedEntity(b);
+        setSelectedEntities([b]);
       }
     }
   };
@@ -259,6 +325,7 @@ export function ManualCadWorkspace({
     if (entity.entity_type === 'feature') {
       setSelectedEntity(entity);
       setSelectedEntities([entity]);
+      setSelectionMode('feature');
       setActiveTool('edit_feature');
       const initialChanges: Record<string, any> = {};
       (entity.params || []).forEach((p: any) => {
@@ -279,6 +346,16 @@ export function ManualCadWorkspace({
     } else if (entity.entity_type === 'face') {
       setSelectionMode('face');
     }
+
+    // Bug A11 fix: only switch tool if current tool is not applicable to new selection
+    if (activeTool !== 'select' && activeTool !== 'measure') {
+      if (!isOperationApplicable(activeTool, entity, geometryContext)) {
+        setActiveTool('select');
+      } else {
+        const toolP = computeToolParams(activeTool, entity, geometryContext, paramsByTool[activeTool]);
+        setParams(toolP);
+      }
+    }
   };
 
   // Direct click on 3D solid model surface
@@ -291,15 +368,42 @@ export function ManualCadWorkspace({
       return;
     }
 
-    // In face mode (or general mode): find clicked face
+    // Edge mode direct click: find closest edge by sampled points (A15)
+    if (selectionMode === 'edge') {
+      if (topology.edges) {
+        let closestEdge: any = null;
+        let minDistanceSq = Infinity;
+        Object.values(topology.edges).forEach((ed: any) => {
+          if (Array.isArray(ed.points) && ed.points.length > 0) {
+            for (const pt of ed.points) {
+              const dx = pt[0] - point[0];
+              const dy = pt[1] - point[1];
+              const dz = pt[2] - point[2];
+              const distSq = dx * dx + dy * dy + dz * dz;
+              if (distSq < minDistanceSq) {
+                minDistanceSq = distSq;
+                closestEdge = ed;
+              }
+            }
+          }
+        });
+        if (closestEdge && minDistanceSq < 400) {
+          handleSelectTopologyEntity(closestEdge);
+          return;
+        }
+      }
+    }
+
+    // In face or feature mode: find clicked face
     if (topology.faces) {
       const face = findFaceFromHit(point, normal, topology.faces);
       if (face) {
-        // If this face belongs to a detected feature, highlight/select that feature for editing
         const matchingFeat = detectedFeatures.find((df: any) =>
           df.face_ids?.includes(face.transient_id)
         );
-        if (matchingFeat && activeTool === 'edit_feature') {
+        if (selectionMode === 'feature' && matchingFeat) {
+          handleSelectTopologyEntity({ entity_type: 'feature', ...matchingFeat });
+        } else if (matchingFeat && activeTool === 'edit_feature') {
           handleSelectTopologyEntity({ entity_type: 'feature', ...matchingFeat });
         } else {
           handleSelectTopologyEntity(face);
@@ -330,7 +434,7 @@ export function ManualCadWorkspace({
     return refs;
   };
 
-  // Build parameters dictionary
+  // Build parameters dictionary using definition.toRequest (A9)
   const buildRequestParameters = (): Record<string, any> => {
     const isFeat = selectedEntity?.entity_type === 'feature';
     if (isFeat) {
@@ -340,15 +444,26 @@ export function ManualCadWorkspace({
         ...params,
       };
     }
+    const opType = activeTool;
+    const def = getOperationDefinition(opType);
+    if (def && typeof def.toRequest === 'function') {
+      return def.toRequest(params, selectedEntity);
+    }
     return { ...getDefaultParams(activeTool), ...params };
   };
 
-  // Preview Operation
+  // Preview Operation with AbortController and parseApiError (A8 & A13)
   const handlePreview = async () => {
     if (!selectedEntity) {
       toast.error('Please select something to edit first.');
       return;
     }
+
+    if (previewAbortRef.current) {
+      previewAbortRef.current.abort();
+    }
+    const abortController = new AbortController();
+    previewAbortRef.current = abortController;
 
     setIsLoading(true);
     setPreviewResult(null);
@@ -359,6 +474,7 @@ export function ManualCadWorkspace({
       const res = await fetch('/api/cad/modify/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           session_id: sessionId,
           base_revision: activeRevision,
@@ -368,10 +484,17 @@ export function ManualCadWorkspace({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.valid) {
-        setPreviewResult(data);
-        toast.error(data.validation?.error_message || 'Operation preview failed');
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.valid) {
+        const errorDiag = parseApiError(res, data);
+        setPreviewResult({
+          validation: data?.validation || { is_valid: false },
+          error_diagnostic: {
+            code: data?.error_diagnostic?.code || errorDiag.code,
+            message: errorDiag.message,
+          },
+        });
+        toast.error(errorDiag.message);
       } else {
         setPreviewResult(data);
         setIsPreviewActive(true);
@@ -381,7 +504,13 @@ export function ManualCadWorkspace({
         toast.success('Preview generated successfully');
       }
     } catch (err: any) {
-      toast.error(err.message || 'Preview generation failed');
+      if (err.name === 'AbortError') return;
+      const msg = err.message || 'Preview generation failed';
+      setPreviewResult({
+        validation: { is_valid: false },
+        error_diagnostic: { code: 'Network Error', message: msg },
+      });
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -389,6 +518,9 @@ export function ManualCadWorkspace({
 
   // Cancel Preview
   const handleCancelPreview = useCallback(() => {
+    if (previewAbortRef.current) {
+      previewAbortRef.current.abort();
+    }
     setIsPreviewActive(false);
     setPreviewResult(null);
     setStlUrl(`/api/cad/modify/file/${sessionId}/revisions/${activeRevision}.stl`);
@@ -408,8 +540,8 @@ export function ManualCadWorkspace({
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
         setActiveRevision(data.active_revision);
         setStlUrl(data.stl_url);
         setIsPreviewActive(false);
@@ -418,9 +550,12 @@ export function ManualCadWorkspace({
         setSelectedEntities([]);
         toast.success(`Switched to ${data.active_revision}`);
         refetchFeatures();
+        refetchModelParams();
+      } else {
+        toast.error(parseApiError(res, data).message);
       }
     } catch (err: any) {
-      toast.error('Rollback failed');
+      toast.error(err.message || 'Rollback failed');
     } finally {
       setIsLoading(false);
     }
@@ -458,6 +593,7 @@ export function ManualCadWorkspace({
           setContextMenu(null);
           return;
         }
+
         if (activeTool !== 'select') {
           if (isPreviewActive) {
             handleCancelPreview();
@@ -503,9 +639,14 @@ export function ManualCadWorkspace({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error?.message || 'Commit failed');
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        const errorDiag = parseApiError(res, data);
+        setPreviewResult({
+          error_diagnostic: { code: errorDiag.code, message: errorDiag.message },
+        });
+        toast.error(errorDiag.message);
+        return;
       }
 
       setActiveRevision(data.new_revision);
@@ -518,6 +659,7 @@ export function ManualCadWorkspace({
       toast.success(`Committed revision ${data.new_revision}`);
       await fetchHistory();
       refetchFeatures();
+      refetchModelParams();
     } catch (err: any) {
       toast.error(err.message || 'Failed to commit revision');
     } finally {
@@ -538,15 +680,16 @@ export function ManualCadWorkspace({
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
         setActiveRevision(data.final_revision);
         setStlUrl(data.stl_url);
         toast.success(`Operation removed: recomputed to ${data.final_revision}`);
         await fetchHistory();
         refetchFeatures();
+        refetchModelParams();
       } else {
-        throw new Error(data.error?.message || 'Recompute failed');
+        throw new Error(parseApiError(res, data).message);
       }
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete operation');
@@ -641,6 +784,7 @@ export function ManualCadWorkspace({
               onHoverEntity={setHoveredEntity}
               selectionMode={selectionMode}
               highlightedFaceIds={highlightedFaceIds}
+              onHighlightFaces={setHighlightedFaceIds}
               detectedFeatures={detectedFeatures}
             />
           </CadViewport>
@@ -733,7 +877,7 @@ export function ManualCadWorkspace({
 
           <div style={{ width: 1, height: 18, background: 'var(--mcad-border)' }} />
 
-          {/* Segmented control: Model | Face | Edge (with symbols) */}
+          {/* Segmented control: Model | Feature | Face | Edge (with symbols) */}
           <div className="mcad-seg">
             <button
               type="button"
@@ -744,6 +888,16 @@ export function ManualCadWorkspace({
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 32, padding: '0 8px' }}
             >
               <Box size={13} strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              data-on={selectionMode === 'feature'}
+              onClick={() => handleSetSelectionMode('feature')}
+              title="Select feature"
+              aria-label="Select feature"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 32, padding: '0 8px' }}
+            >
+              <Sliders size={13} strokeWidth={2} />
             </button>
             <button
               type="button"
@@ -962,7 +1116,7 @@ export function ManualCadWorkspace({
               selectedEntity={selectedEntity}
               activeTool={activeTool}
               params={params}
-              setParams={setParams}
+              setParams={handleUpdateParams}
               onPreview={handlePreview}
               onCancelPreview={handleCancelPreview}
               onCommit={handleCommit}
@@ -978,6 +1132,10 @@ export function ManualCadWorkspace({
               onRefetchFeatures={refetchFeatures}
               onHighlightFaces={setHighlightedFaceIds}
               selectionMode={selectionMode}
+              ctx={geometryContext}
+              modelParams={modelParams}
+              isLoadingModelParams={isLoadingModelParams}
+              onRefetchModelParams={refetchModelParams}
             />
           </div>
         </div>

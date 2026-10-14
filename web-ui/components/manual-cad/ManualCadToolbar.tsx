@@ -26,6 +26,7 @@ import {
   Trash2,
   Box,
   Slash,
+  Sliders,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -35,6 +36,7 @@ import {
 
 export type CADToolType =
   | 'select' | 'fillet' | 'chamfer' | 'hole' | 'pocket' | 'pad' | 'measure' | 'edit_feature'
+  | 'transform'
   // Body-level editing
   | 'move' | 'rotate' | 'scale' | 'mirror' | 'align'
   | 'primitive' | 'shell' | 'offset' | 'split'
@@ -46,8 +48,8 @@ interface ManualCadToolbarProps {
   activeTool: CADToolType;
   setActiveTool: (tool: CADToolType) => void;
   selectedEntity: any | null;
-  selectionMode?: 'body' | 'face' | 'edge';
-  setSelectionMode?: (mode: 'body' | 'face' | 'edge') => void;
+  selectionMode?: 'body' | 'feature' | 'face' | 'edge';
+  setSelectionMode?: (mode: 'body' | 'feature' | 'face' | 'edge') => void;
   /** Ref of the workspace container, so shortcuts are scoped to it */
   workspaceRef?: React.RefObject<HTMLElement | null>;
 }
@@ -273,11 +275,11 @@ export function ManualCadToolbar({
         overflow: 'visible',
       }}
     >
-      {/* Top Mode Filter Switcher: 3D Model | Face | Edge */}
+      {/* Top Mode Filter Switcher: 3D Model | Feature | Face | Edge */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(4, 1fr)',
           gap: 2,
           padding: 2.5,
           background: 'var(--mcad-input)',
@@ -304,7 +306,27 @@ export function ManualCadToolbar({
             transition: 'background 0.15s, color 0.15s',
           }}
         >
-          <Box size={14} strokeWidth={2} />
+          <Box size={13} strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectionMode?.('feature')}
+          title="Feature Selection"
+          aria-label="Feature"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '5px 0',
+            borderRadius: 5,
+            border: 'none',
+            cursor: 'pointer',
+            background: effectiveMode === 'feature' ? 'var(--mcad-accent)' : 'transparent',
+            color: effectiveMode === 'feature' ? '#fff' : 'var(--mcad-text-secondary)',
+            transition: 'background 0.15s, color 0.15s',
+          }}
+        >
+          <Sliders size={13} strokeWidth={2} />
         </button>
         <button
           type="button"
@@ -344,7 +366,7 @@ export function ManualCadToolbar({
             transition: 'background 0.15s, color 0.15s',
           }}
         >
-          <Slash size={14} strokeWidth={2.5} />
+          <Slash size={13} strokeWidth={2.5} />
         </button>
       </div>
 

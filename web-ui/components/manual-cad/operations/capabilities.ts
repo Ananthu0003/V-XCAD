@@ -123,8 +123,25 @@ export const CAPABILITY_MATRIX: Record<CADToolType | 'edit_feature', EntityClass
   fillet: ['edge.linear', 'edge.circular', 'edge.other'],
   chamfer: ['edge.linear', 'edge.circular', 'edge.other'],
   edit_feature: [
+    'body',
+    'face.planar',
     'face.cylindrical',
     'edge.circular',
+    'feature.hole',
+    'feature.boss',
+    'feature.pocket',
+    'feature.slot',
+    'feature.fillet',
+    'feature.chamfer',
+    'feature.other',
+  ],
+  transform: [
+    'body',
+    'face.planar',
+    'face.cylindrical',
+    'edge.linear',
+    'edge.circular',
+    'edge.other',
     'feature.hole',
     'feature.boss',
     'feature.pocket',
@@ -200,7 +217,8 @@ export const OPERATION_REQUIREMENTS: Record<CADToolType | 'edit_feature', string
   pad: 'Select a planar face',
   fillet: 'Select an edge',
   chamfer: 'Select an edge',
-  edit_feature: 'Select a cylindrical face or feature',
+  edit_feature: 'Select a face, feature, or the 3D model to edit dimensions',
+  transform: 'Select the 3D model, face, or feature to transform',
   push_pull: 'Select a planar face',
   round_face_edges: 'Select a planar face',
   delete_feature: 'Select a feature or cylindrical face',
@@ -241,7 +259,7 @@ export function getApplicableOperations(
   const classification = classifyEntity(entity, ctx);
   if (!classification) return [];
   if (classification === 'face.planar') {
-    return ['hole', 'pocket', 'pad', 'push_pull', 'round_face_edges', 'shell', 'split', 'mirror', 'align', 'primitive', 'measure'];
+    return ['hole', 'pocket', 'pad', 'edit_feature', 'push_pull', 'round_face_edges', 'shell', 'split', 'mirror', 'align', 'primitive', 'measure'];
   }
   if (classification === 'face.cylindrical') {
     return ['edit_feature', 'measure'];
@@ -260,7 +278,7 @@ export function getApplicableOperations(
   }
   if (classification === 'body') {
     return [
-      'move', 'rotate', 'scale', 'mirror', 'align', 'primitive',
+      'move', 'rotate', 'scale', 'transform', 'edit_feature', 'mirror', 'align', 'primitive',
       'shell', 'offset', 'split', 'linear_pattern', 'polar_pattern', 'heal', 'measure',
     ];
   }
@@ -474,11 +492,14 @@ export function getSelectionReadout(entity: TopologyEntity | null | undefined): 
           label: 'Diameter',
           value: `⌀${(entity.radius * 2).toFixed(1)} mm`,
         });
+        props.push({
+          label: 'Circumference',
+          value: `${(2 * Math.PI * entity.radius).toFixed(1)} mm`,
+        });
       } else {
         // Square, rectangular or planar boundary face: show Length, Width or Size
         if (entity.width != null && entity.height != null) {
-          props.push({ label: 'Width', value: `${entity.width.toFixed(1)} mm` });
-          props.push({ label: 'Length', value: `${entity.height.toFixed(1)} mm` });
+          props.push({ label: 'Size', value: `${entity.width.toFixed(1)} × ${entity.height.toFixed(1)} mm` });
         } else if (nonZeroDims.length >= 2) {
           props.push({ label: 'Length', value: `${nonZeroDims[0].toFixed(1)} mm` });
           props.push({ label: 'Width', value: `${nonZeroDims[1].toFixed(1)} mm` });
@@ -504,6 +525,10 @@ export function getSelectionReadout(entity: TopologyEntity | null | undefined): 
         props.push({
           label: 'Diameter',
           value: `⌀${(radius * 2).toFixed(2)} mm`,
+        });
+        props.push({
+          label: 'Circumference',
+          value: `${(2 * Math.PI * radius).toFixed(2)} mm`,
         });
       }
       // Length of cylinder

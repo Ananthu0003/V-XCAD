@@ -98,8 +98,11 @@ const seg = (
   key: string, label: string, def: string, options: FieldOption[],
   opts: Partial<OperationField> = {},
 ): OperationField => ({ key, label, type: 'segment', options, default: def, advanced: false, ...opts });
-const tog = (key: string, label: string, def: boolean): OperationField => ({
-  key, label, type: 'toggle', default: def, advanced: false,
+const tog = (
+  key: string, label: string, def: boolean,
+  opts: Partial<OperationField> = {},
+): OperationField => ({
+  key, label, type: 'toggle', default: def, advanced: false, ...opts,
 });
 const AXIS_OPTS: FieldOption[] = [
   { value: 'x', label: 'X' }, { value: 'y', label: 'Y' }, { value: 'z', label: 'Z' },
@@ -128,11 +131,59 @@ function bodyTool(
 }
 
 const BODY_TOOLS: Partial<Record<CADToolType, OperationDefinition>> = {
+  transform: bodyTool('transform', 'Transform', Move3d, 'T', [
+    seg('mode', 'Mode', 'move', [
+      { value: 'move', label: 'Move' },
+      { value: 'rotate', label: 'Rotate' },
+      { value: 'scale', label: 'Scale' },
+    ]),
+    // Move controls
+    seg('direction', 'Direction', 'xyz', [{ value: 'xyz', label: 'XYZ' }, { value: 'normal', label: 'Normal' }, { value: 'edge', label: 'Edge' }], {
+      visibleWhen: (v) => (v.mode || 'move') === 'move',
+    }),
+    num('dx', 'X', 10, { step: 1, visibleWhen: (v) => (v.mode || 'move') === 'move' && (v.direction || 'xyz') === 'xyz' }),
+    num('dy', 'Y', 0, { step: 1, visibleWhen: (v) => (v.mode || 'move') === 'move' && (v.direction || 'xyz') === 'xyz' }),
+    num('dz', 'Z', 0, { step: 1, visibleWhen: (v) => (v.mode || 'move') === 'move' && (v.direction || 'xyz') === 'xyz' }),
+    num('distance', 'Distance', 10, { step: 1, visibleWhen: (v) => (v.mode || 'move') === 'move' && (v.direction || 'xyz') !== 'xyz' }),
+    // Rotate controls
+    seg('axis', 'Axis', 'z', [
+      { value: 'x', label: 'X' },
+      { value: 'y', label: 'Y' },
+      { value: 'z', label: 'Z' },
+      { value: 'face_normal', label: 'Normal' },
+      { value: 'cylinder_axis', label: 'Cyl Axis' },
+      { value: 'edge', label: 'Edge' },
+    ], { visibleWhen: (v) => v.mode === 'rotate' }),
+    num('angle', 'Angle', 90, { unit: '°', step: 5, quickPresets: [45, 90, 180], visibleWhen: (v) => v.mode === 'rotate' }),
+    // Scale controls
+    seg('scale_type', 'Scale Type', 'uniform', [{ value: 'uniform', label: 'Uniform' }, { value: 'axis', label: 'Per axis' }], {
+      visibleWhen: (v) => v.mode === 'scale',
+    }),
+    num('factor', 'Factor', 1.5, { unit: '×', min: 0.001, max: 1000, step: 0.1, quickPresets: [0.5, 1.5, 2],
+      visibleWhen: (v) => v.mode === 'scale' && (v.scale_type || 'uniform') === 'uniform' }),
+    tog('lock_proportions', 'Lock proportions', true, { visibleWhen: (v) => v.mode === 'scale' && v.scale_type === 'axis' }),
+    num('sx', 'X scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'scale' && v.scale_type === 'axis' }),
+    num('sy', 'Y scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'scale' && v.scale_type === 'axis' }),
+    num('sz', 'Z scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'scale' && v.scale_type === 'axis' }),
+    // Pivot
+    seg('pivot', 'Pivot', 'center', PIVOT_OPTS, { visibleWhen: (v) => v.mode === 'rotate' || v.mode === 'scale' }),
+  ]),
   move: bodyTool('move', 'Move', Move3d, 'G', [
-    num('dx', 'X', 10, { step: 1 }), num('dy', 'Y', 0, { step: 1 }), num('dz', 'Z', 0, { step: 1 }),
+    seg('direction', 'Direction', 'xyz', [{ value: 'xyz', label: 'XYZ' }, { value: 'normal', label: 'Normal' }, { value: 'edge', label: 'Edge' }]),
+    num('dx', 'X', 10, { step: 1, visibleWhen: (v) => (v.direction || 'xyz') === 'xyz' }),
+    num('dy', 'Y', 0, { step: 1, visibleWhen: (v) => (v.direction || 'xyz') === 'xyz' }),
+    num('dz', 'Z', 0, { step: 1, visibleWhen: (v) => (v.direction || 'xyz') === 'xyz' }),
+    num('distance', 'Distance', 10, { step: 1, visibleWhen: (v) => (v.direction || 'xyz') !== 'xyz' }),
   ]),
   rotate: bodyTool('rotate', 'Rotate', RotateCw, 'R', [
-    seg('axis', 'Axis', 'z', AXIS_OPTS),
+    seg('axis', 'Axis', 'z', [
+      { value: 'x', label: 'X' },
+      { value: 'y', label: 'Y' },
+      { value: 'z', label: 'Z' },
+      { value: 'face_normal', label: 'Normal' },
+      { value: 'cylinder_axis', label: 'Cyl Axis' },
+      { value: 'edge', label: 'Edge' },
+    ]),
     num('angle', 'Angle', 90, { unit: '°', step: 5, quickPresets: [45, 90, 180] }),
     seg('pivot', 'Pivot', 'center', PIVOT_OPTS),
   ]),
@@ -140,6 +191,7 @@ const BODY_TOOLS: Partial<Record<CADToolType, OperationDefinition>> = {
     seg('mode', 'Mode', 'uniform', [{ value: 'uniform', label: 'Uniform' }, { value: 'axis', label: 'Per axis' }]),
     num('factor', 'Factor', 1.5, { unit: '×', min: 0.001, max: 1000, step: 0.1, quickPresets: [0.5, 1.5, 2],
       visibleWhen: (v) => (v.mode || 'uniform') === 'uniform' }),
+    tog('lock_proportions', 'Lock proportions', true, { visibleWhen: (v) => v.mode === 'axis' }),
     num('sx', 'X scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'axis' }),
     num('sy', 'Y scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'axis' }),
     num('sz', 'Z scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'axis' }),
@@ -344,7 +396,23 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         visibleWhen: (_v, e) => !e?.radius || e.radius > 8,
       },
     ],
-    toRequest: (values) => ({ ...values }),
+    toRequest: (values) => {
+      const pos = (typeof values.position === 'object' && values.position !== null)
+        ? values.position as { pos_x?: number; pos_y?: number }
+        : {};
+      return {
+        ...values,
+        pos_x: values.pos_x ?? pos.pos_x ?? 0,
+        pos_y: values.pos_y ?? pos.pos_y ?? 0,
+        diameter: Number(values.diameter ?? 6),
+        depth: values.hole_type === 'through' ? 100 : Number(values.depth ?? 10),
+        through: values.hole_type === 'through',
+        cbore_diameter: values.hole_type === 'counterbore' ? Number(values.cbore_diameter ?? 11) : undefined,
+        cbore_depth: values.hole_type === 'counterbore' ? Number(values.cbore_depth ?? 4) : undefined,
+        csink_diameter: values.hole_type === 'countersink' ? Number(values.csink_diameter ?? 11) : undefined,
+        csink_angle: values.hole_type === 'countersink' ? Number(values.csink_angle ?? 90) : undefined,
+      };
+    },
   },
 
   pocket: {
@@ -482,7 +550,24 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         visibleWhen: (v) => (v.profile || 'rectangle') !== 'circle',
       },
     ],
-    toRequest: (values) => ({ ...values }),
+    toRequest: (values) => {
+      const pos = (typeof values.position === 'object' && values.position !== null)
+        ? values.position as { pos_x?: number; pos_y?: number }
+        : {};
+      return {
+        ...values,
+        profile: values.profile || 'rectangle',
+        pos_x: values.pos_x ?? pos.pos_x ?? 0,
+        pos_y: values.pos_y ?? pos.pos_y ?? 0,
+        width: Number(values.width ?? 25),
+        height: Number(values.height ?? 18),
+        length: Number(values.length ?? 35),
+        diameter: Number(values.diameter ?? 25),
+        depth: Number(values.depth ?? 6),
+        corner_radius: Number(values.corner_radius ?? 0),
+        rotation_deg: Number(values.rotation_deg ?? 0),
+      };
+    },
   },
 
   pad: {
@@ -593,7 +678,23 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         advanced: true,
       },
     ],
-    toRequest: (values) => ({ ...values }),
+    toRequest: (values) => {
+      const pos = (typeof values.position === 'object' && values.position !== null)
+        ? values.position as { pos_x?: number; pos_y?: number }
+        : {};
+      return {
+        ...values,
+        profile: values.profile || 'rectangle',
+        pos_x: values.pos_x ?? pos.pos_x ?? 0,
+        pos_y: values.pos_y ?? pos.pos_y ?? 0,
+        width: Number(values.width ?? 20),
+        length: Number(values.length ?? 20),
+        diameter: Number(values.diameter ?? 20),
+        height: Number(values.height ?? 6),
+        corner_radius: Number(values.corner_radius ?? 0),
+        rotation_deg: Number(values.rotation_deg ?? 0),
+      };
+    },
   },
 
   fillet: {
@@ -619,7 +720,10 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         advanced: false,
       },
     ],
-    toRequest: (values) => ({ ...values }),
+    toRequest: (values) => ({
+      ...values,
+      radius: Number(values.radius ?? 2),
+    }),
   },
 
   chamfer: {
@@ -632,8 +736,20 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
     previewable: true,
     fields: [
       {
+        key: 'mode',
+        label: 'Chamfer Type',
+        type: 'segment',
+        options: [
+          { value: 'equal', label: 'Equal (d)' },
+          { value: 'two_distances', label: 'Two Dist (d1, d2)' },
+          { value: 'distance_angle', label: 'Dist × Angle' },
+        ],
+        default: 'equal',
+        advanced: false,
+      },
+      {
         key: 'distance',
-        label: 'Distance',
+        label: 'Distance (d1)',
         type: 'number',
         unit: 'mm',
         min: 0.1,
@@ -644,13 +760,41 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         quickPresets: [0.5, 1, 1.5, 2, 3],
         advanced: false,
       },
+      {
+        key: 'distance2',
+        label: 'Distance 2 (d2)',
+        type: 'number',
+        unit: 'mm',
+        min: 0.1,
+        step: 0.25,
+        default: 1.5,
+        advanced: false,
+        visibleWhen: (v) => v.mode === 'two_distances',
+      },
+      {
+        key: 'angle',
+        label: 'Angle',
+        type: 'number',
+        unit: '°',
+        min: 15,
+        max: 75,
+        step: 5,
+        default: 45,
+        advanced: false,
+        visibleWhen: (v) => v.mode === 'distance_angle',
+      },
     ],
-    toRequest: (values) => ({ ...values }),
+    toRequest: (values) => ({
+      distance: Number(values.distance ?? 1),
+      distance2: values.mode === 'two_distances' ? Number(values.distance2 ?? values.distance ?? 1) : undefined,
+      angle: values.mode === 'distance_angle' ? Number(values.angle ?? 45) : undefined,
+      ...values,
+    }),
   },
 
   edit_feature: {
     id: 'edit_feature',
-    label: 'Edit Feature',
+    label: 'Edit Dimensions',
     icon: Pencil,
     shortcut: 'X',
     appliesTo: CAPABILITY_MATRIX.edit_feature,
@@ -662,44 +806,156 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         label: 'Feature Type',
         type: 'segment',
         options: [
-          { value: 'hole', label: 'Hole' },
-          { value: 'boss', label: 'Boss' }
+          { value: 'auto', label: 'Auto' },
+          { value: 'cylinder', label: 'Cylinder' },
+          { value: 'rect', label: 'Rect / Box' },
+          { value: 'slot', label: 'Slot' },
         ],
-        default: 'hole',
-        initial: (ctx) => ctx.cylindrical?.kind || 'hole',
+        default: 'auto',
+        initial: (ctx) => {
+          if (ctx.cylindrical) return 'cylinder';
+          if (ctx.planar?.rect_length || ctx.planar?.feature_kind === 'rect') return 'rect';
+          return 'rect';
+        },
         advanced: false,
-        // Make it readonly or hidden? It's just displaying what we are editing.
       },
+      // Cylindrical dimensions
       {
         key: 'diameter',
         label: 'Diameter (⌀)',
         type: 'number',
         unit: 'mm',
         min: 0.1,
-        step: 0.1,
+        step: 0.5,
         default: 10,
-        initial: (ctx) => ctx.cylindrical?.diameter || 10,
+        initial: (ctx) => ctx.cylindrical?.diameter ?? 10,
         advanced: false,
+        visibleWhen: (v, e) => (v.kind === 'cylinder' || (v.kind === 'auto' && e?.surface_type === 'cylinder')),
       },
       {
         key: 'depth',
-        label: 'Depth/Height',
+        label: 'Depth / Height',
         type: 'number',
         unit: 'mm',
         min: 0.1,
         step: 0.5,
         default: 10,
-        initial: (ctx) => ctx.cylindrical?.length || 10,
+        initial: (ctx) => ctx.cylindrical?.length ?? ctx.planar?.material_depth ?? 10,
         advanced: false,
-        visibleWhen: (_v, _entity) => {
-           // We'll hide this if it's a through-hole (which we can check if we had access to ctx in visibleWhen)
-           // But since visibleWhen doesn't have ctx directly, we'll keep it visible unless we add ctx to visibleWhen.
-           return true;
-        }
+        visibleWhen: (v, e) => (v.kind === 'cylinder' || (v.kind === 'auto' && e?.surface_type === 'cylinder')),
+      },
+      // Planar / Box dimensions
+      {
+        key: 'length',
+        label: 'Length',
+        type: 'number',
+        unit: 'mm',
+        min: 0.1,
+        step: 1,
+        default: 20,
+        initial: (ctx) => ctx.planar?.rect_length ?? ctx.planar?.extents_u ?? 20,
+        advanced: false,
+        visibleWhen: (v, e) => (v.kind === 'rect' || v.kind === 'slot' || (v.kind === 'auto' && e?.surface_type !== 'cylinder')),
+      },
+      {
+        key: 'width',
+        label: 'Width',
+        type: 'number',
+        unit: 'mm',
+        min: 0.1,
+        step: 1,
+        default: 20,
+        initial: (ctx) => ctx.planar?.rect_width ?? ctx.planar?.extents_v ?? 20,
+        advanced: false,
+        visibleWhen: (v, e) => (v.kind === 'rect' || v.kind === 'slot' || (v.kind === 'auto' && e?.surface_type !== 'cylinder')),
+      },
+      {
+        key: 'height',
+        label: 'Height / Depth',
+        type: 'number',
+        unit: 'mm',
+        min: 0.1,
+        step: 1,
+        default: 10,
+        initial: (ctx) => ctx.planar?.material_depth ?? 10,
+        advanced: false,
+        visibleWhen: (v, e) => (v.kind === 'rect' || v.kind === 'slot' || (v.kind === 'auto' && e?.surface_type !== 'cylinder')),
+      },
+      {
+        key: 'area',
+        label: 'Area',
+        type: 'number',
+        unit: 'mm²',
+        min: 0.01,
+        step: 5,
+        default: 400,
+        initial: (ctx) => {
+          if (ctx.area) return ctx.area;
+          const l = ctx.planar?.rect_length ?? ctx.planar?.extents_u ?? 20;
+          const w = ctx.planar?.rect_width ?? ctx.planar?.extents_v ?? 20;
+          return l * w;
+        },
+        advanced: false,
+        visibleWhen: (v, e) => (v.kind === 'rect' || (v.kind === 'auto' && e?.surface_type !== 'cylinder')),
+      },
+      {
+        key: 'lock_aspect_ratio',
+        label: 'Lock aspect ratio',
+        type: 'toggle',
+        default: true,
+        advanced: false,
+        visibleWhen: (v, e) => (v.kind === 'rect' || (v.kind === 'auto' && e?.surface_type !== 'cylinder')),
+      },
+      {
+        key: 'anchor',
+        label: 'Anchor',
+        type: 'segment',
+        options: [
+          { value: 'center', label: 'Center' },
+          { value: 'corner', label: 'Corner' },
+          { value: 'edge', label: 'Edge' },
+        ],
+        default: 'center',
+        advanced: false,
+        visibleWhen: (v, e) => (v.kind === 'rect' || (v.kind === 'auto' && e?.surface_type !== 'cylinder')),
+      },
+      {
+        key: 'corner_radius',
+        label: 'Corner R',
+        type: 'number',
+        unit: 'mm',
+        min: 0,
+        step: 0.5,
+        default: 0,
+        initial: (ctx) => ctx.planar?.corner_radius ?? 0,
+        advanced: true,
+        visibleWhen: (v, e) => (v.kind === 'rect' || (v.kind === 'auto' && e?.surface_type !== 'cylinder')),
       },
     ],
-    toRequest: (values) => ({ ...values }),
+    toRequest: (values, selection) => {
+      const isCyl = selection?.surface_type === 'cylinder' || values.kind === 'cylinder' || values.kind === 'hole' || values.kind === 'boss';
+      if (isCyl) {
+        return {
+          feature_type: 'cylinder',
+          kind: values.cyl_kind || (selection as any)?.kind || 'hole',
+          diameter: Number(values.diameter ?? 10),
+          depth: Number(values.depth ?? 10),
+        };
+      }
+      return {
+        feature_type: 'planar',
+        kind: values.kind || 'rect',
+        length: Number(values.length ?? 20),
+        width: Number(values.width ?? 20),
+        height: Number(values.height ?? 10),
+        area: Number(values.area ?? (Number(values.length ?? 20) * Number(values.width ?? 20))),
+        anchor: values.anchor || 'center',
+        corner_radius: Number(values.corner_radius ?? 0),
+        lock_aspect_ratio: values.lock_aspect_ratio !== false,
+      };
+    },
   },
+
 
   measure: {
     id: 'measure',
@@ -792,7 +1048,7 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
   },
 
   ...(BODY_TOOLS as Record<
-    'move' | 'rotate' | 'scale' | 'mirror' | 'align' | 'primitive' | 'shell' | 'offset' | 'split' | 'linear_pattern' | 'polar_pattern' | 'heal',
+    'move' | 'rotate' | 'scale' | 'transform' | 'mirror' | 'align' | 'primitive' | 'shell' | 'offset' | 'split' | 'linear_pattern' | 'polar_pattern' | 'heal',
     OperationDefinition
   >),
 };
