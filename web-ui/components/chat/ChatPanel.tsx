@@ -173,7 +173,7 @@ export function ChatPanel({
 
 	return (
 		<>
-			<div className="flex h-full flex-col bg-[var(--ui-panel)] select-none text-[var(--ui-text-primary)]">
+			<div className="flex h-full min-h-0 flex-col bg-[var(--ui-panel)] select-none text-[var(--ui-text-primary)] overflow-hidden">
 				{/* Header */}
 				<div className="flex h-12 shrink-0 items-center justify-between px-4 border-b border-[var(--ui-border)] bg-[var(--ui-panel)]">
 					<div className="flex items-center gap-2.5">
@@ -237,7 +237,7 @@ export function ChatPanel({
 				/>
 
 				{/* Chat Messages Stream */}
-				<div className="flex-1 overflow-y-auto px-4 py-4 space-y-3.5 no-scrollbar">
+				<div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3.5 no-scrollbar">
 					{messages.length === 0 ? (
 						<div className="flex flex-col items-center justify-center h-full text-center px-4 space-y-5 max-w-xs mx-auto animate-in fade-in duration-300">
 							<div className="flex size-12 items-center justify-center rounded-2xl bg-[var(--ui-input)] border border-[var(--ui-border-ctrl)] text-[var(--ui-accent)] shadow-sm">
@@ -249,7 +249,7 @@ export function ChatPanel({
 									Parametric CAD Copilot
 								</h3>
 								<p className="text-[11px] text-[var(--ui-text-muted)] leading-relaxed">
-									Upload a 2D engineering blueprint or enter parametric CAD prompts below.
+									Describe your mechanical part in natural language or attach a 3D STEP solid model to modify.
 								</p>
 							</div>
 
@@ -273,7 +273,7 @@ export function ChatPanel({
 
 								<button
 									type="button"
-									onClick={() => setPrompt('Convert attached 2D blueprint drawing into a fully parametric 3D model.')}
+									onClick={() => setPrompt('Design a mounting bracket with 4 counterbore holes and center cut-out.')}
 									className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-input)] hover:border-[var(--ui-border-strong)] text-left text-xs transition-all flex items-center justify-between gap-2 cursor-pointer group shadow-sm"
 								>
 									<div className="flex items-center gap-2.5 min-w-0">
@@ -281,7 +281,7 @@ export function ChatPanel({
 											<Ruler className="size-3.5" />
 										</div>
 										<span className="truncate font-medium text-[11.5px] text-[var(--ui-text-primary)]">
-											Convert Blueprint to 3D CAD
+											Mounting Bracket with Holes
 										</span>
 									</div>
 									<ChevronRight className="size-3.5 text-[var(--ui-text-muted)] group-hover:text-[var(--ui-text-primary)] shrink-0" />
@@ -323,7 +323,7 @@ export function ChatPanel({
 				</div>
 
 				{/* Floating Command Input Dock */}
-				<div className="p-3 border-t border-[var(--ui-border)] bg-[var(--ui-panel)]">
+				<div className="shrink-0 p-3 border-t border-[var(--ui-border)] bg-[var(--ui-panel)]">
 					<form onSubmit={onSubmit} className="flex flex-col gap-2">
 						{/* Target Feature Pill (When Model Active) */}
 						{hasActiveModel && (
@@ -509,21 +509,21 @@ export function ChatPanel({
 									className={`ui-btn ui-btn--ghost !h-7 !w-7 !p-0 cursor-pointer flex items-center justify-center ${
 										selectedFile ? 'border-[var(--ui-accent)] text-[var(--ui-accent)]' : ''
 									}`}
-									title="Attach blueprint (PDF/PNG/JPG) or 3D solid model (.STEP, .STP)"
+									title="Attach 3D CAD solid model (.STEP, .STP)"
 								>
 									<Paperclip className="size-3.5" />
 									<input
 										ref={fileInputRef}
 										type="file"
-										accept="image/*,.pdf,.step,.stp"
+										accept=".step,.stp"
 										className="hidden"
 										onChange={(e) => {
 											const file = e.target.files?.[0] || null;
 											if (file) {
 												const isStep = file.name.toLowerCase().endsWith('.step') || file.name.toLowerCase().endsWith('.stp');
-												const maxLimit = isStep ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
+												const maxLimit = 50 * 1024 * 1024;
 												if (file.size > maxLimit) {
-													alert(`File size exceeds the ${isStep ? '50MB' : '10MB'} limit.`);
+													alert('File size exceeds the 50MB limit.');
 													e.target.value = '';
 													return;
 												}

@@ -64,10 +64,11 @@ const getAlignmentQuaternion = (dir: Vector3): Quaternion => {
     return new Quaternion().setFromAxisAngle(axis, radians);
 };
 
-function isRenderable(a: AnnotationEntry): boolean {
+function isRenderable(a: AnnotationEntry, key?: string): boolean {
     if (a.isEps || a.isDegenerate) return false;
 
-    const type = a.type ?? (a.p1 && a.p2 ? 'height' : a.center ? 'diameter' : 'height');
+    const isDiaToken = key ? /(?:diameter|diam|dia|bore|shaft|cylinder|cyl|hole|radius|rad|cbore|csink)/i.test(key) : false;
+    const type = a.type ?? (a.type === 'diameter' ? 'diameter' : isDiaToken && a.center ? 'diameter' : a.p1 && a.p2 ? 'height' : 'height');
 
     if (type === 'diameter' || type === 'chamfer') {
         if (!a.center) return false;
@@ -398,7 +399,7 @@ export function DimensionOverlay({
     const hasAnyActive = activeParameter !== null || targetPortion !== null;
 
     const renderableEntries = useMemo(
-        () => annotations ? Object.entries(annotations).filter(([, a]) => isRenderable(a)) : [],
+        () => annotations ? Object.entries(annotations).filter(([key, a]) => isRenderable(a, key)) : [],
         [annotations]
     );
 
@@ -407,9 +408,10 @@ export function DimensionOverlay({
     return (
         <group>
             {renderableEntries.map(([key, annotation]) => {
+                const isDiaToken = /(?:diameter|diam|dia|bore|shaft|cylinder|cyl|hole|radius|rad|cbore|csink)/i.test(key);
                 const type = annotation.type
-                    ?? (annotation.p1 && annotation.p2 ? 'height'
-                        : annotation.center ? 'diameter'
+                    ?? (annotation.type === 'diameter' ? 'diameter'
+                        : isDiaToken && annotation.center ? 'diameter'
                         : 'height');
 
                 const isDirectActive = key === activeParameter;

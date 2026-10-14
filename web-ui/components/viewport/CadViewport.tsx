@@ -626,7 +626,8 @@ export function CadViewport({
 				</div>
 			)}
 
-			<header className={`flex h-12 items-center justify-between px-3 sm:px-4 z-30 gap-2 ${workflowStage === 'manual_cad' ? 'bg-transparent' : 'border-b border-border/40 bg-background/50 backdrop-blur-2xl'}`}>
+			{workflowStage !== 'manual_cad' && (
+				<header className="flex h-12 items-center justify-between px-3 sm:px-4 z-30 gap-2 border-b border-border/40 bg-background/50 backdrop-blur-2xl">
 				<div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
 					{projectName && (
 						<button
@@ -768,6 +769,7 @@ export function CadViewport({
 					)}
 				</div>
 			</header>
+			)}
 
 			<div 
 				className="relative flex-1"
@@ -820,7 +822,13 @@ export function CadViewport({
 									: 'calc((100% + 36px) / 2)',
 							transform: 'translateX(-50%)',
 						}}
-						className={`absolute z-20 flex items-center gap-2 bg-background/90 backdrop-blur-xl border border-border/60 rounded-full px-4 py-2 shadow-2xl ring-1 ring-white/5 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-32' : 'bottom-24'}`}
+						className={`absolute z-20 flex items-center gap-2 bg-background/90 backdrop-blur-xl border border-border/60 rounded-full px-4 py-2 shadow-2xl ring-1 ring-white/5 transition-all ${
+							workflowStage === 'manual_cad'
+								? 'bottom-6'
+								: workflowStage === 'cam' || workflowStage === 'gcode'
+								? 'bottom-28'
+								: 'bottom-16'
+						}`}
 					>
 						<button
 							onClick={() => setViewMode('both')}
@@ -1313,7 +1321,7 @@ export function CadViewport({
 									: 'calc((100% + 36px) / 2)',
 							transform: 'translateX(-50%)',
 						}}
-						className={`absolute z-10 flex flex-col items-center gap-2 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-24' : 'bottom-2'}`}
+						className={`absolute z-10 flex flex-col items-center gap-2 transition-all pointer-events-none ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-20' : 'bottom-1'}`}
 					>
 						{toolpaths && toolpaths.length > 0 && !hasValidToolpaths && (
 							<div className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-card/90 px-4 py-1.5 backdrop-blur-md shadow-xl shadow-black/40">

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   MousePointer2,
   CircleDot,
@@ -23,6 +24,8 @@ import {
   Wrench,
   Settings2,
   Trash2,
+  Box,
+  Slash,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -220,6 +223,12 @@ export function ManualCadToolbar({
     setActiveTool(t.id);
   };
 
+  const [hoveredTool, setHoveredTool] = useState<{
+    tool: ToolDef;
+    rect: DOMRect;
+    enabled: boolean;
+  } | null>(null);
+
   // Keyboard shortcuts – mapped to currently visible tools
   const shortcutMap = useRef<Record<string, ToolDef>>({});
   useEffect(() => {
@@ -256,7 +265,13 @@ export function ManualCadToolbar({
     <nav
       aria-label="CAD Tools"
       className="mcad-rail flex flex-col items-stretch select-none"
-      style={{ width: 112, padding: '10px 8px 14px 8px', gap: 0, overflow: 'visible' }}
+      style={{
+        width: 108,
+        boxSizing: 'border-box',
+        padding: '10px 8px 14px 8px',
+        gap: 0,
+        overflow: 'visible',
+      }}
     >
       {/* Top Mode Filter Switcher: 3D Model | Face | Edge */}
       <div
@@ -274,62 +289,62 @@ export function ManualCadToolbar({
         <button
           type="button"
           onClick={() => setSelectionMode?.('body')}
-          title="Filter to 3D Model tools"
+          title="3D Model (Body)"
+          aria-label="3D Model"
           style={{
-            fontSize: 10,
-            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             padding: '5px 0',
             borderRadius: 5,
             border: 'none',
             cursor: 'pointer',
-            textAlign: 'center',
             background: effectiveMode === 'body' ? 'var(--mcad-accent)' : 'transparent',
             color: effectiveMode === 'body' ? '#fff' : 'var(--mcad-text-secondary)',
             transition: 'background 0.15s, color 0.15s',
-            whiteSpace: 'nowrap',
           }}
         >
-          Model
+          <Box size={14} strokeWidth={2} />
         </button>
         <button
           type="button"
           onClick={() => setSelectionMode?.('face')}
-          title="Filter to Face tools"
+          title="Face Selection"
+          aria-label="Face"
           style={{
-            fontSize: 10,
-            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             padding: '5px 0',
             borderRadius: 5,
             border: 'none',
             cursor: 'pointer',
-            textAlign: 'center',
             background: effectiveMode === 'face' ? 'var(--mcad-accent)' : 'transparent',
             color: effectiveMode === 'face' ? '#fff' : 'var(--mcad-text-secondary)',
             transition: 'background 0.15s, color 0.15s',
-            whiteSpace: 'nowrap',
           }}
         >
-          Face
+          <Square size={13} strokeWidth={2} />
         </button>
         <button
           type="button"
           onClick={() => setSelectionMode?.('edge')}
-          title="Filter to Edge tools"
+          title="Edge Selection"
+          aria-label="Edge"
           style={{
-            fontSize: 10,
-            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             padding: '5px 0',
             borderRadius: 5,
             border: 'none',
             cursor: 'pointer',
-            textAlign: 'center',
             background: effectiveMode === 'edge' ? 'var(--mcad-accent)' : 'transparent',
             color: effectiveMode === 'edge' ? '#fff' : 'var(--mcad-text-secondary)',
             transition: 'background 0.15s, color 0.15s',
-            whiteSpace: 'nowrap',
           }}
         >
-          Edge
+          <Slash size={14} strokeWidth={2.5} />
         </button>
       </div>
 
@@ -368,7 +383,7 @@ export function ManualCadToolbar({
               const enabled = isToolEnabled(t);
               const tooltip = getTooltip(t);
               return (
-                <div key={t.id} className="relative group flex items-center justify-center">
+                <div key={t.id} className="flex items-center justify-center">
                   <button
                     type="button"
                     className="mcad-tool"
@@ -378,19 +393,66 @@ export function ManualCadToolbar({
                     aria-label={tooltip}
                     aria-pressed={isActive}
                     onClick={() => handleToolClick(t)}
+                    onMouseEnter={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setHoveredTool({ tool: t, rect, enabled });
+                    }}
+                    onMouseLeave={() => setHoveredTool(null)}
                   >
                     <Icon size={19} strokeWidth={1.75} />
                   </button>
-                  <div role="tooltip" className="mcad-tip" style={{ zIndex: 100, fontSize: 11.5, padding: '6px 10px' }}>
-                    <span>{enabled ? t.label : tooltip}</span>
-                    {enabled && <span className="mcad-kbd" style={{ fontSize: 10 }}>{t.shortcut}</span>}
-                  </div>
                 </div>
               );
             })}
           </div>
         </React.Fragment>
       ))}
+
+      {/* Floating Tooltip Portaled Directly to document.body */}
+      {typeof document !== 'undefined' && hoveredTool && createPortal(
+        <div
+          role="tooltip"
+          style={{
+            position: 'fixed',
+            left: 136,
+            top: hoveredTool.rect.top + (hoveredTool.rect.height / 2),
+            transform: 'translateY(-50%)',
+            background: 'rgba(15, 18, 24, 0.96)',
+            border: '1px solid rgba(255, 255, 255, 0.16)',
+            borderRadius: 8,
+            padding: '5px 10px',
+            fontSize: 11.5,
+            fontWeight: 500,
+            fontFamily: 'var(--font-sans)',
+            color: '#ffffff',
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+            zIndex: 999999,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.08)',
+            animation: 'fadeIn 0.12s ease-out',
+          }}
+        >
+          <span>{hoveredTool.enabled ? hoveredTool.tool.label : getTooltip(hoveredTool.tool)}</span>
+          {hoveredTool.enabled && (
+            <span
+              style={{
+                font: '600 10px/1 var(--font-mono)',
+                padding: '3px 5px',
+                borderRadius: 4,
+                color: '#a1a1aa',
+                background: 'rgba(255,255,255,0.1)',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              {hoveredTool.tool.shortcut}
+            </span>
+          )}
+        </div>,
+        document.body
+      )}
     </nav>
   );
 }

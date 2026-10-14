@@ -16,6 +16,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
+ARG CACHEBUST=6
 COPY . .
 
 # Generate Prisma client and Next.js build (needs placeholder envs at build time)

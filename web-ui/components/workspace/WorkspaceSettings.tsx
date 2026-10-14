@@ -47,8 +47,8 @@ export function WorkspaceSettings({
   };
   
   return (
-    <div className="flex flex-col font-sans h-full w-full bg-transparent">
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+    <div className="flex flex-col font-sans h-full min-h-0 w-full bg-transparent overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-6">
         {/* Extracted Parameters */}
         <div className="ui-section">
           <div className="ui-section-title">

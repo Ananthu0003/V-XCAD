@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { ManualCadToolbar, CADToolType } from './ManualCadToolbar';
 import { TopologyPropertiesPanel } from './TopologyPropertiesPanel';
-import { HistoryTimelineBar, HistoryOperation } from './HistoryTimelineBar';
+import type { HistoryOperation } from './HistoryTimelineBar';
 import { CadViewport } from '@/components/viewport/CadViewport';
 import { SubShapeRaycaster, findFaceFromHit } from './SubShapeRaycaster';
 import { StlMesh } from '@/components/viewport/StlMesh';
@@ -15,9 +15,16 @@ import { useDetectedFeatures, DetectedFeature } from './useDetectedFeatures';
 import { StageSwitcher } from '@/components/workspace/StageSwitcher';
 import {
   Loader2,
-  ArrowUp,
   Maximize2,
   Home,
+  Undo2,
+  Redo2,
+  Box,
+  Square,
+  Slash,
+  Download,
+  ChevronDown,
+  Layers,
 } from 'lucide-react';
 
 /** Tools that act on the whole model; a selected planar face is optional input for some. */
@@ -27,20 +34,12 @@ const BODY_TOOLS = new Set<CADToolType>([
 ]);
 const FACE_OPTIONAL_BODY_TOOLS = new Set<CADToolType>(['mirror', 'split', 'align', 'shell', 'primitive']);
 
-interface PromptDockProps {
-  value: string;
-  onChange: (v: string) => void;
-  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
-  isGenerating: boolean;
-}
-
 interface ManualCadWorkspaceProps {
   sessionId: string;
   initialStlUrl?: string | null;
   initialStepUrl?: string | null;
   onProceedToCam?: () => void;
   onSwitchStage?: (stage: 'cad' | 'manual_cad' | 'cam') => void;
-  promptDock?: PromptDockProps;
 }
 
 export function ManualCadWorkspace({
@@ -49,7 +48,6 @@ export function ManualCadWorkspace({
   initialStepUrl,
   onProceedToCam,
   onSwitchStage,
-  promptDock,
 }: ManualCadWorkspaceProps) {
   const [activeRevision, setActiveRevision] = useState<string>('rev_000');
   const [activeTool, setActiveTool] = useState<CADToolType>('select');
@@ -68,6 +66,35 @@ export function ManualCadWorkspace({
   const [stlUrl, setStlUrl] = useState<string | null>(initialStlUrl || null);
   const [hoveredEntity, setHoveredEntity] = useState<any | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entity: any } | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handleClick);
+    return () => window.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const handleDownloadStl = () => {
+    if (stlUrl) {
+      const a = document.createElement('a');
+      a.href = stlUrl;
+      a.download = `cad_${sessionId}.stl`;
+      a.click();
+    }
+  };
+
+  const handleDownloadStep = () => {
+    const target = initialStepUrl || `/api/outputs/cad_${sessionId}.step`;
+    const a = document.createElement('a');
+    a.href = target;
+    a.download = `cad_${sessionId}.step`;
+    a.click();
+  };
 
   // Sync stlUrl when initialStlUrl prop arrives or updates
   useEffect(() => {
@@ -78,7 +105,6 @@ export function ManualCadWorkspace({
 
   // Scoped workspace ref for keyboard shortcuts
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Hook for B-Rep detected features (parameter extraction)
   const {
@@ -369,9 +395,64 @@ export function ManualCadWorkspace({
     toast.info('Preview discarded');
   }, [sessionId, activeRevision]);
 
-  // Escape key cancels active tool / task panel or closes context menu
+  // Rollback
+  const handleRollback = async (targetRev: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/cad/modify/rollback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          target_revision: targetRev,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setActiveRevision(data.active_revision);
+        setStlUrl(data.stl_url);
+        setIsPreviewActive(false);
+        setPreviewResult(null);
+        setSelectedEntity(null);
+        setSelectedEntities([]);
+        toast.success(`Switched to ${data.active_revision}`);
+        refetchFeatures();
+      }
+    } catch (err: any) {
+      toast.error('Rollback failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Undo / Redo
+  const activeIdx = history.findIndex((h) => h.output_revision === activeRevision);
+  const canUndo = activeIdx > 0;
+  const canRedo = activeIdx >= 0 && activeIdx < history.length - 1;
+
+  const handleUndo = () => {
+    if (canUndo) {
+      const prevRev = history[activeIdx - 1].output_revision || 'rev_000';
+      handleRollback(prevRev);
+    }
+  };
+
+  const handleRedo = () => {
+    if (canRedo) {
+      const nextRev = history[activeIdx + 1].output_revision;
+      if (nextRev) handleRollback(nextRev);
+    }
+  };
+
+  // Keyboard shortcuts (Escape to cancel/close, Ctrl+Z / Ctrl+Y for Undo / Redo)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
       if (e.key === 'Escape') {
         if (contextMenu) {
           setContextMenu(null);
@@ -383,11 +464,24 @@ export function ManualCadWorkspace({
           }
           setActiveTool('select');
         }
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [contextMenu, activeTool, isPreviewActive, handleCancelPreview]);
+  }, [contextMenu, activeTool, isPreviewActive, handleCancelPreview, canUndo, canRedo, activeIdx, history]);
 
   // Commit Operation
   const handleCommit = async () => {
@@ -431,37 +525,6 @@ export function ManualCadWorkspace({
     }
   };
 
-  // Rollback
-  const handleRollback = async (targetRev: string) => {
-    setIsLoading(true);
-    try {
-      const res = await fetch('/api/cad/modify/rollback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sessionId,
-          target_revision: targetRev,
-        }),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setActiveRevision(data.active_revision);
-        setStlUrl(data.stl_url);
-        setIsPreviewActive(false);
-        setPreviewResult(null);
-        setSelectedEntity(null);
-        setSelectedEntities([]);
-        toast.success(`Switched to ${data.active_revision}`);
-        refetchFeatures();
-      }
-    } catch (err: any) {
-      toast.error('Rollback failed');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // Delete Operation and Recompute
   const handleDeleteOperation = async (opId: string) => {
     setIsLoading(true);
@@ -492,46 +555,7 @@ export function ManualCadWorkspace({
     }
   };
 
-  // Undo / Redo
-  const activeIdx = history.findIndex((h) => h.output_revision === activeRevision);
-  const canUndo = activeIdx > 0;
-  const canRedo = activeIdx >= 0 && activeIdx < history.length - 1;
 
-  const handleUndo = () => {
-    if (canUndo) {
-      const prevRev = history[activeIdx - 1].output_revision || 'rev_000';
-      handleRollback(prevRev);
-    }
-  };
-
-  const handleRedo = () => {
-    if (canRedo) {
-      const nextRev = history[activeIdx + 1].output_revision;
-      if (nextRev) handleRollback(nextRev);
-    }
-  };
-
-  // Viewport status text computation
-  const getStatusCaption = () => {
-    if (isLoading) return 'Computing geometry…';
-    if (!selectedEntity) return 'Nothing selected · Click a face or 3D model';
-    const e = selectedEntity;
-    const parts: string[] = [];
-    if (e.entity_type === 'feature') {
-      parts.push(e.name || 'Feature');
-      if (e.subtype) parts.push(e.subtype);
-    } else if (e.entity_type === 'body') {
-      parts.push('3D Solid Model');
-      if (e.volume_mm3 != null) parts.push(`${e.volume_mm3.toFixed(1)} mm³`);
-    } else {
-      parts.push(e.transient_id);
-      if (e.surface_type) parts.push(e.surface_type);
-      if (e.curve_type) parts.push(e.curve_type);
-      if (e.area != null) parts.push(`${e.area.toFixed(1)} mm²`);
-      if (e.length != null) parts.push(`${e.length.toFixed(1)} mm`);
-    }
-    return parts.join(' · ');
-  };
 
   const previewPillLabel = isPreviewActive && activeTool !== 'select'
     ? activeTool.charAt(0).toUpperCase() + activeTool.slice(1)
@@ -628,11 +652,13 @@ export function ManualCadWorkspace({
           style={{
             position: 'absolute',
             left: 12,
-            top: 56,
-            zIndex: 20,
-            overflow: 'visible',
-            maxHeight: 'calc(100% - 68px)',
+            top: 12,
+            bottom: 12,
+            zIndex: 40,
+            maxHeight: 'calc(100% - 24px)',
             overflowY: 'auto',
+            overflowX: 'visible',
+            scrollbarWidth: 'none',
           }}
         >
           <ManualCadToolbar
@@ -650,41 +676,94 @@ export function ManualCadWorkspace({
           className="mcad-float"
           style={{
             position: 'absolute',
-            top: 56,
+            top: 12,
             left: '50%',
             transform: 'translateX(-50%)',
             padding: 6,
-            zIndex: 20,
+            zIndex: 30,
             display: 'flex',
             alignItems: 'center',
             gap: 8,
+            overflow: 'visible',
           }}
         >
-          {/* Segmented control: 3D Model | Face | Edge */}
+          {/* Undo / Redo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <button
+              type="button"
+              className="mcad-btn mcad-btn--ghost"
+              onClick={handleUndo}
+              disabled={!canUndo || isLoading}
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo"
+              style={{
+                height: 26,
+                width: 26,
+                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: (!canUndo || isLoading) ? 0.35 : 1,
+                cursor: (!canUndo || isLoading) ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <Undo2 size={13} />
+            </button>
+            <button
+              type="button"
+              className="mcad-btn mcad-btn--ghost"
+              onClick={handleRedo}
+              disabled={!canRedo || isLoading}
+              title="Redo (Ctrl+Y)"
+              aria-label="Redo"
+              style={{
+                height: 26,
+                width: 26,
+                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: (!canRedo || isLoading) ? 0.35 : 1,
+                cursor: (!canRedo || isLoading) ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <Redo2 size={13} />
+            </button>
+          </div>
+
+          <div style={{ width: 1, height: 18, background: 'var(--mcad-border)' }} />
+
+          {/* Segmented control: Model | Face | Edge (with symbols) */}
           <div className="mcad-seg">
             <button
               type="button"
               data-on={selectionMode === 'body'}
               onClick={() => handleSetSelectionMode('body')}
               title="Select 3D solid model"
+              aria-label="Select 3D solid model"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 32, padding: '0 8px' }}
             >
-              3D Model
+              <Box size={13} strokeWidth={2} />
             </button>
             <button
               type="button"
               data-on={selectionMode === 'face'}
               onClick={() => handleSetSelectionMode('face')}
               title="Select face"
+              aria-label="Select face"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 32, padding: '0 8px' }}
             >
-              Face
+              <Square size={12} strokeWidth={2} />
             </button>
             <button
               type="button"
               data-on={selectionMode === 'edge'}
               onClick={() => handleSetSelectionMode('edge')}
               title="Select edge"
+              aria-label="Select edge"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 32, padding: '0 8px' }}
             >
-              Edge
+              <Slash size={13} strokeWidth={2.5} />
             </button>
           </div>
 
@@ -739,6 +818,112 @@ export function ManualCadWorkspace({
               setSelectedEntities([]);
             }}
           />
+
+          <div style={{ width: 1, height: 18, background: 'var(--mcad-border)' }} />
+
+          {/* Export Dropdown */}
+          <div className="relative" ref={exportRef}>
+            <button
+              type="button"
+              className="mcad-btn mcad-btn--ghost"
+              onClick={() => setExportOpen((prev) => !prev)}
+              style={{
+                height: 26,
+                padding: '0 8px',
+                fontSize: 11,
+                gap: 4,
+                color: 'var(--mcad-accent)',
+                fontWeight: 600,
+              }}
+              title="Export 3D Model"
+            >
+              <Download size={12} />
+              <span>Export</span>
+              <ChevronDown size={11} className={`transition-transform ${exportOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {exportOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  right: 0,
+                  minWidth: 160,
+                  background: 'var(--mcad-raised, #181c24)',
+                  border: '1px solid var(--mcad-border-ctrl, #2d3545)',
+                  borderRadius: 8,
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
+                  padding: 4,
+                  zIndex: 1000,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportOpen(false);
+                    handleDownloadStep();
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--mcad-text-primary)',
+                    fontSize: 11,
+                    fontFamily: 'var(--font-sans)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    width: '100%',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--mcad-input)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <Box size={14} className="text-blue-400" />
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span style={{ fontWeight: 600 }}>STEP Format</span>
+                    <span style={{ fontSize: 9.5, color: 'var(--mcad-text-muted)' }}>Solid CAD model</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExportOpen(false);
+                    handleDownloadStl();
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--mcad-text-primary)',
+                    fontSize: 11,
+                    fontFamily: 'var(--font-sans)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    width: '100%',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--mcad-input)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <Layers size={14} className="text-emerald-400" />
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span style={{ fontWeight: 600 }}>STL Format</span>
+                    <span style={{ fontSize: 9.5, color: 'var(--mcad-text-muted)' }}>3D printing mesh</span>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 4. Floating Right Panel */}
@@ -747,11 +932,13 @@ export function ManualCadWorkspace({
           style={{
             position: 'absolute',
             right: 12,
-            top: 56,
+            top: 12,
             bottom: 12,
+            maxHeight: 'calc(100% - 24px)',
             width: 324,
             display: 'flex',
             flexDirection: 'column',
+            overflow: 'hidden',
             zIndex: 20,
           }}
         >
@@ -795,93 +982,7 @@ export function ManualCadWorkspace({
           </div>
         </div>
 
-        {/* 5. Floating Prompt Dock (bottom centre) */}
-        {promptDock && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 16,
-              left: 128,
-              right: 360,
-              zIndex: 20,
-              pointerEvents: 'none',
-            }}
-          >
-            <div
-              style={{
-                maxWidth: 680,
-                margin: '0 auto',
-                pointerEvents: 'auto',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              {/* Centered muted status caption */}
-              <div
-                style={{
-                  fontSize: 11,
-                  fontFamily: 'var(--font-mono)',
-                  color: 'var(--mcad-text-muted)',
-                  userSelect: 'none',
-                }}
-              >
-                {isLoading && (
-                  <Loader2 size={11} className="inline mr-1 animate-spin" style={{ color: 'var(--mcad-accent)' }} />
-                )}
-                {getStatusCaption()}
-              </div>
 
-              {/* Prompt box */}
-              <form
-                className="mcad-prompt"
-                style={{ width: '100%' }}
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (promptDock.value.trim() && !promptDock.isGenerating) {
-                    promptDock.onSubmit(e);
-                  }
-                }}
-              >
-                <textarea
-                  ref={textareaRef}
-                  value={promptDock.value}
-                  onChange={(e) => {
-                    promptDock.onChange(e.target.value);
-                    if (textareaRef.current) {
-                      textareaRef.current.style.height = 'auto';
-                      textareaRef.current.style.height = `${Math.min(120, textareaRef.current.scrollHeight)}px`;
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      if (promptDock.value.trim() && !promptDock.isGenerating) {
-                        promptDock.onSubmit(e as any);
-                      }
-                    }
-                  }}
-                  placeholder="Describe a change to the model…"
-                  rows={1}
-                />
-
-                <button
-                  type="submit"
-                  className="mcad-prompt-send"
-                  disabled={promptDock.isGenerating || !promptDock.value.trim()}
-                  title="Send instruction to AI CAD (Enter)"
-                >
-                  {promptDock.isGenerating ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <ArrowUp size={16} />
-                  )}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
 
         {/* Right-click Context Menu */}
         {contextMenu && (
@@ -901,19 +1002,7 @@ export function ManualCadWorkspace({
         )}
       </div>
 
-      {/* ─── Bottom: History timeline (100% untouched) ─── */}
-      <HistoryTimelineBar
-        history={history}
-        activeRevision={activeRevision}
-        onRollback={handleRollback}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        onDeleteOperation={handleDeleteOperation}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        isRecomputing={isLoading}
-        previewLabel={previewPillLabel}
-      />
+
     </div>
   );
 }

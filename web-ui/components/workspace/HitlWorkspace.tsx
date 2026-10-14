@@ -2258,15 +2258,6 @@ export default function HitlWorkspace() {
 									sessionId={sessionId || ''}
 									initialStlUrl={stlUrl}
 									initialStepUrl={stepUrl}
-									promptDock={{
-										value: prompt,
-										onChange: setPrompt,
-										onSubmit: (e) => {
-											toast.info('Sending to AI CAD');
-											handleGenerate(e);
-										},
-										isGenerating: isGenerating,
-									}}
 									onSwitchStage={async (st) => {
 										if (st === 'cam') {
 											try {
@@ -2517,27 +2508,27 @@ export default function HitlWorkspace() {
 
 									{/* Bottom Overlay with Manual CAD Switch */}
 									{workflowStage === 'cad' && stlUrl && (
-										<div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none z-30 flex flex-col items-center">
-											<div className="flex items-center gap-2 pointer-events-auto mt-2">
+										<div className="absolute bottom-2 left-1/2 -translate-x-1/2 pointer-events-none z-30 flex flex-col items-center">
+											<div className="flex items-center gap-2 pointer-events-auto">
 												<button
 													onClick={() => {
 														setIsCamDrawerOpen((prev) => !prev);
 													}}
-													className="ui-btn ui-btn--ghost !h-8 px-3.5 rounded-xl font-mono text-xs font-semibold shadow-xl backdrop-blur-md cursor-pointer"
+													className="ui-btn ui-btn--ghost !h-7 px-3 rounded-lg font-mono text-[11px] font-semibold shadow-md backdrop-blur-md cursor-pointer"
 													title="Toggle bottom CAD/CAM Property & Setup Console"
 												>
-													<Settings className="size-3.5 text-[var(--ui-accent)]" />
-													<span>{isCamDrawerOpen ? 'Hide Property Bar' : 'Show Property Bar'}</span>
+													<Settings className="size-3 text-[var(--ui-accent)]" />
+													<span>{isCamDrawerOpen ? 'Hide Console' : 'Show Console'}</span>
 												</button>
 												<button
 													onClick={() => {
 														setWorkflowStage('manual_cad');
 														setActiveRightTab('manual_cad');
 													}}
-													className="ui-btn ui-btn--primary !h-8 px-4 rounded-xl text-xs font-bold shadow-lg cursor-pointer"
+													className="ui-btn ui-btn--primary !h-7 px-3.5 rounded-lg text-[11px] font-bold shadow-md cursor-pointer"
 												>
-													<Sparkles className="size-3.5" />
-													<span>Enter Manual CAD Refinement Mode</span>
+													<Sparkles className="size-3" />
+													<span>Enter Manual CAD</span>
 												</button>
 											</div>
 										</div>
@@ -2551,12 +2542,14 @@ export default function HitlWorkspace() {
 										style={{
 											position: 'absolute',
 											left: 12,
-											top: 56,
+											top: 52,
 											bottom: 12,
+											maxHeight: 'calc(100% - 64px)',
 											width: 360,
 											zIndex: 20,
 											display: 'flex',
 											flexDirection: 'column',
+											overflow: 'hidden',
 										}}
 									>
 										<ChatPanel
@@ -2600,12 +2593,14 @@ export default function HitlWorkspace() {
 									style={{
 										position: 'absolute',
 										right: 12,
-										top: 56,
+										top: 52,
 										bottom: 12,
+										maxHeight: 'calc(100% - 64px)',
 										width: 324,
 										zIndex: 20,
 										display: 'flex',
 										flexDirection: 'column',
+										overflow: 'hidden',
 									}}
 								>
 									{/* Header: Shared Stage Switcher */}

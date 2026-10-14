@@ -219,7 +219,7 @@
 /* Floating panels & cards */
 .ui-float, .mcad-float {
   background: var(--ui-panel); border-radius: var(--ui-r-panel);
-  box-shadow: var(--ui-shadow-card); overflow: hidden;
+  box-shadow: var(--ui-shadow-card); overflow: visible;
 }
 .ui-card, .mcad-card { background: var(--ui-raised); border: 1px solid var(--ui-border); border-radius: var(--ui-r-card); overflow: hidden; }
 
@@ -240,13 +240,14 @@
 /* Tooltip */
 .ui-tip, .mcad-tip {
   position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
-  background: #0e0f11; border: 1px solid var(--ui-border-ctrl); border-radius: 8px; padding: 5px 9px;
-  font: 500 12px var(--font-sans); color: var(--ui-text-primary); white-space: nowrap; pointer-events: none;
-  opacity: 0; transition: opacity .12s .3s; z-index: 60; display: flex; align-items: center; gap: 8px;
+  background: rgba(15, 18, 24, 0.96); border: 1px solid var(--ui-border-ctrl); border-radius: 8px; padding: 5px 10px;
+  font: 500 12px var(--font-sans); color: #ffffff; white-space: nowrap; pointer-events: none;
+  opacity: 0; transition: opacity .12s .15s, transform .12s .15s; z-index: 99999; display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08);
 }
 .group:hover > .ui-tip, .group:focus-within > .ui-tip,
-.group:hover > .mcad-tip, .group:focus-within > .mcad-tip { opacity: 1; }
-.ui-kbd, .mcad-kbd { font: 600 10px/1 var(--font-mono); padding: 3px 5px; border-radius: 4px; color: var(--ui-text-secondary); background: var(--ui-input); }
+.group:hover > .mcad-tip, .group:focus-within > .mcad-tip { opacity: 1; transform: translateY(-50%) translateX(2px); }
+.ui-kbd, .mcad-kbd { font: 600 10px/1 var(--font-mono); padding: 3px 5px; border-radius: 4px; color: #a1a1aa; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.08); }
 
 /* Segmented control (top bar, stage switcher) */
 .ui-seg, .mcad-seg { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--ui-input); }

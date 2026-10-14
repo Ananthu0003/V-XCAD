@@ -458,34 +458,40 @@ export function getSelectionReadout(entity: TopologyEntity | null | undefined): 
         props.push({ label: 'Normal', value: norm });
       }
 
-      // If circular planar face (has radius)
-      if (entity.radius != null && entity.radius > 0) {
+      // Check if bounding box exists
+      const bbox = entity.bounding_box;
+      const dx = bbox?.min && bbox?.max ? Math.abs(bbox.max[0] - bbox.min[0]) : null;
+      const dy = bbox?.min && bbox?.max ? Math.abs(bbox.max[1] - bbox.min[1]) : null;
+      const dz = bbox?.min && bbox?.max ? Math.abs(bbox.max[2] - bbox.min[2]) : null;
+      const nonZeroDims = [dx, dy, dz].filter((d): d is number => d != null && d > 0.05).sort((a, b) => b - a);
+
+      // Only show diameter if face is genuinely circular (e.g. circle wire or explicit circular flag)
+      // When width and height or bounding box are available for square/rectangle/polygon, show Width x Length
+      const isExplicitCircular = entity.is_circular === true || (entity.radius != null && entity.radius > 0 && entity.is_circular !== false && (!nonZeroDims.length || Math.abs((entity.radius * 2) - nonZeroDims[0]) < 0.2 && Math.abs(nonZeroDims[0] - nonZeroDims[1]) < 0.2));
+
+      if (isExplicitCircular && entity.radius != null && entity.radius > 0) {
         props.push({
           label: 'Diameter',
           value: `⌀${(entity.radius * 2).toFixed(1)} mm`,
         });
       } else {
-        // Rectangular or general planar face: show Width x Height
+        // Square, rectangular or planar boundary face: show Length, Width or Size
         if (entity.width != null && entity.height != null) {
-          props.push({
-            label: 'Size',
-            value: `${entity.width.toFixed(1)} × ${entity.height.toFixed(1)} mm`,
-          });
-        } else if (entity.bounding_box?.min && entity.bounding_box?.max) {
-          const bbox = entity.bounding_box;
-          const dx = Math.abs(bbox.max![0] - bbox.min![0]);
-          const dy = Math.abs(bbox.max![1] - bbox.min![1]);
-          const dz = Math.abs(bbox.max![2] - bbox.min![2]);
-          // In a plane, take the two non-zero / dominant dimensions
-          const dims = [dx, dy, dz].filter((d) => d > 0.05).sort((a, b) => b - a);
-          if (dims.length >= 2) {
-            props.push({
-              label: 'Width × Height',
-              value: `${dims[0].toFixed(1)} × ${dims[1].toFixed(1)} mm`,
-            });
-          } else if (dims.length === 1) {
-            props.push({ label: 'Span', value: `${dims[0].toFixed(1)} mm` });
+          props.push({ label: 'Width', value: `${entity.width.toFixed(1)} mm` });
+          props.push({ label: 'Length', value: `${entity.height.toFixed(1)} mm` });
+        } else if (nonZeroDims.length >= 2) {
+          props.push({ label: 'Length', value: `${nonZeroDims[0].toFixed(1)} mm` });
+          props.push({ label: 'Width', value: `${nonZeroDims[1].toFixed(1)} mm` });
+          if (nonZeroDims.length >= 3 && nonZeroDims[2] > 0.1) {
+            props.push({ label: 'Height', value: `${nonZeroDims[2].toFixed(1)} mm` });
           }
+        } else if (nonZeroDims.length === 1) {
+          props.push({ label: 'Span', value: `${nonZeroDims[0].toFixed(1)} mm` });
+        } else if (entity.radius != null && entity.radius > 0) {
+          props.push({
+            label: 'Span',
+            value: `${(entity.radius * 2).toFixed(1)} mm`,
+          });
         }
       }
       break;
