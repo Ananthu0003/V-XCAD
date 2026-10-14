@@ -10,8 +10,9 @@ export interface SubShapeRaycasterProps {
   onSelectEntity: (entity: any, multiSelect?: boolean) => void;
   hoveredEntity?: any | null;
   onHoverEntity?: (entity: any | null) => void;
-  selectionMode?: 'body' | 'face' | 'edge' | 'all';
+  selectionMode?: 'body' | 'feature' | 'face' | 'edge' | 'all';
   highlightedFaceIds?: string[] | null;
+  onHighlightFaces?: (faceIds: string[] | null) => void;
   detectedFeatures?: any[];
   selectedEntities?: any[];
 }
@@ -138,7 +139,7 @@ function FaceSurfaceMesh({
         if (uVal < uMin) uMin = uVal;
         if (uVal > uMax) uMax = uVal;
         if (vVal < vMin) vMin = vVal;
-        if (vVal > vMax) vMax = vMax;
+        if (vVal > vMax) vMax = vVal;
       });
 
       const p1 = new THREE.Vector3().copy(center).addScaledVector(u, uMin).addScaledVector(v, vMin);
@@ -212,6 +213,7 @@ export function SubShapeRaycaster({
   onHoverEntity,
   selectionMode = 'face',
   highlightedFaceIds,
+  onHighlightFaces,
   detectedFeatures,
   selectedEntities,
 }: SubShapeRaycasterProps) {
@@ -224,7 +226,7 @@ export function SubShapeRaycaster({
   const faces = Object.values(topology.faces || {}) as any[];
   const edges = Object.values(topology.edges || {}) as any[];
 
-  const showFaces = selectionMode === 'face' || selectionMode === 'all' || selectionMode === 'body';
+  const showFaces = selectionMode === 'face' || selectionMode === 'all' || selectionMode === 'body' || selectionMode === 'feature';
   const showEdges = selectionMode === 'edge' || selectionMode === 'all';
 
   const hlFaceSet = useMemo(() => new Set(highlightedFaceIds || []), [highlightedFaceIds]);
@@ -275,11 +277,22 @@ export function SubShapeRaycaster({
                 onHoverEntity?.({ entity_type: 'body' });
                 return;
               }
+              if (selectionMode === 'feature' && detectedFeatures) {
+                const feat = detectedFeatures.find((df: any) => df.face_ids?.includes(face.transient_id));
+                if (feat) {
+                  onHoverEntity?.({ entity_type: 'feature', ...feat });
+                  onHighlightFaces?.(feat.face_ids);
+                  return;
+                }
+              }
               onHoverEntity?.(face);
             }}
             onPointerOut={() => {
               setLocalHovered(null);
               onHoverEntity?.(null);
+              if (selectionMode === 'feature') {
+                onHighlightFaces?.(null);
+              }
             }}
             onClick={(e) => {
               if (selectionMode === 'body') {
@@ -288,6 +301,14 @@ export function SubShapeRaycaster({
                 return;
               }
               const isMulti = e?.nativeEvent?.shiftKey || false;
+              if (selectionMode === 'feature' && detectedFeatures) {
+                const feat = detectedFeatures.find((df: any) => df.face_ids?.includes(face.transient_id));
+                if (feat) {
+                  e?.stopPropagation?.();
+                  onSelectEntity({ entity_type: 'feature', ...feat }, isMulti);
+                  return;
+                }
+              }
               onSelectEntity(face, isMulti);
             }}
           />
@@ -301,6 +322,9 @@ export function SubShapeRaycaster({
         const bbox = edge.bounding_box || { min: [0, 0, 0], max: [0, 0, 0] };
         const p1: [number, number, number] = bbox.min as [number, number, number];
         const p2: [number, number, number] = bbox.max as [number, number, number];
+        const edgePoints = (edge.points && Array.isArray(edge.points) && edge.points.length >= 2)
+          ? (edge.points as [number, number, number][])
+          : [p1, p2];
 
         return (
           <group
@@ -323,11 +347,21 @@ export function SubShapeRaycaster({
               onSelectEntity(edge, isMulti);
             }}
           >
+            {/* Fat invisible pick line so Three.js raycasting intercepts hover/clicks reliably */}
+            <Line
+              points={edgePoints}
+              color="#ffffff"
+              lineWidth={12}
+              transparent
+              opacity={0.0001}
+              depthTest={false}
+            />
+            {/* Visual highlighted edge curve */}
             {(isSelected || isHovered) && (
               <Line
-                points={[p1, p2]}
-                color="#4c7bf4"           // accent blue for selected and hovered edges
-                lineWidth={isSelected ? 3 : 2}
+                points={edgePoints}
+                color="#4c7bf4"
+                lineWidth={isSelected ? 3.5 : 2}
                 transparent
                 opacity={1.0}
                 depthTest={false}

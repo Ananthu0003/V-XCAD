@@ -8,7 +8,8 @@ import {
   Activity,
 } from 'lucide-react';
 import type { OperationDefinition } from './registry';
-import type { TopologyEntity } from './capabilities';
+import { TopologyEntity, isOperationApplicable, OPERATION_REQUIREMENTS } from './capabilities';
+import type { GeometryContext } from './context';
 import { OperationForm } from './OperationForm';
 
 export interface TaskPanelProps {
@@ -26,6 +27,7 @@ export interface TaskPanelProps {
   setLivePreview: (live: boolean) => void;
   validationReport?: { is_valid?: boolean; volume_mm3?: number } | null;
   errorDiagnostic?: { code?: string; message?: string } | null;
+  ctx?: GeometryContext | null;
 }
 
 export function TaskPanel({
@@ -43,12 +45,16 @@ export function TaskPanel({
   setLivePreview,
   validationReport,
   errorDiagnostic,
+  ctx,
 }: TaskPanelProps) {
   const Icon = definition.icon;
+
+  const isApplicable = !definition.requiresSelection || isOperationApplicable(definition.id, selectedEntity, ctx);
 
   // Validation: ensure numeric values are valid (> 0)
   const isFormValid = (): boolean => {
     if (!selectedEntity && definition.requiresSelection) return false;
+    if (selectedEntity && !isOperationApplicable(definition.id, selectedEntity, ctx)) return false;
 
     const getNum = (key: string, def: number) => {
       const val = params[key];
@@ -171,6 +177,7 @@ export function TaskPanel({
           values={params}
           onChange={onChangeParam}
           entity={selectedEntity}
+          ctx={ctx}
         />
       </div>
 
@@ -307,9 +314,12 @@ export function TaskPanel({
             style={{ flex: 2 }}
             onClick={onCommit}
             disabled={okDisabled}
+            title={!isApplicable ? (OPERATION_REQUIREMENTS[definition.id] || 'Target not applicable') : undefined}
           >
             {isLoading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-            Apply {definition.label}
+            {!isApplicable
+              ? (OPERATION_REQUIREMENTS[definition.id] || 'Select valid target')
+              : `Apply ${definition.label}`}
           </button>
         </div>
       </div>
