@@ -36,11 +36,18 @@ const MIME_TYPES: Record<string, string> = {
  */
 function extractSessionIdFromFilename(filename: string): string | null {
 	if (!filename.startsWith('cad_')) return null;
-	const body = filename.slice(4);
+	let name = filename.slice(4);
+	// Strip file extension
+	name = name.replace(/\.(stl|step|stp|dxf|gcode|ngc|json|png|jpg|jpeg|py\.txt|txt)$/i, '');
+	// Strip version suffix if present (_v1, _v2, etc.)
+	name = name.replace(/_v\d+$/, '');
+	// Strip _annotations if present
+	name = name.replace(/_annotations$/, '');
 
-	// Session IDs are CUIDs/UUIDs: alphanumeric + hyphens only.
-	// Find where the session ID ends (first non-alphanumeric-hyphen char).
-	const match = body.match(/^([a-zA-Z0-9-]+)/);
+	if (/^[a-zA-Z0-9_-]+$/.test(name)) {
+		return name;
+	}
+	const match = name.match(/^([a-zA-Z0-9_-]+)/);
 	return match ? match[1] : null;
 }
 

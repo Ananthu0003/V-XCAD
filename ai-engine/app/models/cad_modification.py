@@ -2,8 +2,13 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
+
+
+# Operation ids are validated by the service registry (unknown ids return a structured
+# INVALID_REFERENCE result) so new tools never need a schema change.
+OperationType = str
 
 
 class OperationSource(str, Enum):
@@ -68,10 +73,15 @@ class ValidationReport(BaseModel):
     suggestions: List[str] = Field(default_factory=list)
 
 
+# Operation ids are validated by the service registry (unknown ids return a structured
+# INVALID_REFERENCE result) so new tools never need a schema change.
+OperationType = str
+
+
 class CADOperation(BaseModel):
     """Unified contract for any manual CAD operation."""
     operation_id: str
-    operation_type: Literal["fillet", "chamfer", "hole", "pocket", "pad", "boolean", "transform"]
+    operation_type: OperationType
     source: OperationSource = OperationSource.MANUAL
     input_revision: str
     output_revision: Optional[str] = None
@@ -85,7 +95,7 @@ class CADOperation(BaseModel):
 class PreviewRequest(BaseModel):
     session_id: str
     base_revision: str = "rev_000"
-    operation_type: Literal["fillet", "chamfer", "hole", "pocket", "pad", "boolean", "transform"]
+    operation_type: OperationType
     references: List[GeometricReference]
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
@@ -107,7 +117,7 @@ class PreviewResult(BaseModel):
 class CommitRequest(BaseModel):
     session_id: str
     base_revision: str = "rev_000"
-    operation_type: Literal["fillet", "chamfer", "hole", "pocket", "pad", "boolean", "transform"]
+    operation_type: OperationType
     references: List[GeometricReference]
     parameters: Dict[str, Any] = Field(default_factory=dict)
     user_note: Optional[str] = None
@@ -142,12 +152,31 @@ class MeasureRequest(BaseModel):
     entity_b: Optional[GeometricReference] = None
 
 
+class RecognizedShapeFeature(BaseModel):
+    feature_id: str
+    part_name: str
+    feature_type: str = "body"  # 'hole', 'pocket', 'boss', 'slot', 'flange', 'fillet', 'chamfer', 'body'
+    category: str = "Component Geometry"
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    face_ids: List[str] = Field(default_factory=list)
+    edge_ids: List[str] = Field(default_factory=list)
+    center: Optional[List[float]] = None
+    bounding_box: Optional[Dict[str, List[float]]] = None
+    axis: Optional[List[float]] = None
+    description: Optional[str] = None
+
+
 class MeasureResult(BaseModel):
     distance_mm: Optional[float] = None
     min_distance_mm: Optional[float] = None
     angle_degrees: Optional[float] = None
     entity_a_info: Dict[str, Any] = Field(default_factory=dict)
     entity_b_info: Optional[Dict[str, Any]] = None
+    part_name: Optional[str] = None
+    feature_type: Optional[str] = None
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    parameter_metadata: Dict[str, Any] = Field(default_factory=dict)
+    shape_feature: Optional[RecognizedShapeFeature] = None
 
 
 class TopologyDataResponse(BaseModel):
@@ -158,6 +187,9 @@ class TopologyDataResponse(BaseModel):
     bounding_box: Dict[str, List[float]]
     volume_mm3: float
     is_valid: bool
+    features: List[RecognizedShapeFeature] = Field(default_factory=list)
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    parameter_metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class RecomputeRequest(BaseModel):
@@ -250,4 +282,153 @@ class GeometryContext(BaseModel):
     cylindrical: Optional[CylFaceContext] = None
     edge: Optional[EdgeContext] = None
     body: Optional[BodyContext] = None
+
+
+# ---------------------------------------------------------------------------
+# AI Geometry Planner models
+# ---------------------------------------------------------------------------
+
+class CADOperationPlan(BaseModel):
+    """Structured plan produced by the AI geometry planner from a natural-language command."""
+    operation_type: str = Field(..., description="One of the supported backend operation types")
+    target_entity_ids: List[str] = Field(default_factory=list, description="Transient IDs of target entities")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="Operation parameters")
+    description: str = Field("", description="Human-readable description of the planned operation")
+    preconditions: List[str] = Field(default_factory=list, description="Requirements that must be satisfied")
+    requires_confirmation: bool = Field(False, description="Whether the planner requests user confirmation")
+    clarification_needed: Optional[str] = Field(None, description="Question to ask the user when command is ambiguous")
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
+
+
+class AiPlanRequest(BaseModel):
+    """Request to convert a natural-language CAD command into a structured operation plan."""
+    session_id: str
+    revision_id: str = "rev_000"
+    command: str = Field(..., description="Natural-language editing command")
+    selected_entity_ids: List[str] = Field(default_factory=list)
+    geometry_context: Optional[Dict[str, Any]] = Field(None, description="Serialized GeometryContext for selected entities")
+    operation_history: List[str] = Field(default_factory=list, description="Recent operation descriptions for follow-up context")
+
+
+class AiPlanResult(BaseModel):
+    """Result of the AI geometry planning step."""
+    plan: Optional[CADOperationPlan] = None
+    raw_command: str = ""
+    error: Optional[str] = None
+    suggestions: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Coplanar & Similar selection query models
+# ---------------------------------------------------------------------------
+
+class CoplanarQueryRequest(BaseModel):
+    """Find all faces coplanar with a reference face within a geometric tolerance."""
+    session_id: str
+    revision_id: str = "rev_000"
+    reference_face_id: str = Field(..., description="Transient ID of the reference face")
+    tolerance_mm: float = Field(0.01, ge=0.0, description="Planar distance tolerance in mm")
+    angle_tolerance_deg: float = Field(1.0, ge=0.0, description="Normal angle tolerance in degrees")
+
+
+class CoplanarQueryResult(BaseModel):
+    coplanar_face_ids: List[str] = Field(default_factory=list)
+    reference_face_id: str
+    plane_normal: Optional[List[float]] = None
+    plane_d: Optional[float] = None
+    count: int = 0
+
+
+class SimilarQueryRequest(BaseModel):
+    """Find geometrically similar entities (bores, faces) within a tolerance."""
+    session_id: str
+    revision_id: str = "rev_000"
+    reference_entity_id: str = Field(..., description="Transient ID of the reference entity")
+    entity_type: Literal["face", "edge"] = "face"
+    radius_tolerance_mm: float = Field(0.1, ge=0.0)
+    angle_tolerance_deg: float = Field(5.0, ge=0.0)
+    depth_tolerance_mm: float = Field(0.5, ge=0.0)
+
+
+class SimilarQueryResult(BaseModel):
+    similar_entity_ids: List[str] = Field(default_factory=list)
+    reference_entity_id: str
+    similarity_basis: str = ""
+    count: int = 0
+
+
+# ---------------------------------------------------------------------------
+# DFM analysis models
+# ---------------------------------------------------------------------------
+
+class DfmSuggestion(BaseModel):
+    """A single Design for Manufacturing suggestion."""
+    suggestion_id: str
+    category: Literal["hole_diameter", "hole_depth", "face_alignment", "corner_radius", "inconsistent_features", "general"]
+    severity: Literal["info", "warning", "critical"]
+    title: str
+    description: str
+    affected_entity_ids: List[str] = Field(default_factory=list)
+    proposed_operation: Optional[CADOperationPlan] = None
+    standard_reference: Optional[str] = None
+    measured_value: Optional[float] = None
+    suggested_value: Optional[float] = None
+    unit: Optional[str] = None
+
+
+class DfmAnalysisRequest(BaseModel):
+    session_id: str
+    revision_id: str = "rev_000"
+    selected_entity_ids: List[str] = Field(default_factory=list, description="If empty, analyzes whole model")
+    standards: List[str] = Field(default_factory=lambda: ["ISO_metric"], description="Engineering standards to check against")
+
+
+class DfmAnalysisResult(BaseModel):
+    suggestions: List[DfmSuggestion] = Field(default_factory=list)
+    analyzed_entity_count: int = 0
+    session_id: str
+    revision_id: str
+
+
+# ---------------------------------------------------------------------------
+# Detected Features & Parameter Extraction models
+# ---------------------------------------------------------------------------
+
+class FeatureParam(BaseModel):
+    key: str
+    label: str
+    unit: Optional[str] = None
+    value: Union[float, str, bool]
+    type: Literal["number", "select", "toggle"]
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[float] = None
+    options: Optional[List[str]] = None
+
+
+class DetectedFeature(BaseModel):
+    feature_id: str = Field(..., description="Stable per revision (hash of kind + sorted face ids)")
+    kind: Literal["hole", "boss", "pocket", "slot", "fillet", "chamfer"]
+    subtype: str = Field(..., description="blind | through | counterbore | countersink | closed | open | rect | circle | obround")
+    name: str = Field(..., description="Human-readable name, e.g. Hole Ø6 × 10")
+    face_ids: List[str] = Field(default_factory=list, description="Transient ids used by the viewport: face_12")
+    edge_ids: List[str] = Field(default_factory=list)
+    center: List[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
+    axis: Optional[List[float]] = None
+    bounding_box: Dict[str, List[float]] = Field(default_factory=dict)
+    params: List[FeatureParam] = Field(default_factory=list)
+    editable: bool = True
+    not_editable_reason: Optional[str] = None
+    confidence: float = 1.0
+
+
+class SelectMoreRequest(BaseModel):
+    session_id: str
+    revision_id: str = "rev_000"
+    seed_ids: List[str] = Field(default_factory=list)
+    mode: Literal["adjacent", "coplanar", "tangent_chain", "edge_loop", "same_type", "same_size", "invert", "clear"]
+
+
+class SelectMoreResponse(BaseModel):
+    transient_ids: List[str] = Field(default_factory=list)
 

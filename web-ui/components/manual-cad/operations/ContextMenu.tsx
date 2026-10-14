@@ -94,7 +94,7 @@ export function ContextMenu({
           style={{
             fontSize: 11,
             fontFamily: 'var(--font-mono)',
-            color: 'var(--mcad-teal)',
+            color: 'var(--mcad-accent)',
           }}
         >
           {entity.transient_id}
@@ -130,7 +130,7 @@ export function ContextMenu({
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.background = 'var(--mcad-input)';
-              e.currentTarget.style.color = 'var(--mcad-teal)';
+              e.currentTarget.style.color = 'var(--mcad-accent)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent';

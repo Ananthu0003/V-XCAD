@@ -1,0 +1,2434 @@
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/ai-engine/app/api/v1/cad_modify_router.py V-XCAD-prod/ai-engine/app/api/v1/cad_modify_router.py
+--- a/ai-engine/app/api/v1/cad_modify_router.py	2026-10-10 06:57:14.000000000 +0000
++++ b/ai-engine/app/api/v1/cad_modify_router.py	2026-10-12 17:49:00.052552616 +0000
+@@ -1,10 +1,12 @@
+ """VEXCAD Manual CAD Refinement Router — /api/v1/cad/modify."""
+ from __future__ import annotations
+ 
++import asyncio
+ import os
+ from pathlib import Path
++from typing import Optional
+ from fastapi import APIRouter, HTTPException, Query
+-from fastapi.responses import FileResponse
++from fastapi.responses import FileResponse, Response
+ 
+ from app.models.cad_modification import (
+     CADOperation,
+@@ -137,11 +139,37 @@
+         raise HTTPException(status_code=500, detail=f"Failed to fetch history: {exc}")
+ 
+ 
++@router.get("/export/{session_id}")
++async def export_model(
++    session_id: str,
++    fmt: str = Query("stl", description="stl | step | obj | 3mf"),
++    revision_id: Optional[str] = Query(None, description="Defaults to the active revision"),
++) -> Response:
++    """Download the current (or a chosen) revision as STL, STEP, OBJ or 3MF."""
++    try:
++        data, media_type, filename = await asyncio.to_thread(
++            cad_service.export_revision, session_id, revision_id, fmt
++        )
++    except FileNotFoundError as exc:
++        raise HTTPException(status_code=404, detail=str(exc))
++    except ValueError as exc:
++        raise HTTPException(status_code=400, detail=str(exc))
++    except Exception as exc:
++        raise HTTPException(status_code=500, detail=f"Export failed: {exc}")
++    return Response(
++        content=data,
++        media_type=media_type,
++        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
++    )
++
++
+ @router.get("/file/{session_id}/{path:path}")
+ async def get_session_file(session_id: str, path: str):
+     """Serve session artifacts (STEP / STL / DXF)."""
+-    file_path = BASE_STORAGE_DIR / session_id / path
+-    if not file_path.exists():
++    session_root = (BASE_STORAGE_DIR / session_id).resolve()
++    file_path = (session_root / path).resolve()
++    # Block path traversal ("../") out of the session directory.
++    if session_root not in file_path.parents or not file_path.is_file():
+         raise HTTPException(status_code=404, detail="File not found")
+     media_type = "model/stl" if file_path.suffix == ".stl" else "application/octet-stream"
+     return FileResponse(file_path, media_type=media_type)
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/ai-engine/app/models/cad_modification.py V-XCAD-prod/ai-engine/app/models/cad_modification.py
+--- a/ai-engine/app/models/cad_modification.py	2026-10-10 06:57:14.000000000 +0000
++++ b/ai-engine/app/models/cad_modification.py	2026-10-12 17:48:34.477398618 +0000
+@@ -6,6 +6,11 @@
+ from pydantic import BaseModel, Field
+ 
+ 
++# Operation ids are validated by the service registry (unknown ids return a structured
++# INVALID_REFERENCE result) so new tools never need a schema change.
++OperationType = str
++
++
+ class OperationSource(str, Enum):
+     AI_GENERATED = "ai_generated"
+     MANUAL = "manual"
+@@ -71,7 +76,7 @@
+ class CADOperation(BaseModel):
+     """Unified contract for any manual CAD operation."""
+     operation_id: str
+-    operation_type: Literal["fillet", "chamfer", "hole", "pocket", "pad", "boolean", "transform"]
++    operation_type: OperationType
+     source: OperationSource = OperationSource.MANUAL
+     input_revision: str
+     output_revision: Optional[str] = None
+@@ -85,7 +90,7 @@
+ class PreviewRequest(BaseModel):
+     session_id: str
+     base_revision: str = "rev_000"
+-    operation_type: Literal["fillet", "chamfer", "hole", "pocket", "pad", "boolean", "transform"]
++    operation_type: OperationType
+     references: List[GeometricReference]
+     parameters: Dict[str, Any] = Field(default_factory=dict)
+ 
+@@ -107,7 +112,7 @@
+ class CommitRequest(BaseModel):
+     session_id: str
+     base_revision: str = "rev_000"
+-    operation_type: Literal["fillet", "chamfer", "hole", "pocket", "pad", "boolean", "transform"]
++    operation_type: OperationType
+     references: List[GeometricReference]
+     parameters: Dict[str, Any] = Field(default_factory=dict)
+     user_note: Optional[str] = None
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/ai-engine/app/services/geometry/body_operations.py V-XCAD-prod/ai-engine/app/services/geometry/body_operations.py
+--- a/ai-engine/app/services/geometry/body_operations.py	1970-01-01 00:00:00.000000000 +0000
++++ b/ai-engine/app/services/geometry/body_operations.py	2026-10-13 06:02:33.609139343 +0000
+@@ -0,0 +1,309 @@
++"""Body-level editing operations for VEXCAD Manual CAD.
++
++These are the tools a user needs *after* a model has been generated (the FreeCAD
++Part / Draft / Mesh-workbench equivalents): move, rotate, scale, mirror, align to
++build plate, add/cut primitives, shell, offset, split by plane, patterns and heal.
++
++Every handler follows the same contract as the face/edge operations in
++``manual_cad_service``:
++
++    handler(shape, refs, params) -> (new_shape | None, status, message, created_faces, modified_edges)
++"""
++from __future__ import annotations
++
++import math
++from typing import Any, Dict, List, Optional, Tuple
++
++import build123d as bd
++
++from app.models.cad_modification import GeometricReference, OperationStatus
++from app.services.geometry.reference_resolver import ReferenceResolver
++
++OpResult = Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]
++
++_AXES: Dict[str, bd.Axis] = {"x": bd.Axis.X, "y": bd.Axis.Y, "z": bd.Axis.Z}
++_PLANES: Dict[str, bd.Plane] = {"xy": bd.Plane.XY, "yz": bd.Plane.YZ, "xz": bd.Plane.XZ}
++
++# Hard caps keep a typo (count=100000) from exhausting the worker.
++MAX_PATTERN_COUNT = 100
++MAX_SCALE = 1000.0
++MIN_SCALE = 1e-3
++
++
++def _fail(msg: str, status: OperationStatus = OperationStatus.GEOMETRY_FAILURE) -> OpResult:
++    return None, status, msg, [], []
++
++
++def _ok(shape: Any, msg: str, created: Optional[List[str]] = None) -> OpResult:
++    # Some build123d operators return a ShapeList; normalise to a single Shape.
++    if isinstance(shape, (list, bd.ShapeList)):
++        items = list(shape)
++        if not items:
++            return _fail("Operation produced no geometry.")
++        shape = items[0] if len(items) == 1 else bd.Compound(items)
++    return shape, OperationStatus.VALID, msg, created or [], []
++
++
++def _f(params: Dict[str, Any], key: str, default: float) -> float:
++    try:
++        return float(params.get(key, default))
++    except (TypeError, ValueError):
++        return float(default)
++
++
++def _center(shape: bd.Shape) -> bd.Vector:
++    return shape.bounding_box().center()
++
++
++def _pivot(shape: bd.Shape, params: Dict[str, Any]) -> bd.Vector:
++    """Pivot for rotate/scale: 'center' of bounding box (default) or world 'origin'."""
++    if str(params.get("pivot", "center")).lower() == "origin":
++        return bd.Vector(0, 0, 0)
++    return _center(shape)
++
++
++def _plane_from(
++    shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]
++) -> Tuple[Optional[bd.Plane], Optional[str]]:
++    """A cutting/mirror plane: a selected planar face wins, else a named world plane + offset."""
++    offset = _f(params, "offset", 0.0)
++    if refs and refs[0].entity_type == "face":
++        face, status, msg = ReferenceResolver.resolve_face(shape, refs[0])
++        if status != OperationStatus.VALID or face is None:
++            return None, msg
++        if refs[0].surface_type and refs[0].surface_type.lower() != "plane":
++            return None, "Selected face is not planar."
++        c = face.center()
++        return bd.Plane(origin=c, z_dir=face.normal_at(c)).offset(offset), None
++    name = str(params.get("plane", "xy")).lower()
++    base = _PLANES.get(name)
++    if base is None:
++        return None, f"Unknown plane '{name}'. Use XY, YZ or XZ."
++    return base.offset(offset), None
++
++
++class BodyOperationsMixin:
++    """Mixed into ``ManualCADService``; adds whole-body editing handlers."""
++
++    # ------------------------------------------------------------------ transform
++
++    def _apply_move(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        dx, dy, dz = _f(params, "dx", 0.0), _f(params, "dy", 0.0), _f(params, "dz", 0.0)
++        if dx == dy == dz == 0.0:
++            return _fail("Move distance is zero on all axes.")
++        return _ok(shape.moved(bd.Location((dx, dy, dz))), f"Moved by ({dx:g}, {dy:g}, {dz:g}) mm.")
++
++    def _apply_rotate(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        axis_key = str(params.get("axis", "z")).lower()
++        if axis_key not in _AXES:
++            return _fail(f"Unknown axis '{axis_key}'. Use X, Y or Z.")
++        angle = _f(params, "angle", 90.0)
++        if angle % 360.0 == 0.0:
++            return _fail("Rotation angle is a multiple of 360°; nothing to do.")
++        p = _pivot(shape, params)
++        axis = bd.Axis(origin=p, direction=_AXES[axis_key].direction)
++        return _ok(shape.rotate(axis, angle), f"Rotated {angle:g}° about {axis_key.upper()}.")
++
++    def _apply_scale(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        if str(params.get("mode", "uniform")).lower() == "uniform":
++            fx = fy = fz = _f(params, "factor", 1.0)
++        else:
++            fx, fy, fz = _f(params, "sx", 1.0), _f(params, "sy", 1.0), _f(params, "sz", 1.0)
++        for f in (fx, fy, fz):
++            if not (MIN_SCALE <= f <= MAX_SCALE):
++                return _fail(f"Scale factors must be between {MIN_SCALE:g} and {MAX_SCALE:g}.")
++        if fx == fy == fz == 1.0:
++            return _fail("Scale factor is 1; nothing to do.")
++        p = _pivot(shape, params)
++        # bd.scale works about the origin: translate pivot to origin, scale, translate back.
++        centred = shape.moved(bd.Location(-p))
++        scaled = bd.scale(centred, by=(fx, fy, fz)) if not (fx == fy == fz) else bd.scale(centred, by=fx)
++        return _ok(scaled.moved(bd.Location(p)), f"Scaled ×({fx:g}, {fy:g}, {fz:g}).")
++
++    def _apply_mirror(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        plane, err = _plane_from(shape, refs, params)
++        if plane is None:
++            return _fail(err or "Mirror plane could not be resolved.", OperationStatus.INVALID_REFERENCE)
++        mirrored = bd.mirror(shape, plane)
++        if bool(params.get("keep_original", False)):
++            return _ok(shape + mirrored, "Mirrored copy added (symmetric body).")
++        return _ok(mirrored, "Body mirrored.")
++
++    def _apply_align(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        """Orient/position for printing or CAM: face-down, drop to bed, centre."""
++        mode = str(params.get("mode", "drop_to_bed")).lower()
++        out = shape
++        notes: List[str] = []
++
++        if mode == "face_down":
++            if not refs or refs[0].entity_type != "face":
++                return _fail("Face-down needs a selected planar face.", OperationStatus.INVALID_REFERENCE)
++            face, status, msg = ReferenceResolver.resolve_face(shape, refs[0])
++            if status != OperationStatus.VALID or face is None:
++                return _fail(msg, status)
++            n = face.normal_at(face.center())
++            target = bd.Vector(0, 0, -1)
++            dot = max(-1.0, min(1.0, n.X * target.X + n.Y * target.Y + n.Z * target.Z))
++            if dot < 0.999999:
++                if dot < -0.999999:
++                    rot_axis = bd.Axis(origin=_center(out), direction=(1, 0, 0))
++                    out = out.rotate(rot_axis, 180.0)
++                else:
++                    cross = n.cross(target)
++                    rot_axis = bd.Axis(origin=_center(out), direction=(cross.X, cross.Y, cross.Z))
++                    out = out.rotate(rot_axis, math.degrees(math.acos(dot)))
++            notes.append("face placed down")
++
++        if mode in ("center_xy", "center_origin"):
++            c = _center(out)
++            out = out.moved(bd.Location((-c.X, -c.Y, -c.Z if mode == "center_origin" else 0.0)))
++            notes.append("centred on origin" if mode == "center_origin" else "centred in XY")
++
++        if mode in ("drop_to_bed", "face_down"):
++            bb = out.bounding_box()
++            out = out.moved(bd.Location((0, 0, -bb.min.Z)))
++            notes.append("dropped to Z=0")
++
++        if not notes:
++            return _fail(f"Unknown align mode '{mode}'.")
++        return _ok(out, "Aligned: " + ", ".join(notes) + ".")
++
++    # ------------------------------------------------------------------ primitives
++
++    def _apply_primitive(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        kind = str(params.get("shape", "box")).lower()
++        mode = str(params.get("mode", "add")).lower()
++        if mode not in ("add", "subtract", "intersect"):
++            return _fail(f"Unknown boolean mode '{mode}'.")
++        px, py, pz = _f(params, "x", 0.0), _f(params, "y", 0.0), _f(params, "z", 0.0)
++
++        if kind == "box":
++            tool: bd.Shape = bd.Box(
++                max(0.01, _f(params, "length", 10.0)),
++                max(0.01, _f(params, "width", 10.0)),
++                max(0.01, _f(params, "height", 10.0)),
++            )
++        elif kind == "cylinder":
++            tool = bd.Cylinder(max(0.01, _f(params, "diameter", 10.0) / 2.0), max(0.01, _f(params, "height", 10.0)))
++        elif kind == "sphere":
++            tool = bd.Sphere(max(0.01, _f(params, "diameter", 10.0) / 2.0))
++        elif kind == "cone":
++            d1 = max(0.0, _f(params, "diameter", 10.0) / 2.0)
++            d2 = max(0.0, _f(params, "top_diameter", 0.0) / 2.0)
++            if d1 == 0.0 and d2 == 0.0:
++                return _fail("Cone needs a non-zero base or top diameter.")
++            tool = bd.Cone(d1, d2, max(0.01, _f(params, "height", 10.0)))
++        else:
++            return _fail(f"Unknown primitive '{kind}'. Use box, cylinder, sphere or cone.")
++
++        # Position is the primitive's centre, relative to the world origin; "on_face" anchors
++        # it to the selected planar face centre so users can drop features onto the part.
++        origin = bd.Vector(px, py, pz)
++        if refs and refs[0].entity_type == "face":
++            face, status, msg = ReferenceResolver.resolve_face(shape, refs[0])
++            if status != OperationStatus.VALID or face is None:
++                return _fail(msg, status)
++            origin = face.center() + bd.Vector(px, py, pz)
++        tool = tool.moved(bd.Location(origin))
++
++        if mode == "add":
++            result, label = shape + tool, "added"
++        elif mode == "subtract":
++            result, label = shape - tool, "subtracted"
++        else:
++            result, label = shape & tool, "intersected"
++        return _ok(result, f"{kind.capitalize()} {label}.", ["face_new_primitive"])
++
++    # ------------------------------------------------------------------ solid shaping
++
++    def _apply_shell(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        thickness = _f(params, "thickness", 2.0)
++        if thickness <= 0:
++            return _fail("Wall thickness must be positive.")
++        bb = shape.bounding_box()
++        if thickness * 2 >= min(bb.size.X, bb.size.Y, bb.size.Z):
++            return _fail("Wall thickness is too large for this body; it would consume the part.")
++        openings: List[bd.Face] = []
++        for r in refs:
++            if r.entity_type != "face":
++                continue
++            face, status, msg = ReferenceResolver.resolve_face(shape, r)
++            if status != OperationStatus.VALID or face is None:
++                return _fail(msg, status)
++            openings.append(face)
++        amount = thickness if str(params.get("direction", "inside")).lower() == "outside" else -thickness
++        result = bd.offset(shape, amount=amount, openings=openings or None)
++        return _ok(result, f"Shelled with {thickness:g} mm wall" + (f", {len(openings)} open face(s)." if openings else " (closed cavity)."))
++
++    def _apply_offset(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        amount = _f(params, "amount", 0.2)
++        if amount == 0.0:
++            return _fail("Offset amount is zero.")
++        bb = shape.bounding_box()
++        if amount < 0 and abs(amount) * 2 >= min(bb.size.X, bb.size.Y, bb.size.Z):
++            return _fail("Negative offset is larger than half the thinnest dimension.")
++        return _ok(bd.offset(shape, amount=amount), f"Body offset by {amount:+g} mm (tolerance/clearance).")
++
++    def _apply_split(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        plane, err = _plane_from(shape, refs, params)
++        if plane is None:
++            return _fail(err or "Cut plane could not be resolved.", OperationStatus.INVALID_REFERENCE)
++        keep = str(params.get("keep", "top")).lower()
++        keep_enum = {"top": bd.Keep.TOP, "bottom": bd.Keep.BOTTOM, "both": bd.Keep.BOTH}.get(keep)
++        if keep_enum is None:
++            return _fail("keep must be top, bottom or both.")
++        result = bd.split(shape, plane, keep=keep_enum)
++        if result is None or result.volume < 1e-6:
++            return _fail("The plane does not intersect the body (nothing remains).")
++        return _ok(result, f"Cut by plane, kept {keep}.")
++
++    # ------------------------------------------------------------------ patterns
++
++    def _apply_linear_pattern(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        count = int(_f(params, "count", 3))
++        if not (2 <= count <= MAX_PATTERN_COUNT):
++            return _fail(f"Count must be between 2 and {MAX_PATTERN_COUNT}.")
++        dx, dy, dz = _f(params, "dx", 20.0), _f(params, "dy", 0.0), _f(params, "dz", 0.0)
++        if dx == dy == dz == 0.0:
++            return _fail("Pattern spacing is zero.")
++        result = shape
++        for i in range(1, count):
++            result = result + shape.moved(bd.Location((dx * i, dy * i, dz * i)))
++        return _ok(result, f"Linear pattern ×{count}.")
++
++    def _apply_polar_pattern(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        count = int(_f(params, "count", 4))
++        if not (2 <= count <= MAX_PATTERN_COUNT):
++            return _fail(f"Count must be between 2 and {MAX_PATTERN_COUNT}.")
++        axis_key = str(params.get("axis", "z")).lower()
++        if axis_key not in _AXES:
++            return _fail(f"Unknown axis '{axis_key}'. Use X, Y or Z.")
++        total = _f(params, "angle", 360.0)
++        # A full circle must not duplicate the first instance at 360°.
++        step = total / count if abs(total) >= 360.0 else total / (count - 1)
++        axis = bd.Axis(origin=(_f(params, "cx", 0.0), _f(params, "cy", 0.0), _f(params, "cz", 0.0)),
++                       direction=_AXES[axis_key].direction)
++        result = shape
++        for i in range(1, count):
++            result = result + shape.rotate(axis, step * i)
++        return _ok(result, f"Polar pattern ×{count} about {axis_key.upper()}.")
++
++    # ------------------------------------------------------------------ repair
++
++    def _apply_heal(self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]) -> OpResult:
++        """Clean-up for generated geometry: fix, merge co-planar faces, drop loose debris."""
++        result: bd.Shape = shape
++        notes: List[str] = []
++        if bool(params.get("fix", True)):
++            fixed = result.fix() if hasattr(result, "fix") else result
++            result = fixed or result
++            notes.append("shape fixed")
++        if bool(params.get("clean", True)):
++            result = result.clean()
++            notes.append("co-planar faces merged")
++        if bool(params.get("keep_largest", True)):
++            solids = list(result.solids())
++            if len(solids) > 1:
++                result = max(solids, key=lambda s: s.volume)
++                notes.append(f"removed {len(solids) - 1} loose solid(s)")
++        return _ok(result, "Heal: " + ", ".join(notes) + ".")
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/ai-engine/app/services/geometry/manual_cad_service.py V-XCAD-prod/ai-engine/app/services/geometry/manual_cad_service.py
+--- a/ai-engine/app/services/geometry/manual_cad_service.py	2026-10-10 06:57:14.000000000 +0000
++++ b/ai-engine/app/services/geometry/manual_cad_service.py	2026-10-13 06:11:35.584533112 +0000
+@@ -39,13 +39,14 @@
+     TopologyDataResponse,
+     ValidationReport,
+ )
++from app.services.geometry.body_operations import BodyOperationsMixin
+ from app.services.geometry.brep_validator import BRepValidator
+ from app.services.geometry.reference_resolver import ReferenceResolver
+ 
+ BASE_STORAGE_DIR = Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs"))
+ 
+ 
+-class ManualCADService:
++class ManualCADService(BodyOperationsMixin):
+     """
+     Manages session storage, multi-stage reference resolution, parametric B-Rep operations,
+     preview generation, non-destructive revisions, and CAM handoff.
+@@ -448,6 +449,8 @@
+         # 1. Modify operational recipe
+         new_op_plan: List[CADOperation] = []
+         for op in current_ops:
++            if op.operation_id == "op_000":
++                continue  # base AI-generated model: it is rev_000 itself, never replayed
+             if req.action == "delete_op" and op.operation_id == req.target_op_id:
+                 continue # Skip / delete this operation
+             elif req.action == "edit_params" and op.operation_id == req.target_op_id and req.updated_parameters:
+@@ -464,6 +467,8 @@
+         # Clear existing operation records to write clean history
+         op_dir = sdir / "operations"
+         for f in op_dir.glob("op_*.json"):
++            if f.name == "op_000.json":
++                continue  # keep the base-model record so history still starts with it
+             try:
+                 f.unlink()
+             except Exception:
+@@ -571,37 +576,102 @@
+     # --------------------------------------------------------------------------
+ 
+     def measure(self, req: MeasureRequest) -> MeasureResult:
+-        """Measure exact B-Rep distances, radii, and angles between entities."""
++        """Measure exact B-Rep minimum distance, angle between planar faces, radii and lengths."""
++        import math
++
+         shape = self.load_revision_shape(req.session_id, req.revision_id)
+-        info_a: Dict[str, Any] = {}
+-        info_b: Optional[Dict[str, Any]] = None
+ 
+-        if req.entity_a.entity_type == "face":
+-            matched_f, status, _ = ReferenceResolver.resolve_face(shape, req.entity_a)
+-            if matched_f:
+-                info_a = {"area_mm2": req.entity_a.area, "surface_type": req.entity_a.surface_type, "centroid": req.entity_a.centroid}
+-        elif req.entity_a.entity_type == "edge":
+-            matched_e, status, _ = ReferenceResolver.resolve_edge(shape, req.entity_a)
+-            if matched_e:
+-                info_a = {"length_mm": req.entity_a.length, "curve_type": req.entity_a.curve_type, "radius_mm": req.entity_a.radius}
++        def resolve(ref: GeometricReference):
++            if ref.entity_type == "face":
++                found, _, _ = ReferenceResolver.resolve_face(shape, ref)
++            elif ref.entity_type == "edge":
++                found, _, _ = ReferenceResolver.resolve_edge(shape, ref)
++            else:
++                found = None
++            return found
+ 
++        def info(ref: GeometricReference) -> Dict[str, Any]:
++            if ref.entity_type == "face":
++                return {"area_mm2": ref.area, "surface_type": ref.surface_type, "centroid": ref.centroid}
++            return {"length_mm": ref.length, "curve_type": ref.curve_type, "radius_mm": ref.radius}
++
++        info_a = info(req.entity_a)
++        info_b: Optional[Dict[str, Any]] = None
+         dist_val: Optional[float] = None
++        min_dist: Optional[float] = None
++        angle: Optional[float] = None
++
+         if req.entity_b:
+-            # Centroid point distance
+-            dx = req.entity_a.centroid[0] - req.entity_b.centroid[0]
+-            dy = req.entity_a.centroid[1] - req.entity_b.centroid[1]
+-            dz = req.entity_a.centroid[2] - req.entity_b.centroid[2]
+-            dist_val = (dx*dx + dy*dy + dz*dz) ** 0.5
+-            info_b = {"entity_type": req.entity_b.entity_type, "centroid": req.entity_b.centroid}
++            a, b = req.entity_a.centroid, req.entity_b.centroid
++            dist_val = math.dist(a, b)  # centre-to-centre
++            info_b = info(req.entity_b)
++            info_b["entity_type"] = req.entity_b.entity_type
++            ent_a, ent_b = resolve(req.entity_a), resolve(req.entity_b)
++            if ent_a is not None and ent_b is not None:
++                ext = BRepExtrema_DistShapeShape(ent_a.wrapped, ent_b.wrapped)
++                if ext.IsDone():
++                    min_dist = float(ext.Value())
++            na, nb = req.entity_a.normal, req.entity_b.normal
++            if na and nb and len(na) == 3 and len(nb) == 3:
++                dot = max(-1.0, min(1.0, sum(x * y for x, y in zip(na, nb))))
++                angle = math.degrees(math.acos(dot))
+ 
+         return MeasureResult(
+             distance_mm=dist_val,
+-            min_distance_mm=dist_val,
++            min_distance_mm=min_dist if min_dist is not None else dist_val,
++            angle_degrees=angle,
+             entity_a_info=info_a,
+-            entity_b_info=info_b
++            entity_b_info=info_b,
+         )
+ 
+     # --------------------------------------------------------------------------
++    # Export
++    # --------------------------------------------------------------------------
++
++    EXPORT_FORMATS = {
++        "stl": ("model/stl", "stl"),
++        "step": ("application/step", "step"),
++        "obj": ("text/plain", "obj"),
++        "3mf": ("application/vnd.ms-package.3dmanufacturing-3dmodel+xml", "3mf"),
++    }
++
++    def export_revision(self, session_id: str, revision_id: Optional[str], fmt: str) -> Tuple[bytes, str, str]:
++        """Export a revision as STL / STEP / OBJ / 3MF. Returns (bytes, media_type, filename).
++
++        Files are produced in a throw-away temp directory and streamed back from memory.
++        """
++        import tempfile
++
++        fmt = fmt.lower()
++        if fmt not in self.EXPORT_FORMATS:
++            raise ValueError(f"Unsupported export format '{fmt}'. Use one of: {', '.join(self.EXPORT_FORMATS)}.")
++        if not revision_id:
++            state_file = self._get_session_dir(session_id) / "session.json"
++            revision_id = json.loads(state_file.read_text()).get("active_revision", "rev_000") if state_file.exists() else "rev_000"
++
++        shape = self.load_revision_shape(session_id, revision_id)
++        media_type, ext = self.EXPORT_FORMATS[fmt]
++        filename = f"{session_id}_{revision_id}.{ext}"
++
++        if fmt == "obj":
++            verts, tris = shape.tessellate(0.05, 0.3)
++            lines = ["# VEXCAD export"] + [f"v {v.X:.6f} {v.Y:.6f} {v.Z:.6f}" for v in verts]
++            lines += [f"f {a + 1} {b + 1} {c + 1}" for a, b, c in tris]
++            return ("\n".join(lines) + "\n").encode(), media_type, filename
++
++        with tempfile.TemporaryDirectory() as tmp:
++            out = Path(tmp) / filename
++            if fmt == "stl":
++                export_stl(shape, str(out))
++            elif fmt == "step":
++                export_step(shape, str(out))
++            else:  # 3mf
++                mesher = bd.Mesher()
++                mesher.add_shape(shape)
++                mesher.write(str(out))
++            return out.read_bytes(), media_type, filename
++
++    # --------------------------------------------------------------------------
+     # Geometry Execution Engine
+     # --------------------------------------------------------------------------
+ 
+@@ -615,6 +685,19 @@
+             "pocket": self._apply_pocket,
+             "pad": self._apply_pad,
+             "edit_feature": self._apply_edit_feature,
++            # Body-level editing (BodyOperationsMixin)
++            "move": self._apply_move,
++            "rotate": self._apply_rotate,
++            "scale": self._apply_scale,
++            "mirror": self._apply_mirror,
++            "align": self._apply_align,
++            "primitive": self._apply_primitive,
++            "shell": self._apply_shell,
++            "offset": self._apply_offset,
++            "split": self._apply_split,
++            "linear_pattern": self._apply_linear_pattern,
++            "polar_pattern": self._apply_polar_pattern,
++            "heal": self._apply_heal,
+         }
+ 
+     def _execute_operation(
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/ai-engine/app/services/geometry/reference_resolver.py V-XCAD-prod/ai-engine/app/services/geometry/reference_resolver.py
+--- a/ai-engine/app/services/geometry/reference_resolver.py	2026-10-10 06:57:14.000000000 +0000
++++ b/ai-engine/app/services/geometry/reference_resolver.py	2026-10-13 06:03:05.172755871 +0000
+@@ -14,7 +14,7 @@
+ )
+ from OCP.TopExp import TopExp
+ from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+-from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
++from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED
+ from OCP.BRepGProp import BRepGProp
+ from OCP.GProp import GProp_GProps
+ from OCP.Bnd import Bnd_Box
+@@ -91,6 +91,10 @@
+                 pos = pln.Position()
+                 dir_z = pos.Direction()
+                 normal = [float(dir_z.X()), float(dir_z.Y()), float(dir_z.Z())]
++                # Outward normal: a reversed face flips the underlying plane axis. Without this,
++                # opposite faces of a block (e.g. top and bottom) share the same normal.
++                if face.wrapped.Orientation() == TopAbs_REVERSED:
++                    normal = [-c for c in normal]
+                 plane_d = float(- (normal[0] * pos.Location().X() + normal[1] * pos.Location().Y() + normal[2] * pos.Location().Z()))
+             elif adaptor.GetType() == GeomAbs_Cylinder:
+                 cyl = adaptor.Cylinder()
+@@ -316,7 +320,11 @@
+         dy = target.centroid[1] - cand.centroid[1]
+         dz = target.centroid[2] - cand.centroid[2]
+         dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+-        dist_score = math.exp(- (dist * dist) / (2.0 * (15.0 ** 2)))
++        # Tolerance scales with the face itself (a fixed 15 mm made opposite faces of small
++        # parts indistinguishable): ~quarter of the face's characteristic size, at least 2 mm.
++        ref_area = target.area or cand.area or 0.0
++        sigma = max(2.0, 0.25 * math.sqrt(ref_area)) if ref_area > 0 else 15.0
++        dist_score = math.exp(- (dist * dist) / (2.0 * (sigma ** 2)))
+         score += 0.30 * dist_score
+ 
+         # 4. Area Match (Weight: 0.20)
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/ai-engine/tests/test_body_operations.py V-XCAD-prod/ai-engine/tests/test_body_operations.py
+--- a/ai-engine/tests/test_body_operations.py	1970-01-01 00:00:00.000000000 +0000
++++ b/ai-engine/tests/test_body_operations.py	2026-10-13 06:11:14.509726063 +0000
+@@ -0,0 +1,193 @@
++"""Body-level editing operations (move, rotate, scale, mirror, ... heal) on a real B-Rep."""
++import build123d as bd
++import pytest
++
++from app.models.cad_modification import CommitRequest, OperationStatus, PreviewRequest
++from app.services.geometry.manual_cad_service import ManualCADService
++
++
++@pytest.fixture
++def svc(tmp_path):
++    s = ManualCADService(storage_dir=tmp_path)
++    s.initialize_session_if_needed("s", base_shape=bd.Box(20, 20, 10))
++    return s
++
++
++def run(svc, op, params=None, refs=None):
++    return svc.preview_operation(
++        PreviewRequest(session_id="s", base_revision="rev_000", operation_type=op,
++                       references=refs or [], parameters=params or {})
++    )
++
++
++def commit(svc, op, params=None, refs=None):
++    res = svc.commit_operation(
++        CommitRequest(session_id="s", base_revision="rev_000", operation_type=op,
++                      references=refs or [], parameters=params or {})
++    )
++    return svc.load_revision_shape("s", res.new_revision)
++
++
++def top_face_ref(svc):
++    topo = svc.get_topology("s", "rev_000")
++    return max(topo.faces.values(), key=lambda f: f.centroid[2])
++
++
++def test_move_translates_bbox(svc):
++    shape = commit(svc, "move", {"dx": 5, "dy": 0, "dz": 3})
++    bb = shape.bounding_box()
++    assert bb.min.X == pytest.approx(-5) and bb.min.Z == pytest.approx(-2)
++
++
++def test_move_zero_is_rejected(svc):
++    assert run(svc, "move", {"dx": 0, "dy": 0, "dz": 0}).valid is False
++
++
++def test_rotate_90_swaps_extents(svc):
++    shape = commit(svc, "rotate", {"axis": "x", "angle": 90})
++    size = shape.bounding_box().size
++    assert size.Y == pytest.approx(10) and size.Z == pytest.approx(20)
++
++
++def test_scale_uniform_and_per_axis(svc):
++    assert commit(svc, "scale", {"mode": "uniform", "factor": 2}).volume == pytest.approx(4000 * 8, rel=1e-3)
++    svc.initialize_session_if_needed("s", base_shape=bd.Box(20, 20, 10), force_sync=True)
++    sized = commit(svc, "scale", {"mode": "axis", "sx": 2, "sy": 1, "sz": 0.5}).bounding_box().size
++    assert (sized.X, sized.Y, sized.Z) == pytest.approx((40, 20, 5), abs=1e-3)
++
++
++def test_scale_limits(svc):
++    assert run(svc, "scale", {"factor": 0}).valid is False
++    assert run(svc, "scale", {"factor": 1}).valid is False
++
++
++def test_mirror_keep_original_makes_symmetric_body(svc):
++    shape = commit(svc, "move", {"dx": 30})  # off-centre so a mirror is visible
++    assert shape.bounding_box().min.X == pytest.approx(20)
++
++
++def test_mirror_with_copy_doubles_volume(svc):
++    # offset the mirror plane so copy does not overlap: plane YZ at x=15 -> copy at x=20..40
++    res = run(svc, "mirror", {"plane": "yz", "offset": 15, "keep_original": True})
++    assert res.valid is True
++    assert res.volume_delta_mm3 == pytest.approx(4000 - 0, abs=1)  # one extra 20x20x10 block
++
++
++def test_align_drop_to_bed(svc):
++    shape = commit(svc, "align", {"mode": "drop_to_bed"})
++    assert shape.bounding_box().min.Z == pytest.approx(0)
++
++
++def test_align_face_down(svc):
++    top = top_face_ref(svc)
++    shape = commit(svc, "align", {"mode": "face_down"}, [top])
++    bb = shape.bounding_box()
++    assert bb.min.Z == pytest.approx(0) and bb.size.Z == pytest.approx(10)
++
++
++def test_align_face_down_requires_face(svc):
++    assert run(svc, "align", {"mode": "face_down"}).valid is False
++
++
++@pytest.mark.parametrize("shape_kind,expected", [("box", 4000 + 1000), ("cylinder", None), ("sphere", None), ("cone", None)])
++def test_primitive_add(svc, shape_kind, expected):
++    res = run(svc, "primitive", {"shape": shape_kind, "mode": "add", "x": 40, "length": 10, "width": 10, "height": 10, "diameter": 10, "top_diameter": 0})
++    assert res.valid is True
++    if expected:
++        assert res.volume_delta_mm3 == pytest.approx(1000, abs=1)
++
++
++def test_primitive_subtract_and_intersect(svc):
++    cut = run(svc, "primitive", {"shape": "box", "mode": "subtract", "length": 10, "width": 10, "height": 10})
++    assert cut.valid and cut.volume_delta_mm3 == pytest.approx(-1000, abs=1)
++    keep = run(svc, "primitive", {"shape": "box", "mode": "intersect", "length": 10, "width": 10, "height": 10})
++    assert keep.valid and keep.validation.volume_mm3 == pytest.approx(1000, abs=1)
++
++
++def test_primitive_unknown_shape(svc):
++    assert run(svc, "primitive", {"shape": "teapot"}).valid is False
++
++
++def test_shell_closed_and_open(svc):
++    closed = run(svc, "shell", {"thickness": 2})
++    assert closed.valid is True and closed.validation.volume_mm3 < 4000
++    opened = run(svc, "shell", {"thickness": 2}, [top_face_ref(svc)])
++    assert opened.valid is True and opened.validation.volume_mm3 < 4000
++
++
++def test_shell_too_thick_is_rejected(svc):
++    assert run(svc, "shell", {"thickness": 6}).valid is False
++
++
++def test_offset_grow_and_limit(svc):
++    grown = run(svc, "offset", {"amount": 1})
++    assert grown.valid and grown.validation.volume_mm3 > 4000
++    assert run(svc, "offset", {"amount": -6}).valid is False
++    assert run(svc, "offset", {"amount": 0}).valid is False
++
++
++def test_split_keeps_half_and_rejects_miss(svc):
++    half = commit(svc, "split", {"plane": "xy", "offset": 0, "keep": "top"})
++    assert half.volume == pytest.approx(2000, rel=1e-3)
++    assert run(svc, "split", {"plane": "xy", "offset": 100, "keep": "top"}).valid is False
++    assert run(svc, "split", {"plane": "ab"}).valid is False
++
++
++def test_split_with_selected_face_plane(svc):
++    res = run(svc, "split", {"keep": "bottom", "offset": -2}, [top_face_ref(svc)])
++    assert res.valid is True and res.validation.volume_mm3 == pytest.approx(3200, rel=1e-3)
++
++
++def test_linear_pattern(svc):
++    shape = commit(svc, "linear_pattern", {"count": 3, "dx": 30, "dy": 0, "dz": 0})
++    assert shape.volume == pytest.approx(3 * 4000, rel=1e-3)
++    assert shape.bounding_box().size.X == pytest.approx(80)
++
++
++def test_pattern_count_limits(svc):
++    assert run(svc, "linear_pattern", {"count": 1}).valid is False
++    assert run(svc, "linear_pattern", {"count": 101}).valid is False
++    assert run(svc, "polar_pattern", {"count": 1}).valid is False
++
++
++def test_polar_pattern_full_circle(svc):
++    moved = commit(svc, "move", {"dx": 40})
++    assert moved.bounding_box().min.X == pytest.approx(30)
++    res = run(svc, "polar_pattern", {"count": 4, "axis": "z", "angle": 360})
++    assert res.valid is True
++
++
++def test_heal_removes_loose_solids(svc):
++    cluttered = bd.Compound([bd.Box(20, 20, 10), bd.Box(1, 1, 1).moved(bd.Location((50, 0, 0)))])
++    svc.initialize_session_if_needed("s", base_shape=cluttered, force_sync=True)
++    healed = commit(svc, "heal", {})
++    assert len(healed.solids()) == 1
++    assert healed.volume == pytest.approx(4000, rel=1e-3)
++
++
++def test_edit_feature_is_an_accepted_operation_type(svc):
++    # Previously rejected by the request schema (not part of the Literal), now routed to the handler.
++    res = run(svc, "edit_feature", {}, [top_face_ref(svc)])
++    assert res.status != OperationStatus.PREVIEW  # planar face -> handler refuses, but schema accepted
++    assert "Unsupported operation type" not in (res.validation.error_message or "")
++
++
++def test_export_formats(svc):
++    for fmt, head in (("stl", None), ("step", b"ISO-10303"), ("obj", b"# VEXCAD"), ("3mf", b"PK")):
++        data, media, name = svc.export_revision("s", None, fmt)
++        assert data and name.endswith(fmt)
++        if head:
++            assert data.startswith(head)
++    with pytest.raises(ValueError):
++        svc.export_revision("s", None, "dwg")
++
++
++def test_measure_min_distance_and_angle(svc):
++    from app.models.cad_modification import MeasureRequest
++    topo = svc.get_topology("s", "rev_000")
++    faces = list(topo.faces.values())
++    top = max(faces, key=lambda f: f.centroid[2])
++    bottom = min(faces, key=lambda f: f.centroid[2])
++    res = svc.measure(MeasureRequest(session_id="s", revision_id="rev_000", entity_a=top, entity_b=bottom))
++    assert res.min_distance_mm == pytest.approx(10, abs=1e-3)
++    assert res.angle_degrees == pytest.approx(180, abs=1e-3)
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/docs/MANUAL_CAD_UI_PLAN.md V-XCAD-prod/docs/MANUAL_CAD_UI_PLAN.md
+--- a/docs/MANUAL_CAD_UI_PLAN.md	1970-01-01 00:00:00.000000000 +0000
++++ b/docs/MANUAL_CAD_UI_PLAN.md	2026-10-13 06:03:59.529439517 +0000
+@@ -0,0 +1,228 @@
++# V-XCAD Manual CAD — Professional UI Plan
++
++Goal: make the Manual CAD stage feel like a real 3D editing tool (FreeCAD / Fusion 360 / Onshape),
++not a form beside a model. The viewport is the product; everything else stays out of its way.
++
++Principles
++1. **Viewport first.** At least 65% of the screen is 3D. Panels dock, collapse and never cover the model.
++2. **Select, then act.** The UI always shows what is selected and which tools that selection allows.
++3. **Direct manipulation.** Move, rotate and scale use on-model handles, not only number boxes.
++4. **Everything previews, nothing is destructive.** Every tool shows a live ghost preview, and Accept / Cancel are always visible. History is non-destructive (revisions already exist).
++5. **Keyboard and mouse like the pros.** Orbit / pan / zoom, shortcuts, right-click menus, a command search.
++
++---
++
++## 1. Screen layout
++
++```
++┌──────────────────────────────────────────────────────────────────────────────────────────┐
++│ ① TOP BAR   V-XCAD › Part name   rev_007 ▾    ↶ Undo  ↷ Redo   [ Export ▾ ]  [ → CAM ]   │
++├────┬─────────────────────────────────────────────────────────────────────┬───────────────┤
++│    │ ③ CONTEXT BAR:  [Body|Face|Edge]  [Wireframe|Shaded|Edges]  [Snap ⌗]   │ ⑤ RIGHT DOCK  │
++│ ②  │                                                                      │ ┌───────────┐ │
++│ T  │                                                    ┌──────┐          │ │ Model tree│ │
++│ O  │                                                    │ VIEW │ ④        │ │  ▸ Body   │ │
++│ O  │                                                    │ CUBE │          │ │  ▸ Faces  │ │
++│ L  │              ⑥ 3D VIEWPORT                         └──────┘          │ │  ▸ Edges  │ │
++│ R  │         (grid, axes, model, gizmo,                                   │ ├───────────┤ │
++│ A  │          ghost preview, dimensions)                                  │ │ Properties│ │
++│ I  │                                                                      │ │ (selected)│ │
++│ L  │                                                                      │ ├───────────┤ │
++│    │   ┌────────────────────────────┐                                     │ │ Task panel│ │
++│    │   │ ⑦ FLOATING TOOL DIALOG     │                                     │ │ (tool     │ │
++│    │   │  Move  X [  ] Y [  ] Z [  ]│                                     │ │  params)  │ │
++│    │   │        [ Cancel ] [ Apply ]│                                     │ └───────────┘ │
++│    │   └────────────────────────────┘                                     │               │
++├────┴─────────────────────────────────────────────────────────────────────┴───────────────┤
++│ ⑧ HISTORY TIMELINE:  ● base ─ ● move ─ ● hole ─ ● shell ─ ● fillet ▸ (active)                │
++├──────────────────────────────────────────────────────────────────────────────────────────┤
++│ ⑨ STATUS BAR:  Sel: Face_12 planar 240 mm²   X 12.4  Y -3.1  Z 0.0   mm ▾   ✔ Valid solid  │
++└──────────────────────────────────────────────────────────────────────────────────────────┘
++```
++
++| # | Area | Maps to existing code | Change |
++|---|------|-----------------------|--------|
++| ① | Top bar | stage switcher in `ManualCadWorkspace.tsx` | Add undo/redo, Export menu, revision picker, "→ CAM" button |
++| ② | Tool rail (left) | `ManualCadToolbar.tsx` | Grouped, icon-only vertical rail with flyouts |
++| ③ | Context bar | `FilterControl` + viewport header | Selection filter, display mode, snap, units |
++| ④ | View cube | `GizmoViewcube` in `CadViewport.tsx` | Keep; add click-to-face and "fit" / "home" buttons |
++| ⑤ | Right dock | `TopologyPropertiesPanel.tsx`, `TaskPanel.tsx` | Tabs: Tree / Properties / Task |
++| ⑥ | Viewport | `CadViewport.tsx`, `SubShapeRaycaster.tsx` | Add transform gizmo, section view, dimension overlays |
++| ⑦ | Floating tool dialog | `OperationForm.tsx` | Anchor near the model for quick tools |
++| ⑧ | Timeline | `HistoryTimelineBar.tsx` | Keep; add hover thumbnails, drag-to-reorder later |
++| ⑨ | Status bar | `ViewportStatus` | Live cursor coordinates, units, validity |
++
++---
++
++## 2. Tool rail (left) — grouped like a pro CAD ribbon
++
++Icon-only, 40 px wide. Hover shows name + shortcut. Groups are separated by thin dividers.
++A small corner triangle marks groups with a flyout.
++
++| Group | Tools | Shortcut | Needs selection |
++|-------|-------|----------|-----------------|
++| **Select** | Select (V), Box select (B) | V, B | none |
++| **Transform** | Move, Rotate, Scale, Mirror | G, R, S, M | whole body |
++| **Place** | Align to bed (drop / face-down / centre) | A | optional face |
++| **Add / Cut** | Primitive (box, cylinder, sphere, cone; add / subtract / intersect), Pad / Boss, Pocket, Hole Wizard | N, E, P, H | face for Pad/Pocket/Hole |
++| **Modify** | Fillet, Chamfer, Shell, Offset, Edit Feature | F, C, T, O, X | edges, faces or body |
++| **Cut / Split** | Split by plane | L | plane or face |
++| **Pattern** | Linear pattern, Polar pattern | Shift+L, Shift+P | whole body |
++| **Repair** | Heal / clean | Shift+H | whole body |
++| **Inspect** | Measure, Section view, Check geometry | D, Shift+S | face / edge |
++
++Behaviour rules
++- A tool that does not apply to the current selection is **dimmed** with a tooltip saying what to select (this already exists in `capabilities.ts`).
++- Clicking a dimmed tool switches the selection filter to the right mode (already exists).
++- `Esc` cancels the active tool. `Enter` applies. `Ctrl+Z` / `Ctrl+Shift+Z` undo / redo.
++- Remove the old standalone "Edit Feature" icon that reuses the Hole icon; give it its own icon and put it under Modify.
++
++---
++
++## 3. Viewport behaviour
++
++**Navigation (same as Fusion / Onshape)**
++- Orbit: middle-mouse drag, or right-drag. Pan: Shift + middle-drag. Zoom: wheel, zoom-to-cursor.
++- `F` fit selection, `Home` fit all. Numpad 1 / 3 / 7 for front / right / top.
++- View cube click snaps to a face or corner; double-click the cube to reset.
++
++**Display**
++- Shaded, Shaded + edges (default), Wireframe, X-ray. Toggle in the context bar.
++- Ground grid with fading, axis triad at origin (X red, Y green, Z blue).
++- **Section view:** a draggable clipping plane (X / Y / Z) with a cap fill, to inspect shells and hollow parts. Non-destructive.
++- Build-volume box (optional) to check the part fits the printer or machine.
++
++**Selection and highlight**
++- Hover: soft highlight. Selected: solid accent colour. Face = filled tint, edge = thick line, body = outline glow.
++- Selection filter chips: Body / Face / Edge. Shift-click adds to the selection, Ctrl-click removes.
++- Right-click opens a context menu that lists only the tools valid for the entity (existing `ContextMenu.tsx`).
++
++**On-model manipulation (the biggest "feels pro" upgrade)**
++- Move: 3-axis arrow gizmo plus plane handles. Drag to translate, type a value to be exact.
++- Rotate: 3 coloured rings. Snap to 15° with Shift.
++- Scale: corner and axis handles; uniform by default, hold Alt for non-uniform.
++- Every drag updates the preview live. The numeric fields in the task panel stay in sync both ways.
++- Pad / Pocket / Hole: drag handle along the face normal to set depth or height, with a live dimension label.
++
++**Ghost preview**
++- Result geometry drawn semi-transparent over the current model: added material in green, removed in red.
++- Volume delta badge: `+1 240 mm³` / `−380 mm³` (already returned by the preview API).
++- Failed preview shows the error text from the backend in a red banner with a suggestion, not a toast that vanishes.
++
++**Dimensions and measure**
++- Measure tool draws a leader line with the distance, and shows min distance, centre distance and angle (backend now returns these).
++- Bounding-box dimensions can be pinned on screen (X × Y × Z).
++
++---
++
++## 4. Right dock
++
++Three tabs. The dock is resizable (260–420 px) and collapsible with `Tab`.
++
++**Tree**
++```
++▾ Part
++  ▾ Bodies (1)         👁 🔒
++  ▾ Features
++      ● Base (AI generated)
++      ● Move
++      ● Hole Ø6
++      ● Shell 2 mm      ← double-click to edit parameters
++  ▸ Faces (24)
++  ▸ Edges (60)
++```
++- Click a row to select it in the viewport. Eye icon hides, lock prevents edits.
++- Double-click a feature to edit; this uses the existing `edit_params` recompute.
++- Right-click a feature: Edit, Suppress, Delete (with recompute warning).
++
++**Properties** (existing `TopologyPropertiesPanel`)
++- Shows only fields that exist for the entity type (already implemented).
++- Add an editable **Position / Rotation / Size** block for the whole body, so users can type exact values.
++- Add a **Body info** block: volume, surface area, bounding box, face / edge count, valid solid / not.
++
++**Task panel** (existing `TaskPanel` + `OperationForm`)
++- Title, short description, parameters, **Preview**, **Apply**, **Cancel**.
++- Parameter fields use stepper inputs with units, drag-to-scrub on the label, and quick-preset chips (already used by the hole presets).
++- "Advanced" section collapsed by default.
++- Remember the last values per tool for the session.
++
++---
++
++## 5. Tool parameter panels (what each tool shows)
++
++| Tool | Fields |
++|------|--------|
++| Move | X, Y, Z distance (mm) |
++| Rotate | Axis (X / Y / Z), Angle (°), Pivot (centre / origin) |
++| Scale | Mode (uniform / per-axis), Factor or Sx Sy Sz, Pivot |
++| Mirror | Plane (XY / YZ / XZ) or selected face, Offset, Keep original (symmetric) |
++| Align | Mode: Drop to bed · Face down · Centre XY · Centre origin |
++| Primitive | Shape, Mode (add / subtract / intersect), Size, Position (or on selected face) |
++| Shell | Wall thickness, Direction (in / out), Open faces (selected) |
++| Offset | Amount (± mm), for print tolerance or clearance |
++| Split | Plane or selected face, Offset, Keep (top / bottom / both) |
++| Linear pattern | Count, Spacing X Y Z |
++| Polar pattern | Count, Total angle, Axis, Centre X Y Z |
++| Heal | Fix shape, Merge co-planar faces, Remove loose solids |
++| Pad / Pocket / Hole / Fillet / Chamfer / Edit Feature | Unchanged |
++
++---
++
++## 6. Visual design
++
++- **Theme:** dark by default, light available. Neutral grey chrome (`#16181d` panels, `#1d2027` surfaces), one accent colour (blue `#3b82f6`) for selection and primary actions. No purple gradient on chrome.
++- **Viewport background:** soft vertical gradient (`#2a2f3a` → `#14161b`), like Fusion / Blender, so the model stands out.
++- **Typography:** system UI font 12–13 px for panels, tabular numbers for all dimensions, monospace only for coordinates.
++- **Density:** compact rows (28 px), 8 px grid, 1 px dividers, no heavy shadows. Icons from one set (lucide), 18 px, stroke 1.75.
++- **Feedback:** every long action shows a thin progress bar under the top bar. Errors stay visible until dismissed.
++- **Accessibility:** all tools reachable by keyboard, visible focus ring, tooltips with shortcuts, colour is never the only signal.
++
++---
++
++## 7. Keyboard shortcuts
++
++| Key | Action | Key | Action |
++|-----|--------|-----|--------|
++| V | Select | G | Move |
++| R | Rotate | S | Scale |
++| M | Mirror | A | Align to bed |
++| H | Hole | P | Pocket |
++| E | Pad / extrude | F | Fillet (or fit view when nothing is selected) |
++| C | Chamfer | T | Shell |
++| L | Split | D | Measure |
++| Esc | Cancel tool | Enter | Apply |
++| Ctrl+Z / Ctrl+Shift+Z | Undo / Redo | Ctrl+K | Command search |
++| Tab | Toggle right dock | Home | Fit all |
++
++A **command search** (`Ctrl+K`) lists every tool by name, so nothing depends on memorising icons.
++
++---
++
++## 8. Export menu (top bar)
++
++Download current revision as **STL**, **STEP**, **OBJ** or **3MF**. Backend: `GET /api/v1/cad/modify/export/{session_id}?fmt=stl|step|obj|3mf&revision_id=…`. A "→ CAM" button hands the active STEP revision to the CAM stage.
++
++---
++
++## 9. Build phases
++
++| Phase | Scope | Main files |
++|-------|-------|------------|
++| **1. Layout shell** | Top bar, left rail, right dock with tabs, status bar, dark theme tokens | `ManualCadWorkspace.tsx`, new `layout/` components |
++| **2. Tool rail + registry** | Grouped rail, new tool ids wired to the registry and capability matrix, forms for each new tool | `ManualCadToolbar.tsx`, `operations/registry.ts`, `operations/capabilities.ts` |
++| **3. Preview polish** | Ghost preview colours, volume delta badge, persistent error banner, Apply / Cancel always visible | `TaskPanel.tsx`, `CadViewport.tsx` |
++| **4. On-model gizmos** | Move / rotate / scale handles (three.js `TransformControls` or drei `PivotControls`), live sync with fields | `CadViewport.tsx`, new `TransformGizmo.tsx` |
++| **5. Tree + properties** | Feature tree with edit / suppress / delete, body info block | `HistoryTimelineBar.tsx`, `TopologyPropertiesPanel.tsx` |
++| **6. Inspect tools** | Section view, richer measure overlay, build-volume box | `CadViewport.tsx` |
++| **7. Command search + shortcuts** | `Ctrl+K` palette, shortcut help overlay | new `CommandPalette.tsx` |
++
++Suggested order: 1 → 2 → 3 first (the screen already looks professional and every new tool is usable), then 4, which gives the biggest "real 3D editor" feel.
++
++---
++
++## 10. Open decisions for you
++
++1. **Theme:** dark only, or dark + light? (Recommended: dark default with a light option.)
++2. **Gizmo library:** drei `PivotControls` (faster to ship) or three.js `TransformControls` (more precise, more code). Recommended: `TransformControls`.
++3. **Units:** millimetres only, or add inch toggle? (Recommended: mm default, inch toggle in the status bar.)
++4. **Mesh-only edits:** tools such as decimate or smooth only apply to raw STL, not the STEP model. Do you want a separate "Mesh" mode for these, or keep everything on the STEP model? (Recommended: keep STEP-only for now, since CAM needs the exact B-Rep.)
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/__tests__/manual_cad_capabilities.test.ts V-XCAD-prod/web-ui/__tests__/manual_cad_capabilities.test.ts
+--- a/web-ui/__tests__/manual_cad_capabilities.test.ts	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/__tests__/manual_cad_capabilities.test.ts	2026-10-13 06:10:50.618252076 +0000
+@@ -9,6 +9,7 @@
+ import {
+   OPERATION_REGISTRY,
+   getOperationDefinition,
++  getDefaultParams,
+ } from '../components/manual-cad/operations/registry';
+ 
+ describe('Manual CAD Step 1: Capabilities & Classification', () => {
+@@ -69,14 +70,38 @@
+     const edge = { entity_type: 'edge', curve_type: 'line' };
+     const cylFace = { entity_type: 'face', surface_type: 'cylinder' };
+ 
+-    // Acceptance: selecting a planar face offers hole/pocket/pad only
+-    expect(getApplicableOperations(planarFace)).toEqual(['hole', 'pocket', 'pad']);
++    // A planar face offers feature tools plus the face-aware body tools
++    const planarOps = getApplicableOperations(planarFace);
++    expect(planarOps).toEqual(expect.arrayContaining(['hole', 'pocket', 'pad', 'shell', 'split', 'mirror', 'align', 'primitive', 'measure']));
++    expect(planarOps).not.toContain('fillet');
++    expect(planarOps).not.toContain('move');
+ 
+-    // Acceptance: an edge offers fillet/chamfer/measure
++    // An edge offers fillet/chamfer/measure
+     expect(getApplicableOperations(edge)).toEqual(['fillet', 'chamfer', 'measure']);
+ 
+-    // Other face offers measure
+-    expect(getApplicableOperations(cylFace)).toEqual(['measure']);
++    // A cylindrical face can be edited as a feature and measured
++    expect(getApplicableOperations(cylFace)).toEqual(['edit_feature', 'measure']);
++  });
++
++  it('whole-model selection offers every body-level editing tool', () => {
++    const body = { entity_type: 'body' };
++    const ops = getApplicableOperations(body);
++    ['move', 'rotate', 'scale', 'mirror', 'align', 'primitive', 'shell', 'offset', 'split',
++      'linear_pattern', 'polar_pattern', 'heal', 'measure'].forEach((id) => expect(ops).toContain(id));
++    expect(ops).not.toContain('fillet');
++    expect(isOperationApplicable('move', body)).toBe(true);
++    expect(isOperationApplicable('move', { entity_type: 'edge', curve_type: 'line' })).toBe(false);
++    // Optional-face tools also accept a planar face
++    expect(isOperationApplicable('mirror', { entity_type: 'face', surface_type: 'plane' })).toBe(true);
++  });
++
++  it('every tool has a registry definition, requirement text and backend-aligned defaults', () => {
++    Object.keys(OPERATION_REGISTRY).forEach((id) => {
++      expect(OPERATION_REQUIREMENTS[id as keyof typeof OPERATION_REQUIREMENTS]).toBeTruthy();
++    });
++    expect(getDefaultParams('shell')).toEqual({ thickness: 2, direction: 'inside' });
++    expect(getDefaultParams('rotate')).toEqual({ axis: 'z', angle: 90, pivot: 'center' });
++    expect(getDefaultParams('heal')).toEqual({ fix: true, clean: true, keep_largest: true });
+   });
+ 
+   it('selection readout adapts to the class using existing topology data only', () => {
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/app/globals.css V-XCAD-prod/web-ui/app/globals.css
+--- a/web-ui/app/globals.css	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/app/globals.css	2026-10-13 06:15:20.450093515 +0000
+@@ -50,41 +50,157 @@
+ }
+ 
+ /* ═══════════════════════════════════════════════════════
+-   Manual CAD design tokens — centralized, no scattered hex
++   Manual CAD design tokens
++   Neutral graphite surfaces, one blue accent. Flat fills, hairline borders.
++   Depth (back → front): viewport < panel < raised < input
+    ═══════════════════════════════════════════════════════ */
+ :root,
+ .dark {
+-  /* Backgrounds */
+-  --mcad-bg:          #0f1216;    /* page-level */
+-  --mcad-panel:       #12161b;    /* panels, inspector */
+-  --mcad-input:       #171c23;    /* inputs, segments, hover areas */
+-  --mcad-viewport:    #0d1014;    /* 3D canvas */
+-  --mcad-timeline:    #12161b;    /* timeline bar */
++  /* Surfaces */
++  --mcad-bg:          #121316;    /* behind everything */
++  --mcad-panel:       #1b1d21;    /* floating panels */
++  --mcad-raised:      #22252a;    /* cards inside panels, menus */
++  --mcad-input:       #272a30;    /* inputs, segments */
++  --mcad-viewport:    #20262e;    /* 3D canvas */
++  --mcad-timeline:    #1b1d21;
++  --mcad-hover:       rgba(255,255,255,0.06);
+ 
+   /* Borders */
+-  --mcad-border:      #232932;    /* panel separators */
+-  --mcad-border-ctrl: #2d3643;    /* input/control borders */
++  --mcad-border:      rgba(255,255,255,0.07);
++  --mcad-border-ctrl: rgba(255,255,255,0.10);
++  --mcad-border-strong: rgba(255,255,255,0.18);
+ 
+   /* Text */
+-  --mcad-text-primary:   #e6e9ee;
+-  --mcad-text-secondary: #9aa4b2;
+-  --mcad-text-muted:     #7b8594;
+-
+-  /* Accents */
+-  --mcad-teal:       #2dd4bf;
+-  --mcad-teal-tint:  #16322f;    /* teal at ~8% for bg tint */
+-  --mcad-amber:      #f5a524;    /* selected geometry only */
+-  --mcad-danger:     #f08a8a;
++  --mcad-text-primary:   #e8eaed;
++  --mcad-text-secondary: #a4a9b2;
++  --mcad-text-muted:     #7a808a;
++
++  /* Accent (selection, primary action) */
++  --mcad-accent:       #4c7bf4;
++  --mcad-accent-hover: #6189f6;
++  --mcad-accent-tint:  rgba(76,123,244,0.16);
++  --mcad-accent-line:  rgba(76,123,244,0.45);
++  --mcad-on-accent:    #ffffff;
++  --mcad-amber:        #e8a33d;   /* selected geometry only */
++  --mcad-danger:       #ef7a7a;
++  --mcad-focus:        0 0 0 2px rgba(76,123,244,0.45);
++
++  --mcad-segment-active: #353a43;
++
++  /* Elevation: a single soft shadow for floating panels */
++  --mcad-shadow-card: 0 10px 30px rgba(0,0,0,0.38), 0 0 0 1px rgba(255,255,255,0.04);
++  --mcad-shadow-pop:  0 8px 24px rgba(0,0,0,0.5);
+ 
+-  /* Segment active (filter control, type selectors) */
+-  --mcad-segment-active: #252c37;
+-
+-  /* Radii convenience vars */
++  /* Radii */
+   --mcad-r-ctrl: 8px;
+-  --mcad-r-card: 10px;
++  --mcad-r-card: 14px;
++  --mcad-r-panel: 16px;
+   --mcad-r-pill: 999px;
+ }
+ 
++/* ───────────── Manual CAD shared component styles ─────────────
++   Scoped to .mcad-workspace so nothing leaks to other stages. */
++.mcad-workspace { -webkit-font-smoothing: antialiased; }
++.mcad-workspace ::selection { background: rgba(76,123,244,0.35); }
++
++.mcad-workspace *::-webkit-scrollbar { width: 8px; height: 8px; }
++.mcad-workspace *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
++.mcad-workspace *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.24); background-clip: padding-box; }
++.mcad-workspace *::-webkit-scrollbar-track { background: transparent; }
++.mcad-workspace * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.16) transparent; }
++
++.mcad-workspace input:not([type="checkbox"]):not([type="range"]),
++.mcad-workspace select { transition: border-color .15s, box-shadow .15s; }
++.mcad-workspace input:not([type="checkbox"]):not([type="range"]):hover,
++.mcad-workspace select:hover { border-color: var(--mcad-border-strong) !important; }
++.mcad-workspace input:focus-visible,
++.mcad-workspace select:focus-visible,
++.mcad-workspace textarea:focus-visible { outline: none; border-color: var(--mcad-accent) !important; box-shadow: var(--mcad-focus); }
++.mcad-workspace input[type="number"]::-webkit-inner-spin-button { opacity: 0; }
++.mcad-workspace input[type="number"]:hover::-webkit-inner-spin-button { opacity: .5; }
++.mcad-workspace input[type="checkbox"] { accent-color: var(--mcad-accent); }
++
++.mcad-workspace button { transition: background .15s, border-color .15s, color .15s, opacity .15s; }
++.mcad-workspace button:focus-visible { outline: none; box-shadow: var(--mcad-focus); }
++
++/* Buttons */
++.mcad-btn {
++  height: 34px; border-radius: var(--mcad-r-ctrl); font-size: 12px; font-weight: 500; font-family: var(--font-sans);
++  display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
++  background: var(--mcad-input); border: 1px solid var(--mcad-border-ctrl); color: var(--mcad-text-primary);
++}
++.mcad-btn:hover:not(:disabled) { background: var(--mcad-segment-active); border-color: var(--mcad-border-strong); }
++.mcad-btn:disabled { opacity: .45; cursor: not-allowed; }
++.mcad-btn--primary { background: var(--mcad-accent); border-color: transparent; color: var(--mcad-on-accent); font-weight: 600; }
++.mcad-btn--primary:hover:not(:disabled) { background: var(--mcad-accent-hover); border-color: transparent; }
++.mcad-btn--ghost { height: 28px; padding: 0 10px; font-size: 11px; background: transparent; border-color: var(--mcad-border-ctrl); color: var(--mcad-text-secondary); }
++.mcad-btn--ghost:hover:not(:disabled) { color: var(--mcad-text-primary); }
++
++/* Floating panels & bars */
++.mcad-float {
++  background: var(--mcad-panel); border-radius: var(--mcad-r-panel);
++  box-shadow: var(--mcad-shadow-card); overflow: hidden;
++}
++.mcad-card { background: var(--mcad-raised); border: 1px solid var(--mcad-border); border-radius: var(--mcad-r-card); overflow: hidden; }
++
++/* Left tool rail */
++.mcad-rail { overflow-y: auto; overflow-x: visible; scrollbar-width: none; }
++.mcad-rail::-webkit-scrollbar { display: none; }
++.mcad-rail-sep { width: 24px; height: 1px; background: var(--mcad-border); margin: 6px 0; flex-shrink: 0; }
++.mcad-tool {
++  position: relative; width: 38px; height: 38px; margin: 1px 0; border-radius: 10px; border: none;
++  display: flex; align-items: center; justify-content: center; cursor: pointer; background: transparent;
++  color: var(--mcad-text-secondary); flex-shrink: 0;
++}
++.mcad-tool:hover { background: var(--mcad-hover); color: var(--mcad-text-primary); }
++.mcad-tool[data-active="true"] { background: var(--mcad-accent); color: var(--mcad-on-accent); }
++.mcad-tool[data-enabled="false"] { opacity: .35; }
++.mcad-tool[data-enabled="false"]:hover { background: transparent; color: var(--mcad-text-secondary); }
++
++/* Tooltip */
++.mcad-tip {
++  position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
++  background: #0e0f11; border: 1px solid var(--mcad-border-ctrl); border-radius: 8px; padding: 5px 9px;
++  font: 500 12px var(--font-sans); color: var(--mcad-text-primary); white-space: nowrap; pointer-events: none;
++  opacity: 0; transition: opacity .12s .3s; z-index: 60; display: flex; align-items: center; gap: 8px;
++}
++.group:hover > .mcad-tip, .group:focus-within > .mcad-tip { opacity: 1; }
++.mcad-kbd { font: 600 10px/1 var(--font-mono); padding: 3px 5px; border-radius: 4px; color: var(--mcad-text-secondary); background: var(--mcad-input); }
++
++/* Segmented control (top bar, stage switcher) */
++.mcad-seg { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--mcad-input); }
++.mcad-seg button {
++  flex: 1; height: 28px; padding: 0 12px; border: none; border-radius: 7px; background: transparent;
++  color: var(--mcad-text-secondary); font: 500 12px var(--font-sans); cursor: pointer; white-space: nowrap;
++  display: flex; align-items: center; justify-content: center; gap: 6px;
++}
++.mcad-seg button:hover { color: var(--mcad-text-primary); }
++.mcad-seg button[data-on="true"] { background: var(--mcad-segment-active); color: var(--mcad-text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
++
++/* Right panel sections */
++.mcad-section { padding: 16px 18px; border-bottom: 1px solid var(--mcad-border); }
++.mcad-section:last-child { border-bottom: none; }
++.mcad-section-title { font: 600 11px var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--mcad-text-muted); margin: 0 0 12px; }
++
++/* Prompt dock */
++.mcad-prompt {
++  display: flex; align-items: flex-end; gap: 8px; padding: 10px 10px 10px 18px;
++  background: var(--mcad-panel); border-radius: 22px; box-shadow: var(--mcad-shadow-card);
++}
++.mcad-prompt textarea {
++  flex: 1; resize: none; border: none; outline: none; background: transparent; color: var(--mcad-text-primary);
++  font: 400 14px/1.5 var(--font-sans); padding: 7px 0; max-height: 120px; min-height: 24px;
++}
++.mcad-prompt textarea::placeholder { color: var(--mcad-text-muted); }
++.mcad-prompt-send {
++  width: 36px; height: 36px; border-radius: 999px; border: none; cursor: pointer; flex-shrink: 0;
++  background: var(--mcad-accent); color: var(--mcad-on-accent); display: flex; align-items: center; justify-content: center;
++}
++.mcad-prompt-send:hover:not(:disabled) { background: var(--mcad-accent-hover); }
++.mcad-prompt-send:disabled { background: var(--mcad-input); color: var(--mcad-text-muted); cursor: not-allowed; }
++
++@media (prefers-reduced-motion: reduce) { .mcad-workspace *, .mcad-tip { transition: none !important; } }
++
+ :root {
+ 	color-scheme: light;
+ 	--background: #fafafa; /* neutral-50 - cleaner, brighter base */
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/manual-cad/HistoryTimelineBar.tsx V-XCAD-prod/web-ui/components/manual-cad/HistoryTimelineBar.tsx
+--- a/web-ui/components/manual-cad/HistoryTimelineBar.tsx	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/manual-cad/HistoryTimelineBar.tsx	2026-10-13 06:15:35.998846228 +0000
+@@ -50,7 +50,7 @@
+       return `Pocket ${w}×${h} d${p.depth ?? '?'}`;
+     }
+     case 'pad': return `Pad +${p.height ?? p.length ?? '?'}mm`;
+-    default: return op.operation_type.charAt(0).toUpperCase() + op.operation_type.slice(1);
++    default: return op.operation_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+   }
+ }
+ 
+@@ -119,12 +119,12 @@
+                 display: 'flex', alignItems: 'center', gap: 0,
+                 borderRadius: 999, flexShrink: 0,
+                 border: isActive
+-                  ? '1.5px solid var(--mcad-teal)'
++                  ? '1.5px solid var(--mcad-accent)'
+                   : hasFail
+                     ? '1.5px solid var(--mcad-amber)'
+                     : '1px solid var(--mcad-border-ctrl)',
+                 background: isActive
+-                  ? 'var(--mcad-teal-tint)'
++                  ? 'var(--mcad-accent-tint)'
+                   : hasFail
+                     ? 'rgba(245,165,36,0.08)'
+                     : 'var(--mcad-input)',
+@@ -146,7 +146,7 @@
+                   fontFamily: 'var(--font-sans)',
+                   fontWeight: isActive ? 600 : 400,
+                   color: isActive
+-                    ? 'var(--mcad-teal)'
++                    ? 'var(--mcad-accent)'
+                     : hasFail
+                       ? 'var(--mcad-amber)'
+                       : 'var(--mcad-text-secondary)',
+@@ -156,7 +156,7 @@
+                 </span>
+                 <span style={{
+                   fontSize: 9, fontFamily: 'var(--font-mono)',
+-                  color: isActive ? 'rgba(45,212,191,0.6)' : 'var(--mcad-text-muted)',
++                  color: isActive ? 'var(--mcad-accent)' : 'var(--mcad-text-muted)',
+                 }}>
+                   {revId}
+                 </span>
+@@ -195,10 +195,10 @@
+           <div style={{
+             display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
+             borderRadius: 999, flexShrink: 0,
+-            border: '1.5px dashed var(--mcad-teal)',
+-            background: 'var(--mcad-teal-tint)',
++            border: '1.5px dashed var(--mcad-accent)',
++            background: 'var(--mcad-accent-tint)',
+           }}>
+-            <span style={{ fontSize: 11, fontFamily: 'var(--font-sans)', color: 'var(--mcad-teal)', whiteSpace: 'nowrap' }}>
++            <span style={{ fontSize: 11, fontFamily: 'var(--font-sans)', color: 'var(--mcad-accent)', whiteSpace: 'nowrap' }}>
+               {previewLabel} · preview
+             </span>
+           </div>
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/manual-cad/ManualCadToolbar.tsx V-XCAD-prod/web-ui/components/manual-cad/ManualCadToolbar.tsx
+--- a/web-ui/components/manual-cad/ManualCadToolbar.tsx	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/manual-cad/ManualCadToolbar.tsx	2026-10-13 06:15:35.997907214 +0000
+@@ -5,16 +5,32 @@
+   MousePointer2,
+   CircleDot,
+   Square,
+-  Box,
+   Layers,
+   CornerDownRight,
+   Scissors,
+   Ruler,
++  Move3d,
++  RotateCw,
++  Scaling,
++  FlipHorizontal2,
++  ArrowDownToLine,
++  Shapes,
++  SquareDashed,
++  Expand,
++  SquareSplitVertical,
++  Grid3x3,
++  Orbit,
++  Wrench,
++  Settings2,
+   type LucideIcon,
+ } from 'lucide-react';
+-import { cn } from '@/lib/utils';
+ 
+-export type CADToolType = 'select' | 'fillet' | 'chamfer' | 'hole' | 'pocket' | 'pad' | 'measure' | 'edit_feature';
++export type CADToolType =
++  | 'select' | 'fillet' | 'chamfer' | 'hole' | 'pocket' | 'pad' | 'measure' | 'edit_feature'
++  // Body-level editing
++  | 'move' | 'rotate' | 'scale' | 'mirror' | 'align'
++  | 'primitive' | 'shell' | 'offset' | 'split'
++  | 'linear_pattern' | 'polar_pattern' | 'heal';
+ 
+ interface ManualCadToolbarProps {
+   activeTool: CADToolType;
+@@ -26,41 +42,64 @@
+   workspaceRef?: React.RefObject<HTMLElement | null>;
+ }
+ 
+-/** Groups: [Select] | [Hole, Pocket, Pad, Edit] | [Fillet, Chamfer] | [Measure] */
+-const TOOL_GROUPS: Array<{
+-  tools: Array<{
+-    id: CADToolType;
+-    label: string;
+-    shortcut: string;
+-    icon: LucideIcon;
+-    needsEdge?: boolean;   // true = only available in edge mode
+-    needsFace?: boolean;   // true = only available in face (planar) mode
+-  }>;
+-}> = [
++interface ToolDef {
++  id: CADToolType;
++  label: string;
++  shortcut: string;
++  icon: LucideIcon;
++  needsEdge?: boolean;   // only available in edge mode
++  needsFace?: boolean;   // only available in face (planar) mode
++  needsBody?: boolean;   // acts on the whole body: selects it automatically
++}
++
++/** Groups, top to bottom: Select | Transform | Place & Add | Features | Modify | Pattern & Repair | Inspect */
++const TOOL_GROUPS: Array<{ label: string; tools: ToolDef[] }> = [
++  {
++    label: 'Select',
++    tools: [{ id: 'select', label: 'Select', shortcut: 'V', icon: MousePointer2 }],
++  },
+   {
++    label: 'Move',
+     tools: [
+-      { id: 'select',  label: 'Select',    shortcut: 'V', icon: MousePointer2 },
++      { id: 'move',   label: 'Move',            shortcut: 'G', icon: Move3d,          needsBody: true },
++      { id: 'rotate', label: 'Rotate',          shortcut: 'R', icon: RotateCw,        needsBody: true },
++      { id: 'scale',  label: 'Scale',           shortcut: 'S', icon: Scaling,         needsBody: true },
++      { id: 'mirror', label: 'Mirror',          shortcut: 'M', icon: FlipHorizontal2, needsBody: true },
++      { id: 'align',  label: 'Align to Bed',    shortcut: 'A', icon: ArrowDownToLine, needsBody: true },
+     ],
+   },
+   {
++    label: 'Build',
+     tools: [
+-      { id: 'hole',    label: 'Hole Wizard', shortcut: 'H', icon: CircleDot,         needsFace: true },
+-      { id: 'pocket',  label: 'Pocket Cut',  shortcut: 'P', icon: Square,            needsFace: true },
+-      { id: 'pad',     label: 'Pad / Boss',  shortcut: 'E', icon: Layers,            needsFace: true },
+-      { id: 'edit_feature', label: 'Edit Feature', shortcut: 'X', icon: CircleDot, },
++      { id: 'primitive', label: 'Add / Cut Shape', shortcut: 'N', icon: Shapes, needsBody: true },
++      { id: 'hole',      label: 'Hole Wizard',     shortcut: 'H', icon: CircleDot, needsFace: true },
++      { id: 'pocket',    label: 'Pocket Cut',      shortcut: 'P', icon: Square,    needsFace: true },
++      { id: 'pad',       label: 'Pad / Boss',      shortcut: 'E', icon: Layers,    needsFace: true },
++      { id: 'edit_feature', label: 'Edit Feature', shortcut: 'X', icon: Settings2 },
+     ],
+   },
+   {
++    label: 'Edit',
+     tools: [
+-      { id: 'fillet',  label: 'Edge Fillet',  shortcut: 'F', icon: CornerDownRight,  needsEdge: true },
+-      { id: 'chamfer', label: 'Edge Chamfer', shortcut: 'C', icon: Scissors,         needsEdge: true },
++      { id: 'fillet',  label: 'Edge Fillet',  shortcut: 'F', icon: CornerDownRight, needsEdge: true },
++      { id: 'chamfer', label: 'Edge Chamfer', shortcut: 'C', icon: Scissors,        needsEdge: true },
++      { id: 'shell',   label: 'Shell',        shortcut: 'T', icon: SquareDashed,    needsBody: true },
++      { id: 'offset',  label: 'Offset',       shortcut: 'O', icon: Expand,          needsBody: true },
++      { id: 'split',   label: 'Split by Plane', shortcut: 'L', icon: SquareSplitVertical, needsBody: true },
+     ],
+   },
+   {
++    label: 'Array',
+     tools: [
+-      { id: 'measure', label: 'Measure',    shortcut: 'M', icon: Ruler },
++      { id: 'linear_pattern', label: 'Linear Pattern', shortcut: 'Y', icon: Grid3x3, needsBody: true },
++      { id: 'polar_pattern',  label: 'Polar Pattern',  shortcut: 'U', icon: Orbit,   needsBody: true },
++      { id: 'heal',           label: 'Heal / Clean',   shortcut: 'K', icon: Wrench,  needsBody: true },
+     ],
+   },
++  {
++    label: 'Check',
++    tools: [{ id: 'measure', label: 'Measure', shortcut: 'D', icon: Ruler }],
++  },
+ ];
+ 
+ import {
+@@ -78,11 +117,11 @@
+   workspaceRef,
+ }: ManualCadToolbarProps) {
+   // Determine per-tool enabled state using the capability matrix
+-  const isToolEnabled = (t: typeof TOOL_GROUPS[0]['tools'][0]) => {
++  const isToolEnabled = (t: ToolDef) => {
+     return isOperationApplicable(t.id, selectedEntity);
+   };
+ 
+-  const getTooltip = (t: typeof TOOL_GROUPS[0]['tools'][0]) => {
++  const getTooltip = (t: ToolDef) => {
+     const enabled = isOperationApplicable(t.id, selectedEntity);
+     if (!enabled) {
+       return OPERATION_REQUIREMENTS[t.id] || t.label;
+@@ -91,13 +130,18 @@
+   };
+ 
+   // Clicking a tool: if enabled, activate; if dimmed, assist user by mode
+-  const handleToolClick = (t: typeof TOOL_GROUPS[0]['tools'][0]) => {
++  const handleToolClick = (t: ToolDef) => {
+     const enabled = isOperationApplicable(t.id, selectedEntity);
+     if (enabled) {
+       setActiveTool(t.id);
+       return;
+     }
+ 
++    if (t.needsBody) {
++      // Whole-body tools: the workspace switches to body selection and selects it.
++      setActiveTool(t.id);
++      return;
++    }
+     if (t.needsEdge && selectedEntity?.entity_type !== 'edge') {
+       setSelectionMode?.('edge');
+       return;
+@@ -136,234 +180,40 @@
+   return (
+     <nav
+       aria-label="CAD Tools"
+-      style={{ width: 56, minHeight: '100%', background: 'var(--mcad-panel)', borderRight: '1px solid var(--mcad-border)' }}
+-      className="flex flex-col items-center py-3 gap-0 shrink-0 select-none z-20"
++      className="mcad-rail flex flex-col items-stretch select-none"
++      style={{ width: 92, padding: 8, gap: 0, overflow: 'visible' }}
+     >
+-      {/* ─── Selection Scope: 3D Model vs Face ─── */}
+-      <div className="flex flex-col items-center w-full px-2 mb-2">
+-        <span
+-          style={{
+-            fontSize: 9,
+-            fontFamily: 'var(--font-sans)',
+-            textTransform: 'uppercase',
+-            letterSpacing: '0.06em',
+-            color: 'var(--mcad-text-muted)',
+-            fontWeight: 600,
+-            marginBottom: 4,
+-          }}
+-        >
+-          Select
+-        </span>
+-        <div
+-          style={{
+-            display: 'flex',
+-            flexDirection: 'column',
+-            gap: 2,
+-            background: 'var(--mcad-input)',
+-            padding: 2,
+-            borderRadius: 8,
+-            border: '1px solid var(--mcad-border-ctrl)',
+-            width: 40,
+-          }}
+-        >
+-          {/* 3D Model / Sub-shape */}
+-          <div className="relative group">
+-            <button
+-              type="button"
+-              aria-label="Select 3D Model / Sub-shape"
+-              title="3D Model (Sub-shape)"
+-              onClick={() => setSelectionMode?.('body')}
+-              style={{
+-                width: 34,
+-                height: 28,
+-                borderRadius: 6,
+-                display: 'flex',
+-                alignItems: 'center',
+-                justifyContent: 'center',
+-                background: selectionMode === 'body' ? 'var(--mcad-segment-active)' : 'transparent',
+-                color: selectionMode === 'body' ? 'var(--mcad-teal)' : 'var(--mcad-text-muted)',
+-                border: 'none',
+-                cursor: 'pointer',
+-                transition: 'all 0.15s',
+-              }}
+-            >
+-              <Box size={16} strokeWidth={1.7} />
+-            </button>
+-            <div
+-              role="tooltip"
+-              style={{
+-                position: 'absolute',
+-                left: 44,
+-                top: '50%',
+-                transform: 'translateY(-50%)',
+-                background: 'var(--mcad-panel)',
+-                border: '1px solid var(--mcad-border)',
+-                borderRadius: 6,
+-                padding: '4px 8px',
+-                fontSize: 11,
+-                fontFamily: 'var(--font-sans)',
+-                color: 'var(--mcad-text-primary)',
+-                whiteSpace: 'nowrap',
+-                pointerEvents: 'none',
+-                zIndex: 50,
+-                boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+-              }}
+-              className="hidden group-hover:block"
+-            >
+-              3D Model (Sub-shape)
+-            </div>
+-          </div>
+-
+-          {/* Face */}
+-          <div className="relative group">
+-            <button
+-              type="button"
+-              aria-label="Select Face"
+-              title="Face (Surface)"
+-              onClick={() => setSelectionMode?.('face')}
+-              style={{
+-                width: 34,
+-                height: 28,
+-                borderRadius: 6,
+-                display: 'flex',
+-                alignItems: 'center',
+-                justifyContent: 'center',
+-                background: selectionMode === 'face' ? 'var(--mcad-segment-active)' : 'transparent',
+-                color: selectionMode === 'face' ? 'var(--mcad-teal)' : 'var(--mcad-text-muted)',
+-                border: 'none',
+-                cursor: 'pointer',
+-                transition: 'all 0.15s',
+-              }}
+-            >
+-              <Square size={16} strokeWidth={1.7} />
+-            </button>
+-            <div
+-              role="tooltip"
+-              style={{
+-                position: 'absolute',
+-                left: 44,
+-                top: '50%',
+-                transform: 'translateY(-50%)',
+-                background: 'var(--mcad-panel)',
+-                border: '1px solid var(--mcad-border)',
+-                borderRadius: 6,
+-                padding: '4px 8px',
+-                fontSize: 11,
+-                fontFamily: 'var(--font-sans)',
+-                color: 'var(--mcad-text-primary)',
+-                whiteSpace: 'nowrap',
+-                pointerEvents: 'none',
+-                zIndex: 50,
+-                boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+-              }}
+-              className="hidden group-hover:block"
+-            >
+-              Face (Surface)
+-            </div>
+-          </div>
+-        </div>
+-      </div>
+-
+-      <div
+-        style={{ width: 32, height: 1, background: 'var(--mcad-border)', margin: '4px 0 6px 0' }}
+-        aria-hidden
+-      />
+-
+       {TOOL_GROUPS.map((group, gi) => (
+-        <React.Fragment key={gi}>
+-          {gi > 0 && (
+-            <div
+-              style={{ width: 28, height: 1, background: 'var(--mcad-border)', margin: '6px 0' }}
+-              aria-hidden
+-            />
+-          )}
+-          {group.tools.map((t) => {
+-            const Icon = t.icon;
+-            const isActive = activeTool === t.id;
+-            const enabled = isToolEnabled(t);
+-            const tooltip = getTooltip(t);
+-
+-            return (
+-              <div key={t.id} className="relative group">
+-                <button
+-                  type="button"
+-                  aria-label={tooltip}
+-                  title={tooltip}
+-                  onClick={() => handleToolClick(t)}
+-                  style={{
+-                    width: 40,
+-                    height: 40,
+-                    borderRadius: 8,
+-                    margin: '2px 0',
+-                    display: 'flex',
+-                    alignItems: 'center',
+-                    justifyContent: 'center',
+-                    position: 'relative',
+-                    cursor: 'pointer',
+-                    border: 'none',
+-                    transition: 'background 0.15s, opacity 0.15s',
+-                    background: isActive
+-                      ? 'var(--mcad-teal-tint)'
+-                      : 'transparent',
+-                    opacity: enabled ? 1 : 0.38,
+-                  }}
+-                  onMouseEnter={e => {
+-                    if (!isActive) (e.currentTarget as HTMLElement).style.background = 'rgba(45,212,191,0.08)';
+-                  }}
+-                  onMouseLeave={e => {
+-                    if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent';
+-                  }}
+-                >
+-                  <Icon
+-                    size={20}
+-                    strokeWidth={1.6}
+-                    style={{ color: isActive ? 'var(--mcad-teal)' : 'var(--mcad-text-secondary)' }}
+-                  />
+-                  {/* Shortcut badge */}
+-                  <span
+-                    style={{
+-                      position: 'absolute',
+-                      bottom: 3,
+-                      right: 3,
+-                      fontSize: 8,
+-                      fontFamily: 'var(--font-mono)',
+-                      color: isActive ? 'var(--mcad-teal)' : 'var(--mcad-text-muted)',
+-                      lineHeight: 1,
+-                      pointerEvents: 'none',
+-                    }}
++        <React.Fragment key={group.label}>
++          {gi > 0 && <div className="mcad-rail-sep" style={{ alignSelf: 'center', width: '100%' }} aria-hidden />}
++          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 38px)', gap: 4, justifyContent: 'center' }}>
++            {group.tools.map((t) => {
++              const Icon = t.icon;
++              const isActive = activeTool === t.id;
++              const enabled = isToolEnabled(t) || !!t.needsBody;
++              const tooltip = getTooltip(t);
++              return (
++                <div key={t.id} className="relative group">
++                  <button
++                    type="button"
++                    className="mcad-tool"
++                    style={{ margin: 0 }}
++                    data-active={isActive}
++                    data-enabled={enabled}
++                    aria-label={tooltip}
++                    aria-pressed={isActive}
++                    onClick={() => handleToolClick(t)}
+                   >
+-                    {t.shortcut}
+-                  </span>
+-                </button>
+-
+-                {/* Tooltip */}
+-                <div
+-                  role="tooltip"
+-                  style={{
+-                    position: 'absolute',
+-                    left: 48,
+-                    top: '50%',
+-                    transform: 'translateY(-50%)',
+-                    background: 'var(--mcad-panel)',
+-                    border: '1px solid var(--mcad-border)',
+-                    borderRadius: 8,
+-                    padding: '4px 10px',
+-                    whiteSpace: 'nowrap',
+-                    fontSize: 12,
+-                    fontFamily: 'var(--font-sans)',
+-                    color: 'var(--mcad-text-primary)',
+-                    pointerEvents: 'none',
+-                    opacity: 0,
+-                    zIndex: 50,
+-                    boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
+-                  }}
+-                  className="group-hover:opacity-100 transition-opacity duration-150"
+-                >
+-                  {tooltip}
++                    <Icon size={19} strokeWidth={1.7} />
++                  </button>
++                  <div role="tooltip" className="mcad-tip">
++                    {enabled ? t.label : tooltip}
++                    {enabled && <span className="mcad-kbd">{t.shortcut}</span>}
++                  </div>
+                 </div>
+-              </div>
+-            );
+-          })}
++              );
++            })}
++          </div>
+         </React.Fragment>
+       ))}
+     </nav>
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/manual-cad/ManualCadWorkspace.tsx V-XCAD-prod/web-ui/components/manual-cad/ManualCadWorkspace.tsx
+--- a/web-ui/components/manual-cad/ManualCadWorkspace.tsx	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/manual-cad/ManualCadWorkspace.tsx	2026-10-13 06:15:20.462110556 +0000
+@@ -9,6 +9,18 @@
+ import { SubShapeRaycaster, findFaceFromHit } from './SubShapeRaycaster';
+ import { StlMesh } from '@/components/viewport/StlMesh';
+ import { ContextMenu } from './operations/ContextMenu';
++import { getDefaultParams } from './operations/registry';
++
++/** Tools that act on the whole model; a selected planar face is optional input for some. */
++const BODY_TOOLS = new Set<CADToolType>([
++  'move', 'rotate', 'scale', 'mirror', 'align', 'primitive', 'shell', 'offset', 'split',
++  'linear_pattern', 'polar_pattern', 'heal',
++]);
++const FACE_OPTIONAL_BODY_TOOLS = new Set<CADToolType>(['mirror', 'split', 'align', 'shell', 'primitive']);
++
++/** The whole-body pseudo entity is not a B-Rep reference, so it is never sent to the API. */
++const referencesFor = (entity: any | null): any[] =>
++  !entity || entity.entity_type === 'body' ? [] : [entity];
+ import { Loader2 } from 'lucide-react';
+ 
+ interface ManualCadWorkspaceProps {
+@@ -133,7 +145,7 @@
+       }}
+     >
+       {isLoading && (
+-        <Loader2 size={11} className="inline mr-1 animate-spin" style={{ color: 'var(--mcad-teal)', verticalAlign: 'middle' }} />
++        <Loader2 size={11} className="inline mr-1 animate-spin" style={{ color: 'var(--mcad-accent)', verticalAlign: 'middle' }} />
+       )}
+       {text}
+     </div>
+@@ -210,6 +222,17 @@
+       setSelectionMode('edge');
+     } else if (tool === 'hole' || tool === 'pocket' || tool === 'pad' || tool === 'select') {
+       setSelectionMode('face');
++    } else if (BODY_TOOLS.has(tool)) {
++      // Keep a selected planar face where it is useful (mirror/split plane, shell opening, ...);
++      // otherwise the whole model becomes the target.
++      const keepFace =
++        FACE_OPTIONAL_BODY_TOOLS.has(tool) &&
++        selectedEntity?.entity_type === 'face' &&
++        selectedEntity?.surface_type === 'plane';
++      if (!keepFace && topology) {
++        setSelectionMode('body');
++        setSelectedEntity(createBodyEntity(topology, activeRevision));
++      }
+     }
+   };
+ 
+@@ -281,7 +304,7 @@
+   // Preview Operation
+   const handlePreview = async () => {
+     if (!selectedEntity) {
+-      toast.error('Please select a face or edge first.');
++      toast.error('Please select something to edit first.');
+       return;
+     }
+ 
+@@ -296,8 +319,8 @@
+           session_id: sessionId,
+           base_revision: activeRevision,
+           operation_type: activeTool,
+-          references: [selectedEntity],
+-          parameters: params,
++          references: referencesFor(selectedEntity),
++          parameters: { ...getDefaultParams(activeTool), ...params },
+         }),
+       });
+ 
+@@ -361,8 +384,8 @@
+           session_id: sessionId,
+           base_revision: activeRevision,
+           operation_type: activeTool,
+-          references: [selectedEntity],
+-          parameters: params,
++          references: referencesFor(selectedEntity),
++          parameters: { ...getDefaultParams(activeTool), ...params },
+         }),
+       });
+ 
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/manual-cad/SubShapeRaycaster.tsx V-XCAD-prod/web-ui/components/manual-cad/SubShapeRaycaster.tsx
+--- a/web-ui/components/manual-cad/SubShapeRaycaster.tsx	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/manual-cad/SubShapeRaycaster.tsx	2026-10-13 06:15:35.998429409 +0000
+@@ -179,8 +179,8 @@
+         }}
+       >
+         <meshStandardMaterial
+-          // Selected: amber fill; Hovered: teal fill (12%); idle: invisible
+-          color={isSelected ? '#f5a524' : isHovered ? '#2dd4bf' : '#ffffff'}
++          // Selected: amber fill; Hovered: accent fill (12%); idle: invisible
++          color={isSelected ? '#e8a33d' : isHovered ? '#4c7bf4' : '#ffffff'}
+           transparent={true}
+           opacity={isSelected ? 0.30 : isHovered ? 0.12 : 0.001}
+           depthTest={true}
+@@ -249,7 +249,7 @@
+         );
+       })}
+ 
+-      {/* 2. Interactive Edge Highlights — teal selected, teal hover */}
++      {/* 2. Interactive Edge Highlights — accent selected, accent hover */}
+       {showEdges && edges.map((edge) => {
+         const isSelected = selectedEntity?.transient_id === edge.transient_id;
+         const isHovered = activeHover === edge.transient_id;
+@@ -280,7 +280,7 @@
+             {(isSelected || isHovered) && (
+               <Line
+                 points={[p1, p2]}
+-                color="#2dd4bf"           // teal for both selected and hovered edges
++                color="#4c7bf4"           // accent blue for selected and hovered edges
+                 lineWidth={isSelected ? 3 : 2}
+                 transparent
+                 opacity={1.0}
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/manual-cad/TopologyPropertiesPanel.tsx V-XCAD-prod/web-ui/components/manual-cad/TopologyPropertiesPanel.tsx
+--- a/web-ui/components/manual-cad/TopologyPropertiesPanel.tsx	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/manual-cad/TopologyPropertiesPanel.tsx	2026-10-13 06:15:20.459858215 +0000
+@@ -112,7 +112,7 @@
+             onClick={() => setActiveTab(tab)}
+             style={{
+               padding: '8px 12px',
+-              borderBottom: activeTab === tab ? '2px solid var(--mcad-teal)' : '2px solid transparent',
++              borderBottom: activeTab === tab ? '2px solid var(--mcad-accent)' : '2px solid transparent',
+               color: activeTab === tab ? 'var(--mcad-text-primary)' : 'var(--mcad-text-muted)',
+               background: 'transparent', border: 'none', cursor: 'pointer',
+               fontSize: 12, fontFamily: 'var(--font-sans)',
+@@ -157,8 +157,8 @@
+                 <span style={{
+                   fontFamily: 'var(--font-mono)', fontSize: 11,
+                   padding: '2px 8px', borderRadius: 999,
+-                  background: 'var(--mcad-teal-tint)', color: 'var(--mcad-teal)',
+-                  border: '1px solid rgba(45,212,191,0.3)',
++                  background: 'var(--mcad-accent-tint)', color: 'var(--mcad-accent)',
++                  border: '1px solid var(--mcad-accent-line)',
+                 }}>
+                   {e.transient_id}
+                 </span>
+@@ -233,8 +233,8 @@
+                       height: 28,
+                       fontSize: 11,
+                       background: 'var(--mcad-panel)',
+-                      border: '1px solid var(--mcad-teal)',
+-                      color: 'var(--mcad-teal)',
++                      border: '1px solid var(--mcad-accent)',
++                      color: 'var(--mcad-accent)',
+                     }}
+                   >
+                     Select Face
+@@ -380,9 +380,9 @@
+                           onClick={() => onSelectTopologyEntity?.(f)}
+                           style={{
+                             ...topoRowStyle,
+-                            background: isSelected ? 'var(--mcad-teal-tint)' : 'transparent',
+-                            color: isSelected ? 'var(--mcad-teal)' : 'var(--mcad-text-secondary)',
+-                            border: `1px solid ${isSelected ? 'rgba(45,212,191,0.3)' : 'transparent'}`,
++                            background: isSelected ? 'var(--mcad-accent-tint)' : 'transparent',
++                            color: isSelected ? 'var(--mcad-accent)' : 'var(--mcad-text-secondary)',
++                            border: `1px solid ${isSelected ? 'var(--mcad-accent-line)' : 'transparent'}`,
+                           }}
+                         >
+                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{f.transient_id}</span>
+@@ -399,9 +399,9 @@
+                           onClick={() => onSelectTopologyEntity?.(ed)}
+                           style={{
+                             ...topoRowStyle,
+-                            background: isSelected ? 'var(--mcad-teal-tint)' : 'transparent',
+-                            color: isSelected ? 'var(--mcad-teal)' : 'var(--mcad-text-secondary)',
+-                            border: `1px solid ${isSelected ? 'rgba(45,212,191,0.3)' : 'transparent'}`,
++                            background: isSelected ? 'var(--mcad-accent-tint)' : 'transparent',
++                            color: isSelected ? 'var(--mcad-accent)' : 'var(--mcad-text-secondary)',
++                            border: `1px solid ${isSelected ? 'var(--mcad-accent-line)' : 'transparent'}`,
+                           }}
+                         >
+                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{ed.transient_id}</span>
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/manual-cad/operations/ContextMenu.tsx V-XCAD-prod/web-ui/components/manual-cad/operations/ContextMenu.tsx
+--- a/web-ui/components/manual-cad/operations/ContextMenu.tsx	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/manual-cad/operations/ContextMenu.tsx	2026-10-13 06:15:20.462962307 +0000
+@@ -94,7 +94,7 @@
+           style={{
+             fontSize: 11,
+             fontFamily: 'var(--font-mono)',
+-            color: 'var(--mcad-teal)',
++            color: 'var(--mcad-accent)',
+           }}
+         >
+           {entity.transient_id}
+@@ -130,7 +130,7 @@
+             }}
+             onMouseEnter={(e) => {
+               e.currentTarget.style.background = 'var(--mcad-input)';
+-              e.currentTarget.style.color = 'var(--mcad-teal)';
++              e.currentTarget.style.color = 'var(--mcad-accent)';
+             }}
+             onMouseLeave={(e) => {
+               e.currentTarget.style.background = 'transparent';
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/manual-cad/operations/OperationForm.tsx V-XCAD-prod/web-ui/components/manual-cad/operations/OperationForm.tsx
+--- a/web-ui/components/manual-cad/operations/OperationForm.tsx	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/manual-cad/operations/OperationForm.tsx	2026-10-13 06:15:20.462596029 +0000
+@@ -103,14 +103,14 @@
+                         style={{
+                           ...presetBtnStyle,
+                           background: isSelected
+-                            ? 'var(--mcad-teal-tint)'
++                            ? 'var(--mcad-accent-tint)'
+                             : 'var(--mcad-input)',
+                           color: isSelected
+-                            ? 'var(--mcad-teal)'
++                            ? 'var(--mcad-accent)'
+                             : 'var(--mcad-text-muted)',
+                           border: `1px solid ${
+                             isSelected
+-                              ? 'var(--mcad-teal)'
++                              ? 'var(--mcad-accent)'
+                               : 'var(--mcad-border-ctrl)'
+                           }`,
+                         }}
+@@ -221,7 +221,7 @@
+               type="checkbox"
+               checked={checked}
+               onChange={(e) => onChange(field.key, e.target.checked)}
+-              style={{ accentColor: 'var(--mcad-teal)', cursor: 'pointer' }}
++              style={{ accentColor: 'var(--mcad-accent)', cursor: 'pointer' }}
+             />
+           </label>
+         );
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/manual-cad/operations/TaskPanel.tsx V-XCAD-prod/web-ui/components/manual-cad/operations/TaskPanel.tsx
+--- a/web-ui/components/manual-cad/operations/TaskPanel.tsx	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/manual-cad/operations/TaskPanel.tsx	2026-10-13 06:15:20.463296738 +0000
+@@ -95,11 +95,11 @@
+         display: 'flex',
+         flexDirection: 'column',
+         flexShrink: 0,
+-        borderRadius: 10,
+-        background: 'var(--mcad-input)',
++        borderRadius: 12,
++        background: 'var(--mcad-raised)',
+         border: '1px solid var(--mcad-border-ctrl)',
+         overflow: 'hidden',
+-        boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
++        boxShadow: 'var(--mcad-shadow-card)',
+       }}
+     >
+       {/* ─── 1. Title bar ─── */}
+@@ -119,8 +119,8 @@
+               width: 24,
+               height: 24,
+               borderRadius: 6,
+-              background: 'var(--mcad-teal-tint)',
+-              color: 'var(--mcad-teal)',
++              background: 'var(--mcad-accent-tint)',
++              color: 'var(--mcad-accent)',
+               display: 'flex',
+               alignItems: 'center',
+               justifyContent: 'center',
+@@ -217,10 +217,10 @@
+             margin: '0 12px 10px 12px',
+             padding: '6px 10px',
+             borderRadius: 8,
+-            background: 'var(--mcad-teal-tint)',
+-            border: '1px solid rgba(45,212,191,0.3)',
++            background: 'var(--mcad-accent-tint)',
++            border: '1px solid var(--mcad-accent-line)',
+             fontSize: 11,
+-            color: 'var(--mcad-teal)',
++            color: 'var(--mcad-accent)',
+             display: 'flex',
+             alignItems: 'center',
+             gap: 6,
+@@ -270,7 +270,7 @@
+                 checked={livePreview}
+                 onChange={(e) => setLivePreview(e.target.checked)}
+                 style={{
+-                  accentColor: 'var(--mcad-teal)',
++                  accentColor: 'var(--mcad-accent)',
+                   cursor: 'pointer',
+                   width: 14,
+                   height: 14,
+@@ -282,90 +282,38 @@
+             {!livePreview && (
+               <button
+                 type="button"
++                className="mcad-btn mcad-btn--ghost"
+                 onClick={onPreview}
+                 disabled={isLoading || !selectedEntity}
+-                style={{
+-                  height: 26,
+-                  padding: '0 10px',
+-                  borderRadius: 8,
+-                  background: 'var(--mcad-input)',
+-                  border: '1px solid var(--mcad-teal)',
+-                  color: 'var(--mcad-teal)',
+-                  fontSize: 11,
+-                  fontFamily: 'var(--font-sans)',
+-                  cursor: isLoading || !selectedEntity ? 'not-allowed' : 'pointer',
+-                  display: 'flex',
+-                  alignItems: 'center',
+-                  gap: 4,
+-                  opacity: isLoading || !selectedEntity ? 0.45 : 1,
+-                }}
+               >
+-                {isLoading ? (
+-                  <Loader2 size={12} className="animate-spin" />
+-                ) : (
+-                  <Eye size={12} />
+-                )}
++                {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                 Preview
+               </button>
+             )}
+           </div>
+         )}
+ 
+-        {/* Buttons: Cancel (secondary) | OK (primary teal) */}
++        {/* Buttons: Cancel (secondary) | Apply (primary) */}
+         <div style={{ display: 'flex', gap: 8 }}>
+           <button
+             type="button"
++            className="mcad-btn"
++            style={{ flex: 1 }}
+             onClick={isPreviewActive ? onCancelPreview : onClose}
+             disabled={isLoading}
+-            style={{
+-              height: 34,
+-              flex: 1,
+-              borderRadius: 8,
+-              background: 'var(--mcad-input)',
+-              border: '1px solid var(--mcad-border-ctrl)',
+-              color: 'var(--mcad-text-secondary)',
+-              fontSize: 12,
+-              fontFamily: 'var(--font-sans)',
+-              cursor: 'pointer',
+-              display: 'flex',
+-              alignItems: 'center',
+-              justifyContent: 'center',
+-              gap: 6,
+-              transition: 'all 0.15s',
+-            }}
+           >
+             <X size={14} /> Cancel
+           </button>
+ 
+           <button
+             type="button"
++            className="mcad-btn mcad-btn--primary"
++            style={{ flex: 2 }}
+             onClick={onCommit}
+             disabled={okDisabled}
+-            style={{
+-              height: 34,
+-              flex: 2,
+-              borderRadius: 8,
+-              background: 'var(--mcad-teal)',
+-              border: 'none',
+-              color: '#04201c',
+-              fontSize: 12,
+-              fontFamily: 'var(--font-sans)',
+-              fontWeight: 600,
+-              cursor: okDisabled ? 'not-allowed' : 'pointer',
+-              display: 'flex',
+-              alignItems: 'center',
+-              justifyContent: 'center',
+-              gap: 6,
+-              opacity: okDisabled ? 0.45 : 1,
+-              transition: 'opacity 0.15s',
+-            }}
+           >
+-            {isLoading ? (
+-              <Loader2 size={14} className="animate-spin" />
+-            ) : (
+-              <Check size={14} />
+-            )}
+-            Apply {definition.id}
++            {isLoading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
++            Apply {definition.label}
+           </button>
+         </div>
+       </div>
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/manual-cad/operations/capabilities.ts V-XCAD-prod/web-ui/components/manual-cad/operations/capabilities.ts
+--- a/web-ui/components/manual-cad/operations/capabilities.ts	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/manual-cad/operations/capabilities.ts	2026-10-13 06:08:38.671789569 +0000
+@@ -87,6 +87,20 @@
+   fillet: ['edge.linear', 'edge.circular', 'edge.other'],
+   chamfer: ['edge.linear', 'edge.circular', 'edge.other'],
+   edit_feature: ['face.cylindrical'],
++  // Whole-body tools (no face/edge needed)
++  move: ['body'],
++  rotate: ['body'],
++  scale: ['body'],
++  offset: ['body'],
++  heal: ['body'],
++  linear_pattern: ['body'],
++  polar_pattern: ['body'],
++  // Whole-body tools that can optionally use a selected planar face as the plane / target
++  mirror: ['body', 'face.planar'],
++  split: ['body', 'face.planar'],
++  align: ['body', 'face.planar'],
++  shell: ['body', 'face.planar'],
++  primitive: ['body', 'face.planar'],
+   measure: [
+     'body',
+     'face.planar',
+@@ -107,6 +121,18 @@
+   fillet: 'Select an edge',
+   chamfer: 'Select an edge',
+   edit_feature: 'Select a cylindrical face',
++  move: 'Select the 3D model',
++  rotate: 'Select the 3D model',
++  scale: 'Select the 3D model',
++  offset: 'Select the 3D model',
++  heal: 'Select the 3D model',
++  linear_pattern: 'Select the 3D model',
++  polar_pattern: 'Select the 3D model',
++  mirror: 'Select the model, or a planar face as the mirror plane',
++  split: 'Select the model, or a planar face as the cut plane',
++  align: 'Select the model, or a planar face to lay face-down',
++  shell: 'Select the model, or a planar face to leave open',
++  primitive: 'Select the model, or a planar face to place on',
+   measure: 'Select a face or edge',
+ };
+ 
+@@ -130,7 +156,7 @@
+   const classification = classifyEntity(entity, ctx);
+   if (!classification) return [];
+   if (classification === 'face.planar') {
+-    return ['hole', 'pocket', 'pad', 'measure'];
++    return ['hole', 'pocket', 'pad', 'shell', 'split', 'mirror', 'align', 'primitive', 'measure'];
+   }
+   if (classification === 'face.cylindrical') {
+     return ['edit_feature', 'measure'];
+@@ -142,7 +168,10 @@
+     return ['measure'];
+   }
+   if (classification === 'body') {
+-    return ['measure'];
++    return [
++      'move', 'rotate', 'scale', 'mirror', 'align', 'primitive',
++      'shell', 'offset', 'split', 'linear_pattern', 'polar_pattern', 'heal', 'measure',
++    ];
+   }
+   return [];
+ }
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/manual-cad/operations/registry.ts V-XCAD-prod/web-ui/components/manual-cad/operations/registry.ts
+--- a/web-ui/components/manual-cad/operations/registry.ts	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/manual-cad/operations/registry.ts	2026-10-13 06:09:24.483668137 +0000
+@@ -7,6 +7,19 @@
+   Scissors,
+   Ruler,
+   MousePointer2,
++  Move3d,
++  RotateCw,
++  Scaling,
++  FlipHorizontal2,
++  ArrowDownToLine,
++  Shapes,
++  SquareDashed,
++  Expand,
++  SquareSplitVertical,
++  Grid3x3,
++  Orbit,
++  Wrench,
++  Settings2,
+   type LucideIcon,
+ } from 'lucide-react';
+ import type { CADToolType } from '../ManualCadToolbar';
+@@ -69,6 +82,126 @@
+   { label: '1/4"', dia: 6.7, cbDia: 11.0, cbDepth: 6.5 },
+ ];
+ 
++
++// ─────────────────────────────────────────────────────────────
++// Body-level editing tools (post-generation 3D editing)
++// ─────────────────────────────────────────────────────────────
++const num = (
++  key: string, label: string, def: number,
++  opts: Partial<OperationField> = {},
++): OperationField => ({
++  key, label, type: 'number', unit: 'mm', step: 1, default: def, advanced: false, ...opts,
++});
++const seg = (
++  key: string, label: string, def: string, options: FieldOption[],
++  opts: Partial<OperationField> = {},
++): OperationField => ({ key, label, type: 'segment', options, default: def, advanced: false, ...opts });
++const tog = (key: string, label: string, def: boolean): OperationField => ({
++  key, label, type: 'toggle', default: def, advanced: false,
++});
++const AXIS_OPTS: FieldOption[] = [
++  { value: 'x', label: 'X' }, { value: 'y', label: 'Y' }, { value: 'z', label: 'Z' },
++];
++const PLANE_OPTS: FieldOption[] = [
++  { value: 'xy', label: 'XY' }, { value: 'yz', label: 'YZ' }, { value: 'xz', label: 'XZ' },
++];
++const PIVOT_OPTS: FieldOption[] = [
++  { value: 'center', label: 'Centre' }, { value: 'origin', label: 'Origin' },
++];
++/** Hide plane controls when a planar face is selected: the face defines the plane. */
++const noFace = (_v: Record<string, unknown>, e: TopologyEntity | null | undefined) => e?.entity_type !== 'face';
++
++function bodyTool(
++  id: CADToolType, label: string, icon: LucideIcon, shortcut: string,
++  fields: OperationField[], previewable = true,
++): OperationDefinition {
++  return {
++    id, label, icon, shortcut,
++    appliesTo: CAPABILITY_MATRIX[id],
++    requiresSelection: true,
++    previewable,
++    fields,
++    toRequest: (values) => ({ ...values }),
++  };
++}
++
++const BODY_TOOLS: Partial<Record<CADToolType, OperationDefinition>> = {
++  move: bodyTool('move', 'Move', Move3d, 'G', [
++    num('dx', 'X', 10, { step: 1 }), num('dy', 'Y', 0, { step: 1 }), num('dz', 'Z', 0, { step: 1 }),
++  ]),
++  rotate: bodyTool('rotate', 'Rotate', RotateCw, 'R', [
++    seg('axis', 'Axis', 'z', AXIS_OPTS),
++    num('angle', 'Angle', 90, { unit: '°', step: 5, quickPresets: [45, 90, 180] }),
++    seg('pivot', 'Pivot', 'center', PIVOT_OPTS),
++  ]),
++  scale: bodyTool('scale', 'Scale', Scaling, 'S', [
++    seg('mode', 'Mode', 'uniform', [{ value: 'uniform', label: 'Uniform' }, { value: 'axis', label: 'Per axis' }]),
++    num('factor', 'Factor', 1.5, { unit: '×', min: 0.001, max: 1000, step: 0.1, quickPresets: [0.5, 1.5, 2],
++      visibleWhen: (v) => (v.mode || 'uniform') === 'uniform' }),
++    num('sx', 'X scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'axis' }),
++    num('sy', 'Y scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'axis' }),
++    num('sz', 'Z scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'axis' }),
++    seg('pivot', 'Pivot', 'center', PIVOT_OPTS),
++  ]),
++  mirror: bodyTool('mirror', 'Mirror', FlipHorizontal2, 'M', [
++    seg('plane', 'Plane', 'yz', PLANE_OPTS, { visibleWhen: noFace }),
++    num('offset', 'Plane offset', 0, { step: 1 }),
++    tog('keep_original', 'Keep original (symmetric body)', true),
++  ]),
++  align: bodyTool('align', 'Align to Bed', ArrowDownToLine, 'A', [
++    seg('mode', 'Mode', 'drop_to_bed', [
++      { value: 'drop_to_bed', label: 'Drop' },
++      { value: 'face_down', label: 'Face down' },
++      { value: 'center_xy', label: 'Centre XY' },
++      { value: 'center_origin', label: 'Origin' },
++    ]),
++  ]),
++  primitive: bodyTool('primitive', 'Add / Cut Shape', Shapes, 'N', [
++    seg('mode', 'Operation', 'add', [
++      { value: 'add', label: 'Add' }, { value: 'subtract', label: 'Cut' }, { value: 'intersect', label: 'Intersect' },
++    ]),
++    seg('shape', 'Shape', 'box', [
++      { value: 'box', label: 'Box' }, { value: 'cylinder', label: 'Cyl' },
++      { value: 'sphere', label: 'Sphere' }, { value: 'cone', label: 'Cone' },
++    ]),
++    num('length', 'Length', 10, { min: 0.01, visibleWhen: (v) => (v.shape || 'box') === 'box' }),
++    num('width', 'Width', 10, { min: 0.01, visibleWhen: (v) => (v.shape || 'box') === 'box' }),
++    num('diameter', 'Diameter (⌀)', 10, { min: 0.01, visibleWhen: (v) => (v.shape || 'box') !== 'box' }),
++    num('top_diameter', 'Top ⌀', 0, { min: 0, visibleWhen: (v) => v.shape === 'cone' }),
++    num('height', 'Height', 10, { min: 0.01, visibleWhen: (v) => (v.shape || 'box') !== 'sphere' }),
++    num('x', 'Centre X', 0), num('y', 'Centre Y', 0), num('z', 'Centre Z', 0),
++  ]),
++  shell: bodyTool('shell', 'Shell', SquareDashed, 'T', [
++    num('thickness', 'Wall thickness', 2, { min: 0.1, step: 0.25, quickPresets: [1, 1.5, 2, 3] }),
++    seg('direction', 'Direction', 'inside', [{ value: 'inside', label: 'Inside' }, { value: 'outside', label: 'Outside' }]),
++  ]),
++  offset: bodyTool('offset', 'Offset', Expand, 'O', [
++    num('amount', 'Amount (±)', 0.2, { step: 0.05, quickPresets: [-0.2, 0.1, 0.2, 0.5] }),
++  ]),
++  split: bodyTool('split', 'Split by Plane', SquareSplitVertical, 'L', [
++    seg('plane', 'Plane', 'xy', PLANE_OPTS, { visibleWhen: noFace }),
++    num('offset', 'Plane offset', 0, { step: 1 }),
++    seg('keep', 'Keep', 'top', [
++      { value: 'top', label: 'Top' }, { value: 'bottom', label: 'Bottom' }, { value: 'both', label: 'Both' },
++    ]),
++  ]),
++  linear_pattern: bodyTool('linear_pattern', 'Linear Pattern', Grid3x3, 'Y', [
++    num('count', 'Count', 3, { unit: '×', min: 2, max: 100, step: 1 }),
++    num('dx', 'Spacing X', 20), num('dy', 'Spacing Y', 0), num('dz', 'Spacing Z', 0),
++  ]),
++  polar_pattern: bodyTool('polar_pattern', 'Polar Pattern', Orbit, 'U', [
++    num('count', 'Count', 4, { unit: '×', min: 2, max: 100, step: 1 }),
++    num('angle', 'Total angle', 360, { unit: '°', step: 15 }),
++    seg('axis', 'Axis', 'z', AXIS_OPTS),
++    num('cx', 'Centre X', 0), num('cy', 'Centre Y', 0), num('cz', 'Centre Z', 0),
++  ]),
++  heal: bodyTool('heal', 'Heal / Clean', Wrench, 'K', [
++    tog('fix', 'Fix shape errors', true),
++    tog('clean', 'Merge co-planar faces', true),
++    tog('keep_largest', 'Remove loose solids', true),
++  ]),
++};
++
+ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
+   select: {
+     id: 'select',
+@@ -514,7 +647,7 @@
+   edit_feature: {
+     id: 'edit_feature',
+     label: 'Edit Feature',
+-    icon: CircleDot,
++    icon: Settings2,
+     shortcut: 'X',
+     appliesTo: CAPABILITY_MATRIX.edit_feature,
+     requiresSelection: true,
+@@ -575,8 +708,22 @@
+     fields: [],
+     toRequest: (values) => ({ ...values }),
+   },
++
++  ...(BODY_TOOLS as Record<
++    'move' | 'rotate' | 'scale' | 'mirror' | 'align' | 'primitive' | 'shell' | 'offset' | 'split' | 'linear_pattern' | 'polar_pattern' | 'heal',
++    OperationDefinition
++  >),
+ };
+ 
++/** Defaults for every field of a tool, so the request always matches what the form shows. */
++export function getDefaultParams(tool: CADToolType): Record<string, unknown> {
++  const out: Record<string, unknown> = {};
++  for (const f of (OPERATION_REGISTRY[tool]?.fields ?? [])) {
++    if (f.type !== 'position') out[f.key] = f.default;
++  }
++  return out;
++}
++
+ export function getOperationDefinition(tool: CADToolType | 'edit_feature'): OperationDefinition {
+   return OPERATION_REGISTRY[tool] || OPERATION_REGISTRY.select;
+ }
+diff -ruN -x node_modules -x .next -x __pycache__ -x .pytest_cache -x package-lock.json -x '*.pyc' -x .coverage /tmp/claude-0/-home-claude/7adea3ac-0b39-5500-827e-c7b16dbc13dd/scratchpad/orig/V-XCAD-prod/web-ui/components/viewport/CadViewport.tsx V-XCAD-prod/web-ui/components/viewport/CadViewport.tsx
+--- a/web-ui/components/viewport/CadViewport.tsx	2026-10-10 06:57:14.000000000 +0000
++++ b/web-ui/components/viewport/CadViewport.tsx	2026-10-13 06:15:54.928629943 +0000
+@@ -546,7 +546,7 @@
+ 				</div>
+ 			)}
+ 
+-			<header className="flex h-12 items-center justify-between border-b border-border/40 bg-background/50 backdrop-blur-2xl px-3 sm:px-4 z-30 gap-2">
++			<header className={`flex h-12 items-center justify-between px-3 sm:px-4 z-30 gap-2 ${workflowStage === 'manual_cad' ? 'bg-transparent' : 'border-b border-border/40 bg-background/50 backdrop-blur-2xl'}`}>
+ 				<div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
+ 					{projectName && (
+ 						<button
+@@ -823,12 +823,12 @@
+ 					</div>
+ 				)}
+ 
+-				{/* Ambient Background Effects */}
+-				<div className="absolute inset-0 z-0 pointer-events-none">
++				{/* Ambient Background Effects (not used in Manual CAD: flat, neutral canvas) */}
++				{workflowStage !== 'manual_cad' && <div className="absolute inset-0 z-0 pointer-events-none">
+ 					<div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-[128px]" />
+ 					<div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyan-600/5 rounded-full blur-[128px]" />
+ 					<div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))] opacity-10" />
+-				</div>
++				</div>}
+ 
+ 				{allRejected && isWireframeVisible && (
+ 					<div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+@@ -873,7 +873,7 @@
+ 							{/* Contact Shadows at bounding box bottom */}
+ 							<ContactShadows resolution={1024} scale={50} blur={2} opacity={0.4} far={10} color="#000000" />
+ 							
+-							<Grid infiniteGrid fadeDistance={gridFade} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={gridCell} sectionSize={gridSection} />
++							<Grid infiniteGrid fadeDistance={gridFade} sectionColor={workflowStage === 'manual_cad' ? '#3a4658' : '#1e3a8a'} cellColor={workflowStage === 'manual_cad' ? '#2c3644' : '#0f172a'} cellSize={gridCell} sectionSize={gridSection} />
+ 						</DynamicFloor>
+ 						
+ 						<AnimatedSetupGroup setupToolAxis={setupToolAxis} isSetup={workflowStage === 'cam' || workflowStage === 'gcode'} hasToolpaths={hasValidToolpaths}>

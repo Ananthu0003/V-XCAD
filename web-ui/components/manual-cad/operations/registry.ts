@@ -7,6 +7,21 @@ import {
   Scissors,
   Ruler,
   MousePointer2,
+  Pencil,
+  Move3d,
+  RotateCw,
+  Scaling,
+  FlipHorizontal2,
+  ArrowDownToLine,
+  Shapes,
+  SquareDashed,
+  Expand,
+  SquareSplitVertical,
+  Grid3x3,
+  Orbit,
+  Wrench,
+  Settings2,
+  Trash2,
   type LucideIcon,
 } from 'lucide-react';
 import type { CADToolType } from '../ManualCadToolbar';
@@ -68,6 +83,126 @@ export const HOLE_PRESETS = [
   { label: 'M8', dia: 9.0, cbDia: 15.0, cbDepth: 8.5 },
   { label: '1/4"', dia: 6.7, cbDia: 11.0, cbDepth: 6.5 },
 ];
+
+
+// ─────────────────────────────────────────────────────────────
+// Body-level editing tools (post-generation 3D editing)
+// ─────────────────────────────────────────────────────────────
+const num = (
+  key: string, label: string, def: number,
+  opts: Partial<OperationField> = {},
+): OperationField => ({
+  key, label, type: 'number', unit: 'mm', step: 1, default: def, advanced: false, ...opts,
+});
+const seg = (
+  key: string, label: string, def: string, options: FieldOption[],
+  opts: Partial<OperationField> = {},
+): OperationField => ({ key, label, type: 'segment', options, default: def, advanced: false, ...opts });
+const tog = (key: string, label: string, def: boolean): OperationField => ({
+  key, label, type: 'toggle', default: def, advanced: false,
+});
+const AXIS_OPTS: FieldOption[] = [
+  { value: 'x', label: 'X' }, { value: 'y', label: 'Y' }, { value: 'z', label: 'Z' },
+];
+const PLANE_OPTS: FieldOption[] = [
+  { value: 'xy', label: 'XY' }, { value: 'yz', label: 'YZ' }, { value: 'xz', label: 'XZ' },
+];
+const PIVOT_OPTS: FieldOption[] = [
+  { value: 'center', label: 'Centre' }, { value: 'origin', label: 'Origin' },
+];
+/** Hide plane controls when a planar face is selected: the face defines the plane. */
+const noFace = (_v: Record<string, unknown>, e: TopologyEntity | null | undefined) => e?.entity_type !== 'face';
+
+function bodyTool(
+  id: CADToolType, label: string, icon: LucideIcon, shortcut: string,
+  fields: OperationField[], previewable = true,
+): OperationDefinition {
+  return {
+    id, label, icon, shortcut,
+    appliesTo: CAPABILITY_MATRIX[id],
+    requiresSelection: true,
+    previewable,
+    fields,
+    toRequest: (values) => ({ ...values }),
+  };
+}
+
+const BODY_TOOLS: Partial<Record<CADToolType, OperationDefinition>> = {
+  move: bodyTool('move', 'Move', Move3d, 'G', [
+    num('dx', 'X', 10, { step: 1 }), num('dy', 'Y', 0, { step: 1 }), num('dz', 'Z', 0, { step: 1 }),
+  ]),
+  rotate: bodyTool('rotate', 'Rotate', RotateCw, 'R', [
+    seg('axis', 'Axis', 'z', AXIS_OPTS),
+    num('angle', 'Angle', 90, { unit: '°', step: 5, quickPresets: [45, 90, 180] }),
+    seg('pivot', 'Pivot', 'center', PIVOT_OPTS),
+  ]),
+  scale: bodyTool('scale', 'Scale', Scaling, 'S', [
+    seg('mode', 'Mode', 'uniform', [{ value: 'uniform', label: 'Uniform' }, { value: 'axis', label: 'Per axis' }]),
+    num('factor', 'Factor', 1.5, { unit: '×', min: 0.001, max: 1000, step: 0.1, quickPresets: [0.5, 1.5, 2],
+      visibleWhen: (v) => (v.mode || 'uniform') === 'uniform' }),
+    num('sx', 'X scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'axis' }),
+    num('sy', 'Y scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'axis' }),
+    num('sz', 'Z scale', 1, { unit: '×', min: 0.001, max: 1000, step: 0.1, visibleWhen: (v) => v.mode === 'axis' }),
+    seg('pivot', 'Pivot', 'center', PIVOT_OPTS),
+  ]),
+  mirror: bodyTool('mirror', 'Mirror', FlipHorizontal2, 'M', [
+    seg('plane', 'Plane', 'yz', PLANE_OPTS, { visibleWhen: noFace }),
+    num('offset', 'Plane offset', 0, { step: 1 }),
+    tog('keep_original', 'Keep original (symmetric body)', true),
+  ]),
+  align: bodyTool('align', 'Align to Bed', ArrowDownToLine, 'A', [
+    seg('mode', 'Mode', 'drop_to_bed', [
+      { value: 'drop_to_bed', label: 'Drop' },
+      { value: 'face_down', label: 'Face down' },
+      { value: 'center_xy', label: 'Centre XY' },
+      { value: 'center_origin', label: 'Origin' },
+    ]),
+  ]),
+  primitive: bodyTool('primitive', 'Add / Cut Shape', Shapes, 'N', [
+    seg('mode', 'Operation', 'add', [
+      { value: 'add', label: 'Add' }, { value: 'subtract', label: 'Cut' }, { value: 'intersect', label: 'Intersect' },
+    ]),
+    seg('shape', 'Shape', 'box', [
+      { value: 'box', label: 'Box' }, { value: 'cylinder', label: 'Cyl' },
+      { value: 'sphere', label: 'Sphere' }, { value: 'cone', label: 'Cone' },
+    ]),
+    num('length', 'Length', 10, { min: 0.01, visibleWhen: (v) => (v.shape || 'box') === 'box' }),
+    num('width', 'Width', 10, { min: 0.01, visibleWhen: (v) => (v.shape || 'box') === 'box' }),
+    num('diameter', 'Diameter (⌀)', 10, { min: 0.01, visibleWhen: (v) => (v.shape || 'box') !== 'box' }),
+    num('top_diameter', 'Top ⌀', 0, { min: 0, visibleWhen: (v) => v.shape === 'cone' }),
+    num('height', 'Height', 10, { min: 0.01, visibleWhen: (v) => (v.shape || 'box') !== 'sphere' }),
+    num('x', 'Centre X', 0), num('y', 'Centre Y', 0), num('z', 'Centre Z', 0),
+  ]),
+  shell: bodyTool('shell', 'Shell', SquareDashed, 'T', [
+    num('thickness', 'Wall thickness', 2, { min: 0.1, step: 0.25, quickPresets: [1, 1.5, 2, 3] }),
+    seg('direction', 'Direction', 'inside', [{ value: 'inside', label: 'Inside' }, { value: 'outside', label: 'Outside' }]),
+  ]),
+  offset: bodyTool('offset', 'Offset', Expand, 'O', [
+    num('amount', 'Amount (±)', 0.2, { step: 0.05, quickPresets: [-0.2, 0.1, 0.2, 0.5] }),
+  ]),
+  split: bodyTool('split', 'Split by Plane', SquareSplitVertical, 'L', [
+    seg('plane', 'Plane', 'xy', PLANE_OPTS, { visibleWhen: noFace }),
+    num('offset', 'Plane offset', 0, { step: 1 }),
+    seg('keep', 'Keep', 'top', [
+      { value: 'top', label: 'Top' }, { value: 'bottom', label: 'Bottom' }, { value: 'both', label: 'Both' },
+    ]),
+  ]),
+  linear_pattern: bodyTool('linear_pattern', 'Linear Pattern', Grid3x3, 'Y', [
+    num('count', 'Count', 3, { unit: '×', min: 2, max: 100, step: 1 }),
+    num('dx', 'Spacing X', 20), num('dy', 'Spacing Y', 0), num('dz', 'Spacing Z', 0),
+  ]),
+  polar_pattern: bodyTool('polar_pattern', 'Polar Pattern', Orbit, 'U', [
+    num('count', 'Count', 4, { unit: '×', min: 2, max: 100, step: 1 }),
+    num('angle', 'Total angle', 360, { unit: '°', step: 15 }),
+    seg('axis', 'Axis', 'z', AXIS_OPTS),
+    num('cx', 'Centre X', 0), num('cy', 'Centre Y', 0), num('cz', 'Centre Z', 0),
+  ]),
+  heal: bodyTool('heal', 'Heal / Clean', Wrench, 'K', [
+    tog('fix', 'Fix shape errors', true),
+    tog('clean', 'Merge co-planar faces', true),
+    tog('keep_largest', 'Remove loose solids', true),
+  ]),
+};
 
 export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
   select: {
@@ -133,6 +268,54 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         advanced: false,
         visibleWhen: (v) => v.hole_type !== 'through',
       },
+      // Basic: Counterbore Diameter (visible for counterbore)
+      {
+        key: 'cbore_diameter',
+        label: 'C-Bore ⌀',
+        type: 'number',
+        unit: 'mm',
+        min: 0.1,
+        step: 0.5,
+        default: 11,
+        advanced: false,
+        visibleWhen: (v) => v.hole_type === 'counterbore',
+      },
+      // Basic: Counterbore Depth (visible for counterbore)
+      {
+        key: 'cbore_depth',
+        label: 'C-Bore Depth',
+        type: 'number',
+        unit: 'mm',
+        min: 0.1,
+        step: 0.5,
+        default: 4,
+        advanced: false,
+        visibleWhen: (v) => v.hole_type === 'counterbore',
+      },
+      // Basic: Countersink Diameter (visible for countersink)
+      {
+        key: 'csink_diameter',
+        label: 'C-Sink ⌀',
+        type: 'number',
+        unit: 'mm',
+        min: 0.1,
+        step: 0.5,
+        default: 11,
+        advanced: false,
+        visibleWhen: (v) => v.hole_type === 'countersink',
+      },
+      // Basic: Countersink Angle (visible for countersink)
+      {
+        key: 'csink_angle',
+        label: 'Angle',
+        type: 'number',
+        unit: '°',
+        min: 30,
+        step: 1,
+        default: 90,
+        advanced: false,
+        visibleWhen: (v) => v.hole_type === 'countersink',
+      },
       // Advanced: Standard Preset
       {
         key: 'preset',
@@ -147,54 +330,6 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         placeholder: 'Standard preset…',
         advanced: true,
       },
-      // Advanced: Counterbore Diameter
-      {
-        key: 'cbore_diameter',
-        label: 'C-Bore ⌀',
-        type: 'number',
-        unit: 'mm',
-        min: 0.1,
-        step: 0.5,
-        default: 11,
-        advanced: true,
-        visibleWhen: (v) => v.hole_type === 'counterbore',
-      },
-      // Advanced: Counterbore Depth
-      {
-        key: 'cbore_depth',
-        label: 'C-Bore Depth',
-        type: 'number',
-        unit: 'mm',
-        min: 0.1,
-        step: 0.5,
-        default: 4,
-        advanced: true,
-        visibleWhen: (v) => v.hole_type === 'counterbore',
-      },
-      // Advanced: Countersink Diameter
-      {
-        key: 'csink_diameter',
-        label: 'C-Sink ⌀',
-        type: 'number',
-        unit: 'mm',
-        min: 0.1,
-        step: 0.5,
-        default: 11,
-        advanced: true,
-        visibleWhen: (v) => v.hole_type === 'countersink',
-      },
-      // Advanced: Countersink Angle
-      {
-        key: 'csink_angle',
-        label: 'Angle',
-        type: 'number',
-        unit: '°',
-        min: 30,
-        step: 1,
-        default: 90,
-        advanced: true,
-        visibleWhen: (v) => v.hole_type === 'countersink',
-      },
       // Advanced: Position
       {
         key: 'position',
@@ -206,6 +341,7 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
           return { pos_x: 0, pos_y: 0 };
         },
         advanced: true,
+        visibleWhen: (_v, e) => !e?.radius || e.radius > 8,
       },
     ],
     toRequest: (values) => ({ ...values }),
@@ -333,7 +469,7 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         },
         advanced: true,
       },
-      // Advanced: Rotation
+      // Advanced: Rotation (only for rectangle/slot)
       {
         key: 'rotation_deg',
         label: 'Rotation',
@@ -343,6 +479,7 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
         step: 15,
         default: 0,
         advanced: true,
+        visibleWhen: (v) => (v.profile || 'rectangle') !== 'circle',
       },
     ],
     toRequest: (values) => ({ ...values }),
@@ -514,7 +651,7 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
   edit_feature: {
     id: 'edit_feature',
     label: 'Edit Feature',
-    icon: CircleDot,
+    icon: Pencil,
     shortcut: 'X',
     appliesTo: CAPABILITY_MATRIX.edit_feature,
     requiresSelection: true,
@@ -575,7 +712,99 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
     fields: [],
     toRequest: (values) => ({ ...values }),
   },
+
+  push_pull: {
+    id: 'push_pull',
+    label: 'Push / Pull Face',
+    icon: Expand,
+    shortcut: 'P',
+    appliesTo: CAPABILITY_MATRIX.push_pull,
+    requiresSelection: true,
+    previewable: true,
+    fields: [
+      num('distance', 'Distance', 5, { min: -500, max: 500, step: 1 }),
+    ],
+    toRequest: (values) => ({ ...values }),
+  },
+
+  round_face_edges: {
+    id: 'round_face_edges',
+    label: 'Round Face Edges',
+    icon: CornerDownRight,
+    shortcut: '',
+    appliesTo: CAPABILITY_MATRIX.round_face_edges,
+    requiresSelection: true,
+    previewable: true,
+    fields: [
+      seg('mode', 'Mode', 'fillet', [
+        { value: 'fillet', label: 'Fillet' },
+        { value: 'chamfer', label: 'Chamfer' },
+      ]),
+      num('radius', 'Radius / Distance', 2, { min: 0.1, step: 0.5 }),
+    ],
+    toRequest: (values) => ({ ...values }),
+  },
+
+  delete_feature: {
+    id: 'delete_feature',
+    label: 'Delete Feature',
+    icon: Trash2,
+    shortcut: '',
+    appliesTo: CAPABILITY_MATRIX.delete_feature,
+    requiresSelection: true,
+    previewable: false,
+    fields: [],
+    toRequest: (values) => ({ ...values }),
+  },
+
+  move_feature: {
+    id: 'move_feature',
+    label: 'Move Feature',
+    icon: Move3d,
+    shortcut: '',
+    appliesTo: CAPABILITY_MATRIX.move_feature,
+    requiresSelection: true,
+    previewable: true,
+    fields: [
+      num('du', 'ΔU', 0, { min: -200, max: 200, step: 1 }),
+      num('dv', 'ΔV', 0, { min: -200, max: 200, step: 1 }),
+    ],
+    toRequest: (values) => ({ ...values }),
+  },
+
+  pattern_feature: {
+    id: 'pattern_feature',
+    label: 'Pattern Feature',
+    icon: Grid3x3,
+    shortcut: '',
+    appliesTo: CAPABILITY_MATRIX.pattern_feature,
+    requiresSelection: true,
+    previewable: true,
+    fields: [
+      seg('pattern_type', 'Pattern Type', 'linear', [
+        { value: 'linear', label: 'Linear' },
+        { value: 'polar', label: 'Polar' },
+      ]),
+      num('count', 'Count', 3, { min: 2, max: 50, step: 1, unit: undefined }),
+      num('spacing', 'Spacing / Angle', 15, { min: 0.1, max: 500, step: 1 }),
+    ],
+    toRequest: (values) => ({ ...values }),
+  },
+
+  ...(BODY_TOOLS as Record<
+    'move' | 'rotate' | 'scale' | 'mirror' | 'align' | 'primitive' | 'shell' | 'offset' | 'split' | 'linear_pattern' | 'polar_pattern' | 'heal',
+    OperationDefinition
+  >),
 };
+
+/** Defaults for every field of a tool, so the request always matches what the form shows. */
+export function getDefaultParams(tool: CADToolType): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of (OPERATION_REGISTRY[tool]?.fields ?? [])) {
+    if (f.type !== 'position') out[f.key] = f.default;
+  }
+  return out;
+}
 
 export function getOperationDefinition(tool: CADToolType | 'edit_feature'): OperationDefinition {
   return OPERATION_REGISTRY[tool] || OPERATION_REGISTRY.select;

@@ -370,7 +370,7 @@ export function PromptAssistantWidget({
 		const userMsg: ChatMessage = {
 			id: `user_${Date.now()}`,
 			role: 'user',
-			content: text || (croppedBlueprintUrl ? '🔍 Inspect Cropped Blueprint Region vs 3D Model' : '🔍 Compare Blueprint vs 3D Model'),
+			content: text || (croppedBlueprintUrl ? 'Inspect Cropped Blueprint Region vs 3D Model' : 'Compare Blueprint vs 3D Model'),
 			timestamp: Date.now(),
 		};
 
@@ -436,7 +436,7 @@ export function PromptAssistantWidget({
 				{
 					id: `err_${Date.now()}`,
 					role: 'assistant',
-					content: `⚠️ Failed to analyze: ${err.message}. Check your API keys in .env.`,
+					content: `Failed to analyze: ${err.message}. Check your API keys in .env.`,
 					timestamp: Date.now(),
 				},
 			]);
@@ -796,8 +796,9 @@ export function PromptAssistantWidget({
 												onMouseDown={(e) => handleCropMouseDown(e, 'move')}
 												className="absolute inset-0 bg-cyan-400/10 cursor-move flex items-center justify-center group"
 											>
-												<span className="px-2 py-0.5 text-[9.5px] font-bold font-mono bg-cyan-400 text-black rounded shadow opacity-90 group-hover:opacity-100 transition-opacity">
-													✂️ Drag or Resize Handles
+												<span className="px-2 py-0.5 text-[9.5px] font-bold font-mono bg-cyan-400 text-black rounded shadow opacity-90 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1">
+													<Crop className="size-3" />
+													<span>Drag or Resize Handles</span>
 												</span>
 											</div>
 
@@ -1048,7 +1049,10 @@ export function PromptAssistantWidget({
 									{m.suggested_prompt && (
 										<div className="mt-3 pt-2.5 border-t border-primary/20 dark:border-cyan-500/30">
 											<div className="text-[10px] font-extrabold uppercase tracking-wider text-primary dark:text-cyan-400 mb-1.5 flex items-center justify-between">
-												<span>🎯 Corrected CAD Prompt</span>
+												<span className="inline-flex items-center gap-1.5">
+													<Sparkles className="size-3.5" />
+													<span>Corrected CAD Prompt</span>
+												</span>
 											</div>
 											<div className="p-2.5 rounded-xl bg-slate-900 text-slate-100 dark:bg-black/60 dark:text-cyan-100 font-mono text-[11px] leading-relaxed break-words border border-border dark:border-cyan-500/30 shadow-inner">
 												{m.suggested_prompt}

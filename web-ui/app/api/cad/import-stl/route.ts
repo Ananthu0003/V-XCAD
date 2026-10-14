@@ -60,8 +60,12 @@ export async function POST(request: NextRequest): Promise<Response> {
     const outputsDir = resolveOutputsDir();
 
     if (outputsDir) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      await writeFile(join(outputsDir, filenameOnDisk), buffer);
+      try {
+        const buffer = Buffer.from(await file.arrayBuffer());
+        await writeFile(join(outputsDir, filenameOnDisk), buffer);
+      } catch (writeErr) {
+        console.warn('Direct file write to outputs directory failed:', writeErr);
+      }
     }
 
     const fileUrl = `/api/outputs/${filenameOnDisk}`;

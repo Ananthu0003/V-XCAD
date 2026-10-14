@@ -1,4 +1,5 @@
 import React from 'react';
+import { Minus, Plus } from 'lucide-react';
 
 export function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -100,7 +101,7 @@ export function NumInput({
           style={stepperStyle}
           aria-label={`Decrease ${label}`}
         >
-          −
+          <Minus size={11} strokeWidth={2.5} />
         </button>
         <div style={{ position: 'relative', width: 84 }}>
           <input
@@ -145,7 +146,7 @@ export function NumInput({
           style={stepperStyle}
           aria-label={`Increase ${label}`}
         >
-          +
+          <Plus size={11} strokeWidth={2.5} />
         </button>
       </div>
     </div>
@@ -186,7 +187,10 @@ export function PositionRow({
             type="button"
             onClick={() => onChange('pos_x', parseFloat((posX - 1).toFixed(1)))}
             style={{ ...stepperStyle, width: 18 }}
-          >−</button>
+            aria-label="Decrease X"
+          >
+            <Minus size={10} strokeWidth={2.5} />
+          </button>
           <input
             type="number"
             value={posX}
@@ -209,7 +213,10 @@ export function PositionRow({
             type="button"
             onClick={() => onChange('pos_x', parseFloat((posX + 1).toFixed(1)))}
             style={{ ...stepperStyle, width: 18 }}
-          >+</button>
+            aria-label="Increase X"
+          >
+            <Plus size={10} strokeWidth={2.5} />
+          </button>
         </div>
         {/* Y */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -218,7 +225,10 @@ export function PositionRow({
             type="button"
             onClick={() => onChange('pos_y', parseFloat((posY - 1).toFixed(1)))}
             style={{ ...stepperStyle, width: 18 }}
-          >−</button>
+            aria-label="Decrease Y"
+          >
+            <Minus size={10} strokeWidth={2.5} />
+          </button>
           <input
             type="number"
             value={posY}
@@ -241,7 +251,10 @@ export function PositionRow({
             type="button"
             onClick={() => onChange('pos_y', parseFloat((posY + 1).toFixed(1)))}
             style={{ ...stepperStyle, width: 18 }}
-          >+</button>
+            aria-label="Increase Y"
+          >
+            <Plus size={10} strokeWidth={2.5} />
+          </button>
         </div>
       </div>
     </div>

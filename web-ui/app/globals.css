@@ -50,112 +50,309 @@
 }
 
 /* ═══════════════════════════════════════════════════════
-   Manual CAD design tokens — centralized, no scattered hex
+   Shared Workspace design tokens (AI CAD, Manual CAD, CAM)
+   Neutral graphite surfaces, single blue accent (#4c7bf4).
+   Depth (back → front): viewport < panel < raised < input
    ═══════════════════════════════════════════════════════ */
-:root,
-.dark {
-  /* Backgrounds */
-  --mcad-bg:          #0f1216;    /* page-level */
-  --mcad-panel:       #12161b;    /* panels, inspector */
-  --mcad-input:       #171c23;    /* inputs, segments, hover areas */
-  --mcad-viewport:    #0d1014;    /* 3D canvas */
-  --mcad-timeline:    #12161b;    /* timeline bar */
+:root {
+  /* Surfaces (Light Mode) */
+  --ui-bg:          #f0f2f5;    /* behind everything */
+  --ui-panel:       #ffffff;    /* floating panels */
+  --ui-raised:      #f6f8fa;    /* cards inside panels, menus */
+  --ui-input:       #ebedf0;    /* inputs, segments */
+  --ui-viewport:    #dde1e7;    /* 3D canvas */
+  --ui-timeline:    #ffffff;
+  --ui-hover:       rgba(0,0,0,0.05);
 
-  /* Borders */
-  --mcad-border:      #232932;    /* panel separators */
-  --mcad-border-ctrl: #2d3643;    /* input/control borders */
+  /* Borders (Light Mode) */
+  --ui-border:        rgba(0,0,0,0.08);
+  --ui-border-ctrl:   rgba(0,0,0,0.12);
+  --ui-border-strong: rgba(0,0,0,0.22);
 
-  /* Text */
-  --mcad-text-primary:   #e6e9ee;
-  --mcad-text-secondary: #9aa4b2;
-  --mcad-text-muted:     #7b8594;
+  /* Text (Light Mode) */
+  --ui-text-primary:   #181a1f;
+  --ui-text-secondary: #4b5260;
+  --ui-text-muted:     #768092;
 
-  /* Accents */
-  --mcad-teal:       #2dd4bf;
-  --mcad-teal-tint:  #16322f;    /* teal at ~8% for bg tint */
-  --mcad-amber:      #f5a524;    /* selected geometry only */
-  --mcad-danger:     #f08a8a;
+  /* Accent (selection, primary action) */
+  --ui-accent:       #3b6cf0;
+  --ui-accent-hover: #2659e2;
+  --ui-accent-tint:  rgba(59,108,240,0.12);
+  --ui-accent-line:  rgba(59,108,240,0.45);
+  --ui-on-accent:    #ffffff;
+  --ui-amber:        #d97706;   /* selected geometry only */
+  --ui-danger:       #dc2626;
+  --ui-focus:        0 0 0 2px rgba(59,108,240,0.35);
 
-  /* Segment active (filter control, type selectors) */
-  --mcad-segment-active: #252c37;
+  --ui-segment-active: #ffffff;
 
-  /* Radii convenience vars */
-  --mcad-r-ctrl: 8px;
-  --mcad-r-card: 10px;
-  --mcad-r-pill: 999px;
+  /* Elevation */
+  --ui-shadow-card: 0 8px 24px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.05);
+  --ui-shadow-pop:  0 12px 32px rgba(0,0,0,0.14);
+
+  /* Radii */
+  --ui-r-ctrl: 8px;
+  --ui-r-card: 14px;
+  --ui-r-panel: 16px;
+  --ui-r-pill: 999px;
+
+  /* Backward-compatible aliases for --mcad-* */
+  --mcad-bg: var(--ui-bg);
+  --mcad-panel: var(--ui-panel);
+  --mcad-raised: var(--ui-raised);
+  --mcad-input: var(--ui-input);
+  --mcad-viewport: var(--ui-viewport);
+  --mcad-timeline: var(--ui-timeline);
+  --mcad-hover: var(--ui-hover);
+  --mcad-border: var(--ui-border);
+  --mcad-border-ctrl: var(--ui-border-ctrl);
+  --mcad-border-strong: var(--ui-border-strong);
+  --mcad-text-primary: var(--ui-text-primary);
+  --mcad-text-secondary: var(--ui-text-secondary);
+  --mcad-text-muted: var(--ui-text-muted);
+  --mcad-accent: var(--ui-accent);
+  --mcad-accent-hover: var(--ui-accent-hover);
+  --mcad-accent-tint: var(--ui-accent-tint);
+  --mcad-accent-line: var(--ui-accent-line);
+  --mcad-on-accent: var(--ui-on-accent);
+  --mcad-amber: var(--ui-amber);
+  --mcad-danger: var(--ui-danger);
+  --mcad-focus: var(--ui-focus);
+  --mcad-segment-active: var(--ui-segment-active);
+  --mcad-shadow-card: var(--ui-shadow-card);
+  --mcad-shadow-pop: var(--ui-shadow-pop);
+  --mcad-r-ctrl: var(--ui-r-ctrl);
+  --mcad-r-card: var(--ui-r-card);
+  --mcad-r-panel: var(--ui-r-panel);
+  --mcad-r-pill: var(--ui-r-pill);
 }
+
+.dark {
+  /* Surfaces (Dark Mode) */
+  --ui-bg:          #121316;    /* behind everything */
+  --ui-panel:       #1b1d21;    /* floating panels */
+  --ui-raised:      #22252a;    /* cards inside panels, menus */
+  --ui-input:       #272a30;    /* inputs, segments */
+  --ui-viewport:    #20262e;    /* 3D canvas */
+  --ui-timeline:    #1b1d21;
+  --ui-hover:       rgba(255,255,255,0.06);
+
+  /* Borders (Dark Mode) */
+  --ui-border:        rgba(255,255,255,0.07);
+  --ui-border-ctrl:   rgba(255,255,255,0.10);
+  --ui-border-strong: rgba(255,255,255,0.18);
+
+  /* Text (Dark Mode) */
+  --ui-text-primary:   #e8eaed;
+  --ui-text-secondary: #a4a9b2;
+  --ui-text-muted:     #7a808a;
+
+  /* Accent (selection, primary action) */
+  --ui-accent:       #4c7bf4;
+  --ui-accent-hover: #6189f6;
+  --ui-accent-tint:  rgba(76,123,244,0.16);
+  --ui-accent-line:  rgba(76,123,244,0.45);
+  --ui-on-accent:    #ffffff;
+  --ui-amber:        #e8a33d;   /* selected geometry only */
+  --ui-danger:       #ef7a7a;
+  --ui-focus:        0 0 0 2px rgba(76,123,244,0.45);
+
+  --ui-segment-active: #353a43;
+
+  /* Elevation */
+  --ui-shadow-card: 0 10px 30px rgba(0,0,0,0.38), 0 0 0 1px rgba(255,255,255,0.04);
+  --ui-shadow-pop:  0 8px 24px rgba(0,0,0,0.5);
+}
+
+/* ───────────── Shared workspace component styles (.ui-root & .mcad-workspace) ───────────── */
+.ui-root, .mcad-workspace { -webkit-font-smoothing: antialiased; }
+.ui-root ::selection, .mcad-workspace ::selection { background: rgba(76,123,244,0.35); }
+
+.ui-root *::-webkit-scrollbar, .mcad-workspace *::-webkit-scrollbar { width: 8px; height: 8px; }
+.ui-root *::-webkit-scrollbar-thumb, .mcad-workspace *::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.dark .ui-root *::-webkit-scrollbar-thumb, .dark .mcad-workspace *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); }
+.ui-root *::-webkit-scrollbar-thumb:hover, .mcad-workspace *::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.24); background-clip: padding-box; }
+.dark .ui-root *::-webkit-scrollbar-thumb:hover, .dark .mcad-workspace *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.24); }
+.ui-root *::-webkit-scrollbar-track, .mcad-workspace *::-webkit-scrollbar-track { background: transparent; }
+.ui-root *, .mcad-workspace * { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.16) transparent; }
+.dark .ui-root *, .dark .mcad-workspace * { scrollbar-color: rgba(255,255,255,0.16) transparent; }
+
+.ui-root input:not([type="checkbox"]):not([type="range"]),
+.mcad-workspace input:not([type="checkbox"]):not([type="range"]),
+.ui-root select,
+.mcad-workspace select { transition: border-color .15s, box-shadow .15s; }
+.ui-root input:not([type="checkbox"]):not([type="range"]):hover,
+.mcad-workspace input:not([type="checkbox"]):not([type="range"]):hover,
+.ui-root select:hover,
+.mcad-workspace select:hover { border-color: var(--ui-border-strong) !important; }
+.ui-root input:focus-visible,
+.mcad-workspace input:focus-visible,
+.ui-root select:focus-visible,
+.mcad-workspace select:focus-visible,
+.ui-root textarea:focus-visible,
+.mcad-workspace textarea:focus-visible { outline: none; border-color: var(--ui-accent) !important; box-shadow: var(--ui-focus); }
+.ui-root input[type="number"]::-webkit-inner-spin-button,
+.mcad-workspace input[type="number"]::-webkit-inner-spin-button { opacity: 0; }
+.ui-root input[type="number"]:hover::-webkit-inner-spin-button,
+.mcad-workspace input[type="number"]:hover::-webkit-inner-spin-button { opacity: .5; }
+.ui-root input[type="checkbox"],
+.mcad-workspace input[type="checkbox"] { accent-color: var(--ui-accent); }
+
+.ui-root button,
+.mcad-workspace button { transition: background .15s, border-color .15s, color .15s, opacity .15s; }
+.ui-root button:focus-visible,
+.mcad-workspace button:focus-visible { outline: none; box-shadow: var(--ui-focus); }
+
+/* Buttons */
+.ui-btn, .mcad-btn {
+  height: 34px; border-radius: var(--ui-r-ctrl); font-size: 12px; font-weight: 500; font-family: var(--font-sans);
+  display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
+  background: var(--ui-input); border: 1px solid var(--ui-border-ctrl); color: var(--ui-text-primary);
+}
+.ui-btn:hover:not(:disabled), .mcad-btn:hover:not(:disabled) { background: var(--ui-segment-active); border-color: var(--ui-border-strong); }
+.ui-btn:disabled, .mcad-btn:disabled { opacity: .45; cursor: not-allowed; }
+.ui-btn--primary, .mcad-btn--primary { background: var(--ui-accent); border-color: transparent; color: var(--ui-on-accent); font-weight: 600; }
+.ui-btn--primary:hover:not(:disabled), .mcad-btn--primary:hover:not(:disabled) { background: var(--ui-accent-hover); border-color: transparent; }
+.ui-btn--ghost, .mcad-btn--ghost { height: 28px; padding: 0 10px; font-size: 11px; background: transparent; border-color: var(--ui-border-ctrl); color: var(--ui-text-secondary); }
+.ui-btn--ghost:hover:not(:disabled), .mcad-btn--ghost:hover:not(:disabled) { color: var(--ui-text-primary); }
+
+/* Floating panels & cards */
+.ui-float, .mcad-float {
+  background: var(--ui-panel); border-radius: var(--ui-r-panel);
+  box-shadow: var(--ui-shadow-card); overflow: hidden;
+}
+.ui-card, .mcad-card { background: var(--ui-raised); border: 1px solid var(--ui-border); border-radius: var(--ui-r-card); overflow: hidden; }
+
+/* Left tool rail */
+.ui-rail, .mcad-rail { overflow-y: auto; overflow-x: visible; scrollbar-width: none; }
+.ui-rail::-webkit-scrollbar, .mcad-rail::-webkit-scrollbar { display: none; }
+.ui-rail-sep, .mcad-rail-sep { width: 24px; height: 1px; background: var(--ui-border); margin: 6px 0; flex-shrink: 0; }
+.ui-tool, .mcad-tool {
+  position: relative; width: 38px; height: 38px; margin: 1px 0; border-radius: 10px; border: none;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; background: transparent;
+  color: var(--ui-text-secondary); flex-shrink: 0;
+}
+.ui-tool:hover, .mcad-tool:hover { background: var(--ui-hover); color: var(--ui-text-primary); }
+.ui-tool[data-active="true"], .mcad-tool[data-active="true"] { background: var(--ui-accent); color: var(--ui-on-accent); }
+.ui-tool[data-enabled="false"], .mcad-tool[data-enabled="false"] { opacity: .35; }
+.ui-tool[data-enabled="false"]:hover, .mcad-tool[data-enabled="false"]:hover { background: transparent; color: var(--ui-text-secondary); }
+
+/* Tooltip */
+.ui-tip, .mcad-tip {
+  position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
+  background: #0e0f11; border: 1px solid var(--ui-border-ctrl); border-radius: 8px; padding: 5px 9px;
+  font: 500 12px var(--font-sans); color: var(--ui-text-primary); white-space: nowrap; pointer-events: none;
+  opacity: 0; transition: opacity .12s .3s; z-index: 60; display: flex; align-items: center; gap: 8px;
+}
+.group:hover > .ui-tip, .group:focus-within > .ui-tip,
+.group:hover > .mcad-tip, .group:focus-within > .mcad-tip { opacity: 1; }
+.ui-kbd, .mcad-kbd { font: 600 10px/1 var(--font-mono); padding: 3px 5px; border-radius: 4px; color: var(--ui-text-secondary); background: var(--ui-input); }
+
+/* Segmented control (top bar, stage switcher) */
+.ui-seg, .mcad-seg { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--ui-input); }
+.ui-seg button, .mcad-seg button {
+  flex: 1; height: 28px; padding: 0 12px; border: none; border-radius: 7px; background: transparent;
+  color: var(--ui-text-secondary); font: 500 12px var(--font-sans); cursor: pointer; white-space: nowrap;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.ui-seg button:hover, .mcad-seg button:hover { color: var(--ui-text-primary); }
+.ui-seg button[data-on="true"], .mcad-seg button[data-on="true"] { background: var(--ui-segment-active); color: var(--ui-text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+
+/* Section styling */
+.ui-section, .mcad-section { padding: 16px 18px; border-bottom: 1px solid var(--ui-border); }
+.ui-section:last-child, .mcad-section:last-child { border-bottom: none; }
+.ui-section-title, .mcad-section-title { font: 600 11px var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ui-text-muted); margin: 0 0 12px; }
+
+/* Prompt dock */
+.ui-prompt, .mcad-prompt {
+  display: flex; align-items: flex-end; gap: 8px; padding: 10px 10px 10px 18px;
+  background: var(--ui-panel); border-radius: 22px; box-shadow: var(--ui-shadow-card);
+}
+.ui-prompt textarea, .mcad-prompt textarea {
+  flex: 1; resize: none; border: none; outline: none; background: transparent; color: var(--ui-text-primary);
+  font: 400 14px/1.5 var(--font-sans); padding: 7px 0; max-height: 120px; min-height: 24px;
+}
+.ui-prompt textarea::placeholder, .mcad-prompt textarea::placeholder { color: var(--ui-text-muted); }
+.ui-prompt-send, .mcad-prompt-send {
+  width: 36px; height: 36px; border-radius: 999px; border: none; cursor: pointer; flex-shrink: 0;
+  background: var(--ui-accent); color: var(--ui-on-accent); display: flex; align-items: center; justify-content: center;
+}
+.ui-prompt-send:hover:not(:disabled), .mcad-prompt-send:hover:not(:disabled) { background: var(--ui-accent-hover); }
+.ui-prompt-send:disabled, .mcad-prompt-send:disabled { background: var(--ui-input); color: var(--ui-text-muted); cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) { .ui-root *, .mcad-workspace *, .ui-tip, .mcad-tip { transition: none !important; } }
 
 :root {
 	color-scheme: light;
-	--background: #fafafa; /* neutral-50 - cleaner, brighter base */
-	--foreground: #0a0a0b; /* neutral-950 - maximum contrast */
+	--background: #f8fafc;
+	--foreground: #090b0f;
 	--card: #ffffff;
-	--card-foreground: #0a0a0b;
+	--card-foreground: #090b0f;
 	--popover: #ffffff;
-	--popover-foreground: #0a0a0b;
-	--primary: #1d4ed8; /* blue-700 - deeper, more premium blue */
+	--popover-foreground: #090b0f;
+	--primary: #4c7bf4;
 	--primary-foreground: #ffffff;
-	--secondary: #f4f4f5; /* neutral-100 - subtle elevation */
-	--secondary-foreground: #18181b; /* neutral-900 */
-	--muted: #f4f4f5;
-	--muted-foreground: #71717a; /* neutral-500 - balanced readability */
-	--accent: #f4f4f5;
-	--accent-foreground: #18181b;
-	--destructive: #dc2626; /* red-600 - slightly softer */
+	--secondary: #f1f5f9;
+	--secondary-foreground: #0f172a;
+	--muted: #f1f5f9;
+	--muted-foreground: #475569;
+	--accent: #f1f5f9;
+	--accent-foreground: #0f172a;
+	--destructive: #e11d48;
 	--destructive-foreground: #ffffff;
-	--border: #e4e4e7; /* neutral-200 - cleaner lines */
-	--input: #e4e4e7;
-	--ring: #1d4ed8;
-	--chart-1: #1d4ed8;
-	--chart-2: #0e7490;
+	--border: #e2e8f0;
+	--input: #e2e8f0;
+	--ring: #4c7bf4;
+	--chart-1: #4c7bf4;
+	--chart-2: #0d9488;
 	--chart-3: #2563eb;
-	--chart-4: #15803d;
-	--chart-5: #b45309;
-	--radius: 0.75rem; /* slightly rounder for premium feel */
+	--chart-4: #16a34a;
+	--chart-5: #d97706;
+	--radius: 0.625rem;
 	--sidebar: #ffffff;
-	--sidebar-foreground: #0a0a0b;
-	--sidebar-primary: #1d4ed8;
+	--sidebar-foreground: #090b0f;
+	--sidebar-primary: #4c7bf4;
 	--sidebar-primary-foreground: #ffffff;
-	--sidebar-accent: #fafafa;
-	--sidebar-accent-foreground: #0a0a0b;
-	--sidebar-border: #e4e4e7;
-	--sidebar-ring: #1d4ed8;
+	--sidebar-accent: #f8fafc;
+	--sidebar-accent-foreground: #090b0f;
+	--sidebar-border: #e2e8f0;
+	--sidebar-ring: #4c7bf4;
 }
 
 .dark {
 	color-scheme: dark;
-	--background: #09090b; /* zinc-950 */
-	--foreground: #fafafa;
-	--card: #0f0f11;
-	--card-foreground: #fafafa;
-	--popover: #18181b; /* zinc-900 */
-	--popover-foreground: #fafafa;
-	--primary: #3b82f6; /* blue-500 */
+	--background: #090b0f;
+	--foreground: #f8fafc;
+	--card: #0e1218;
+	--card-foreground: #f8fafc;
+	--popover: #121720;
+	--popover-foreground: #f8fafc;
+	--primary: #4c7bf4;
 	--primary-foreground: #ffffff;
-	--secondary: #27272a; /* zinc-800 */
-	--secondary-foreground: #fafafa;
-	--muted: #27272a;
-	--muted-foreground: #a1a1aa; /* zinc-400 */
-	--accent: #27272a;
-	--accent-foreground: #fafafa;
-	--destructive: #ef4444;
-	--destructive-foreground: #fafafa;
-	--border: #27272a;
-	--input: #18181b;
-	--ring: #3B82F6;
-	--chart-1: #3B82F6;
-	--chart-2: #22D3EE;
-	--chart-3: #60A5FA;
-	--chart-4: #22C55E;
-	--chart-5: #F59E0B;
-	--sidebar: #060B14;
-	--sidebar-foreground: #94A3B8;
-	--sidebar-primary: #3B82F6;
-	--sidebar-primary-foreground: #F8FAFC;
-	--sidebar-accent: #111C2F;
-	--sidebar-accent-foreground: #F8FAFC;
-	--sidebar-border: #16243A;
-	--sidebar-ring: #3B82F6;
+	--secondary: #141a24;
+	--secondary-foreground: #f8fafc;
+	--muted: #131821;
+	--muted-foreground: #94a3b8;
+	--accent: #19212e;
+	--accent-foreground: #f8fafc;
+	--destructive: #f43f5e;
+	--destructive-foreground: #ffffff;
+	--border: #1c2331;
+	--input: #131821;
+	--ring: #4c7bf4;
+	--chart-1: #4c7bf4;
+	--chart-2: #38bdf8;
+	--chart-3: #818cf8;
+	--chart-4: #34d399;
+	--chart-5: #fbbf24;
+	--sidebar: #090b0f;
+	--sidebar-foreground: #94a3b8;
+	--sidebar-primary: #4c7bf4;
+	--sidebar-primary-foreground: #ffffff;
+	--sidebar-accent: #141a24;
+	--sidebar-accent-foreground: #f8fafc;
+	--sidebar-border: #1c2331;
+	--sidebar-ring: #4c7bf4;
 }
 
 @layer base {
@@ -227,71 +424,97 @@
 
 @layer utilities {
 	.bg-gradient-workspace {
-		background: radial-gradient(ellipse at center, #ffffff 0%, #fafafa 50%, #f4f4f5 100%);
+		background: radial-gradient(ellipse at center, #ffffff 0%, #f8fafc 50%, #f1f5f9 100%);
 	}
 	.dark .bg-gradient-workspace {
-		background: radial-gradient(ellipse at center, #0f0f11 0%, #09090b 70%, #000000 100%);
+		background: radial-gradient(ellipse at center, #0e1218 0%, #090b0f 70%, #05070a 100%);
 	}
 
 	.bg-gradient-panel {
-		background: linear-gradient(145deg, #ffffff 0%, #fafafa 50%, #f4f4f5 100%);
+		background: linear-gradient(145deg, #ffffff 0%, #f8fafc 50%, #f1f5f9 100%);
 	}
 	.dark .bg-gradient-panel {
-		background: linear-gradient(145deg, #18181b 0%, #09090b 100%);
+		background: linear-gradient(145deg, #121720 0%, #090b0f 100%);
 	}
 
 	.glass-panel {
-		background: rgba(255, 255, 255, 0.7);
-		backdrop-filter: blur(32px);
-		-webkit-backdrop-filter: blur(32px);
-		border: 1px solid rgba(228, 228, 231, 0.6);
+		background: rgba(255, 255, 255, 0.85);
+		backdrop-filter: blur(20px);
+		-webkit-backdrop-filter: blur(20px);
+		border: 1px solid rgba(226, 232, 240, 0.8);
 		box-shadow: 
-			0 1px 3px rgba(10, 10, 11, 0.04),
-			0 4px 16px rgba(10, 10, 11, 0.06),
-			0 8px 32px rgba(10, 10, 11, 0.04);
+			0 1px 3px rgba(15, 23, 42, 0.04),
+			0 4px 16px rgba(15, 23, 42, 0.06);
 	}
 	.dark .glass-panel {
-		background: rgba(24, 24, 27, 0.7);
-		border: 1px solid rgba(255, 255, 255, 0.1);
+		background: rgba(14, 18, 24, 0.8);
+		backdrop-filter: blur(24px);
+		-webkit-backdrop-filter: blur(24px);
+		border: 1px solid rgba(255, 255, 255, 0.08);
 		box-shadow: 
-			0 1px 3px rgba(0, 0, 0, 0.2),
-			0 4px 16px rgba(0, 0, 0, 0.15),
-			0 8px 32px rgba(0, 0, 0, 0.1);
+			0 4px 24px rgba(0, 0, 0, 0.4),
+			inset 0 1px 0 rgba(255, 255, 255, 0.06);
 	}
 
 	.glass-panel-subtle {
-		background: rgba(255, 255, 255, 0.5);
-		backdrop-filter: blur(24px);
-		-webkit-backdrop-filter: blur(24px);
-		border: 1px solid rgba(228, 228, 231, 0.4);
-		box-shadow: 
-			0 1px 2px rgba(10, 10, 11, 0.03),
-			0 2px 8px rgba(10, 10, 11, 0.04);
+		background: rgba(255, 255, 255, 0.6);
+		backdrop-filter: blur(16px);
+		-webkit-backdrop-filter: blur(16px);
+		border: 1px solid rgba(226, 232, 240, 0.6);
+		box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
 	}
 	.dark .glass-panel-subtle {
-		background: rgba(24, 24, 27, 0.5);
-		border: 1px solid rgba(255, 255, 255, 0.06);
+		background: rgba(14, 18, 24, 0.55);
+		backdrop-filter: blur(16px);
+		-webkit-backdrop-filter: blur(16px);
+		border: 1px solid rgba(255, 255, 255, 0.05);
 		box-shadow: 
-			0 1px 2px rgba(0, 0, 0, 0.15),
-			0 2px 8px rgba(0, 0, 0, 0.1);
+			0 2px 12px rgba(0, 0, 0, 0.25),
+			inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	}
+
+	.border-hairline {
+		border: 1px solid rgba(0, 0, 0, 0.08);
+	}
+	.dark .border-hairline {
+		border: 1px solid rgba(255, 255, 255, 0.08);
+	}
+
+	.border-hairline-subtle {
+		border: 1px solid rgba(0, 0, 0, 0.05);
+	}
+	.dark .border-hairline-subtle {
+		border: 1px solid rgba(255, 255, 255, 0.05);
+	}
+
+	.inner-sheen {
+		box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+	}
+
+	.shadow-glow-cyan {
+		box-shadow: 0 0 20px rgba(6, 182, 212, 0.25);
+	}
+
+	.shadow-glow-amber {
+		box-shadow: 0 0 20px rgba(245, 158, 11, 0.25);
 	}
 
 	.bg-gradient-primary {
-		background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 50%, #3b82f6 100%);
+		background: linear-gradient(135deg, #0284c7 0%, #06b6d4 100%);
 	}
 
 	.bg-gradient-secondary {
-		background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 50%, #22d3ee 100%);
+		background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
 	}
 
 	.text-gradient-primary {
-		background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+		background: linear-gradient(135deg, #06b6d4 0%, #38bdf8 100%);
 		-webkit-background-clip: text;
 		-webkit-text-fill-color: transparent;
 	}
 
 	.text-gradient-premium {
-		background: linear-gradient(135deg, #0a0a0b 0%, #1d4ed8 50%, #0a0a0b 100%);
+		background: linear-gradient(135deg, #ffffff 0%, #94a3b8 100%);
 		-webkit-background-clip: text;
 		-webkit-text-fill-color: transparent;
 	}

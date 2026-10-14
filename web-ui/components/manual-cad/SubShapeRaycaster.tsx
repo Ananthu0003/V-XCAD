@@ -7,10 +7,13 @@ import { Line, Edges } from '@react-three/drei';
 export interface SubShapeRaycasterProps {
   topology: any | null;
   selectedEntity: any | null;
-  onSelectEntity: (entity: any) => void;
+  onSelectEntity: (entity: any, multiSelect?: boolean) => void;
   hoveredEntity?: any | null;
   onHoverEntity?: (entity: any | null) => void;
   selectionMode?: 'body' | 'face' | 'edge' | 'all';
+  highlightedFaceIds?: string[] | null;
+  detectedFeatures?: any[];
+  selectedEntities?: any[];
 }
 
 /**
@@ -179,8 +182,8 @@ function FaceSurfaceMesh({
         }}
       >
         <meshStandardMaterial
-          // Selected: amber fill; Hovered: teal fill (12%); idle: invisible
-          color={isSelected ? '#f5a524' : isHovered ? '#2dd4bf' : '#ffffff'}
+          // Selected: amber fill; Hovered: accent fill (12%); idle: invisible
+          color={isSelected ? '#e8a33d' : isHovered ? '#4c7bf4' : '#ffffff'}
           transparent={true}
           opacity={isSelected ? 0.30 : isHovered ? 0.12 : 0.001}
           depthTest={true}
@@ -207,7 +210,10 @@ export function SubShapeRaycaster({
   onSelectEntity,
   hoveredEntity,
   onHoverEntity,
-  selectionMode = 'face'
+  selectionMode = 'face',
+  highlightedFaceIds,
+  detectedFeatures,
+  selectedEntities,
 }: SubShapeRaycasterProps) {
   const [localHovered, setLocalHovered] = useState<string | null>(null);
 
@@ -218,15 +224,44 @@ export function SubShapeRaycaster({
   const faces = Object.values(topology.faces || {}) as any[];
   const edges = Object.values(topology.edges || {}) as any[];
 
-  const showFaces = selectionMode === 'face' || selectionMode === 'all';
+  const showFaces = selectionMode === 'face' || selectionMode === 'all' || selectionMode === 'body';
   const showEdges = selectionMode === 'edge' || selectionMode === 'all';
+
+  const hlFaceSet = useMemo(() => new Set(highlightedFaceIds || []), [highlightedFaceIds]);
+  const selectedFaceSet = useMemo(() => {
+    const s = new Set<string>();
+    if (selectedEntity?.transient_id) s.add(selectedEntity.transient_id);
+    if (selectedEntity?.face_ids && Array.isArray(selectedEntity.face_ids)) {
+      selectedEntity.face_ids.forEach((fid: string) => s.add(fid));
+    }
+    if (selectedEntities && Array.isArray(selectedEntities)) {
+      selectedEntities.forEach((ent: any) => {
+        if (ent?.transient_id) s.add(ent.transient_id);
+        if (ent?.face_ids && Array.isArray(ent.face_ids)) {
+          ent.face_ids.forEach((fid: string) => s.add(fid));
+        }
+      });
+    }
+    return s;
+  }, [selectedEntity, selectedEntities]);
+
+  const selectedEdgeSet = useMemo(() => {
+    const s = new Set<string>();
+    if (selectedEntity?.transient_id) s.add(selectedEntity.transient_id);
+    if (selectedEntities && Array.isArray(selectedEntities)) {
+      selectedEntities.forEach((ent: any) => {
+        if (ent?.transient_id) s.add(ent.transient_id);
+      });
+    }
+    return s;
+  }, [selectedEntity, selectedEntities]);
 
   return (
     <group name="sub-shape-raycaster">
       {/* 1. Interactive 3D Face Meshes */}
       {showFaces && faces.map((face) => {
-        const isSelected = selectedEntity?.transient_id === face.transient_id;
-        const isHovered = activeHover === face.transient_id;
+        const isSelected = selectedFaceSet.has(face.transient_id);
+        const isHovered = activeHover === face.transient_id || hlFaceSet.has(face.transient_id);
 
         return (
           <FaceSurfaceMesh
@@ -236,22 +271,32 @@ export function SubShapeRaycaster({
             isHovered={isHovered}
             onPointerOver={() => {
               setLocalHovered(face.transient_id);
+              if (selectionMode === 'body') {
+                onHoverEntity?.({ entity_type: 'body' });
+                return;
+              }
               onHoverEntity?.(face);
             }}
             onPointerOut={() => {
               setLocalHovered(null);
               onHoverEntity?.(null);
             }}
-            onClick={() => {
-              onSelectEntity(face);
+            onClick={(e) => {
+              if (selectionMode === 'body') {
+                e?.stopPropagation?.();
+                onSelectEntity({ entity_type: 'body' });
+                return;
+              }
+              const isMulti = e?.nativeEvent?.shiftKey || false;
+              onSelectEntity(face, isMulti);
             }}
           />
         );
       })}
 
-      {/* 2. Interactive Edge Highlights — teal selected, teal hover */}
+      {/* 2. Interactive Edge Highlights — accent selected, accent hover */}
       {showEdges && edges.map((edge) => {
-        const isSelected = selectedEntity?.transient_id === edge.transient_id;
+        const isSelected = selectedEdgeSet.has(edge.transient_id);
         const isHovered = activeHover === edge.transient_id;
         const bbox = edge.bounding_box || { min: [0, 0, 0], max: [0, 0, 0] };
         const p1: [number, number, number] = bbox.min as [number, number, number];
@@ -274,13 +319,14 @@ export function SubShapeRaycaster({
             }}
             onClick={(e) => {
               e.stopPropagation();
-              onSelectEntity(edge);
+              const isMulti = e?.nativeEvent?.shiftKey || false;
+              onSelectEntity(edge, isMulti);
             }}
           >
             {(isSelected || isHovered) && (
               <Line
                 points={[p1, p2]}
-                color="#2dd4bf"           // teal for both selected and hovered edges
+                color="#4c7bf4"           // accent blue for selected and hovered edges
                 lineWidth={isSelected ? 3 : 2}
                 transparent
                 opacity={1.0}

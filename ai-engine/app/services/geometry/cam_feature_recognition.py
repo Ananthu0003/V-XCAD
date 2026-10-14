@@ -285,13 +285,26 @@ class CamFeatureRecognition:
             if has_planar_bottom or has_conical_bottom:
                 subtype = "blind_hole"
 
-            # Depth estimate from bounding box Z extent
+            # Depth estimate by projecting face vertices along hole axis (handles arbitrary 3D hole axes)
             depth = 10.0
-            try:
-                bb = face["bbox"]
-                depth = round(abs(bb["max"][2] - bb["min"][2]), 6)
-            except Exception:
-                pass
+            face_obj = self.extractor.get_face_object(fid) if self.extractor else None
+            if face_obj is not None:
+                try:
+                    v_pts = [v.center() for v in face_obj.vertices()]
+                    if v_pts:
+                        ha = hole_axis
+                        projs = [pt.X * ha[0] + pt.Y * ha[1] + pt.Z * ha[2] for pt in v_pts]
+                        calc_depth = abs(max(projs) - min(projs))
+                        if calc_depth > 1e-4:
+                            depth = round(calc_depth, 6)
+                except Exception:
+                    pass
+            if depth == 10.0 or depth < 1e-4:
+                try:
+                    bb = face["bbox"]
+                    depth = round(abs(bb["max"][2] - bb["min"][2]), 6)
+                except Exception:
+                    pass
 
             feat = CamFeature(
                 feature_type="hole",

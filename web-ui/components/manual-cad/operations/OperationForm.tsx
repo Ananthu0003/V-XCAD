@@ -103,14 +103,14 @@ export function OperationForm({
                         style={{
                           ...presetBtnStyle,
                           background: isSelected
-                            ? 'var(--mcad-teal-tint)'
+                            ? 'var(--mcad-accent-tint)'
                             : 'var(--mcad-input)',
                           color: isSelected
-                            ? 'var(--mcad-teal)'
+                            ? 'var(--mcad-accent)'
                             : 'var(--mcad-text-muted)',
                           border: `1px solid ${
                             isSelected
-                              ? 'var(--mcad-teal)'
+                              ? 'var(--mcad-accent)'
                               : 'var(--mcad-border-ctrl)'
                           }`,
                         }}
@@ -221,7 +221,7 @@ export function OperationForm({
               type="checkbox"
               checked={checked}
               onChange={(e) => onChange(field.key, e.target.checked)}
-              style={{ accentColor: 'var(--mcad-teal)', cursor: 'pointer' }}
+              style={{ accentColor: 'var(--mcad-accent)', cursor: 'pointer' }}
             />
           </label>
         );

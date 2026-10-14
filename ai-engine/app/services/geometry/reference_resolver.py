@@ -14,7 +14,7 @@ from OCP.GeomAbs import (
 )
 from OCP.TopExp import TopExp
 from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
-from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED
 from OCP.BRepGProp import BRepGProp
 from OCP.GProp import GProp_GProps
 from OCP.Bnd import Bnd_Box
@@ -91,6 +91,10 @@ class ReferenceResolver:
                 pos = pln.Position()
                 dir_z = pos.Direction()
                 normal = [float(dir_z.X()), float(dir_z.Y()), float(dir_z.Z())]
+                # Outward normal: a reversed face flips the underlying plane axis. Without this,
+                # opposite faces of a block (e.g. top and bottom) share the same normal.
+                if face.wrapped.Orientation() == TopAbs_REVERSED:
+                    normal = [-c for c in normal]
                 plane_d = float(- (normal[0] * pos.Location().X() + normal[1] * pos.Location().Y() + normal[2] * pos.Location().Z()))
             elif adaptor.GetType() == GeomAbs_Cylinder:
                 cyl = adaptor.Cylinder()
@@ -234,6 +238,8 @@ class ReferenceResolver:
         for idx, f in enumerate(all_faces):
             cand_ref = cls.extract_face_reference(f, f"face_{idx}")
             score = cls._score_face_match(ref, cand_ref)
+            if ref.transient_id and ref.transient_id == cand_ref.transient_id:
+                score += 0.05
             candidates.append((f, score, cand_ref.model_dump()))
 
         # Sort descending by match score
@@ -243,11 +249,14 @@ class ReferenceResolver:
         if top_score < 0.65:
             return None, OperationStatus.INVALID_REFERENCE, f"No matching face found (top score: {top_score:.2f} < 0.65 threshold)."
 
-        # Check for ambiguity
+        # Check for ambiguity: only flag if candidates are truly indistinguishable
         if len(candidates) > 1:
             second_cand, second_score, _ = candidates[1]
-            if (top_score - second_score) < 0.08 and second_score > 0.75:
-                return None, OperationStatus.AMBIGUOUS_REFERENCE, f"Ambiguous reference: multiple matching candidate faces ({top_score:.2f} vs {second_score:.2f})."
+            score_diff = top_score - second_score
+
+            # Only flag ambiguous if candidates are virtually identical (e.g. duplicate overlapping faces)
+            if score_diff < 0.005 and second_score >= 0.95:
+                return None, OperationStatus.AMBIGUOUS_REFERENCE, f"Ambiguous reference: multiple identical candidate faces ({top_score:.2f} vs {second_score:.2f})."
 
         return top_cand, OperationStatus.VALID, "Reference resolved uniquely."
 
@@ -269,6 +278,8 @@ class ReferenceResolver:
         for idx, e in enumerate(all_edges):
             cand_ref = cls.extract_edge_reference(e, f"edge_{idx}")
             score = cls._score_edge_match(ref, cand_ref)
+            if ref.transient_id and ref.transient_id == cand_ref.transient_id:
+                score += 0.05
             candidates.append((e, score, cand_ref.model_dump()))
 
         candidates.sort(key=lambda x: x[1], reverse=True)
@@ -279,8 +290,9 @@ class ReferenceResolver:
 
         if len(candidates) > 1:
             second_cand, second_score, _ = candidates[1]
-            if (top_score - second_score) < 0.08 and second_score > 0.75:
-                return None, OperationStatus.AMBIGUOUS_REFERENCE, f"Ambiguous reference: multiple candidate edges ({top_score:.2f} vs {second_score:.2f})."
+            score_diff = top_score - second_score
+            if score_diff < 0.005 and second_score >= 0.95:
+                return None, OperationStatus.AMBIGUOUS_REFERENCE, f"Ambiguous reference: multiple identical candidate edges ({top_score:.2f} vs {second_score:.2f})."
 
         return top_cand, OperationStatus.VALID, "Reference resolved uniquely."
 
@@ -316,7 +328,13 @@ class ReferenceResolver:
         dy = target.centroid[1] - cand.centroid[1]
         dz = target.centroid[2] - cand.centroid[2]
         dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-        dist_score = math.exp(- (dist * dist) / (2.0 * (15.0 ** 2)))
+        if dist < 0.05:
+            dist_score = 1.0
+        else:
+            # Tolerance scales with the face itself: ~quarter of the face's characteristic size, at least 2 mm
+            ref_area = target.area or cand.area or 0.0
+            sigma = max(2.0, 0.25 * math.sqrt(ref_area)) if ref_area > 0 else 5.0
+            dist_score = math.exp(- (dist * dist) / (2.0 * (sigma ** 2)))
         score += 0.30 * dist_score
 
         # 4. Area Match (Weight: 0.20)
@@ -325,6 +343,13 @@ class ReferenceResolver:
             score += 0.20 * ratio
         else:
             score += 0.10
+
+        # 5. Planar elevation offset check (if both faces are planar)
+        if target.surface_type == "plane" and cand.surface_type == "plane":
+            if target.plane_d is not None and cand.plane_d is not None:
+                d_diff = abs(target.plane_d - cand.plane_d)
+                if d_diff > 0.05:
+                    score *= max(0.2, math.exp(- (d_diff * d_diff) / (2.0 * (3.0 ** 2))))
 
         return score
 
@@ -345,7 +370,10 @@ class ReferenceResolver:
         dy = target.centroid[1] - cand.centroid[1]
         dz = target.centroid[2] - cand.centroid[2]
         dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-        dist_score = math.exp(- (dist * dist) / (2.0 * (10.0 ** 2)))
+        if dist < 0.05:
+            dist_score = 1.0
+        else:
+            dist_score = math.exp(- (dist * dist) / (2.0 * (4.0 ** 2)))
         score += 0.40 * dist_score
 
         # 3. Length Match (Weight: 0.35)

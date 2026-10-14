@@ -23,8 +23,8 @@ export function WorkflowStep({
   accentColor = 'blue',
 }: WorkflowStepProps) {
   const colorMap: Record<string, { pill: string; ring: string; icon: string; connector: string }> = {
-    blue:  { pill: 'bg-blue-500/15 border-blue-500/30 text-blue-400',   ring: 'ring-blue-500/30',  icon: 'bg-blue-500/20 text-blue-400',  connector: 'from-blue-500/40 to-cyan-500/20' },
-    cyan:  { pill: 'bg-cyan-500/15 border-cyan-500/30 text-cyan-400',   ring: 'ring-cyan-500/30',  icon: 'bg-cyan-500/20 text-cyan-400',  connector: 'from-cyan-500/40 to-violet-500/20' },
+    blue:  { pill: 'bg-blue-500/15 border-blue-500/30 text-blue-400',   ring: 'ring-blue-500/30',  icon: 'bg-blue-500/20 text-blue-400',  connector: 'from-blue-500/40 to-blue-500/20' },
+    cyan:  { pill: 'bg-blue-500/15 border-blue-500/30 text-blue-400',   ring: 'ring-blue-500/30',  icon: 'bg-blue-500/20 text-blue-400',  connector: 'from-blue-500/40 to-violet-500/20' },
     violet:{ pill: 'bg-violet-500/15 border-violet-500/30 text-violet-400', ring: 'ring-violet-500/30', icon: 'bg-violet-500/20 text-violet-400', connector: 'from-violet-500/40 to-emerald-500/20' },
     emerald:{ pill: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400', ring: 'ring-emerald-500/30', icon: 'bg-emerald-500/20 text-emerald-400', connector: 'from-emerald-500/40 to-blue-500/20' },
   };

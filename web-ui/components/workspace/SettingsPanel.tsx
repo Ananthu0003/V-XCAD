@@ -90,8 +90,8 @@ export function SettingsPanel({ isOpen, onClose, user }: SettingsPanelProps) {
 					shadow-[24px_0_80px_rgba(0,0,0,0.125)]
 					${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
 			>
-				{/* ── Top gradient accent bar ── */}
-				<div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-blue-500 via-cyan-400 to-violet-500" />
+				{/* ── Top accent bar ── */}
+				<div className="absolute top-0 left-0 right-0 h-[2px] bg-[var(--ui-accent,#4c7bf4)]" />
 
 				{/* ── Header ── */}
 				<div className="flex items-center justify-between px-6 pt-7 pb-5">
@@ -124,7 +124,7 @@ export function SettingsPanel({ isOpen, onClose, user }: SettingsPanelProps) {
 							<div className="relative flex items-center gap-4">
 								{/* Avatar */}
 								<div className="relative shrink-0">
-									<div className="size-12 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-black text-sm shadow-[0_0_20px_rgba(59,130,246,0.2)]">
+									<div className="size-12 rounded-full bg-[var(--ui-accent,#4c7bf4)] flex items-center justify-center text-white font-black text-sm shadow-[0_0_20px_rgba(76,123,244,0.2)]">
 										{initials}
 									</div>
 									<div className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full bg-emerald-500 border-2 border-white dark:border-[#0d0f14] shadow-sm" />
@@ -230,7 +230,7 @@ export function SettingsPanel({ isOpen, onClose, user }: SettingsPanelProps) {
 					{(user?.email === 'admin@vexcad.local' || user?.name?.toLowerCase() === 'admin') && (
 						<section>
 							<div className="flex items-center gap-2 mb-4">
-								<div className="size-1.5 rounded-full bg-cyan-500" />
+								<div className="size-1.5 rounded-full bg-blue-500" />
 								<span className="text-[10px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Admin Console</span>
 							</div>
 
@@ -238,20 +238,20 @@ export function SettingsPanel({ isOpen, onClose, user }: SettingsPanelProps) {
 								<a
 									href="/admin/knowledge"
 									className="group w-full flex items-center justify-between px-4 py-3 rounded-xl
-										bg-cyan-500/10 border border-cyan-500/20
-										hover:bg-cyan-500/15 hover:border-cyan-500/40
+										bg-blue-500/10 border border-blue-500/20
+										hover:bg-blue-500/15 hover:border-blue-500/40
 										transition-all duration-200"
 								>
 									<div className="flex items-center gap-3">
-										<div className="size-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-											<KeyRound className="size-4 text-cyan-400" />
+										<div className="size-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
+											<KeyRound className="size-4 text-blue-400" />
 										</div>
 										<div>
 											<div className="text-[12px] font-bold text-zinc-900 dark:text-white">Knowledge Base Admin</div>
 											<div className="text-[10px] text-zinc-400 dark:text-zinc-500">Manage manufacturing standards & rules</div>
 										</div>
 									</div>
-									<ChevronRight className="size-3.5 text-cyan-400 group-hover:translate-x-0.5 transition-all" />
+									<ChevronRight className="size-3.5 text-blue-400 group-hover:translate-x-0.5 transition-all" />
 								</a>
 								<a
 									href="/admin/password-reset-requests"

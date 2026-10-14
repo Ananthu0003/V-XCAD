@@ -90,12 +90,12 @@ export function RevisionHistoryDropdown({
 					onClick={() => setIsOpen(!isOpen)}
 					className={`flex h-7 items-center gap-1.5 px-2.5 rounded-lg text-[11px] font-mono font-bold transition-all cursor-pointer ${
 						isOpen
-							? 'bg-cyan-500/20 text-cyan-300'
-							: 'text-cyan-400 hover:text-white hover:bg-white/10'
+							? 'bg-[var(--ui-accent,#4c7bf4)]/20 text-[var(--ui-accent,#4c7bf4)]'
+							: 'text-[var(--ui-accent,#4c7bf4)] hover:text-white hover:bg-white/10'
 					}`}
 					title="Browse and restore CAD model revision history"
 				>
-					<History className="size-3 text-cyan-400" />
+					<History className="size-3 text-[var(--ui-accent,#4c7bf4)]" />
 					<span>
 						REV {activeRevision ? activeRevision.revisionNumber : 1}/{revisions.length}
 					</span>
@@ -187,7 +187,7 @@ export function RevisionHistoryDropdown({
 										</div>
 
 										{rev.targetPortion && (
-											<div className="flex items-center gap-1 text-[10px] text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-md border border-cyan-500/20 w-fit">
+											<div className="flex items-center gap-1 text-[10px] text-[var(--ui-accent,#4c7bf4)] bg-[var(--ui-accent,#4c7bf4)]/10 px-2 py-0.5 rounded-md border border-[var(--ui-accent,#4c7bf4)]/20 w-fit">
 												<Target className="size-3 shrink-0" />
 												<span className="truncate max-w-[200px]">{rev.targetPortion}</span>
 											</div>

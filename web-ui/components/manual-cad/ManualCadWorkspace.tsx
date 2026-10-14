@@ -9,7 +9,30 @@ import { CadViewport } from '@/components/viewport/CadViewport';
 import { SubShapeRaycaster, findFaceFromHit } from './SubShapeRaycaster';
 import { StlMesh } from '@/components/viewport/StlMesh';
 import { ContextMenu } from './operations/ContextMenu';
-import { Loader2 } from 'lucide-react';
+import { getDefaultParams } from './operations/registry';
+import { SelectMoreMenu } from './SelectMoreMenu';
+import { useDetectedFeatures, DetectedFeature } from './useDetectedFeatures';
+import { StageSwitcher } from '@/components/workspace/StageSwitcher';
+import {
+  Loader2,
+  ArrowUp,
+  Maximize2,
+  Home,
+} from 'lucide-react';
+
+/** Tools that act on the whole model; a selected planar face is optional input for some. */
+const BODY_TOOLS = new Set<CADToolType>([
+  'move', 'rotate', 'scale', 'mirror', 'align', 'primitive', 'shell', 'offset', 'split',
+  'linear_pattern', 'polar_pattern', 'heal',
+]);
+const FACE_OPTIONAL_BODY_TOOLS = new Set<CADToolType>(['mirror', 'split', 'align', 'shell', 'primitive']);
+
+interface PromptDockProps {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
+  isGenerating: boolean;
+}
 
 interface ManualCadWorkspaceProps {
   sessionId: string;
@@ -17,144 +40,23 @@ interface ManualCadWorkspaceProps {
   initialStepUrl?: string | null;
   onProceedToCam?: () => void;
   onSwitchStage?: (stage: 'cad' | 'manual_cad' | 'cam') => void;
+  promptDock?: PromptDockProps;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Filter segmented control
-// ─────────────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-// Filter segmented control
-// ─────────────────────────────────────────────────────────────────────────────
-function FilterControl({
-  selectionMode,
-  setSelectionMode,
-}: {
-  selectionMode: 'body' | 'face' | 'edge';
-  setSelectionMode: (m: 'body' | 'face' | 'edge') => void;
-}) {
-  const segments: Array<{ value: 'body' | 'face' | 'edge'; label: string }> = [
-    { value: 'body', label: '3D Model' },
-    { value: 'face', label: 'Face' },
-    { value: 'edge', label: 'Edge' },
-  ];
-
-  return (
-    <div style={{
-      display: 'flex', borderRadius: 8, overflow: 'hidden',
-      border: '1px solid var(--mcad-border-ctrl)',
-      background: 'var(--mcad-input)',
-      height: 30,
-    }}>
-      {segments.map((s, i) => {
-        const isCurrent = selectionMode === s.value;
-        return (
-          <button
-            key={s.value}
-            type="button"
-            title={`Select ${s.label}`}
-            onClick={() => setSelectionMode(s.value)}
-            style={{
-              padding: '0 10px',
-              borderRight: i < segments.length - 1 ? '1px solid var(--mcad-border-ctrl)' : 'none',
-              background: isCurrent ? 'var(--mcad-segment-active)' : 'transparent',
-              color: isCurrent
-                ? '#fff'
-                : 'var(--mcad-text-secondary)',
-              border: 'none',
-              fontSize: 11,
-              fontFamily: 'var(--font-sans)',
-              cursor: 'pointer',
-              fontWeight: isCurrent ? 600 : 400,
-              transition: 'background 0.15s, color 0.15s',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {s.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Status overlay (bottom-left of viewport)
-// ─────────────────────────────────────────────────────────────────────────────
-function ViewportStatus({
-  selectedEntity,
-  isLoading,
-}: {
-  selectedEntity: any | null;
-  isLoading: boolean;
-}) {
-  let text = 'Nothing selected: click a face or 3D model, or press V';
-
-  if (isLoading) {
-    text = 'Computing geometry…';
-  } else if (selectedEntity) {
-    const e = selectedEntity;
-    const parts: string[] = [];
-    parts.push(e.transient_id);
-    if (e.entity_type === 'body') {
-      parts.push('3D Solid Model');
-      if (e.volume_mm3 != null) parts.push(`${e.volume_mm3.toFixed(1)} mm³`);
-      const bbox = e.bounding_box;
-      if (bbox?.min && bbox?.max) {
-        parts.push(`${(bbox.max[0] - bbox.min[0]).toFixed(1)}×${(bbox.max[1] - bbox.min[1]).toFixed(1)}×${(bbox.max[2] - bbox.min[2]).toFixed(1)} mm`);
-      }
-    } else {
-      if (e.surface_type) parts.push(e.surface_type);
-      if (e.curve_type) parts.push(e.curve_type);
-      if (e.area != null) parts.push(`${e.area.toFixed(1)} mm²`);
-      if (e.length != null) parts.push(`${e.length.toFixed(1)} mm`);
-      if (e.normal) {
-        const n = e.normal as number[];
-        const labels = ['+X','-X','+Y','-Y','+Z','-Z'];
-        const axes = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
-        let best = 0, bestDot = -2;
-        axes.forEach(([ax,ay,az],i)=>{
-          const dot = ax*n[0]+ay*n[1]+az*n[2];
-          if(dot>bestDot){bestDot=dot;best=i;}
-        });
-        if(bestDot > 0.9) parts.push(`normal ${labels[best]}`);
-      }
-    }
-    text = parts.join(' · ');
-  }
-
-  return (
-    <div
-      style={{
-        position: 'absolute', bottom: 12, left: 12, zIndex: 15,
-        fontSize: 11, fontFamily: 'var(--font-mono)',
-        color: 'var(--mcad-text-muted)',
-        pointerEvents: 'none', userSelect: 'none',
-        maxWidth: 420, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-      }}
-    >
-      {isLoading && (
-        <Loader2 size={11} className="inline mr-1 animate-spin" style={{ color: 'var(--mcad-teal)', verticalAlign: 'middle' }} />
-      )}
-      {text}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Workspace
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function ManualCadWorkspace({
   sessionId,
   initialStlUrl,
   initialStepUrl,
   onProceedToCam,
-  onSwitchStage
+  onSwitchStage,
+  promptDock,
 }: ManualCadWorkspaceProps) {
   const [activeRevision, setActiveRevision] = useState<string>('rev_000');
   const [activeTool, setActiveTool] = useState<CADToolType>('select');
   const [selectionMode, setSelectionMode] = useState<'body' | 'face' | 'edge'>('face');
   const [selectedEntity, setSelectedEntity] = useState<any | null>(null);
+  const [selectedEntities, setSelectedEntities] = useState<any[]>([]);
+  const [highlightedFaceIds, setHighlightedFaceIds] = useState<string[] | null>(null);
   const [params, setParams] = useState<Record<string, any>>({
     radius: 2.0, distance: 1.0, diameter: 6.0, depth: 10.0, width: 20.0, height: 15.0
   });
@@ -167,8 +69,23 @@ export function ManualCadWorkspace({
   const [hoveredEntity, setHoveredEntity] = useState<any | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entity: any } | null>(null);
 
+  // Sync stlUrl when initialStlUrl prop arrives or updates
+  useEffect(() => {
+    if (initialStlUrl && !isPreviewActive) {
+      setStlUrl(initialStlUrl);
+    }
+  }, [initialStlUrl, isPreviewActive]);
+
   // Scoped workspace ref for keyboard shortcuts
   const workspaceRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Hook for B-Rep detected features (parameter extraction)
+  const {
+    features: detectedFeatures,
+    isLoading: isLoadingFeatures,
+    refetch: refetchFeatures,
+  } = useDetectedFeatures(sessionId, activeRevision);
 
   // Helper to build 3D Model / Sub-shape entity
   const createBodyEntity = useCallback((topo: any, rev: string) => {
@@ -197,10 +114,16 @@ export function ManualCadWorkspace({
       if (topology) {
         setSelectedEntity(createBodyEntity(topology, activeRevision));
       }
-    } else if (mode === 'face' && selectedEntity?.entity_type === 'body') {
-      setSelectedEntity(null);
-    } else if (mode === 'edge' && selectedEntity?.entity_type === 'body') {
-      setSelectedEntity(null);
+    } else if (mode === 'face') {
+      if (selectedEntity?.entity_type === 'body' || selectedEntity?.entity_type === 'edge') {
+        setSelectedEntity(null);
+        setSelectedEntities([]);
+      }
+    } else if (mode === 'edge') {
+      if (selectedEntity?.entity_type === 'body' || selectedEntity?.entity_type === 'face') {
+        setSelectedEntity(null);
+        setSelectedEntities([]);
+      }
     }
   };
 
@@ -208,13 +131,25 @@ export function ManualCadWorkspace({
     setActiveTool(tool);
     if (tool === 'fillet' || tool === 'chamfer') {
       setSelectionMode('edge');
-    } else if (tool === 'hole' || tool === 'pocket' || tool === 'pad' || tool === 'select') {
+    } else if (tool === 'hole' || tool === 'pocket' || tool === 'pad' || tool === 'push_pull' || tool === 'round_face_edges') {
       setSelectionMode('face');
+    } else if (BODY_TOOLS.has(tool)) {
+      const keepFace =
+        FACE_OPTIONAL_BODY_TOOLS.has(tool) &&
+        selectedEntity?.entity_type === 'face' &&
+        selectedEntity?.surface_type === 'plane';
+      if (!keepFace && topology) {
+        setSelectionMode('body');
+        setSelectedEntity(createBodyEntity(topology, activeRevision));
+      }
     }
   };
 
   // 1. Fetch Topology for active revision
   const fetchTopology = useCallback(async (revId: string) => {
+    if (!sessionId || (sessionId === 'default_session' && !initialStepUrl && !initialStlUrl)) {
+      return;
+    }
     try {
       const stepParam = initialStepUrl ? `&source_step=${encodeURIComponent(initialStepUrl)}` : '';
       const res = await fetch(`/api/cad/modify/topology/${sessionId}?revision_id=${revId}${stepParam}`);
@@ -222,15 +157,20 @@ export function ManualCadWorkspace({
       const data = await res.json();
       setTopology(data);
       if (!isPreviewActive) {
-        setStlUrl(`/api/cad/modify/file/${sessionId}/revisions/${revId}.stl`);
+        if (revId !== 'rev_000' || !initialStlUrl) {
+          setStlUrl(`/api/cad/modify/file/${sessionId}/revisions/${revId}.stl`);
+        } else if (initialStlUrl) {
+          setStlUrl(initialStlUrl);
+        }
       }
     } catch (err: any) {
       console.error('Error fetching topology:', err);
     }
-  }, [sessionId, isPreviewActive, initialStepUrl]);
+  }, [sessionId, isPreviewActive, initialStepUrl, initialStlUrl]);
 
   // 2. Fetch History
   const fetchHistory = useCallback(async () => {
+    if (!sessionId || sessionId === 'default_session') return;
     try {
       const res = await fetch(`/api/cad/modify/history/${sessionId}`);
       if (res.ok) {
@@ -243,25 +183,75 @@ export function ManualCadWorkspace({
   }, [sessionId]);
 
   useEffect(() => {
-    if (sessionId) {
+    if (sessionId && (sessionId !== 'default_session' || initialStepUrl || initialStlUrl)) {
       fetchTopology(activeRevision);
       fetchHistory();
     }
-  }, [sessionId, activeRevision, fetchTopology, fetchHistory]);
+  }, [sessionId, activeRevision, fetchTopology, fetchHistory, initialStepUrl, initialStlUrl]);
 
-  // Handle entity selection
-  const handleSelectTopologyEntity = (entity: any) => {
-    setSelectedEntity(entity);
+  // Handle entity selection with multi-select support
+  const handleSelectTopologyEntity = (entity: any, multiSelect?: boolean) => {
+    if (!entity) {
+      setSelectedEntity(null);
+      setSelectedEntities([]);
+      setIsPreviewActive(false);
+      setPreviewResult(null);
+      return;
+    }
+
+    if (entity.entity_type === 'body') {
+      const bodyEnt = topology ? createBodyEntity(topology, activeRevision) : entity;
+      setSelectedEntity(bodyEnt);
+      setSelectedEntities([bodyEnt]);
+      setSelectionMode('body');
+      setIsPreviewActive(false);
+      setPreviewResult(null);
+      return;
+    }
+
+    if (multiSelect) {
+      setSelectedEntities((prev) => {
+        const exists = prev.some((item) => item.transient_id === entity.transient_id);
+        if (exists) {
+          const next = prev.filter((item) => item.transient_id !== entity.transient_id);
+          setSelectedEntity(next.length > 0 ? next[next.length - 1] : null);
+          return next;
+        } else {
+          const next = [...prev, entity];
+          setSelectedEntity(entity);
+          return next;
+        }
+      });
+    } else {
+      setSelectedEntity(entity);
+      setSelectedEntities([entity]);
+    }
+
     setIsPreviewActive(false);
     setPreviewResult(null);
+
+    if (entity.entity_type === 'feature') {
+      setSelectedEntity(entity);
+      setSelectedEntities([entity]);
+      setActiveTool('edit_feature');
+      const initialChanges: Record<string, any> = {};
+      (entity.params || []).forEach((p: any) => {
+        initialChanges[p.key] = p.value;
+      });
+      setParams({
+        feature_id: entity.feature_id,
+        changes: initialChanges,
+        ...initialChanges,
+      });
+      setIsPreviewActive(false);
+      setPreviewResult(null);
+      return;
+    }
+
     if (entity.entity_type === 'edge') {
       setSelectionMode('edge');
-      setActiveTool('fillet');
     } else if (entity.entity_type === 'face') {
       setSelectionMode('face');
-      if (entity.surface_type === 'plane') {
-        setActiveTool('hole');
-      }
     }
   };
 
@@ -269,24 +259,75 @@ export function ManualCadWorkspace({
   const handleDirectMeshClick = (point: [number, number, number], normal?: [number, number, number]) => {
     if (!topology) return;
     if (selectionMode === 'body') {
-      setSelectedEntity(createBodyEntity(topology, activeRevision));
-    } else if (selectionMode === 'face' && topology.faces) {
+      const bodyEnt = createBodyEntity(topology, activeRevision);
+      setSelectedEntity(bodyEnt);
+      setSelectedEntities([bodyEnt]);
+      return;
+    }
+
+    // In face mode (or general mode): find clicked face
+    if (topology.faces) {
       const face = findFaceFromHit(point, normal, topology.faces);
       if (face) {
-        handleSelectTopologyEntity(face);
+        // If this face belongs to a detected feature, highlight/select that feature for editing
+        const matchingFeat = detectedFeatures.find((df: any) =>
+          df.face_ids?.includes(face.transient_id)
+        );
+        if (matchingFeat && activeTool === 'edit_feature') {
+          handleSelectTopologyEntity({ entity_type: 'feature', ...matchingFeat });
+        } else {
+          handleSelectTopologyEntity(face);
+        }
       }
     }
+  };
+
+  // Build references list for API requests
+  const buildRequestReferences = (): any[] => {
+    const targets = selectedEntities.length > 1 ? selectedEntities : selectedEntity ? [selectedEntity] : [];
+    const refs: any[] = [];
+
+    targets.forEach((ent) => {
+      if (!ent || ent.entity_type === 'body') return;
+      if (ent.entity_type === 'feature') {
+        const firstFid = ent.face_ids?.[0];
+        if (firstFid && topology?.faces?.[firstFid]) {
+          refs.push(topology.faces[firstFid]);
+        } else if (firstFid) {
+          refs.push({ entity_type: 'face', transient_id: firstFid });
+        }
+      } else {
+        refs.push(ent);
+      }
+    });
+
+    return refs;
+  };
+
+  // Build parameters dictionary
+  const buildRequestParameters = (): Record<string, any> => {
+    const isFeat = selectedEntity?.entity_type === 'feature';
+    if (isFeat) {
+      return {
+        feature_id: selectedEntity.feature_id,
+        changes: params.changes || params,
+        ...params,
+      };
+    }
+    return { ...getDefaultParams(activeTool), ...params };
   };
 
   // Preview Operation
   const handlePreview = async () => {
     if (!selectedEntity) {
-      toast.error('Please select a face or edge first.');
+      toast.error('Please select something to edit first.');
       return;
     }
 
     setIsLoading(true);
     setPreviewResult(null);
+
+    const opType = selectedEntity?.entity_type === 'feature' ? 'edit_feature' : activeTool;
 
     try {
       const res = await fetch('/api/cad/modify/preview', {
@@ -295,9 +336,9 @@ export function ManualCadWorkspace({
         body: JSON.stringify({
           session_id: sessionId,
           base_revision: activeRevision,
-          operation_type: activeTool,
-          references: [selectedEntity],
-          parameters: params,
+          operation_type: opType,
+          references: buildRequestReferences(),
+          parameters: buildRequestParameters(),
         }),
       });
 
@@ -353,6 +394,8 @@ export function ManualCadWorkspace({
     if (!selectedEntity) return;
 
     setIsLoading(true);
+    const opType = selectedEntity?.entity_type === 'feature' ? 'edit_feature' : activeTool;
+
     try {
       const res = await fetch('/api/cad/modify/commit', {
         method: 'POST',
@@ -360,9 +403,9 @@ export function ManualCadWorkspace({
         body: JSON.stringify({
           session_id: sessionId,
           base_revision: activeRevision,
-          operation_type: activeTool,
-          references: [selectedEntity],
-          parameters: params,
+          operation_type: opType,
+          references: buildRequestReferences(),
+          parameters: buildRequestParameters(),
         }),
       });
 
@@ -376,9 +419,11 @@ export function ManualCadWorkspace({
       setIsPreviewActive(false);
       setPreviewResult(null);
       setSelectedEntity(null);
+      setSelectedEntities([]);
       setActiveTool('select');
       toast.success(`Committed revision ${data.new_revision}`);
       await fetchHistory();
+      refetchFeatures();
     } catch (err: any) {
       toast.error(err.message || 'Failed to commit revision');
     } finally {
@@ -406,7 +451,9 @@ export function ManualCadWorkspace({
         setIsPreviewActive(false);
         setPreviewResult(null);
         setSelectedEntity(null);
+        setSelectedEntities([]);
         toast.success(`Switched to ${data.active_revision}`);
+        refetchFeatures();
       }
     } catch (err: any) {
       toast.error('Rollback failed');
@@ -425,54 +472,67 @@ export function ManualCadWorkspace({
         body: JSON.stringify({
           session_id: sessionId,
           target_op_id: opId,
-          action: 'delete_op',
         }),
       });
 
       const data = await res.json();
-      if (!res.ok || !data.success) {
-        if (data.broken_references && data.broken_references.length > 0) {
-          toast.warning(`Recompute warning: ${data.broken_references[0]}`);
-        } else {
-          throw new Error(data.error?.message || 'Recompute failed');
-        }
+      if (res.ok && data.success) {
+        setActiveRevision(data.final_revision);
+        setStlUrl(data.stl_url);
+        toast.success(`Operation removed: recomputed to ${data.final_revision}`);
+        await fetchHistory();
+        refetchFeatures();
+      } else {
+        throw new Error(data.error?.message || 'Recompute failed');
       }
-
-      setActiveRevision(data.active_revision);
-      setStlUrl(data.stl_url);
-      setHistory(data.history || []);
-      setIsPreviewActive(false);
-      setPreviewResult(null);
-      setSelectedEntity(null);
-      toast.success(`Operation removed. Recomputed to ${data.active_revision}`);
-      await fetchTopology(data.active_revision);
     } catch (err: any) {
-      toast.error(err.message || 'Failed to recompute geometry');
+      toast.error(err.message || 'Failed to delete operation');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Undo / Redo helpers
-  const currentIdx = history.findIndex(h => (h.output_revision || h.input_revision) === activeRevision);
-  const canUndo = currentIdx > 0;
-  const canRedo = currentIdx >= 0 && currentIdx < history.length - 1;
+  // Undo / Redo
+  const activeIdx = history.findIndex((h) => h.output_revision === activeRevision);
+  const canUndo = activeIdx > 0;
+  const canRedo = activeIdx >= 0 && activeIdx < history.length - 1;
 
   const handleUndo = () => {
     if (canUndo) {
-      const prevRev = history[currentIdx - 1].output_revision || history[currentIdx - 1].input_revision;
+      const prevRev = history[activeIdx - 1].output_revision || 'rev_000';
       handleRollback(prevRev);
     }
   };
 
   const handleRedo = () => {
     if (canRedo) {
-      const nextRev = history[currentIdx + 1].output_revision || history[currentIdx + 1].input_revision;
-      handleRollback(nextRev);
+      const nextRev = history[activeIdx + 1].output_revision;
+      if (nextRev) handleRollback(nextRev);
     }
   };
 
-  // Preview pill label for timeline
+  // Viewport status text computation
+  const getStatusCaption = () => {
+    if (isLoading) return 'Computing geometry…';
+    if (!selectedEntity) return 'Nothing selected · Click a face or 3D model';
+    const e = selectedEntity;
+    const parts: string[] = [];
+    if (e.entity_type === 'feature') {
+      parts.push(e.name || 'Feature');
+      if (e.subtype) parts.push(e.subtype);
+    } else if (e.entity_type === 'body') {
+      parts.push('3D Solid Model');
+      if (e.volume_mm3 != null) parts.push(`${e.volume_mm3.toFixed(1)} mm³`);
+    } else {
+      parts.push(e.transient_id);
+      if (e.surface_type) parts.push(e.surface_type);
+      if (e.curve_type) parts.push(e.curve_type);
+      if (e.area != null) parts.push(`${e.area.toFixed(1)} mm²`);
+      if (e.length != null) parts.push(`${e.length.toFixed(1)} mm`);
+    }
+    return parts.join(' · ');
+  };
+
   const previewPillLabel = isPreviewActive && activeTool !== 'select'
     ? activeTool.charAt(0).toUpperCase() + activeTool.slice(1)
     : undefined;
@@ -482,193 +542,235 @@ export function ManualCadWorkspace({
       ref={workspaceRef}
       className="mcad-workspace"
       style={{
-        display: 'flex', flexDirection: 'column',
-        width: '100%', height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        height: '100%',
         background: 'var(--mcad-bg)',
         overflow: 'hidden',
         fontFamily: 'var(--font-sans)',
       }}
-      // Prevent shortcuts from triggering while workspace is not focused
       tabIndex={-1}
     >
-      {/* ─── Main row: toolbar | viewport | inspector ─── */}
-      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      {/* ─── Main 3D Viewport Area with Floating Cards ─── */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
 
-        {/* Left toolbar rail */}
-        <ManualCadToolbar
-          activeTool={activeTool}
-          setActiveTool={handleSetActiveTool}
-          selectedEntity={selectedEntity}
-          selectionMode={selectionMode}
-          setSelectionMode={handleSetSelectionMode}
-          workspaceRef={workspaceRef}
-        />
-
-        {/* ─── Viewport column ─── */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
-
-          {/* Viewport header bar */}
-          <div style={{
-            height: 44,
-            background: 'var(--mcad-panel)',
-            borderBottom: '1px solid var(--mcad-border)',
-            display: 'flex', alignItems: 'center',
-            paddingLeft: 12, paddingRight: 12, gap: 10,
-            flexShrink: 0, zIndex: 10,
-          }}>
-            {/* Filter segmented control */}
-            <FilterControl selectionMode={selectionMode} setSelectionMode={handleSetSelectionMode} />
-
-            <div style={{ flex: 1 }} />
-
-            {/* Hint text */}
-            <span style={{ fontSize: 11, color: 'var(--mcad-text-muted)', fontFamily: 'var(--font-sans)' }}>
-              Shift: multi-select
-            </span>
-
-            {/* Fit hint button */}
-            <button
-              type="button"
-              style={{
-                height: 26, padding: '0 10px', borderRadius: 8,
-                background: 'var(--mcad-input)', border: '1px solid var(--mcad-border-ctrl)',
-                color: 'var(--mcad-text-secondary)', fontSize: 11,
-                fontFamily: 'var(--font-sans)', cursor: 'pointer',
-              }}
-              onClick={() => {/* CadViewport exposes no direct fit API; this is a hint */}}
-              title="Fit model to view (F key in viewport)"
-            >
-              Fit
-            </button>
-          </div>
-
-          {/* 3D viewport */}
-          <div
-            style={{ flex: 1, position: 'relative', background: 'var(--mcad-viewport)', minHeight: 0 }}
-            onContextMenu={(e) => {
-              const targetEntity = hoveredEntity || selectedEntity;
-              if (targetEntity) {
-                e.preventDefault();
-                setContextMenu({
-                  x: e.clientX,
-                  y: e.clientY,
-                  entity: targetEntity,
-                });
+        {/* 1. Full-Bleed 3D Viewport (fills entire container) */}
+        <div
+          style={{ position: 'absolute', inset: 0, background: 'var(--mcad-viewport)' }}
+          onContextMenu={(e) => {
+            const targetEntity = hoveredEntity || selectedEntity;
+            if (targetEntity) {
+              e.preventDefault();
+              setContextMenu({
+                x: e.clientX,
+                y: e.clientY,
+                entity: targetEntity,
+              });
+            }
+          }}
+        >
+          <CadViewport
+            stlUrl={stlUrl}
+            statusText={isLoading ? 'Computing geometry...' : 'Ready'}
+            isRecompiling={isLoading}
+            hasStl={!!stlUrl}
+            hasStep={true}
+            hasDxf={false}
+            hasGcode={false}
+            isDownloadingStl={false}
+            isDownloadingStep={false}
+            isDownloadingDxf={false}
+            onDownloadStl={() => {
+              if (stlUrl) {
+                const a = document.createElement('a');
+                a.href = stlUrl;
+                a.download = `cad_${sessionId}.stl`;
+                a.click();
+              }
+            }}
+            onDownloadStep={() => {
+              const target = initialStepUrl || `/api/outputs/cad_${sessionId}.step`;
+              const a = document.createElement('a');
+              a.href = target;
+              a.download = `cad_${sessionId}.step`;
+              a.click();
+            }}
+            onDownloadDxf={() => {}}
+            workflowStage="manual_cad"
+            onClearSelection={() => {
+              if (selectionMode !== 'body') {
+                setSelectedEntity(null);
+                setSelectedEntities([]);
+                setIsPreviewActive(false);
+                setPreviewResult(null);
               }
             }}
           >
-            {/* Dot-grid background */}
-            <div
-              aria-hidden
-              style={{
-                position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
-                backgroundImage: 'radial-gradient(circle, #1b212a 1px, transparent 1px)',
-                backgroundSize: '24px 24px',
-              }}
+            {stlUrl && <StlMesh url={stlUrl} onDirectClick={handleDirectMeshClick} />}
+            <SubShapeRaycaster
+              topology={topology}
+              selectedEntity={selectedEntity}
+              selectedEntities={selectedEntities}
+              onSelectEntity={handleSelectTopologyEntity}
+              hoveredEntity={hoveredEntity}
+              onHoverEntity={setHoveredEntity}
+              selectionMode={selectionMode}
+              highlightedFaceIds={highlightedFaceIds}
+              detectedFeatures={detectedFeatures}
             />
-
-            <CadViewport
-              stlUrl={stlUrl}
-              statusText={isLoading ? 'Computing geometry...' : 'Ready'}
-              isRecompiling={isLoading}
-              hasStl={!!stlUrl}
-              hasStep={true}
-              hasDxf={false}
-              hasGcode={false}
-              isDownloadingStl={false}
-              isDownloadingStep={false}
-              isDownloadingDxf={false}
-              onDownloadStl={() => {
-                if (stlUrl) {
-                  const a = document.createElement('a');
-                  a.href = stlUrl;
-                  a.download = `cad_${sessionId}.stl`;
-                  a.click();
-                }
-              }}
-              onDownloadStep={() => {
-                const target = initialStepUrl || `/api/outputs/cad_${sessionId}.step`;
-                const a = document.createElement('a');
-                a.href = target;
-                a.download = `cad_${sessionId}.step`;
-                a.click();
-              }}
-              onDownloadDxf={() => {}}
-              workflowStage="manual_cad"
-            >
-              {stlUrl && <StlMesh url={stlUrl} onDirectClick={handleDirectMeshClick} />}
-              <SubShapeRaycaster
-                topology={topology}
-                selectedEntity={selectedEntity}
-                onSelectEntity={handleSelectTopologyEntity}
-                hoveredEntity={hoveredEntity}
-                onHoverEntity={setHoveredEntity}
-                selectionMode={selectionMode}
-              />
-            </CadViewport>
-
-            {/* Right-click Context Menu */}
-            {contextMenu && (
-              <ContextMenu
-                x={contextMenu.x}
-                y={contextMenu.y}
-                entity={contextMenu.entity}
-                onSelectOperation={(opId) => {
-                  if (selectedEntity?.transient_id !== contextMenu.entity?.transient_id) {
-                    handleSelectTopologyEntity(contextMenu.entity);
-                  }
-                  handleSetActiveTool(opId);
-                  setContextMenu(null);
-                }}
-                onClose={() => setContextMenu(null)}
-              />
-            )}
-
-            {/* Bottom-left status line */}
-            <ViewportStatus selectedEntity={selectedEntity} isLoading={isLoading} />
-          </div>
+          </CadViewport>
         </div>
 
-        {/* ─── Right inspector panel ─── */}
-        <div style={{
-          width: 320, minWidth: 280, maxWidth: 360,
-          display: 'flex', flexDirection: 'column',
-          background: 'var(--mcad-panel)',
-          borderLeft: '1px solid var(--mcad-border)',
-          flexShrink: 0, height: '100%', overflow: 'hidden',
-        }}>
-          {/* Stage switcher header — kept identical to other stages */}
-          <div style={{
-            height: 56, display: 'flex', alignItems: 'center',
-            justifyContent: 'center', paddingLeft: 12, paddingRight: 12,
-            borderBottom: '1px solid var(--mcad-border)',
-            flexShrink: 0,
-          }}>
+        {/* 2. Floating Left Tool Rail */}
+        <div
+          className="mcad-float"
+          style={{
+            position: 'absolute',
+            left: 12,
+            top: 56,
+            zIndex: 20,
+            overflow: 'visible',
+            maxHeight: 'calc(100% - 68px)',
+            overflowY: 'auto',
+          }}
+        >
+          <ManualCadToolbar
+            activeTool={activeTool}
+            setActiveTool={handleSetActiveTool}
+            selectedEntity={selectedEntity}
+            selectionMode={selectionMode}
+            setSelectionMode={handleSetSelectionMode}
+            workspaceRef={workspaceRef}
+          />
+        </div>
+
+        {/* 3. Floating Top Selection Bar (centred pill) */}
+        <div
+          className="mcad-float"
+          style={{
+            position: 'absolute',
+            top: 56,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            padding: 6,
+            zIndex: 20,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          {/* Segmented control: 3D Model | Face | Edge */}
+          <div className="mcad-seg">
+            <button
+              type="button"
+              data-on={selectionMode === 'body'}
+              onClick={() => handleSetSelectionMode('body')}
+              title="Select 3D solid model"
+            >
+              3D Model
+            </button>
+            <button
+              type="button"
+              data-on={selectionMode === 'face'}
+              onClick={() => handleSetSelectionMode('face')}
+              title="Select face"
+            >
+              Face
+            </button>
+            <button
+              type="button"
+              data-on={selectionMode === 'edge'}
+              onClick={() => handleSetSelectionMode('edge')}
+              title="Select edge"
+            >
+              Edge
+            </button>
+          </div>
+
+          <div style={{ width: 1, height: 18, background: 'var(--mcad-border)' }} />
+
+          {/* Hint */}
+          <span style={{ fontSize: 11, color: 'var(--mcad-text-muted)' }}>
+            Shift: multi-select
+          </span>
+
+          <div style={{ width: 1, height: 18, background: 'var(--mcad-border)' }} />
+
+          {/* Fit camera view */}
+          <button
+            type="button"
+            className="mcad-btn mcad-btn--ghost"
+            onClick={() => window.dispatchEvent(new CustomEvent('viewport-action', { detail: 'fit' }))}
+            title="Fit model to view"
+            style={{ height: 26, padding: '0 8px', fontSize: 11 }}
+          >
+            <Maximize2 size={12} />
+            Fit
+          </button>
+
+          {/* Isometric home view */}
+          <button
+            type="button"
+            className="mcad-btn mcad-btn--ghost"
+            onClick={() => window.dispatchEvent(new CustomEvent('viewport-action', { detail: 'iso' }))}
+            title="Isometric home view"
+            style={{ height: 26, width: 26, padding: 0 }}
+          >
+            <Home size={12} />
+          </button>
+
+          {/* Select more dropdown menu */}
+          <SelectMoreMenu
+            selectedEntity={selectedEntity}
+            sessionId={sessionId}
+            activeRevision={activeRevision}
+            onApplySelection={(ids) => {
+              if (ids.length > 0 && topology?.faces) {
+                const matched = ids.map((id) => topology.faces[id]).filter(Boolean);
+                if (matched.length > 0) {
+                  setSelectedEntities(matched);
+                  setSelectedEntity(matched[0]);
+                }
+              }
+            }}
+            onClearSelection={() => {
+              setSelectedEntity(null);
+              setSelectedEntities([]);
+            }}
+          />
+        </div>
+
+        {/* 4. Floating Right Panel */}
+        <div
+          className="mcad-float"
+          style={{
+            position: 'absolute',
+            right: 12,
+            top: 56,
+            bottom: 12,
+            width: 324,
+            display: 'flex',
+            flexDirection: 'column',
+            zIndex: 20,
+          }}
+        >
+          {/* Header: Stage switcher */}
+          <div
+            style={{
+              padding: 14,
+              borderBottom: '1px solid var(--mcad-border)',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
             {onSwitchStage && (
-              <div className="flex bg-black/5 dark:bg-black/40 p-1 rounded-lg border border-black/5 dark:border-white/5 w-full max-w-[360px] gap-1">
-                <button
-                  onClick={() => onSwitchStage('cad')}
-                  className="flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 whitespace-nowrap text-center cursor-pointer"
-                >
-                  📐 AI CAD
-                </button>
-                <button
-                  className="flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md bg-purple-100/50 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/30 shadow-sm dark:shadow-[0_0_15px_rgba(168,85,247,0.15)] transition-all duration-200 whitespace-nowrap text-center cursor-default"
-                >
-                  🛠️ Manual CAD
-                </button>
-                <button
-                  onClick={() => onSwitchStage('cam')}
-                  className="flex-1 py-1.5 px-1.5 text-[9.5px] font-bold tracking-tight uppercase rounded-md text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 border border-transparent transition-all duration-200 whitespace-nowrap text-center cursor-pointer"
-                >
-                  ⚙️ CAM Setup
-                </button>
-              </div>
+              <StageSwitcher value="manual_cad" onChange={onSwitchStage} />
             )}
           </div>
 
-          {/* Properties panel — scrolls internally if needed */}
-          <div style={{ flex: 1, overflow: 'hidden' }}>
+          {/* Properties body */}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
             <TopologyPropertiesPanel
               selectedEntity={selectedEntity}
               activeTool={activeTool}
@@ -684,12 +786,122 @@ export function ManualCadWorkspace({
               topology={topology}
               onSelectTopologyEntity={handleSelectTopologyEntity}
               onSelectTool={handleSetActiveTool}
+              detectedFeatures={detectedFeatures}
+              isLoadingFeatures={isLoadingFeatures}
+              onRefetchFeatures={refetchFeatures}
+              onHighlightFaces={setHighlightedFaceIds}
+              selectionMode={selectionMode}
             />
           </div>
         </div>
+
+        {/* 5. Floating Prompt Dock (bottom centre) */}
+        {promptDock && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 16,
+              left: 128,
+              right: 360,
+              zIndex: 20,
+              pointerEvents: 'none',
+            }}
+          >
+            <div
+              style={{
+                maxWidth: 680,
+                margin: '0 auto',
+                pointerEvents: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              {/* Centered muted status caption */}
+              <div
+                style={{
+                  fontSize: 11,
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--mcad-text-muted)',
+                  userSelect: 'none',
+                }}
+              >
+                {isLoading && (
+                  <Loader2 size={11} className="inline mr-1 animate-spin" style={{ color: 'var(--mcad-accent)' }} />
+                )}
+                {getStatusCaption()}
+              </div>
+
+              {/* Prompt box */}
+              <form
+                className="mcad-prompt"
+                style={{ width: '100%' }}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (promptDock.value.trim() && !promptDock.isGenerating) {
+                    promptDock.onSubmit(e);
+                  }
+                }}
+              >
+                <textarea
+                  ref={textareaRef}
+                  value={promptDock.value}
+                  onChange={(e) => {
+                    promptDock.onChange(e.target.value);
+                    if (textareaRef.current) {
+                      textareaRef.current.style.height = 'auto';
+                      textareaRef.current.style.height = `${Math.min(120, textareaRef.current.scrollHeight)}px`;
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (promptDock.value.trim() && !promptDock.isGenerating) {
+                        promptDock.onSubmit(e as any);
+                      }
+                    }
+                  }}
+                  placeholder="Describe a change to the model…"
+                  rows={1}
+                />
+
+                <button
+                  type="submit"
+                  className="mcad-prompt-send"
+                  disabled={promptDock.isGenerating || !promptDock.value.trim()}
+                  title="Send instruction to AI CAD (Enter)"
+                >
+                  {promptDock.isGenerating ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <ArrowUp size={16} />
+                  )}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Right-click Context Menu */}
+        {contextMenu && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            entity={contextMenu.entity}
+            onSelectOperation={(opId) => {
+              if (selectedEntity?.transient_id !== contextMenu.entity?.transient_id) {
+                handleSelectTopologyEntity(contextMenu.entity);
+              }
+              handleSetActiveTool(opId);
+              setContextMenu(null);
+            }}
+            onClose={() => setContextMenu(null)}
+          />
+        )}
       </div>
 
-      {/* ─── Bottom: History timeline ─── */}
+      {/* ─── Bottom: History timeline (100% untouched) ─── */}
       <HistoryTimelineBar
         history={history}
         activeRevision={activeRevision}

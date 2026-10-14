@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import time
@@ -24,6 +25,11 @@ from app.models.cad_modification import (
     CADOperation,
     CommitRequest,
     CommitResult,
+    CoplanarQueryRequest,
+    CoplanarQueryResult,
+    DfmAnalysisRequest,
+    DfmAnalysisResult,
+    DfmSuggestion,
     GeometricReference,
     MeasureRequest,
     MeasureResult,
@@ -36,16 +42,24 @@ from app.models.cad_modification import (
     RecomputedOperationStatus,
     RollbackRequest,
     RollbackResult,
+    SimilarQueryRequest,
+    SimilarQueryResult,
     TopologyDataResponse,
     ValidationReport,
+    DetectedFeature,
+    SelectMoreRequest,
+    SelectMoreResponse,
 )
+from app.services.geometry.body_operations import BodyOperationsMixin
 from app.services.geometry.brep_validator import BRepValidator
 from app.services.geometry.reference_resolver import ReferenceResolver
+from app.services.geometry.feature_service import FeatureService
+from app.services.geometry.topology_extractor import TopologyExtractor
 
 BASE_STORAGE_DIR = Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs"))
 
 
-class ManualCADService:
+class ManualCADService(BodyOperationsMixin):
     """
     Manages session storage, multi-stage reference resolution, parametric B-Rep operations,
     preview generation, non-destructive revisions, and CAM handoff.
@@ -60,6 +74,7 @@ class ManualCADService:
         (sdir / "revisions").mkdir(exist_ok=True)
         (sdir / "operations").mkdir(exist_ok=True)
         (sdir / "topology").mkdir(exist_ok=True)
+        (sdir / "features").mkdir(exist_ok=True)
         (sdir / "previews").mkdir(exist_ok=True)
         return sdir
 
@@ -174,9 +189,11 @@ class ManualCADService:
             if base_shape is not None:
                 export_step(base_shape, str(rev0_step))
             elif base_step_path and base_step_path.exists():
-                shutil.copy2(base_step_path, rev0_step)
+                if base_step_path.resolve() != rev0_step.resolve():
+                    shutil.copy2(base_step_path, rev0_step)
             elif matching_steps and matching_steps[0].exists():
-                shutil.copy2(matching_steps[0], rev0_step)
+                if matching_steps[0].resolve() != rev0_step.resolve():
+                    shutil.copy2(matching_steps[0], rev0_step)
             elif not rev0_step.exists():
                 # Default unit stock only if nothing found anywhere
                 box = bd.Box(50, 50, 20)
@@ -249,6 +266,12 @@ class ManualCADService:
 
         val = BRepValidator.validate_shape(shape)
 
+        # Recognize constituent features, parts, and extract parametric dimensions
+        from app.services.geometry.shape_feature_recognizer import ShapeFeatureRecognizer
+        rec_features, rec_params, rec_metadata = ShapeFeatureRecognizer.recognize_features(
+            shape, faces_meta=faces_meta, edges_meta=edges_meta
+        )
+
         data = TopologyDataResponse(
             session_id=session_id,
             revision_id=revision_id,
@@ -257,6 +280,9 @@ class ManualCADService:
             bounding_box=bbox,
             volume_mm3=max(0.0, vol),
             is_valid=val.is_valid,
+            features=rec_features,
+            parameters=rec_params,
+            parameter_metadata=rec_metadata,
         )
 
         topo_path = sdir / "topology" / f"{revision_id}.json"
@@ -272,7 +298,7 @@ class ManualCADService:
                 data_dict = json.loads(topo_path.read_text())
                 faces_dict = data_dict.get("faces", {})
                 first_face = next(iter(faces_dict.values()), None)
-                if first_face and first_face.get("triangles"):
+                if first_face and first_face.get("triangles") and "features" in data_dict and data_dict["features"]:
                     return TopologyDataResponse(**data_dict)
             except Exception:
                 pass
@@ -393,6 +419,7 @@ class ManualCADService:
 
         # Cache Topology
         self._cache_topology(req.session_id, new_rev_id, modified_shape)
+        self.invalidate_features_cache(req.session_id)
 
         return CommitResult(
             success=True,
@@ -414,6 +441,7 @@ class ManualCADService:
         state = json.loads(session_file.read_text())
         state["active_revision"] = req.target_revision
         session_file.write_text(json.dumps(state, indent=2))
+        self.invalidate_features_cache(req.session_id)
 
         history = self.get_history(req.session_id)
 
@@ -448,6 +476,8 @@ class ManualCADService:
         # 1. Modify operational recipe
         new_op_plan: List[CADOperation] = []
         for op in current_ops:
+            if op.operation_id == "op_000":
+                continue  # base AI-generated model: it is rev_000 itself, never replayed
             if req.action == "delete_op" and op.operation_id == req.target_op_id:
                 continue # Skip / delete this operation
             elif req.action == "edit_params" and op.operation_id == req.target_op_id and req.updated_parameters:
@@ -464,6 +494,8 @@ class ManualCADService:
         # Clear existing operation records to write clean history
         op_dir = sdir / "operations"
         for f in op_dir.glob("op_*.json"):
+            if f.name == "op_000.json":
+                continue  # keep the base-model record so history still starts with it
             try:
                 f.unlink()
             except Exception:
@@ -551,6 +583,7 @@ class ManualCADService:
             "revisions": valid_revisions
         }
         session_file.write_text(json.dumps(state, indent=2))
+        self.invalidate_features_cache(req.session_id)
 
         final_val = BRepValidator.validate_shape(current_shape)
         history = self.get_history(req.session_id)
@@ -571,7 +604,7 @@ class ManualCADService:
     # --------------------------------------------------------------------------
 
     def measure(self, req: MeasureRequest) -> MeasureResult:
-        """Measure exact B-Rep distances, radii, and angles between entities."""
+        """Measure exact B-Rep distances, radii, and angles between entities, with parameter fetching."""
         shape = self.load_revision_shape(req.session_id, req.revision_id)
         info_a: Dict[str, Any] = {}
         info_b: Optional[Dict[str, Any]] = None
@@ -579,27 +612,149 @@ class ManualCADService:
         if req.entity_a.entity_type == "face":
             matched_f, status, _ = ReferenceResolver.resolve_face(shape, req.entity_a)
             if matched_f:
-                info_a = {"area_mm2": req.entity_a.area, "surface_type": req.entity_a.surface_type, "centroid": req.entity_a.centroid}
+                info_a = {
+                    "transient_id": req.entity_a.transient_id,
+                    "area_mm2": req.entity_a.area,
+                    "surface_type": req.entity_a.surface_type,
+                    "centroid": req.entity_a.centroid,
+                    "normal": req.entity_a.normal,
+                    "radius_mm": req.entity_a.radius,
+                }
         elif req.entity_a.entity_type == "edge":
             matched_e, status, _ = ReferenceResolver.resolve_edge(shape, req.entity_a)
             if matched_e:
-                info_a = {"length_mm": req.entity_a.length, "curve_type": req.entity_a.curve_type, "radius_mm": req.entity_a.radius}
+                info_a = {
+                    "transient_id": req.entity_a.transient_id,
+                    "length_mm": req.entity_a.length,
+                    "curve_type": req.entity_a.curve_type,
+                    "radius_mm": req.entity_a.radius,
+                    "centroid": req.entity_a.centroid,
+                }
+        elif req.entity_a.entity_type == "body":
+            bb = shape.bounding_box()
+            info_a = {
+                "transient_id": req.entity_a.transient_id,
+                "entity_type": "body",
+                "width_mm": max(0.1, bb.max.X - bb.min.X),
+                "length_mm": max(0.1, bb.max.Y - bb.min.Y),
+                "height_mm": max(0.1, bb.max.Z - bb.min.Z),
+                "volume_mm3": shape.volume if hasattr(shape, "volume") else 0.0,
+            }
 
         dist_val: Optional[float] = None
-        if req.entity_b:
-            # Centroid point distance
+        min_dist: Optional[float] = None
+        angle_val: Optional[float] = None
+        if req.entity_b and req.entity_a.centroid and req.entity_b.centroid:
             dx = req.entity_a.centroid[0] - req.entity_b.centroid[0]
             dy = req.entity_a.centroid[1] - req.entity_b.centroid[1]
             dz = req.entity_a.centroid[2] - req.entity_b.centroid[2]
-            dist_val = (dx*dx + dy*dy + dz*dz) ** 0.5
-            info_b = {"entity_type": req.entity_b.entity_type, "centroid": req.entity_b.centroid}
+            dist_val = round((dx*dx + dy*dy + dz*dz) ** 0.5, 3)
+            info_b = {
+                "transient_id": req.entity_b.transient_id,
+                "entity_type": req.entity_b.entity_type,
+                "centroid": req.entity_b.centroid
+            }
+
+            ent_a = None
+            ent_b = None
+            if req.entity_a.entity_type == "face":
+                ent_a, _, _ = ReferenceResolver.resolve_face(shape, req.entity_a)
+            elif req.entity_a.entity_type == "edge":
+                ent_a, _, _ = ReferenceResolver.resolve_edge(shape, req.entity_a)
+            if req.entity_b.entity_type == "face":
+                ent_b, _, _ = ReferenceResolver.resolve_face(shape, req.entity_b)
+            elif req.entity_b.entity_type == "edge":
+                ent_b, _, _ = ReferenceResolver.resolve_edge(shape, req.entity_b)
+            if ent_a is not None and ent_b is not None:
+                ext = BRepExtrema_DistShapeShape(ent_a.wrapped, ent_b.wrapped)
+                if ext.IsDone():
+                    min_dist = round(float(ext.Value()), 3)
+
+            if req.entity_a.normal and req.entity_b.normal:
+                na = req.entity_a.normal
+                nb = req.entity_b.normal
+                dot = na[0]*nb[0] + na[1]*nb[1] + na[2]*nb[2]
+                dot_clamped = max(-1.0, min(1.0, dot))
+                angle_val = round(math.degrees(math.acos(dot_clamped)), 2)
+
+        # Feature recognition & parameter fetching
+        topo = self.get_topology(req.session_id, req.revision_id)
+        matched_feature = None
+        target_tid = req.entity_a.transient_id
+
+        if topo.features:
+            for feat in topo.features:
+                if target_tid and (target_tid in feat.face_ids or target_tid in feat.edge_ids):
+                    matched_feature = feat
+                    break
+                if req.entity_a.entity_type == "body" and feat.feature_type == "body":
+                    matched_feature = feat
+                    break
+
+        part_name = matched_feature.part_name if matched_feature else "Unclassified Feature"
+        feature_type = matched_feature.feature_type if matched_feature else (req.entity_a.entity_type or "shape")
+        extracted_params = matched_feature.parameters if matched_feature else {}
+        extracted_meta = {k: topo.parameter_metadata.get(k, {}) for k in extracted_params} if topo.parameter_metadata else {}
 
         return MeasureResult(
             distance_mm=dist_val,
-            min_distance_mm=dist_val,
+            min_distance_mm=min_dist if min_dist is not None else dist_val,
+            angle_degrees=angle_val,
             entity_a_info=info_a,
-            entity_b_info=info_b
+            entity_b_info=info_b,
+            part_name=part_name,
+            feature_type=feature_type,
+            parameters=extracted_params,
+            parameter_metadata=extracted_meta,
+            shape_feature=matched_feature
         )
+
+    # --------------------------------------------------------------------------
+    # Export
+    # --------------------------------------------------------------------------
+
+    EXPORT_FORMATS = {
+        "stl": ("model/stl", "stl"),
+        "step": ("application/step", "step"),
+        "obj": ("text/plain", "obj"),
+        "3mf": ("application/vnd.ms-package.3dmanufacturing-3dmodel+xml", "3mf"),
+    }
+
+    def export_revision(self, session_id: str, revision_id: Optional[str], fmt: str) -> Tuple[bytes, str, str]:
+        """Export a revision as STL / STEP / OBJ / 3MF. Returns (bytes, media_type, filename).
+
+        Files are produced in a throw-away temp directory and streamed back from memory.
+        """
+        import tempfile
+
+        fmt = fmt.lower()
+        if fmt not in self.EXPORT_FORMATS:
+            raise ValueError(f"Unsupported export format '{fmt}'. Use one of: {', '.join(self.EXPORT_FORMATS)}.")
+        if not revision_id:
+            state_file = self._get_session_dir(session_id) / "session.json"
+            revision_id = json.loads(state_file.read_text()).get("active_revision", "rev_000") if state_file.exists() else "rev_000"
+
+        shape = self.load_revision_shape(session_id, revision_id)
+        media_type, ext = self.EXPORT_FORMATS[fmt]
+        filename = f"{session_id}_{revision_id}.{ext}"
+
+        if fmt == "obj":
+            verts, tris = shape.tessellate(0.05, 0.3)
+            lines = ["# VEXCAD export"] + [f"v {v.X:.6f} {v.Y:.6f} {v.Z:.6f}" for v in verts]
+            lines += [f"f {a + 1} {b + 1} {c + 1}" for a, b, c in tris]
+            return ("\n".join(lines) + "\n").encode(), media_type, filename
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / filename
+            if fmt == "stl":
+                export_stl(shape, str(out))
+            elif fmt == "step":
+                export_step(shape, str(out))
+            else:  # 3mf
+                mesher = bd.Mesher()
+                mesher.add_shape(shape)
+                mesher.write(str(out))
+            return out.read_bytes(), media_type, filename
 
     # --------------------------------------------------------------------------
     # Geometry Execution Engine
@@ -615,6 +770,28 @@ class ManualCADService:
             "pocket": self._apply_pocket,
             "pad": self._apply_pad,
             "edit_feature": self._apply_edit_feature,
+            "offset_face": self._apply_offset_face,
+            "snap_to_plane": self._apply_snap_to_plane,
+            "plug_hole": self._apply_plug_hole,
+            # Body-level editing (BodyOperationsMixin)
+            "move": self._apply_move,
+            "rotate": self._apply_rotate,
+            "scale": self._apply_scale,
+            "mirror": self._apply_mirror,
+            "align": self._apply_align,
+            "primitive": self._apply_primitive,
+            "shell": self._apply_shell,
+            "offset": self._apply_offset,
+            "split": self._apply_split,
+            "linear_pattern": self._apply_linear_pattern,
+            "polar_pattern": self._apply_polar_pattern,
+            "heal": self._apply_heal,
+            # Direct edit & feature operations
+            "push_pull": self._apply_push_pull,
+            "round_face_edges": self._apply_round_face_edges,
+            "delete_feature": self._apply_delete_feature,
+            "move_feature": self._apply_move_feature,
+            "pattern_feature": self._apply_pattern_feature,
         }
 
     def _execute_operation(
@@ -895,21 +1072,153 @@ class ManualCADService:
         except Exception as e:
             return None, OperationStatus.GEOMETRY_FAILURE, f"Pad boolean union failed: {e}", [], []
 
-    def _apply_edit_feature(
+    # (Inherits _apply_edit_feature from BodyOperationsMixin)
+
+    # --------------------------------------------------------------------------
+    # New direct-edit operations
+    # --------------------------------------------------------------------------
+
+    def _apply_offset_face(
         self,
         shape: bd.Shape,
         refs: List[GeometricReference],
         params: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
+        """
+        Push-Pull face offset along its normal direction.
+        Uses BRepOffsetAPI_MakeOffsetShape for true B-Rep offset.
+        Positive distance = outward (along normal), negative = inward.
+        """
+        from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Plane
+
+        if not refs or refs[0].entity_type != "face":
+            return None, OperationStatus.INVALID_REFERENCE, "offset_face requires a planar face reference.", [], []
+
+        face_ref = refs[0]
+        if face_ref.surface_type and face_ref.surface_type.lower() != "plane":
+            return None, OperationStatus.INVALID_REFERENCE, "offset_face is supported on planar faces only.", [], []
+
+        distance = float(params.get("distance", 1.0))
+        if distance == 0.0:
+            return None, OperationStatus.GEOMETRY_FAILURE, "Offset distance must be non-zero.", [], []
+
+        # Resolve the target face to verify it exists on this shape
+        face, status, msg = ReferenceResolver.resolve_face(shape, face_ref)
+        if status != OperationStatus.VALID or face is None:
+            return None, status, msg, [], []
+
+        surf = BRepAdaptor_Surface(face.wrapped)
+        if surf.GetType() != GeomAbs_Plane:
+            return None, OperationStatus.INVALID_REFERENCE, "offset_face: resolved face is not planar.", [], []
+
+        # True CAD Push / Pull (Extrude):
+        # - Outward pull (distance > 0): Extrudes face outward along its normal into a solid prism and fuses with the body (Pad / Boss)
+        # - Inward push (distance < 0): Extrudes face inward along -normal into a cutter prism and cuts from the body (Pocket / Cut)
+        try:
+            face_normal = face.normal_at(face.center())
+            face_to_extrude = bd.Face(face.wrapped)
+
+            if distance > 0:
+                extruded = bd.extrude(face_to_extrude, amount=distance, dir=face_normal)
+                result = shape + extruded
+                op_desc = f"Extruded face +{distance:.2f}mm outward (Pad / Boss)."
+            else:
+                cutter = bd.extrude(face_to_extrude, amount=abs(distance), dir=-face_normal)
+                result = shape - cutter
+                op_desc = f"Extruded face {distance:.2f}mm inward (Cut / Pocket)."
+
+            return result, OperationStatus.VALID, op_desc, ["face_extrude"], []
+        except Exception as exc:
+            return None, OperationStatus.GEOMETRY_FAILURE, f"Push/Pull extrude failed: {exc}", [], []
+
+    def _apply_snap_to_plane(
+        self,
+        shape: bd.Shape,
+        refs: List[GeometricReference],
+        params: Dict[str, Any]
+    ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
+        """
+        Translate the entire solid so that the selected face lies on a reference global plane.
+        Supported planes: XY (Z=target_z), XZ (Y=target_y), YZ (X=target_x).
+        Does NOT rotate — only translates.
+        """
+        from OCP.gp import gp_Vec, gp_Trsf
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Plane
+
+        if not refs or refs[0].entity_type != "face":
+            return None, OperationStatus.INVALID_REFERENCE, "snap_to_plane requires a planar face reference.", [], []
+
+        face_ref = refs[0]
+        face, status, msg = ReferenceResolver.resolve_face(shape, face_ref)
+        if status != OperationStatus.VALID or face is None:
+            return None, status, msg, [], []
+
+        surf = BRepAdaptor_Surface(face.wrapped)
+        if surf.GetType() != GeomAbs_Plane:
+            return None, OperationStatus.INVALID_REFERENCE, "snap_to_plane: selected face is not planar.", [], []
+
+        plane = surf.Plane()
+        face_origin = plane.Location()
+        face_normal_gp = plane.Axis().Direction()
+
+        target_plane = str(params.get("plane", "XY")).upper()
+        target_coord = float(params.get("target_coordinate", 0.0))
+
+        # Compute translation offset
+        if target_plane == "XY":
+            # Move face so its Z = target_coord
+            delta_z = target_coord - face_origin.Z()
+            trsf = gp_Trsf()
+            trsf.SetTranslation(gp_Vec(0.0, 0.0, delta_z))
+            desc = f"Snapped to Z={target_coord:.2f}"
+        elif target_plane == "XZ":
+            delta_y = target_coord - face_origin.Y()
+            trsf = gp_Trsf()
+            trsf.SetTranslation(gp_Vec(0.0, delta_y, 0.0))
+            desc = f"Snapped to Y={target_coord:.2f}"
+        elif target_plane == "YZ":
+            delta_x = target_coord - face_origin.X()
+            trsf = gp_Trsf()
+            trsf.SetTranslation(gp_Vec(delta_x, 0.0, 0.0))
+            desc = f"Snapped to X={target_coord:.2f}"
+        else:
+            return None, OperationStatus.INVALID_REFERENCE, f"Unknown plane '{target_plane}'. Use XY, XZ, or YZ.", [], []
+
+        try:
+            builder = BRepBuilderAPI_Transform(shape.wrapped, trsf, True)
+            builder.Build()
+            if not builder.IsDone():
+                return None, OperationStatus.GEOMETRY_FAILURE, "snap_to_plane transform failed.", [], []
+            new_shape = bd.Shape(builder.Shape())
+            return new_shape, OperationStatus.VALID, desc, [], []
+        except Exception as exc:
+            return None, OperationStatus.GEOMETRY_FAILURE, f"snap_to_plane failed: {exc}", [], []
+
+    def _apply_plug_hole(
+        self,
+        shape: bd.Shape,
+        refs: List[GeometricReference],
+        params: Dict[str, Any]
+    ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
+        """
+        Bore defeaturing: remove a cylindrical bore and reconstruct the parent surface.
+        Uses boolean union with a cylinder matching the bore geometry.
+        Supports simple blind and through bores only.
+        Rejects intersecting bores and unsupported surface types.
+        """
         from OCP.BRepAdaptor import BRepAdaptor_Surface
         from OCP.GeomAbs import GeomAbs_Cylinder
-        from OCP.TopAbs import TopAbs_FACE
         from OCP.GeomLProp import GeomLProp_SLProps
+        from OCP.TopAbs import TopAbs_FACE
         from OCP.gp import gp_Dir
         import itertools
 
         if not refs or refs[0].entity_type != "face":
-            return None, OperationStatus.INVALID_REFERENCE, "Edit feature requires a cylindrical face reference.", [], []
+            return None, OperationStatus.INVALID_REFERENCE, "plug_hole requires a cylindrical face reference.", [], []
 
         face, status, msg = ReferenceResolver.resolve_face(shape, refs[0])
         if status != OperationStatus.VALID or face is None:
@@ -917,71 +1226,489 @@ class ManualCADService:
 
         surf = BRepAdaptor_Surface(face.wrapped)
         if surf.GetType() != GeomAbs_Cylinder:
-            return None, OperationStatus.INVALID_REFERENCE, "Edit feature is only supported on cylindrical faces.", [], []
+            return None, OperationStatus.INVALID_REFERENCE, "plug_hole only works on cylindrical bore faces.", [], []
 
         cyl = surf.Cylinder()
-        old_radius = cyl.Radius()
+        radius = cyl.Radius()
         loc = cyl.Location()
         axis = cyl.Axis().Direction()
 
-        props = GeomLProp_SLProps(surf, 0.0, 0.0, 1, 1e-4)
-        n = props.Normal()
-        if face.wrapped.Orientation() != TopAbs_FACE:
-            n.Reverse()
-
-        pnt = props.Value()
-        v = gp_Dir(loc.X() - pnt.X(), loc.Y() - pnt.Y(), loc.Z() - pnt.Z())
-        dot = n.X()*v.X() + n.Y()*v.Y() + n.Z()*v.Z()
-        is_hole = dot > 0
-
+        # Determine bore extent from bounding box of the cylindrical face
         bnd = Bnd_Box()
         BRepBndLib.Add_s(face.wrapped, bnd)
         xmin, ymin, zmin, xmax, ymax, zmax = bnd.Get()
-
         pts = list(itertools.product([xmin, xmax], [ymin, ymax], [zmin, zmax]))
-        t_vals = []
-        for px, py, pz in pts:
-            t = (px - loc.X()) * axis.X() + (py - loc.Y()) * axis.Y() + (pz - loc.Z()) * axis.Z()
-            t_vals.append(t)
-
-        t_min = min(t_vals)
-        t_max = max(t_vals)
-        
-        # Extend slightly to ensure clean boolean operations
-        t_min -= 0.1
-        t_max += 0.1
-        old_len = t_max - t_min
+        t_vals = [
+            (px - loc.X()) * axis.X() + (py - loc.Y()) * axis.Y() + (pz - loc.Z()) * axis.Z()
+            for px, py, pz in pts
+        ]
+        t_min = min(t_vals) - 0.2
+        t_max = max(t_vals) + 0.2
+        bore_len = t_max - t_min
 
         origin = bd.Vector(loc.X(), loc.Y(), loc.Z())
         z_dir = bd.Vector(axis.X(), axis.Y(), axis.Z())
-        old_origin = origin + z_dir * t_min
-        workplane = bd.Plane(origin=old_origin, z_dir=z_dir)
-
-        old_solid = bd.Cylinder(radius=old_radius, height=old_len)
-        old_solid = old_solid.located(workplane.location * bd.Location(bd.Vector(0, 0, old_len / 2.0)))
+        plug_origin = origin + z_dir * t_min
+        workplane = bd.Plane(origin=plug_origin, z_dir=z_dir)
 
         try:
-            if is_hole:
-                shape_filled = shape + old_solid
+            # Create a solid cylinder matching the bore
+            plug = bd.Cylinder(radius=radius, height=bore_len)
+            plug = plug.located(workplane.location * bd.Location(bd.Vector(0, 0, bore_len / 2.0)))
+
+            # Union to fill the bore
+            result = shape + plug
+
+            # Validate — result must not have more volume than reasonable
+            props = GProp_GProps()
+            BRepGProp.VolumeProperties_s(result.wrapped, props)
+            new_vol = float(props.Mass())
+            if new_vol <= 0:
+                return None, OperationStatus.GEOMETRY_FAILURE, "plug_hole produced zero-volume solid — bore may be through complex topology.", [], []
+
+            return result, OperationStatus.VALID, f"Bore plugged (R={radius:.2f}mm, length={bore_len:.1f}mm).", [], ["edge_bore_rim"]
+        except Exception as exc:
+            return None, OperationStatus.GEOMETRY_FAILURE, f"plug_hole boolean union failed: {exc}", [], []
+
+    # --------------------------------------------------------------------------
+    # Non-mutating geometry query methods
+    # --------------------------------------------------------------------------
+
+    def coplanar_faces(
+        self,
+        req: "CoplanarQueryRequest",
+    ) -> "CoplanarQueryResult":
+        """
+        Detect all faces in the revision that share the same plane as the reference face,
+        within the specified distance and angular tolerance.
+        """
+        import math
+        from app.models.cad_modification import CoplanarQueryRequest, CoplanarQueryResult
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.GeomAbs import GeomAbs_Plane
+
+        topo = self.get_topology(req.session_id, req.revision_id)
+        ref_face_data = topo.faces.get(req.reference_face_id)
+        if ref_face_data is None:
+            return CoplanarQueryResult(
+                coplanar_face_ids=[],
+                reference_face_id=req.reference_face_id,
+                count=0,
+            )
+
+        ref_normal = ref_face_data.normal or [0.0, 0.0, 1.0]
+        ref_centroid = ref_face_data.centroid
+        plane_d = ref_face_data.plane_d
+
+        # If plane_d not stored, compute it from normal and centroid
+        if plane_d is None:
+            plane_d = -(ref_normal[0] * ref_centroid[0] + ref_normal[1] * ref_centroid[1] + ref_normal[2] * ref_centroid[2])
+
+        angle_tol_rad = math.radians(req.angle_tolerance_deg)
+        coplanar_ids: List[str] = []
+
+        for face_id, face_data in topo.faces.items():
+            if face_id == req.reference_face_id:
+                continue
+            if face_data.surface_type and face_data.surface_type.lower() != "plane":
+                continue
+            if face_data.normal is None or face_data.centroid is None:
+                continue
+
+            # Angular check: dot product of normals (allow anti-parallel)
+            fn = face_data.normal
+            dot = abs(fn[0] * ref_normal[0] + fn[1] * ref_normal[1] + fn[2] * ref_normal[2])
+            angle = math.acos(max(-1.0, min(1.0, dot)))
+            if angle > angle_tol_rad:
+                continue
+
+            # Distance check: signed distance of face centroid from reference plane
+            fc = face_data.centroid
+            dist = abs(ref_normal[0] * fc[0] + ref_normal[1] * fc[1] + ref_normal[2] * fc[2] + plane_d)
+            if dist <= req.tolerance_mm:
+                coplanar_ids.append(face_id)
+
+        return CoplanarQueryResult(
+            coplanar_face_ids=coplanar_ids,
+            reference_face_id=req.reference_face_id,
+            plane_normal=ref_normal,
+            plane_d=plane_d,
+            count=len(coplanar_ids),
+        )
+
+    def similar_entities(
+        self,
+        req: "SimilarQueryRequest",
+    ) -> "SimilarQueryResult":
+        """
+        Find faces geometrically similar to the reference entity.
+        For cylindrical faces: matches by radius ± tolerance and axis direction ± angle_tolerance.
+        For planar faces: matches by normal direction and plane position.
+        """
+        import math
+        from app.models.cad_modification import SimilarQueryRequest, SimilarQueryResult
+
+        topo = self.get_topology(req.session_id, req.revision_id)
+        faces = topo.faces
+        edges = topo.edges
+
+        similar_ids: List[str] = []
+        basis = ""
+
+        if req.entity_type == "face":
+            ref_face = faces.get(req.reference_entity_id)
+            if ref_face is None:
+                return SimilarQueryResult(
+                    similar_entity_ids=[],
+                    reference_entity_id=req.reference_entity_id,
+                    count=0,
+                )
+
+            ref_surf = (ref_face.surface_type or "").lower()
+            angle_tol_rad = math.radians(req.angle_tolerance_deg)
+
+            if ref_surf == "cylinder":
+                ref_radius = ref_face.radius
+                if ref_radius is None:
+                    return SimilarQueryResult(
+                        similar_entity_ids=[],
+                        reference_entity_id=req.reference_entity_id,
+                        similarity_basis="cylindrical — no radius data",
+                        count=0,
+                    )
+                ref_axis = ref_face.axis or [0.0, 0.0, 1.0]
+                basis = f"cylindrical: R={ref_radius:.3f}mm ± {req.radius_tolerance_mm:.3f}mm"
+
+                for face_id, face in faces.items():
+                    if face_id == req.reference_entity_id:
+                        continue
+                    if (face.surface_type or "").lower() != "cylinder":
+                        continue
+                    if face.radius is None:
+                        continue
+                    if abs(face.radius - ref_radius) > req.radius_tolerance_mm:
+                        continue
+                    # Axis direction check
+                    if face.axis is not None:
+                        fa = face.axis
+                        dot = abs(fa[0] * ref_axis[0] + fa[1] * ref_axis[1] + fa[2] * ref_axis[2])
+                        angle = math.acos(max(-1.0, min(1.0, dot)))
+                        if angle > angle_tol_rad:
+                            continue
+                    similar_ids.append(face_id)
+
+            elif ref_surf == "plane":
+                ref_normal = ref_face.normal
+                if ref_normal is None:
+                    return SimilarQueryResult(
+                        similar_entity_ids=[],
+                        reference_entity_id=req.reference_entity_id,
+                        similarity_basis="planar — no normal data",
+                        count=0,
+                    )
+                ref_centroid = ref_face.centroid
+                plane_d = -(ref_normal[0] * ref_centroid[0] + ref_normal[1] * ref_centroid[1] + ref_normal[2] * ref_centroid[2])
+                basis = f"planar: normal={ref_normal}, area≈{ref_face.area:.1f}mm²" if ref_face.area else "planar"
+
+                for face_id, face in faces.items():
+                    if face_id == req.reference_entity_id:
+                        continue
+                    if (face.surface_type or "").lower() != "plane":
+                        continue
+                    if face.normal is None:
+                        continue
+                    # Normal direction
+                    fn = face.normal
+                    dot = abs(fn[0] * ref_normal[0] + fn[1] * ref_normal[1] + fn[2] * ref_normal[2])
+                    angle = math.acos(max(-1.0, min(1.0, dot)))
+                    if angle > angle_tol_rad:
+                        continue
+                    # Area similarity (within 20%)
+                    if ref_face.area and face.area:
+                        if abs(face.area - ref_face.area) / max(ref_face.area, 0.001) > 0.2:
+                            continue
+                    similar_ids.append(face_id)
             else:
-                shape_filled = shape - old_solid
+                basis = f"{ref_surf} — no similarity logic implemented for this surface type"
 
-            new_dia = float(params.get("diameter", old_radius * 2.0))
-            new_depth = float(params.get("depth", old_len - 0.2)) # Subtract extension
-            req_kind = str(params.get("kind", "hole" if is_hole else "boss")).lower()
+        elif req.entity_type == "edge":
+            ref_edge = edges.get(req.reference_entity_id)
+            if ref_edge is None:
+                return SimilarQueryResult(
+                    similar_entity_ids=[],
+                    reference_entity_id=req.reference_entity_id,
+                    count=0,
+                )
+            ref_curve = (ref_edge.curve_type or "").lower()
+            if ref_curve in ("circle", "circular") and ref_edge.radius is not None:
+                ref_r = ref_edge.radius
+                basis = f"circular edge: R={ref_r:.3f}mm"
+                for eid, edge in edges.items():
+                    if eid == req.reference_entity_id:
+                        continue
+                    if (edge.curve_type or "").lower() not in ("circle", "circular"):
+                        continue
+                    if edge.radius is None:
+                        continue
+                    if abs(edge.radius - ref_r) <= req.radius_tolerance_mm:
+                        similar_ids.append(eid)
 
-            new_solid = bd.Cylinder(radius=new_dia / 2.0, height=new_depth)
-            
-            # Use original face start position
-            new_origin = origin + z_dir * (min(t_vals))
-            new_workplane = bd.Plane(origin=new_origin, z_dir=z_dir)
-            new_solid = new_solid.located(new_workplane.location * bd.Location(bd.Vector(0, 0, new_depth / 2.0)))
+        return SimilarQueryResult(
+            similar_entity_ids=similar_ids,
+            reference_entity_id=req.reference_entity_id,
+            similarity_basis=basis,
+            count=len(similar_ids),
+        )
 
-            if req_kind == "hole":
-                final_shape = shape_filled - new_solid
+    def dfm_analysis(
+        self,
+        req: "DfmAnalysisRequest",
+    ) -> "DfmAnalysisResult":
+        """
+        Generate Design for Manufacturing suggestions from measured geometry.
+        Checks bore diameters against ISO metric clearance hole standards,
+        detects depth inconsistencies among similar bores, identifies non-standard dimensions.
+        """
+        import math
+        import uuid as _uuid
+        from app.models.cad_modification import (
+            DfmAnalysisRequest, DfmAnalysisResult, DfmSuggestion, CADOperationPlan
+        )
+
+        # ISO metric clearance hole close-fit diameters (mm) for M2–M20
+        ISO_METRIC_CLEARANCE = {
+            2.0: 2.2, 2.5: 2.7, 3.0: 3.4, 4.0: 4.5, 5.0: 5.5,
+            6.0: 6.6, 8.0: 9.0, 10.0: 11.0, 12.0: 13.5, 14.0: 15.5,
+            16.0: 17.5, 20.0: 22.0,
+        }
+        ISO_NOMINAL = sorted(ISO_METRIC_CLEARANCE.keys())
+
+        topo = self.get_topology(req.session_id, req.revision_id)
+        faces = topo.faces
+
+        # Filter to requested entities or all faces
+        target_ids = req.selected_entity_ids if req.selected_entity_ids else list(faces.keys())
+        target_faces = {fid: faces[fid] for fid in target_ids if fid in faces}
+
+        suggestions: List[DfmSuggestion] = []
+        analyzed = len(target_faces)
+
+        # 1. Collect all cylindrical (bore) faces
+        bore_faces = [
+            (fid, f) for fid, f in target_faces.items()
+            if (f.surface_type or "").lower() == "cylinder" and f.radius is not None
+        ]
+
+        # 2. Check bore diameters against ISO standard clearance diameters
+        for fid, face in bore_faces:
+            dia = (face.radius or 0.0) * 2.0
+            # Find nearest ISO nominal
+            nearest_nominal = min(ISO_NOMINAL, key=lambda n: abs(ISO_METRIC_CLEARANCE[n] - dia))
+            nearest_clearance = ISO_METRIC_CLEARANCE[nearest_nominal]
+            if abs(dia - nearest_clearance) > 0.15 and abs(dia - nearest_clearance) < 3.0:
+                suggestions.append(DfmSuggestion(
+                    suggestion_id=str(_uuid.uuid4())[:8],
+                    category="hole_diameter",
+                    severity="warning",
+                    title=f"Non-standard bore diameter ⌀{dia:.2f} mm",
+                    description=(
+                        f"Bore ⌀{dia:.2f} mm does not match an ISO metric clearance diameter. "
+                        f"Nearest match is M{nearest_nominal:.0f} clearance ⌀{nearest_clearance:.2f} mm. "
+                        f"Review and standardize if this is an intended fastener clearance hole."
+                    ),
+                    affected_entity_ids=[fid],
+                    measured_value=dia,
+                    suggested_value=nearest_clearance,
+                    unit="mm",
+                    standard_reference=f"ISO 286-1 M{nearest_nominal:.0f} clearance",
+                    proposed_operation=CADOperationPlan(
+                        operation_type="edit_feature",
+                        target_entity_ids=[fid],
+                        parameters={"diameter": nearest_clearance},
+                        description=f"Update bore to ISO M{nearest_nominal:.0f} clearance ⌀{nearest_clearance:.2f} mm",
+                        confidence=0.85,
+                    ),
+                ))
+
+        # 3. Detect inconsistent bore diameters among similar-looking bores
+        if len(bore_faces) >= 2:
+            radii = [(fid, (f.radius or 0.0) * 2.0) for fid, f in bore_faces]
+            median_dia = sorted([r for _, r in radii])[len(radii) // 2]
+            outliers = [(fid, d) for fid, d in radii if abs(d - median_dia) > 0.25]
+            if outliers and len(outliers) < len(radii):
+                for fid, dia in outliers:
+                    suggestions.append(DfmSuggestion(
+                        suggestion_id=str(_uuid.uuid4())[:8],
+                        category="inconsistent_features",
+                        severity="warning",
+                        title=f"Inconsistent bore diameter ⌀{dia:.2f} mm",
+                        description=(
+                            f"This bore ⌀{dia:.2f} mm differs from the median bore diameter ⌀{median_dia:.2f} mm "
+                            f"among {len(bore_faces)} cylindrical faces. Verify that this is intentional."
+                        ),
+                        affected_entity_ids=[fid],
+                        measured_value=dia,
+                        suggested_value=median_dia,
+                        unit="mm",
+                    ))
+
+        # 4. Detect planar faces not aligned to principal planes (Z-normal ≈ 0)
+        for fid, face in target_faces.items():
+            if (face.surface_type or "").lower() != "plane":
+                continue
+            if face.normal is None:
+                continue
+            n = face.normal
+            # Check if normal is not approximately aligned to X, Y, or Z
+            alignments = [abs(n[0]), abs(n[1]), abs(n[2])]
+            max_alignment = max(alignments)
+            if max_alignment < 0.95:  # Not within 18° of any principal axis
+                suggestions.append(DfmSuggestion(
+                    suggestion_id=str(_uuid.uuid4())[:8],
+                    category="face_alignment",
+                    severity="info",
+                    title="Non-principal face normal",
+                    description=(
+                        f"Face normal [{n[0]:.2f}, {n[1]:.2f}, {n[2]:.2f}] is not aligned to a principal axis. "
+                        f"Verify this is an intentional drafted or angled surface, not a modeling error."
+                    ),
+                    affected_entity_ids=[fid],
+                ))
+
+        return DfmAnalysisResult(
+            suggestions=suggestions,
+            analyzed_entity_count=analyzed,
+            session_id=req.session_id,
+            revision_id=req.revision_id,
+        )
+
+    # --------------------------------------------------------------------------
+    # Detected Features & Selection Expansion
+    # --------------------------------------------------------------------------
+
+    def get_detected_features(self, session_id: str, revision_id: str) -> List[DetectedFeature]:
+        """Retrieve cached detected features or extract directly from active B-Rep revision."""
+        sdir = self._get_session_dir(session_id)
+        feat_path = sdir / "features" / f"{revision_id}.json"
+        if feat_path.exists():
+            try:
+                data = json.loads(feat_path.read_text())
+                return [DetectedFeature(**item) for item in data]
+            except Exception:
+                pass
+
+        shape = self.load_revision_shape(session_id, revision_id)
+        features = FeatureService.detect_features(shape)
+        try:
+            feat_path.parent.mkdir(parents=True, exist_ok=True)
+            feat_path.write_text(json.dumps([f.model_dump() for f in features], indent=2))
+        except Exception:
+            pass
+        return features
+
+    def invalidate_features_cache(self, session_id: str, revision_id: Optional[str] = None) -> None:
+        """Invalidate detected features cache when shape revisions change."""
+        sdir = self._get_session_dir(session_id)
+        feat_dir = sdir / "features"
+        if not feat_dir.exists():
+            return
+        if revision_id:
+            (feat_dir / f"{revision_id}.json").unlink(missing_ok=True)
+        else:
+            for f in feat_dir.glob("*.json"):
+                try:
+                    f.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    def select_more(self, req: SelectMoreRequest) -> SelectMoreResponse:
+        """Topological selection expansion: adjacent, coplanar, tangent chain, edge loop, same type/size, invert, clear."""
+        topo = self.get_topology(req.session_id, req.revision_id)
+        mode = req.mode
+        seed_ids = set(req.seed_ids)
+
+        if mode == "clear":
+            return SelectMoreResponse(transient_ids=[])
+
+        if mode == "invert":
+            is_face_mode = any(s.startswith("face_") for s in seed_ids)
+            if is_face_mode or not seed_ids:
+                all_ids = set(topo.faces.keys())
             else:
-                final_shape = shape_filled + new_solid
+                all_ids = set(topo.edges.keys())
+            return SelectMoreResponse(transient_ids=sorted(list(all_ids - seed_ids)))
 
-            return final_shape, OperationStatus.VALID, f"Feature edited ({req_kind}, dia {new_dia:.1f}mm).", ["face_edited"], []
-        except Exception as e:
-            return None, OperationStatus.GEOMETRY_FAILURE, f"Edit feature failed: {e}", [], []
+        if mode == "adjacent":
+            res_ids = set(seed_ids)
+            for sid in seed_ids:
+                if sid in topo.faces:
+                    res_ids.update(topo.faces[sid].adjacent_face_ids)
+                elif sid in topo.edges:
+                    res_ids.update(topo.edges[sid].adjacent_edge_ids)
+            return SelectMoreResponse(transient_ids=sorted(list(res_ids)))
+
+        if mode == "coplanar":
+            res_ids = set(seed_ids)
+            for sid in seed_ids:
+                if sid in topo.faces and topo.faces[sid].surface_type == "plane":
+                    c_res = self.coplanar_faces(CoplanarQueryRequest(
+                        session_id=req.session_id,
+                        revision_id=req.revision_id,
+                        reference_face_id=sid,
+                    ))
+                    res_ids.update(c_res.coplanar_face_ids)
+            return SelectMoreResponse(transient_ids=sorted(list(res_ids)))
+
+        if mode == "tangent_chain":
+            shape = self.load_revision_shape(req.session_id, req.revision_id)
+            extractor = TopologyExtractor(shape)
+            extractor.extract_all()
+            res_ids = set(seed_ids)
+            for sid in seed_ids:
+                adj = extractor.adjacency.get(sid, [])
+                for a in adj:
+                    if a.get("transition") in ("tangent", "smooth"):
+                        res_ids.add(a["adjacent_face"])
+            return SelectMoreResponse(transient_ids=sorted(list(res_ids)))
+
+        if mode == "edge_loop":
+            res_ids = set()
+            for sid in seed_ids:
+                if sid in topo.faces:
+                    res_ids.update(topo.faces[sid].adjacent_edge_ids)
+            return SelectMoreResponse(transient_ids=sorted(list(res_ids)))
+
+        if mode == "same_type":
+            res_ids = set(seed_ids)
+            for sid in seed_ids:
+                if sid in topo.faces:
+                    stype = topo.faces[sid].surface_type
+                    for fid, f in topo.faces.items():
+                        if f.surface_type == stype:
+                            res_ids.add(fid)
+                elif sid in topo.edges:
+                    ctype = topo.edges[sid].curve_type
+                    for eid, e in topo.edges.items():
+                        if e.curve_type == ctype:
+                            res_ids.add(eid)
+            return SelectMoreResponse(transient_ids=sorted(list(res_ids)))
+
+        if mode == "same_size":
+            res_ids = set(seed_ids)
+            for sid in seed_ids:
+                if sid in topo.faces:
+                    r = topo.faces[sid].radius
+                    area = topo.faces[sid].area
+                    for fid, f in topo.faces.items():
+                        if r is not None and f.radius is not None and abs(f.radius - r) < 1e-2:
+                            res_ids.add(fid)
+                        elif r is None and area is not None and f.area is not None and abs(f.area - area) < 1e-2:
+                            res_ids.add(fid)
+                elif sid in topo.edges:
+                    l = topo.edges[sid].length
+                    for eid, e in topo.edges.items():
+                        if l is not None and e.length is not None and abs(e.length - l) < 1e-2:
+                            res_ids.add(eid)
+            return SelectMoreResponse(transient_ids=sorted(list(res_ids)))
+
+        return SelectMoreResponse(transient_ids=sorted(list(seed_ids)))

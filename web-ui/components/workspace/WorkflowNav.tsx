@@ -1,4 +1,4 @@
-import { Cuboid, Layers, Circle, CheckCircle2, Wrench, Package } from 'lucide-react';
+import { Cuboid, Layers, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 
@@ -28,39 +28,39 @@ export function WorkflowNav({ workflowStage, setWorkflowStage }: WorkflowNavProp
   const activeIndex = STAGES.findIndex(s => s.id === activeDisplayStage);
 
   return (
-    <div className="flex h-full w-full flex-col bg-transparent font-sans text-sm relative">
+    <div className="flex h-full w-full flex-col bg-card/60 backdrop-blur-xl font-sans text-sm relative border-r border-border select-none">
       {/* Header / Logo */}
-      <div className="flex h-[72px] shrink-0 items-center px-6 border-b border-border">
-        <Link href="/" className="flex items-center gap-3 group hover:opacity-80 transition-opacity">
-          <div className="relative flex size-10 items-center justify-center rounded-xl bg-primary/10 border border-primary/20">
-            <Cuboid className="size-5 text-primary relative z-10" />
+      <div className="flex h-[64px] shrink-0 items-center px-5 border-b border-border">
+        <Link href="/" className="flex items-center gap-3 group transition-opacity hover:opacity-90">
+          <div className="relative flex size-9 items-center justify-center rounded-lg bg-primary/10 border border-primary/30 shadow-[0_0_12px_rgba(6,182,212,0.2)]">
+            <Cuboid className="size-4.5 text-primary relative z-10" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-xl font-bold tracking-[0.2em] text-foreground uppercase font-sans">
+            <span className="text-lg font-bold tracking-[0.22em] text-foreground uppercase font-sans">
               VEXCAD
             </span>
-            <span className="text-[10px] font-mono text-muted-foreground">v0.1.0</span>
+            <span className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted/50 border border-border/50">v0.1.0</span>
           </div>
         </Link>
       </div>
 
       {/* Project Workflow Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-border">
-        <Layers className="size-4 text-primary" />
-        <h4 className="text-[11px] font-bold uppercase tracking-[0.15em] text-primary">
-          PROJECT WORKFLOW
+      <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-border/60 bg-muted/20">
+        <Layers className="size-3.5 text-primary" />
+        <h4 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">
+          PROJECT PIPELINE
         </h4>
       </div>
 
       {/* Project Workflow Navigation */}
-      <div className="flex-1 py-4">
+      <div className="flex-1 py-3">
         <div className="space-y-0 relative">
           {/* Vertical connecting line background */}
-          <div className="absolute left-[35px] top-[30px] bottom-[30px] w-[2px] bg-border z-0" />
+          <div className="absolute left-[31px] top-[26px] bottom-[26px] w-[2px] bg-border/60 z-0" />
           
           {/* Vertical connecting line active fill */}
           <div 
-            className="absolute left-[35px] top-[30px] w-[2px] bg-primary shadow-[0_0_15px_rgba(59,130,246,0.6)] z-0 transition-all duration-700 ease-in-out" 
+            className="absolute left-[31px] top-[26px] w-[2px] bg-primary shadow-[0_0_12px_rgba(6,182,212,0.6)] z-0 transition-all duration-500 ease-in-out" 
             style={{ 
               height: `${(Math.max(0, activeIndex) / (STAGES.length - 1)) * 100}%` 
             }}
@@ -75,34 +75,36 @@ export function WorkflowNav({ workflowStage, setWorkflowStage }: WorkflowNavProp
                 key={stage.id}
                 onClick={() => setWorkflowStage(stage.id as WorkflowStage)}
                 className={cn(
-                  "relative flex w-full items-center gap-5 px-6 py-4 transition-all text-left group z-10",
-                  isActive ? "bg-primary/10 backdrop-blur-sm" : "hover:bg-muted/50 bg-transparent"
+                  "relative flex w-full items-center gap-4 px-5 py-3.5 transition-all text-left group z-10 cursor-pointer",
+                  isActive 
+                    ? "bg-primary/[0.08] dark:bg-primary/[0.08] text-foreground" 
+                    : "hover:bg-muted/40 text-muted-foreground hover:text-foreground"
                 )}
               >
                 {/* Active Indicator Line on the left */}
                 {isActive && (
-                  <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-primary shadow-[0_0_15px_rgba(59,130,246,0.6)]" />
+                  <div className="absolute left-0 top-0 bottom-0 w-[2.5px] bg-primary shadow-[0_0_10px_rgba(6,182,212,0.8)]" />
                 )}
 
-                {/* Icon */}
-                <div className="relative flex size-6 shrink-0 items-center justify-center z-10 bg-card dark:bg-[#121c2e] rounded-full">
+                {/* Node Icon */}
+                <div className="relative flex size-6 shrink-0 items-center justify-center z-10 bg-card rounded-full border border-border">
                   {isPast ? (
-                    <CheckCircle2 className="size-5 text-primary bg-transparent rounded-full shadow-[0_0_10px_rgba(59,130,246,0.3)]" />
+                    <CheckCircle2 className="size-4.5 text-primary" />
                   ) : isActive ? (
                     <div className="relative flex items-center justify-center size-5">
                       <div className="absolute inset-0 rounded-full border-[2px] border-primary/30" />
                       <div className="absolute inset-0 rounded-full border-[2px] border-primary border-t-transparent animate-spin" />
-                      <div className="size-1.5 rounded-full bg-primary" />
+                      <div className="size-1.5 rounded-full bg-primary shadow-[0_0_6px_rgba(6,182,212,0.8)]" />
                     </div>
                   ) : (
-                    <div className="size-5 rounded-full border-[2px] border-border group-hover:border-primary/40 transition-colors bg-card dark:bg-[#121c2e]" />
+                    <div className="size-2 rounded-full bg-muted-foreground/30 group-hover:bg-primary/50 transition-colors" />
                   )}
                 </div>
 
                 {/* Label */}
                 <span className={cn(
-                  "text-[11px] font-bold uppercase tracking-widest transition-colors",
-                  isActive ? "text-primary dark:text-white font-extrabold" : isPast ? "text-muted-foreground" : "text-muted-foreground/80 group-hover:text-foreground"
+                  "text-[11px] font-semibold tracking-wider transition-colors truncate",
+                  isActive ? "text-primary font-bold" : isPast ? "text-foreground/70" : "text-muted-foreground"
                 )}>
                   {stage.label}
                 </span>

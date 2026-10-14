@@ -315,13 +315,13 @@ export function TargetPortion3DHighlight({
 				distanceFactor={22}
 				className="pointer-events-auto select-none z-50"
 			>
-				<div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#070b14]/90 border border-cyan-400/40 shadow-[0_0_16px_rgba(6,182,212,0.35)] backdrop-blur-xl whitespace-nowrap text-white text-[11px] font-sans animate-in fade-in zoom-in-95 duration-150">
+				<div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--ui-panel,#12141a)] border border-[var(--ui-border,#252934)] shadow-md backdrop-blur-xl whitespace-nowrap text-white text-[11px] font-sans animate-in fade-in zoom-in-95 duration-150">
 					<div className="flex items-center gap-1.5 font-mono">
 						<span className="relative flex size-2">
-							<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
-							<span className="relative inline-flex rounded-full size-2 bg-cyan-500" />
+							<span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--ui-accent,#4c7bf4)] opacity-75" />
+							<span className="relative inline-flex rounded-full size-2 bg-[var(--ui-accent,#4c7bf4)]" />
 						</span>
-						<span className="text-[9px] font-extrabold uppercase tracking-wider text-cyan-400">
+						<span className="text-[9px] font-extrabold uppercase tracking-wider text-[var(--ui-accent,#4c7bf4)]">
 							{targetPortion.isExistingGeometry === false ? 'NEW FEATURE' : 'TARGET'}
 						</span>
 					</div>

@@ -1,6 +1,7 @@
 'use client';
 
-import { Suspense, useState, useRef, useEffect, useMemo } from 'react';
+import React, { Suspense, useState, useRef, useEffect, useMemo, Component, type ErrorInfo, type ReactNode } from 'react';
+import { useTheme } from 'next-themes';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewcube, Grid, Environment, ContactShadows } from '@react-three/drei';
@@ -21,6 +22,64 @@ type AnnotationEntry = {
 	text?: string;
 	type?: 'distance' | 'diameter' | 'radius' | 'angle';
 };
+
+class CanvasErrorBoundary extends React.Component<
+	{ children: React.ReactNode; onReset?: () => void },
+	{ hasError: boolean; error: Error | null; retryCount: number }
+> {
+	private retryTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	constructor(props: { children: React.ReactNode; onReset?: () => void }) {
+		super(props);
+		this.state = { hasError: false, error: null, retryCount: 0 };
+	}
+	static getDerivedStateFromError(error: Error) {
+		return { hasError: true, error };
+	}
+	componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+		console.warn('CanvasErrorBoundary caught 3D/WebGL render error:', error, errorInfo);
+		// Auto-recover immediately once/twice if it was a transient context switch
+		if (this.state.retryCount < 2) {
+			this.retryTimeout = setTimeout(() => {
+				this.setState((prev) => ({ hasError: false, error: null, retryCount: prev.retryCount + 1 }));
+				this.props.onReset?.();
+			}, 150);
+		}
+	}
+	componentWillUnmount() {
+		if (this.retryTimeout) {
+			clearTimeout(this.retryTimeout);
+		}
+	}
+	render() {
+		if (this.state.hasError && this.state.retryCount >= 2) {
+			return (
+				<div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-background/80 backdrop-blur-md p-6 text-center">
+					<div className="max-w-md w-full rounded-2xl border border-border/60 bg-card p-6 shadow-2xl flex flex-col items-center gap-3">
+						<div className="size-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500">
+							<Box className="size-5" />
+						</div>
+						<h3 className="text-sm font-bold text-foreground">3D Viewport Resetting</h3>
+						<p className="text-xs text-muted-foreground leading-relaxed">
+							The 3D graphics context encountered an issue or reload event.
+						</p>
+						<button
+							type="button"
+							onClick={() => {
+								this.setState({ hasError: false, error: null, retryCount: 0 });
+								this.props.onReset?.();
+							}}
+							className="mt-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground font-semibold text-xs hover:bg-primary/90 transition-all cursor-pointer"
+						>
+							Restore 3D Viewport
+						</button>
+					</div>
+				</div>
+			);
+		}
+		return this.props.children;
+	}
+}
 
 function CanvasBridge() {
 	const { gl } = useThree();
@@ -218,6 +277,8 @@ export function CadViewport({
 	onImportStep,
 	onImportStl,
 }: CadViewportProps) {
+	const { resolvedTheme } = useTheme();
+	const isDark = resolvedTheme !== 'light';
 	const handleImport = onImportStep || onImportStl;
 	const groupRef = useRef<THREE.Group>(null);
 	const exportRef = useRef<HTMLDivElement>(null);
@@ -229,6 +290,8 @@ export function CadViewport({
 	const isPIPOpen = showBlueprintPIP !== undefined ? showBlueprintPIP : localShowPIP;
 	const togglePIP = onToggleBlueprintPIP || (() => setLocalShowPIP(prev => !prev));
 
+	const [canvasKey, setCanvasKey] = useState(0);
+
 	const dispatchViewportAction = (action: string) => {
 		window.dispatchEvent(new CustomEvent('viewport-action', { detail: action }));
 	};
@@ -237,6 +300,23 @@ export function CadViewport({
 		const handleKeyUp = (e: KeyboardEvent) => {
 			// Don't trigger shortcuts when typing in inputs
 			if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target as HTMLElement).isContentEditable) return;
+
+			if (workflowStage === 'manual_cad') {
+				if (e.shiftKey) {
+					switch (e.key) {
+						case '1': dispatchViewportAction('top'); break;
+						case '2': dispatchViewportAction('front'); break;
+						case '3': dispatchViewportAction('right'); break;
+						case '4': dispatchViewportAction('left'); break;
+						case '5': dispatchViewportAction('bottom'); break;
+						case '6': dispatchViewportAction('iso'); break;
+						case 'H':
+						case 'h': dispatchViewportAction('home'); break;
+					}
+				}
+				// Skip single-letter camera shortcuts in manual_cad to prevent collision with CAD tool shortcuts
+				return;
+			}
 			
 			const key = e.key.toLowerCase();
 			switch (key) {
@@ -260,7 +340,7 @@ export function CadViewport({
 		};
 		window.addEventListener('keyup', handleKeyUp, { capture: true });
 		return () => window.removeEventListener('keyup', handleKeyUp, { capture: true });
-	}, []);
+	}, [workflowStage]);
 
 	useEffect(() => {
 		const handleClickOutside = (e: MouseEvent) => {
@@ -503,7 +583,7 @@ export function CadViewport({
 	}, [simulationState]);
 
 	return (
-		<section className="relative flex h-full w-full flex-col overflow-hidden bg-background font-sans">
+		<section className={`relative flex h-full w-full flex-col overflow-hidden font-sans ${workflowStage === 'manual_cad' ? 'bg-transparent' : 'bg-background'}`}>
 			{debugMode && featureDebug && (
 				<div className="absolute top-20 right-4 bg-black/80 text-green-400 text-[10px] font-mono p-3 rounded border border-green-500/30 whitespace-nowrap backdrop-blur-sm shadow-xl pointer-events-none select-none max-w-[350px] overflow-hidden z-[100]">
 					<div className="font-bold text-foreground mb-1 border-b border-green-500/30 pb-1">FEATURE DEBUG</div>
@@ -546,39 +626,39 @@ export function CadViewport({
 				</div>
 			)}
 
-			<header className="flex h-12 items-center justify-between border-b border-border/40 bg-background/50 backdrop-blur-2xl px-3 sm:px-4 z-30 gap-2">
+			<header className={`flex h-12 items-center justify-between px-3 sm:px-4 z-30 gap-2 ${workflowStage === 'manual_cad' ? 'bg-transparent' : 'border-b border-border/40 bg-background/50 backdrop-blur-2xl'}`}>
 				<div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
 					{projectName && (
 						<button
 							type="button"
 							onClick={onOpenProjects}
-							className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-black/40 border border-white/10 hover:border-cyan-500/40 text-muted-foreground hover:text-cyan-300 text-[11px] font-semibold transition-all shadow-sm group cursor-pointer shrink-0"
+							className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-card border border-border hover:border-primary/50 text-foreground dark:text-slate-200 hover:text-primary text-[11px] font-semibold transition-all shadow-sm group cursor-pointer shrink-0"
 							title={`Current Project: ${projectName}\nClick to view sessions & switch projects`}
 						>
-							<Folder className="size-3 text-cyan-400 group-hover:scale-110 transition-transform shrink-0" />
-							<span className="max-w-[110px] sm:max-w-[150px] truncate font-medium text-white/90">
+							<Folder className="size-3 text-primary group-hover:scale-110 transition-transform shrink-0" />
+							<span className="max-w-[110px] sm:max-w-[150px] truncate font-medium text-foreground dark:text-slate-200 group-hover:text-primary transition-colors">
 								{projectName.replace(/^#\d+_/, '')}
 							</span>
-							<ChevronDown className="size-2.5 text-muted-foreground group-hover:text-cyan-300 shrink-0" />
+							<ChevronDown className="size-2.5 text-muted-foreground group-hover:text-primary shrink-0" />
 						</button>
 					)}
 
 					{/* Live Compilation Status (Compact dot with expandable text when busy) */}
 					<div 
-						className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground min-w-0"
+						className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground dark:text-slate-300 min-w-0"
 						title={statusText}
 					>
 						{isRecompiling || statusText.includes('Extracting') || statusText.includes('Generating') || statusText.includes('Syncing') ? (
 							<>
-								<Loader2 className="size-3 animate-spin text-cyan-400 shrink-0" />
-								<span className="text-cyan-300 font-mono text-[10.5px] truncate animate-pulse">
+								<Loader2 className="size-3 animate-spin text-primary shrink-0" />
+								<span className="text-primary font-mono text-[11px] font-medium truncate animate-pulse">
 									{statusText.replace('Geometry ', '')}
 								</span>
 							</>
 						) : (
-							<div className="flex items-center gap-1.5 text-muted-foreground/70">
-								<span className={`size-1.5 rounded-full shrink-0 ${hasStl ? 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]' : 'bg-muted-foreground/40'}`} />
-								<span className="text-[10px] font-mono uppercase tracking-wider hidden md:inline text-muted-foreground/60">
+							<div className="flex items-center gap-1.5 text-muted-foreground dark:text-slate-400">
+								<span className={`size-1.5 rounded-full shrink-0 ${hasStl ? 'bg-primary shadow-[0_0_8px_rgba(6,182,212,0.8)]' : 'bg-muted-foreground/40'}`} />
+								<span className="text-[10px] font-mono uppercase tracking-wider hidden md:inline text-muted-foreground dark:text-slate-400 font-semibold">
 									Ready
 								</span>
 							</div>
@@ -607,10 +687,10 @@ export function CadViewport({
 							<button
 								type="button"
 								onClick={() => stepInputRef.current?.click()}
-								className="flex h-8 items-center gap-1.5 rounded-xl border border-white/10 bg-black/30 hover:bg-cyan-500/10 hover:border-cyan-500/40 px-3 text-[11px] font-semibold text-muted-foreground hover:text-cyan-300 transition-all cursor-pointer"
+								className="flex h-8 items-center gap-1.5 rounded-xl border border-white/10 bg-black/30 hover:bg-white/10 hover:border-white/20 px-3 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-all cursor-pointer"
 								title="Import 3D STEP solid model from local disk"
 							>
-								<Upload className="size-3 text-cyan-400" />
+								<Upload className="size-3 text-primary" />
 								<span className="hidden sm:inline">Import STEP</span>
 							</button>
 						</>
@@ -623,7 +703,7 @@ export function CadViewport({
 							className="flex h-8 items-center gap-1.5 rounded-xl border border-white/10 bg-black/30 hover:bg-white/10 px-3 text-[11px] font-semibold text-muted-foreground hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
 							title="Share 3D Model link"
 						>
-							{isSharing ? <Loader2 className="size-3 animate-spin text-cyan-400" /> : <Share2 className="size-3" />}
+							{isSharing ? <Loader2 className="size-3 animate-spin text-primary" /> : <Share2 className="size-3" />}
 							<span className="hidden sm:inline">Share</span>
 						</button>
 					)}
@@ -632,7 +712,7 @@ export function CadViewport({
 						<div className="relative" ref={exportRef}>
 							<button
 								onClick={() => setExportOpen(!exportOpen)}
-								className="flex h-8 items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 px-3 text-[11px] font-extrabold text-black transition-all shadow-[0_0_12px_rgba(34,211,238,0.25)] cursor-pointer"
+								className="flex h-8 items-center gap-1.5 rounded-xl bg-primary hover:brightness-110 px-3 text-[11px] font-bold text-white transition-all cursor-pointer"
 							>
 								<Download className="size-3" />
 								<span>Export</span>
@@ -675,7 +755,7 @@ export function CadViewport({
 											title={undefined}
 											className="flex w-full items-start gap-3 px-4 py-2.5 text-left hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed group transition-colors"
 										>
-											{isDownloadingDxf ? <Loader2 className="size-4 animate-spin mt-0.5 text-foreground" /> : <Layers className="size-4 mt-0.5 text-foreground group-hover:text-cyan-400 transition-colors" />}
+											{isDownloadingDxf ? <Loader2 className="size-4 animate-spin mt-0.5 text-foreground" /> : <Layers className="size-4 mt-0.5 text-foreground group-hover:text-primary transition-colors" />}
 											<div className="flex flex-col gap-0.5">
 												<span className="text-[11px] font-bold uppercase tracking-wider text-foreground">DXF Format</span>
 												<span className="text-[10px] text-muted-foreground font-medium normal-case leading-snug">2D vector profiles</span>
@@ -720,8 +800,8 @@ export function CadViewport({
 				}}
 			>
 				{isDraggingStep && (
-					<div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/85 backdrop-blur-md border-2 border-dashed border-cyan-500/80 rounded-xl pointer-events-none transition-all">
-						<div className="size-16 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center mb-3 text-cyan-400 animate-pulse">
+					<div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/85 backdrop-blur-md border-2 border-dashed border-primary/80 rounded-xl pointer-events-none transition-all">
+						<div className="size-16 rounded-2xl bg-primary/15 border border-primary/30 flex items-center justify-center mb-3 text-primary animate-pulse">
 							<Box className="size-8" />
 						</div>
 						<h3 className="text-sm font-bold text-foreground">Drop STEP file to import</h3>
@@ -730,10 +810,21 @@ export function CadViewport({
 				)}
 				{/* View Mode Controls - Floating Toolbar */}
 				{(hasStl || (toolpaths && toolpaths.length > 0)) && (
-					<div className={`absolute left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-background/90 backdrop-blur-xl border border-border/60 rounded-full px-4 py-2 shadow-2xl ring-1 ring-white/5 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-32' : 'bottom-24'}`}>
+					<div 
+						style={{
+							left:
+								workflowStage === 'manual_cad'
+									? 'calc((100% - 280px) / 2)'
+									: workflowStage === 'cam' || workflowStage === 'gcode'
+									? 'calc((100% - 336px) / 2)'
+									: 'calc((100% + 36px) / 2)',
+							transform: 'translateX(-50%)',
+						}}
+						className={`absolute z-20 flex items-center gap-2 bg-background/90 backdrop-blur-xl border border-border/60 rounded-full px-4 py-2 shadow-2xl ring-1 ring-white/5 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-32' : 'bottom-24'}`}
+					>
 						<button
 							onClick={() => setViewMode('both')}
-							className={`p-2.5 rounded-full transition-all ${viewMode === 'both' ? 'bg-blue-500/20 text-blue-400 shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+							className={`p-2.5 rounded-full transition-all ${viewMode === 'both' ? 'bg-primary/20 text-primary shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
 							title="Show Solid & Toolpaths"
 						>
 							<Layers className="size-4" />
@@ -741,7 +832,7 @@ export function CadViewport({
 						<div className="w-px h-5 bg-border/60 mx-1" />
 						<button
 							onClick={() => setViewMode('solid')}
-							className={`p-2.5 rounded-full transition-all ${viewMode === 'solid' ? 'bg-blue-500/20 text-blue-400 shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+							className={`p-2.5 rounded-full transition-all ${viewMode === 'solid' ? 'bg-primary/20 text-primary shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
 							title="Solid Model Only"
 						>
 							<Box className="size-4" />
@@ -751,7 +842,7 @@ export function CadViewport({
 								<div className="w-px h-5 bg-border/60 mx-1" />
 								<button
 									onClick={() => setViewMode('wireframe')}
-									className={`p-2.5 rounded-full transition-all ${viewMode === 'wireframe' ? 'bg-cyan-500/20 text-cyan-400 shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+									className={`p-2.5 rounded-full transition-all ${viewMode === 'wireframe' ? 'bg-primary/20 text-primary shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
 									title="Toolpaths/Wireframe Only"
 								>
 									<Activity className="size-4" />
@@ -761,7 +852,7 @@ export function CadViewport({
 						<div className="w-px h-5 bg-border/60 mx-1" />
 						<button
 							onClick={onToggleXRay}
-							className={`p-2.5 rounded-full transition-all ${xRayMode ? 'bg-cyan-500/20 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.3)]' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+							className={`p-2.5 rounded-full transition-all ${xRayMode ? 'bg-primary/20 text-primary shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
 							title="X-Ray / Transparency Mode (X)"
 						>
 							<Eye className="size-4" />
@@ -774,7 +865,7 @@ export function CadViewport({
 								<div className="w-px h-5 bg-border/60 mx-1" />
 								<button
 									onClick={togglePIP}
-									className={`p-2.5 rounded-full transition-all ${isPIPOpen ? 'bg-blue-500/20 text-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.3)]' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+									className={`p-2.5 rounded-full transition-all ${isPIPOpen ? 'bg-primary/20 text-primary shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
 									title="Toggle Blueprint Drawing Inspector (2D / PIP)"
 								>
 									<FileImage className="size-4" />
@@ -816,19 +907,12 @@ export function CadViewport({
 						<button onClick={() => { window.dispatchEvent(new CustomEvent('model-rotate', { detail: { axis: 'y', degrees: 90 } })); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Rotate Y +90° <RotateCcw className="size-3 text-muted-foreground" /></button>
 						<button onClick={() => { window.dispatchEvent(new CustomEvent('model-rotate', { detail: { axis: 'z', degrees: 90 } })); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Rotate Z +90° <RotateCcw className="size-3 text-muted-foreground" /></button>
 						<div className="h-px bg-border/60 my-1.5 mx-3" />
-						<button onClick={() => { dispatchViewportAction('iso'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm font-bold text-blue-400 hover:bg-accent hover:text-blue-300 transition-colors flex items-center justify-between">Isometric <span className="text-[10px] opacity-70 font-mono font-normal">I</span></button>
+						<button onClick={() => { dispatchViewportAction('iso'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm font-bold text-primary hover:bg-accent hover:text-primary transition-colors flex items-center justify-between">Isometric <span className="text-[10px] opacity-70 font-mono font-normal">I</span></button>
 						<button onClick={() => { dispatchViewportAction('home'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Home View <span className="text-[10px] text-muted-foreground font-mono">H</span></button>
 						<button onClick={() => { dispatchViewportAction('auto-rotate'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Auto Rotate <span className="text-[10px] text-muted-foreground font-mono">A</span></button>
 						<button onClick={() => { dispatchViewportAction('fit'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors">Fit to Screen</button>
 					</div>
 				)}
-
-				{/* Ambient Background Effects */}
-				<div className="absolute inset-0 z-0 pointer-events-none">
-					<div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-[128px]" />
-					<div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyan-600/5 rounded-full blur-[128px]" />
-					<div className="absolute inset-0 bg-[url('/grid.svg')] bg-center [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))] opacity-10" />
-				</div>
 
 				{allRejected && isWireframeVisible && (
 					<div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
@@ -840,7 +924,23 @@ export function CadViewport({
 					</div>
 				)}
 
-				<Canvas id="cad-three-canvas" shadows dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }} className="relative z-10" onPointerMissed={onClearSelection}>
+				<CanvasErrorBoundary onReset={() => setCanvasKey((prev) => prev + 1)}>
+					<Canvas
+						key={canvasKey}
+						id={workflowStage === 'manual_cad' ? 'cad-three-canvas-mcad' : 'cad-three-canvas'}
+						shadows
+						dpr={[1, 2]}
+						gl={{ preserveDrawingBuffer: true, powerPreference: 'high-performance' }}
+						onCreated={({ gl }) => {
+							const handleContextLost = (e: Event) => {
+								e.preventDefault();
+								console.warn('CadViewport: WebGL Context Lost event intercepted.');
+							};
+							gl.domElement.addEventListener('webglcontextlost', handleContextLost, false);
+						}}
+						className="relative z-10"
+						onPointerMissed={onClearSelection}
+					>
 					<CanvasBridge />
 					<ViewportController 
 						modelGroupRef={groupRef}
@@ -863,7 +963,7 @@ export function CadViewport({
 						<Environment files="/potsdamer_platz_1k.hdr" />
 						
 						{/* Professional CAD Lighting */}
-						<hemisphereLight intensity={0.4} groundColor="#1e293b" color="#f8fafc" />
+						<hemisphereLight intensity={isDark ? 0.4 : 0.75} groundColor={isDark ? "#1e293b" : "#cbd5e1"} color={isDark ? "#f8fafc" : "#ffffff"} />
 						<directionalLight castShadow intensity={0.8} position={[10, 20, 10]} shadow-mapSize={[2048, 2048]}>
 							<orthographicCamera attach="shadow-camera" args={[-20, 20, 20, -20, 0.1, 100]} />
 						</directionalLight>
@@ -871,9 +971,9 @@ export function CadViewport({
 						
 						<DynamicFloor targetRef={groupRef}>
 							{/* Contact Shadows at bounding box bottom */}
-							<ContactShadows resolution={1024} scale={50} blur={2} opacity={0.4} far={10} color="#000000" />
+							<ContactShadows resolution={1024} scale={50} blur={2} opacity={isDark ? 0.4 : 0.25} far={10} color="#000000" />
 							
-							<Grid infiniteGrid fadeDistance={gridFade} sectionColor="#1e3a8a" cellColor="#0f172a" cellSize={gridCell} sectionSize={gridSection} />
+							<Grid infiniteGrid fadeDistance={gridFade} sectionColor={isDark ? "#3a4658" : "#94a3b8"} cellColor={isDark ? "#2c3644" : "#cbd5e1"} cellSize={gridCell} sectionSize={gridSection} />
 						</DynamicFloor>
 						
 						<AnimatedSetupGroup setupToolAxis={setupToolAxis} isSetup={workflowStage === 'cam' || workflowStage === 'gcode'} hasToolpaths={hasValidToolpaths}>
@@ -1121,11 +1221,11 @@ export function CadViewport({
 
 						<GizmoHelper alignment="top-right" margin={[60, 60]}>
 							<GizmoViewcube 
-								color="#1e293b" 
-								strokeColor="#475569" 
-								hoverColor="#3b82f6" 
-								textColor="#f8fafc"
-								opacity={0.75} 
+								color={isDark ? "#121720" : "#ffffff"} 
+								strokeColor={isDark ? "#273144" : "#cbd5e1"} 
+								hoverColor={isDark ? "#4c7bf4" : "#3b6cf0"} 
+								textColor={isDark ? "#f1f5f9" : "#1e293b"}
+								opacity={0.85} 
 							/>
 						</GizmoHelper>
 					</Suspense>
@@ -1133,72 +1233,69 @@ export function CadViewport({
 					{/* Dimension overlay was moved inside Stage */}
 
 				</Canvas>
+			</CanvasErrorBoundary>
 
 				{!stlUrl && !isRecompiling && (
 					<div className="pointer-events-none absolute inset-0 flex items-center justify-center p-12 z-20">
 						<div className="relative max-w-md w-full">
 							{/* Outer glow aura */}
-							<div className="absolute inset-0 rounded-3xl bg-blue-500/5 dark:bg-blue-500/10 blur-2xl dark:blur-3xl scale-105 dark:scale-110" />
+							<div className="absolute inset-0 rounded-3xl bg-primary/5 blur-3xl scale-110" />
 
 							{/* Main card */}
-							<div className="relative rounded-3xl border border-transparent/50 dark:border-border bg-background/90 dark:bg-black/60 p-12 text-center shadow-xl backdrop-blur-2xl">
+							<div className="relative rounded-2xl border border-border/80 dark:border-white/[0.08] bg-card/85 p-10 text-center shadow-2xl backdrop-blur-2xl">
 
 								{/* Top accent line */}
-								<div className="absolute inset-x-0 top-0 h-px rounded-t-3xl bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
+								<div className="absolute inset-x-0 top-0 h-px rounded-t-2xl bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
 
 								{/* Rotating wireframe icon */}
-								<div className="mx-auto mb-7 relative flex size-20 items-center justify-center">
+								<div className="mx-auto mb-6 relative flex size-18 items-center justify-center">
 									{/* Orbit ring */}
-									<div className="absolute inset-0 rounded-full border border-blue-500/15 animate-spin" style={{ animationDuration: '8s' }} />
-									<div className="absolute inset-2 rounded-full border border-dashed border-blue-500/10 animate-spin" style={{ animationDuration: '12s', animationDirection: 'reverse' }} />
+									<div className="absolute inset-0 rounded-full border border-primary/20 animate-spin" style={{ animationDuration: '8s' }} />
+									<div className="absolute inset-2 rounded-full border border-dashed border-primary/15 animate-spin" style={{ animationDuration: '12s', animationDirection: 'reverse' }} />
 									{/* Center glow */}
-									<div className="absolute size-10 rounded-full bg-blue-500/8 blur-md" />
+									<div className="absolute size-9 rounded-full bg-primary/10 blur-md" />
 									{/* Isometric 3D wireframe cube SVG */}
 									<svg
 										viewBox="0 0 48 48"
 										fill="none"
-										className="size-9 animate-spin"
+										className="size-8.5 animate-spin"
 										style={{ animationDuration: '20s', animationTimingFunction: 'linear' }}
 									>
-										{/* Top face */}
-										<polygon points="24,4 40,14 24,24 8,14" stroke="rgb(59,130,246)" strokeWidth="1.2" strokeLinejoin="round" fill="rgba(59,130,246,0.04)" />
-										{/* Left face */}
-										<polygon points="8,14 24,24 24,44 8,34" stroke="rgb(59,130,246)" strokeWidth="1.2" strokeLinejoin="round" fill="rgba(59,130,246,0.02)" />
-										{/* Right face */}
-										<polygon points="40,14 24,24 24,44 40,34" stroke="rgb(59,130,246)" strokeWidth="1.2" strokeLinejoin="round" fill="rgba(59,130,246,0.06)" />
-										{/* Interior guide lines */}
-										<line x1="24" y1="24" x2="24" y2="4" stroke="rgb(59,130,246)" strokeWidth="0.5" strokeDasharray="2,3" strokeOpacity="0.3" />
-										<line x1="24" y1="24" x2="8" y2="14" stroke="rgb(59,130,246)" strokeWidth="0.5" strokeDasharray="2,3" strokeOpacity="0.3" />
-										<line x1="24" y1="24" x2="40" y2="14" stroke="rgb(59,130,246)" strokeWidth="0.5" strokeDasharray="2,3" strokeOpacity="0.3" />
+										<polygon points="24,4 40,14 24,24 8,14" stroke="var(--primary)" strokeWidth="1.2" strokeLinejoin="round" fill="rgba(76,123,244,0.05)" />
+										<polygon points="8,14 24,24 24,44 8,34" stroke="var(--primary)" strokeWidth="1.2" strokeLinejoin="round" fill="rgba(76,123,244,0.03)" />
+										<polygon points="40,14 24,24 24,44 40,34" stroke="var(--primary)" strokeWidth="1.2" strokeLinejoin="round" fill="rgba(76,123,244,0.06)" />
+										<line x1="24" y1="24" x2="24" y2="4" stroke="var(--primary)" strokeWidth="0.5" strokeDasharray="2,3" strokeOpacity="0.4" />
+										<line x1="24" y1="24" x2="8" y2="14" stroke="var(--primary)" strokeWidth="0.5" strokeDasharray="2,3" strokeOpacity="0.4" />
+										<line x1="24" y1="24" x2="40" y2="14" stroke="var(--primary)" strokeWidth="0.5" strokeDasharray="2,3" strokeOpacity="0.4" />
 									</svg>
 								</div>
 
 								{/* Status badge */}
-								<div className="mx-auto mb-6 flex w-fit items-center gap-2 rounded-full border border-blue-500/20 bg-blue-50/50 dark:bg-blue-500/5 px-4 py-1.5 shadow-sm">
-									<div className="size-1.5 rounded-full bg-blue-500 animate-pulse shadow-sm" />
-									<span className="text-[10px] font-bold uppercase tracking-[0.05em] text-blue-600 dark:text-blue-200">Geometry Engine — Idle</span>
+								<div className="mx-auto mb-5 flex w-fit items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3.5 py-1 shadow-sm">
+									<div className="size-1.5 rounded-full bg-primary animate-pulse shadow-[0_0_6px_rgba(76,123,244,0.8)]" />
+									<span className="text-[10px] font-bold uppercase tracking-[0.08em] text-primary">Geometry Engine — Standby</span>
 								</div>
 
-								<h3 className="text-xl font-bold tracking-tight text-foreground">Awaiting Parameters</h3>
+								<h3 className="text-lg font-bold tracking-tight text-foreground">Awaiting Model Parameters</h3>
 							</div>
 						</div>
 					</div>
 				)}
 
 				{isRecompiling && (
-					<div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-md z-20">
+					<div className="absolute inset-0 flex items-center justify-center bg-background/70 backdrop-blur-md z-20">
 						<div className="relative">
 							{/* Glow behind card */}
-							<div className="absolute inset-0 rounded-2xl bg-blue-500/10 blur-xl scale-150" />
-							<div className="relative flex items-center gap-4 rounded-2xl border border-blue-500/25 bg-background/95 px-7 py-5 shadow-lg">
+							<div className="absolute inset-0 rounded-2xl bg-primary/10 blur-xl scale-150" />
+							<div className="relative flex items-center gap-4 rounded-xl border border-primary/30 bg-card/95 px-6 py-4.5 shadow-2xl">
 								<div className="relative shrink-0">
-									<div className="absolute inset-0 animate-ping rounded-full bg-blue-500/20" />
-									<div className="relative flex size-9 items-center justify-center rounded-full border border-blue-500/30 bg-blue-500/10">
-										<Loader2 className="size-4 animate-spin text-blue-500" />
+									<div className="absolute inset-0 animate-ping rounded-full bg-primary/20" />
+									<div className="relative flex size-8 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
+										<Loader2 className="size-4 animate-spin text-primary" />
 									</div>
 								</div>
 								<div className="flex flex-col">
-									<span className="text-[11px] font-black uppercase tracking-[0.05em] text-foreground">Engine Active</span>
+									<span className="text-[11px] font-black uppercase tracking-[0.06em] text-foreground">Engine Processing</span>
 									<span className="mt-0.5 text-[10px] text-muted-foreground">Recomputing Geometry Topology…</span>
 								</div>
 							</div>
@@ -1206,36 +1303,43 @@ export function CadViewport({
 					</div>
 				)}
 
-
-
 				{/* Global Safety Note */}
 				{workflowStage !== 'manual_cad' && (
-					<div className={`absolute left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-2 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-24' : 'bottom-2'}`}>
+					<div 
+						style={{
+							left:
+								workflowStage === 'cam' || workflowStage === 'gcode'
+									? 'calc((100% - 336px) / 2)'
+									: 'calc((100% + 36px) / 2)',
+							transform: 'translateX(-50%)',
+						}}
+						className={`absolute z-10 flex flex-col items-center gap-2 transition-all ${(workflowStage === 'cam' || workflowStage === 'gcode') ? 'bottom-24' : 'bottom-2'}`}
+					>
 						{toolpaths && toolpaths.length > 0 && !hasValidToolpaths && (
-							<div className="flex items-center gap-2 rounded-full border border-orange-500/30 bg-background/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
-								<svg className="size-3 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<div className="flex items-center gap-2 rounded-full border border-amber-500/30 bg-card/90 px-4 py-1.5 backdrop-blur-md shadow-xl shadow-black/40">
+								<svg className="size-3 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
 								</svg>
-								<span className="text-[11px] font-bold uppercase tracking-wider text-orange-400">
+								<span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
 									No valid machining toolpaths to display
 								</span>
 							</div>
 						)}
 						{hasBlockedOperations && (
-							<div className="flex items-center gap-2 rounded-full border border-red-500/30 bg-background/90 px-4 py-2 backdrop-blur-md shadow-xl shadow-black/50">
-								<svg className="size-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<div className="flex items-center gap-2 rounded-full border border-destructive/30 bg-card/90 px-4 py-1.5 backdrop-blur-md shadow-xl shadow-black/40">
+								<svg className="size-3 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
 								</svg>
-								<span className="text-[11px] font-bold uppercase tracking-wider text-red-400">
+								<span className="text-[10px] font-bold uppercase tracking-wider text-destructive">
 									Some features require turning, mill-turn, or secondary setup
 								</span>
 							</div>
 						)}
-						<div className="flex items-center gap-3 rounded-full border border-transparent bg-background/80 px-5 py-2.5 backdrop-blur-xl transition-all hover:border-blue-500/30 whitespace-nowrap">
-							<svg className="size-3 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<div className="flex items-center gap-2.5 rounded-full border border-border/70 bg-card/75 px-4 py-1.5 backdrop-blur-xl transition-all hover:border-primary/40 whitespace-nowrap">
+							<svg className="size-3 text-primary shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
 							</svg>
-							<p className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+							<p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
 								AI can make mistakes. Verify critical dimensions against original blueprints.
 							</p>
 						</div>
