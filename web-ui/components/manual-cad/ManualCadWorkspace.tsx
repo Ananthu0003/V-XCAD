@@ -412,6 +412,27 @@ export function ManualCadWorkspace({
     }
   };
 
+  // Double click directly on 3D solid model surface: promote selection to 3D sub-shape/feature or body
+  const handleDirectMeshDoubleClick = (point: [number, number, number], normal?: [number, number, number]) => {
+    if (!topology) return;
+    if (topology.faces) {
+      const face = findFaceFromHit(point, normal, topology.faces);
+      if (face && detectedFeatures && detectedFeatures.length > 0) {
+        const feat = detectedFeatures.find((df: any) =>
+          df.face_ids?.includes(face.transient_id)
+        );
+        if (feat) {
+          handleSelectTopologyEntity({ entity_type: 'feature', ...feat });
+          return;
+        }
+      }
+    }
+    const bodyEnt = createBodyEntity(topology, activeRevision);
+    setSelectedEntity(bodyEnt);
+    setSelectedEntities([bodyEnt]);
+    setSelectionMode('body');
+  };
+
   // Build references list for API requests
   const buildRequestReferences = (): any[] => {
     const targets = selectedEntities.length > 1 ? selectedEntities : selectedEntity ? [selectedEntity] : [];
@@ -774,7 +795,13 @@ export function ManualCadWorkspace({
               }
             }}
           >
-            {stlUrl && <StlMesh url={stlUrl} onDirectClick={handleDirectMeshClick} />}
+            {stlUrl && (
+              <StlMesh
+                url={stlUrl}
+                onDirectClick={handleDirectMeshClick}
+                onDirectDoubleClick={handleDirectMeshDoubleClick}
+              />
+            )}
             <SubShapeRaycaster
               topology={topology}
               selectedEntity={selectedEntity}

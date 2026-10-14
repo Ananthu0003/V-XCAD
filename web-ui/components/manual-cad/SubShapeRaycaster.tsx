@@ -88,7 +88,8 @@ function FaceSurfaceMesh({
   isHovered,
   onPointerOver,
   onPointerOut,
-  onClick
+  onClick,
+  onDoubleClick,
 }: {
   face: any;
   isSelected: boolean;
@@ -96,6 +97,7 @@ function FaceSurfaceMesh({
   onPointerOver: (e: any) => void;
   onPointerOut: (e: any) => void;
   onClick: (e: any) => void;
+  onDoubleClick?: (e: any) => void;
 }) {
   const geometry = useMemo(() => {
     // 1. Exact B-Rep triangulation if available
@@ -181,6 +183,10 @@ function FaceSurfaceMesh({
           e.stopPropagation();
           onClick(e);
         }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onDoubleClick?.(e);
+        }}
       >
         <meshStandardMaterial
           // Selected: amber fill; Hovered: accent fill (12%); idle: invisible
@@ -226,12 +232,20 @@ export function SubShapeRaycaster({
   const faces = Object.values(topology.faces || {}) as any[];
   const edges = Object.values(topology.edges || {}) as any[];
 
+  const isBodySelected =
+    selectedEntity?.entity_type === 'body' ||
+    selectedEntities?.some((ent: any) => ent?.entity_type === 'body');
+  const isBodyHovered = hoveredEntity?.entity_type === 'body';
+
   const showFaces = selectionMode === 'face' || selectionMode === 'all' || selectionMode === 'body' || selectionMode === 'feature';
   const showEdges = selectionMode === 'edge' || selectionMode === 'all';
 
   const hlFaceSet = useMemo(() => new Set(highlightedFaceIds || []), [highlightedFaceIds]);
   const selectedFaceSet = useMemo(() => {
     const s = new Set<string>();
+    if (isBodySelected && topology?.faces) {
+      Object.keys(topology.faces).forEach((fid) => s.add(fid));
+    }
     if (selectedEntity?.transient_id) s.add(selectedEntity.transient_id);
     if (selectedEntity?.face_ids && Array.isArray(selectedEntity.face_ids)) {
       selectedEntity.face_ids.forEach((fid: string) => s.add(fid));
@@ -245,7 +259,7 @@ export function SubShapeRaycaster({
       });
     }
     return s;
-  }, [selectedEntity, selectedEntities]);
+  }, [selectedEntity, selectedEntities, isBodySelected, topology?.faces]);
 
   const selectedEdgeSet = useMemo(() => {
     const s = new Set<string>();
@@ -263,7 +277,7 @@ export function SubShapeRaycaster({
       {/* 1. Interactive 3D Face Meshes */}
       {showFaces && faces.map((face) => {
         const isSelected = selectedFaceSet.has(face.transient_id);
-        const isHovered = activeHover === face.transient_id || hlFaceSet.has(face.transient_id);
+        const isHovered = isBodyHovered || activeHover === face.transient_id || hlFaceSet.has(face.transient_id);
 
         return (
           <FaceSurfaceMesh
@@ -310,6 +324,17 @@ export function SubShapeRaycaster({
                 }
               }
               onSelectEntity(face, isMulti);
+            }}
+            onDoubleClick={(e) => {
+              e?.stopPropagation?.();
+              if (detectedFeatures && detectedFeatures.length > 0) {
+                const feat = detectedFeatures.find((df: any) => df.face_ids?.includes(face.transient_id));
+                if (feat) {
+                  onSelectEntity({ entity_type: 'feature', ...feat });
+                  return;
+                }
+              }
+              onSelectEntity({ entity_type: 'body' });
             }}
           />
         );

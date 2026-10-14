@@ -22,6 +22,7 @@ type StlMeshProps = {
 	onGeometryReady?: (info: StlGeometryInfo) => void;
 	onMeshClick?: (point: [number, number, number]) => void;
 	onDirectClick?: (point: [number, number, number], normal?: [number, number, number]) => void;
+	onDirectDoubleClick?: (point: [number, number, number], normal?: [number, number, number]) => void;
 	onHover?: (isHovered: boolean) => void;
 };
 
@@ -38,7 +39,7 @@ const MATERIAL_PRESETS: Record<string, any> = {
 	'acrylic': { color: '#ffffff', metalness: 0.1, roughness: 0.1, clearcoat: 1.0, transmission: 0.9, transparent: true },
 };
 
-export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false, onGeometryReady, onMeshClick, onDirectClick, onHover }: StlMeshProps) {
+export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false, onGeometryReady, onMeshClick, onDirectClick, onDirectDoubleClick, onHover }: StlMeshProps) {
 	const geometry = useLoader(STLLoader, url);
 
 	const { centeredGeometry, scale, center } = useMemo(() => {
@@ -151,6 +152,16 @@ export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false
 						? [e.face.normal.x, e.face.normal.y, e.face.normal.z] as [number, number, number] 
 						: undefined;
 					onDirectClick([localPoint.x, localPoint.y, localPoint.z], normal);
+				}
+			}}
+			onDoubleClick={(e) => {
+				if (onDirectDoubleClick) {
+					e.stopPropagation();
+					const localPoint = e.object.worldToLocal(e.point.clone());
+					const normal = e.face?.normal 
+						? [e.face.normal.x, e.face.normal.y, e.face.normal.z] as [number, number, number] 
+						: undefined;
+					onDirectDoubleClick([localPoint.x, localPoint.y, localPoint.z], normal);
 				}
 			}}
 			onPointerOver={(e) => {
