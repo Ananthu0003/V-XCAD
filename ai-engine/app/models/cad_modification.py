@@ -6,9 +6,37 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 
-# Operation ids are validated by the service registry (unknown ids return a structured
-# INVALID_REFERENCE result) so new tools never need a schema change.
-OperationType = str
+OperationType = Literal[
+    "fillet",
+    "chamfer",
+    "hole",
+    "pocket",
+    "pad",
+    "boolean",
+    "transform",
+    "edit_feature",
+    "offset_face",
+    "snap_to_plane",
+    "plug_hole",
+    "move",
+    "rotate",
+    "scale",
+    "mirror",
+    "align",
+    "primitive",
+    "shell",
+    "offset",
+    "split",
+    "linear_pattern",
+    "polar_pattern",
+    "heal",
+    "push_pull",
+    "round_face_edges",
+    "delete_feature",
+    "move_feature",
+    "pattern_feature",
+    "measure",
+]
 
 
 class OperationSource(str, Enum):
@@ -59,6 +87,16 @@ class GeometricReference(BaseModel):
         default_factory=list,
         description="Sampled points along boundary wires of the face"
     )
+    points: Optional[List[List[float]]] = Field(
+        default_factory=list,
+        description="Sampled polyline points along the edge curve"
+    )
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    hint: Optional[str] = None
 
 
 class ValidationReport(BaseModel):
@@ -71,11 +109,6 @@ class ValidationReport(BaseModel):
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     suggestions: List[str] = Field(default_factory=list)
-
-
-# Operation ids are validated by the service registry (unknown ids return a structured
-# INVALID_REFERENCE result) so new tools never need a schema change.
-OperationType = str
 
 
 class CADOperation(BaseModel):
@@ -239,6 +272,11 @@ class PlanarFaceContext(BaseModel):
     max_diameter: Optional[float] = None
     material_depth: Optional[float] = None
     is_through_clear: Optional[bool] = None
+    rect_length: Optional[float] = None
+    rect_width: Optional[float] = None
+    corner_radius: Optional[float] = None
+    feature_kind: Optional[str] = None
+    is_pad_or_pocket: Optional[bool] = None
     existing_features: list[FeatureOnFace] = []
 
 class CylFaceContext(BaseModel):
@@ -266,6 +304,64 @@ class BodyContext(BaseModel):
     volume: Optional[float] = None
     solid_count: Optional[int] = None
     is_valid: Optional[bool] = None
+
+class BaseSolidClassification(BaseModel):
+    primitive_type: str = "freeform"
+    primitive: Optional[str] = None
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 1.0
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.primitive and not self.primitive_type:
+            self.primitive_type = self.primitive
+        elif self.primitive_type and not self.primitive:
+            self.primitive = self.primitive_type
+
+class ExtractedFeature(BaseModel):
+    feature_id: str
+    kind: Literal["hole", "boss", "pocket", "pad", "fillet", "chamfer", "slot", "slab", "other"]
+    subtype: Optional[str] = None
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 1.0
+    parent_face_id: Optional[str] = None
+    face_ids: List[str] = Field(default_factory=list)
+    edge_ids: List[str] = Field(default_factory=list)
+    position_uv: Optional[List[float]] = None
+    center: Optional[List[float]] = None
+    axis: Optional[List[float]] = None
+
+class MassProperties(BaseModel):
+    volume_mm3: float = 0.0
+    volume: Optional[float] = None
+    surface_area_mm2: float = 0.0
+    surface_area: Optional[float] = None
+    center_of_mass: List[float] = Field(default_factory=list)
+    bounding_box: Dict[str, List[float]] = Field(default_factory=dict)
+    bbox_extents: Optional[List[float]] = None
+    solid_count: int = 1
+    face_count: int = 0
+    edge_count: int = 0
+    is_valid: bool = True
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.volume is None:
+            self.volume = self.volume_mm3
+        if self.surface_area is None:
+            self.surface_area = self.surface_area_mm2
+
+class ModelParametersResponse(BaseModel):
+    session_id: str
+    revision: str = "rev_000"
+    revision_id: Optional[str] = None
+    base_solid: BaseSolidClassification
+    features: List[ExtractedFeature] = Field(default_factory=list)
+    mass_properties: MassProperties
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.revision_id is None:
+            self.revision_id = self.revision
+        elif self.revision == "rev_000" and self.revision_id != "rev_000":
+            self.revision = self.revision_id
 
 class GeometryContext(BaseModel):
     status: Literal["ok", "partial", "unsupported", "error"] = "ok"

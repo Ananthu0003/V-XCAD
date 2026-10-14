@@ -207,6 +207,26 @@ class ReferenceResolver:
         except Exception:
             pass
 
+        points: List[List[float]] = []
+        try:
+            num_samples = 32 if ctype in ("circle", "ellipse") else 16
+            if ctype == "line":
+                verts = list(edge.vertices())
+                if len(verts) >= 2:
+                    points = [
+                        [round(float(verts[0].X), 4), round(float(verts[0].Y), 4), round(float(verts[0].Z), 4)],
+                        [round(float(verts[-1].X), 4), round(float(verts[-1].Y), 4), round(float(verts[-1].Z), 4)]
+                    ]
+            if not points:
+                first_param = adaptor.FirstParameter()
+                last_param = adaptor.LastParameter()
+                for step_idx in range(num_samples + 1):
+                    t = first_param + (last_param - first_param) * (step_idx / float(num_samples))
+                    pnt = adaptor.Value(t)
+                    points.append([round(float(pnt.X()), 4), round(float(pnt.Y()), 4), round(float(pnt.Z()), 4)])
+        except Exception:
+            pass
+
         return GeometricReference(
             ref_id=ref_id or f"ref_{transient_id}",
             transient_id=transient_id,
@@ -216,7 +236,8 @@ class ReferenceResolver:
             bounding_box=bbox,
             length=length,
             radius=radius,
-            confidence=1.0
+            confidence=1.0,
+            points=points,
         )
 
     @classmethod

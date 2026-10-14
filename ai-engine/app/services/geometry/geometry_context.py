@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Optional, List, Tuple
+from collections import OrderedDict
+from typing import Optional, List, Tuple, Any
 import shapely.geometry
 import shapely.ops
 
@@ -13,7 +14,7 @@ from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.BRep import BRep_Tool
 from OCP.GeomAbs import GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone, GeomAbs_Sphere, GeomAbs_Torus, GeomAbs_Line, GeomAbs_Circle
 from OCP.GeomLib import GeomLib_IsPlanarSurface
-from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE
+from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_REVERSED
 from OCP.IntCurvesFace import IntCurvesFace_ShapeIntersector
 from OCP.gp import gp_Pnt, gp_Dir, gp_Lin
 from OCP.TopExp import TopExp_Explorer
@@ -21,7 +22,6 @@ from OCP.TopoDS import TopoDS_Face, TopoDS_Edge, TopoDS_Shape
 from OCP.GProp import GProp_GProps
 from OCP.BRepGProp import BRepGProp
 from OCP.BRepTools import BRepTools
-from OCP.GeomLProp import GeomLProp_SLProps
 
 from app.models.cad_modification import (
     GeometryContext, PlanarFaceContext, CylFaceContext, EdgeContext, BodyContext, FeatureOnFace, GeometricReference
@@ -29,8 +29,9 @@ from app.models.cad_modification import (
 from app.services.geometry.reference_resolver import ReferenceResolver
 from app.services.geometry.brep_validator import BRepValidator
 
-# Cache for results (session_id, revision, ref, rounded_u, rounded_v) -> GeometryContext
-_context_cache = {}
+# Bounded LRU cache for results (session_id, revision, ref, rounded_u, rounded_v) -> GeometryContext
+_MAX_CONTEXT_CACHE_SIZE = 128
+_context_cache: OrderedDict[Tuple[Any, ...], GeometryContext] = OrderedDict()
 
 def get_geometry_context(session_id: str, revision: str, ref: str, u: Optional[float] = None, v: Optional[float] = None) -> GeometryContext:
     rounded_u = round(u, 4) if u is not None else None
@@ -38,6 +39,7 @@ def get_geometry_context(session_id: str, revision: str, ref: str, u: Optional[f
     cache_key = (session_id, revision, ref, rounded_u, rounded_v)
     
     if cache_key in _context_cache:
+        _context_cache.move_to_end(cache_key)
         return _context_cache[cache_key]
         
     from app.services.geometry.manual_cad_service import ManualCADService
@@ -74,12 +76,21 @@ def get_geometry_context(session_id: str, revision: str, ref: str, u: Optional[f
     
     # Try resolving as body if ref is special, but let's assume it's face/edge if format matches
     if ref.startswith("face_"):
+        face = None
         try:
             idx = int(ref.split("_")[1])
-            face = shape.faces()[idx]
+            faces = shape.faces()
+            if 0 <= idx < len(faces):
+                face = faces[idx]
         except (IndexError, ValueError):
             face = None
             
+        if not face:
+            matched_f, status, _ = ReferenceResolver.resolve_face(shape, GeometricReference(
+                ref_id=ref, transient_id=ref, entity_type="face", centroid=[0, 0, 0]
+            ))
+            face = matched_f
+
         if not face:
             ctx.status = "error"
             ctx.message = "selection could not be resolved, reselect the face"
@@ -87,12 +98,21 @@ def get_geometry_context(session_id: str, revision: str, ref: str, u: Optional[f
         _measure_face(face, shape, ctx, u, v)
 
     elif ref.startswith("edge_"):
+        edge = None
         try:
             idx = int(ref.split("_")[1])
-            edge = shape.edges()[idx]
+            edges = shape.edges()
+            if 0 <= idx < len(edges):
+                edge = edges[idx]
         except (IndexError, ValueError):
             edge = None
             
+        if not edge:
+            matched_e, status, _ = ReferenceResolver.resolve_edge(shape, GeometricReference(
+                ref_id=ref, transient_id=ref, entity_type="edge", centroid=[0, 0, 0]
+            ))
+            edge = matched_e
+
         if not edge:
             ctx.status = "error"
             ctx.message = "selection could not be resolved, reselect the edge"
@@ -102,10 +122,10 @@ def get_geometry_context(session_id: str, revision: str, ref: str, u: Optional[f
     elif ref.startswith("body") or ref == "model":
         _measure_body(shape, ctx)
     else:
-        ctx.status = "error"
-        ctx.message = "selection could not be resolved, reselect the entity"
-        return ctx
+        _measure_body(shape, ctx)
 
+    if len(_context_cache) >= _MAX_CONTEXT_CACHE_SIZE:
+        _context_cache.popitem(last=False)
     _context_cache[cache_key] = ctx
     return ctx
 
@@ -247,32 +267,76 @@ def _measure_face(face: bd.Face, shape: bd.Shape, ctx: GeometryContext, u: Optio
         ctx.entity_class = "face.other"
         ctx.status = "unsupported"
 
+def get_planar_face_frame(face: bd.Face) -> Tuple[List[float], List[float], List[float], List[float]]:
+    """
+    Returns deterministic (origin, u_axis, v_axis, normal) as [x, y, z] lists.
+    Guarantees:
+    - normal is unit outward normal (respecting TopAbs_REVERSED).
+    - u_axis and v_axis form an orthonormal right-handed system: u_axis x v_axis = normal.
+    - u_axis is deterministically aligned with global axes.
+    - origin is the center of the outer wire's bounding box in (U, V).
+    """
+    occ_face = face.wrapped if hasattr(face, "wrapped") else face
+    adaptor = BRepAdaptor_Surface(occ_face)
+    pln = adaptor.Plane()
+    dir_z = pln.Axis().Direction()
+    norm = bd.Vector(dir_z.X(), dir_z.Y(), dir_z.Z()).normalized()
+    if occ_face.Orientation() == TopAbs_REVERSED:
+        norm = -norm
+
+    z_world = bd.Vector(0, 0, 1)
+    if abs(norm.dot(z_world)) > 0.99:
+        if norm.dot(z_world) > 0:
+            u_axis = bd.Vector(1, 0, 0)
+            v_axis = bd.Vector(0, 1, 0)
+        else:
+            u_axis = bd.Vector(1, 0, 0)
+            v_axis = bd.Vector(0, -1, 0)
+    else:
+        u_axis = z_world.cross(norm).normalized()
+        v_axis = norm.cross(u_axis).normalized()
+
+    # Center in (U, V) from outer wire
+    ref_pt = bd.Vector(pln.Location().X(), pln.Location().Y(), pln.Location().Z())
+    u_vals: List[float] = []
+    v_vals: List[float] = []
+    try:
+        wires = face.wires()
+        if wires:
+            outer_wire = wires[0]
+            for v in outer_wire.vertices():
+                diff = bd.Vector(v.X, v.Y, v.Z) - ref_pt
+                u_vals.append(diff.dot(u_axis))
+                v_vals.append(diff.dot(v_axis))
+    except Exception:
+        pass
+
+    if u_vals and v_vals:
+        u_mid = (min(u_vals) + max(u_vals)) / 2.0
+        v_mid = (min(v_vals) + max(v_vals)) / 2.0
+        origin_pt = ref_pt + u_axis * u_mid + v_axis * v_mid
+    else:
+        c = face.center()
+        origin_pt = bd.Vector(c.X, c.Y, c.Z)
+
+    return (
+        [round(origin_pt.X, 4), round(origin_pt.Y, 4), round(origin_pt.Z, 4)],
+        [round(u_axis.X, 4), round(u_axis.Y, 4), round(u_axis.Z, 4)],
+        [round(v_axis.X, 4), round(v_axis.Y, 4), round(v_axis.Z, 4)],
+        [round(norm.X, 4), round(norm.Y, 4), round(norm.Z, 4)],
+    )
+
+
 def _handle_planar_face(face: bd.Face, shape: bd.Shape, surf: BRepAdaptor_Surface, ctx: GeometryContext, u: Optional[float], v: Optional[float], start_time: float, forced_plane=None):
     ctx.entity_class = "face.planar"
     pctx = PlanarFaceContext()
     ctx.planar = pctx
-    
-    if forced_plane:
-        loc = forced_plane.Location()
-        ax = forced_plane.XAxis().Direction()
-        ay = forced_plane.YAxis().Direction()
-        norm = forced_plane.Axis().Direction()
-    else:
-        pln = surf.Plane()
-        loc = pln.Location()
-        ax = pln.XAxis().Direction()
-        ay = pln.YAxis().Direction()
-        norm = pln.Axis().Direction()
-        
-    pctx.origin = [loc.X(), loc.Y(), loc.Z()]
-    pctx.u_axis = [ax.X(), ax.Y(), ax.Z()]
-    pctx.v_axis = [ay.X(), ay.Y(), ay.Z()]
-    
-    # Normal might be reversed by face orientation
-    is_fwd = face.wrapped.Orientation() == TopAbs_FACE
-    if not is_fwd:
-        norm.Reverse()
-    pctx.normal = [norm.X(), norm.Y(), norm.Z()]
+
+    origin, u_axis, v_axis, norm = get_planar_face_frame(face)
+    pctx.origin = origin
+    pctx.u_axis = u_axis
+    pctx.v_axis = v_axis
+    pctx.normal = norm
 
     if time.time() - start_time > 2.0: return
     
@@ -288,7 +352,7 @@ def _handle_planar_face(face: bd.Face, shape: bd.Shape, surf: BRepAdaptor_Surfac
         
     if time.time() - start_time > 2.0: return
     
-    # Polygon and inscribed circle
+    # Polygon and inscribed circle / rectangle detection
     try:
         wires = face.wires()
         if wires:
@@ -300,21 +364,41 @@ def _handle_planar_face(face: bd.Face, shape: bd.Shape, surf: BRepAdaptor_Surfac
                 if not poly.is_valid:
                     poly = poly.buffer(0)
                 
-                # Check circular / rectangular
                 pctx.is_circular = False
                 pctx.is_rectangular = False
+                area = poly.area
+                perim = poly.length
+
                 if len(inner_pts_list) == 0:
-                    area = poly.area
-                    perim = poly.length
                     # Circle: 4*pi*A / P^2 ~ 1
                     if perim > 0 and abs(4 * math.pi * area / (perim * perim) - 1.0) < 0.05:
                         pctx.is_circular = True
                         pctx.circle_diameter = 2 * math.sqrt(area / math.pi)
+                        pctx.feature_kind = "circle"
                     
-                    # Rect: Area bounding box ~ Area
+                    # Rect: Minimum rotated bounding box area ~ Area
                     min_rect = poly.minimum_rotated_rectangle
-                    if abs(min_rect.area - area) < 1e-3 * area:
+                    if abs(min_rect.area - area) < 0.05 * max(1e-3, area):
                         pctx.is_rectangular = True
+                        pctx.feature_kind = "rect"
+
+                # Compute width and length in face U/V frame
+                ref_pt = bd.Vector(*origin)
+                u_vec = bd.Vector(*u_axis)
+                v_vec = bd.Vector(*v_axis)
+                uv_pts = []
+                for vert in wires[0].vertices():
+                    diff = bd.Vector(vert.X, vert.Y, vert.Z) - ref_pt
+                    uv_pts.append((diff.dot(u_vec), diff.dot(v_vec)))
+                if uv_pts:
+                    u_coords = [p[0] for p in uv_pts]
+                    v_coords = [p[1] for p in uv_pts]
+                    span_u = round(max(u_coords) - min(u_coords), 3)
+                    span_v = round(max(v_coords) - min(v_coords), 3)
+                    pctx.rect_width = span_u
+                    pctx.rect_length = span_v
+                    if pctx.is_rectangular:
+                        pctx.feature_kind = "rect"
 
                 center = shapely.ops.polylabel(poly, tolerance=1.0)
                 pctx.center_uv = [center.x, center.y]
@@ -343,13 +427,11 @@ def _handle_planar_face(face: bd.Face, shape: bd.Shape, surf: BRepAdaptor_Surfac
             else:
                 ray_u, ray_v = 0.0, 0.0
                 
-        # Ray origin
         ray_orig = gp_Pnt(
             pctx.origin[0] + ray_u * pctx.u_axis[0] + ray_v * pctx.v_axis[0],
             pctx.origin[1] + ray_u * pctx.u_axis[1] + ray_v * pctx.v_axis[1],
             pctx.origin[2] + ray_u * pctx.u_axis[2] + ray_v * pctx.v_axis[2]
         )
-        # Ray dir is -normal
         ray_dir = gp_Dir(-pctx.normal[0], -pctx.normal[1], -pctx.normal[2])
         ray_line = gp_Lin(ray_orig, ray_dir)
         
@@ -359,7 +441,7 @@ def _handle_planar_face(face: bd.Face, shape: bd.Shape, surf: BRepAdaptor_Surfac
         
         if intersector.IsDone() and intersector.NbPnt() > 0:
             pctx.material_depth = intersector.WParameter(1)
-            pctx.is_through_clear = True # Simplification, should check if it exits
+            pctx.is_through_clear = True
         else:
             pctx.material_depth = None
             pctx.is_through_clear = False
@@ -369,20 +451,17 @@ def _handle_planar_face(face: bd.Face, shape: bd.Shape, surf: BRepAdaptor_Surfac
     # Features
     if time.time() - start_time > 2.0: return
     try:
-        # Find adjacent cylindrical faces
         for e in face.edges():
             for f_adj in _get_adjacent_faces(shape, e):
                 if f_adj.is_same(face): continue
-                # check if f_adj is cylinder
                 surf_adj = BRepAdaptor_Surface(f_adj.wrapped)
                 if surf_adj.GetType() == GeomAbs_Cylinder:
                     cyl = surf_adj.Cylinder()
                     axis = cyl.Axis().Direction()
-                    # if axis parallel to normal
                     dot = abs(axis.X()*pctx.normal[0] + axis.Y()*pctx.normal[1] + axis.Z()*pctx.normal[2])
                     if dot > 0.99:
                         feat = FeatureOnFace(
-                            kind="hole" if f_adj.wrapped.Orientation() != TopAbs_FACE else "boss",
+                            kind="hole" if f_adj.wrapped.Orientation() == TopAbs_REVERSED else "boss",
                             diameter=2*cyl.Radius()
                         )
                         pctx.existing_features.append(feat)
@@ -404,21 +483,20 @@ def _handle_cylindrical_face(face: bd.Face, shape: bd.Shape, surf: BRepAdaptor_S
         cctx.axis_origin = [loc.X(), loc.Y(), loc.Z()]
         cctx.axis_dir = [axis.X(), axis.Y(), axis.Z()]
         
-        props = GeomLProp_SLProps(surf, 0.0, 0.0, 1, 1e-4)
-        n = props.Normal()
-        if face.wrapped.Orientation() != TopAbs_FACE:
-            n.Reverse()
-        # Hole: normal points towards axis. Boss: normal points away.
-        pnt = props.Value()
-        v = gp_Dir(cctx.axis_origin[0] - pnt.X(), cctx.axis_origin[1] - pnt.Y(), cctx.axis_origin[2] - pnt.Z())
-        dot = n.X()*v.X() + n.Y()*v.Y() + n.Z()*v.Z()
-        cctx.kind = "hole" if dot > 0 else "boss"
+        # Hole vs Boss: normal direction relative to radial vector
+        pt = face.center()
+        n = face.normal_at(pt)
+        v_axis_to_pt = bd.Vector(pt.X - loc.X(), pt.Y - loc.Y(), pt.Z - loc.Z())
+        ax_dir = bd.Vector(axis.X(), axis.Y(), axis.Z()).normalized()
+        v_radial = v_axis_to_pt - ax_dir * v_axis_to_pt.dot(ax_dir)
+        dot_n_r = n.X * v_radial.X + n.Y * v_radial.Y + n.Z * v_radial.Z
+        cctx.kind = "hole" if dot_n_r < 0 else "boss"
         
-        # Length
+        # Exact length from UV bounds (no nub extension)
         try:
             umin, umax, vmin, vmax = BRepTools.UVBounds_s(face.wrapped)
-            cctx.length = vmax - vmin
-        except:
+            cctx.length = round(abs(vmax - vmin), 4)
+        except Exception:
             pass
             
     except Exception:

@@ -49,12 +49,17 @@ from app.models.cad_modification import (
     DetectedFeature,
     SelectMoreRequest,
     SelectMoreResponse,
+    BaseSolidClassification,
+    ExtractedFeature,
+    MassProperties,
+    ModelParametersResponse,
 )
 from app.services.geometry.body_operations import BodyOperationsMixin
 from app.services.geometry.brep_validator import BRepValidator
 from app.services.geometry.reference_resolver import ReferenceResolver
 from app.services.geometry.feature_service import FeatureService
 from app.services.geometry.topology_extractor import TopologyExtractor
+from app.services.geometry.geometry_context import get_planar_face_frame
 
 BASE_STORAGE_DIR = Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs"))
 
@@ -344,6 +349,7 @@ class ManualCADService(BodyOperationsMixin):
         preview_id = uuid.uuid4().hex[:8]
         preview_stl_path = sdir / "previews" / f"prev_{preview_id}.stl"
         export_stl(modified_shape, str(preview_stl_path))
+        self._cleanup_previews(sdir / "previews", keep_last=10)
 
         # Volume Delta
         props_base = GProp_GProps()
@@ -367,6 +373,21 @@ class ManualCADService(BodyOperationsMixin):
             validation=val_report
         )
 
+    def _cleanup_previews(self, previews_dir: Path, keep_last: int = 10) -> None:
+        """Keep only latest N preview STL files to prevent disk leaks."""
+        try:
+            if not previews_dir.exists():
+                return
+            stls = sorted(previews_dir.glob("prev_*.stl"), key=lambda f: f.stat().st_mtime)
+            if len(stls) > keep_last:
+                for f in stls[:-keep_last]:
+                    try:
+                        f.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     def commit_operation(self, req: CommitRequest) -> CommitResult:
         """Apply and persist validated modification as a new immutable revision."""
         sdir = self._get_session_dir(req.session_id)
@@ -383,11 +404,16 @@ class ManualCADService(BodyOperationsMixin):
         if not val_report.is_valid:
             raise ValueError(f"Geometry validation failed: {val_report.error_message}")
 
-        # Compute next revision ID
+        # Compute next revision ID monotonically (prevent collision after rollback)
         session_file = sdir / "session.json"
         state = json.loads(session_file.read_text()) if session_file.exists() else {"revisions": ["rev_000"]}
-        rev_count = len(state.get("revisions", []))
-        new_rev_id = f"rev_{rev_count:03d}"
+        existing_rev_nums = [
+            int(p.stem.replace("rev_", ""))
+            for p in (sdir / "revisions").glob("rev_*.step")
+            if p.stem.replace("rev_", "").isdigit()
+        ]
+        next_rev_num = max(existing_rev_nums) + 1 if existing_rev_nums else len(state.get("revisions", []))
+        new_rev_id = f"rev_{next_rev_num:03d}"
 
         # Write immutable STEP and STL
         new_step_path = sdir / "revisions" / f"{new_rev_id}.step"
@@ -396,7 +422,7 @@ class ManualCADService(BodyOperationsMixin):
         export_stl(modified_shape, str(new_stl_path))
 
         # Write Operation Record
-        op_id = f"op_{rev_count:03d}"
+        op_id = f"op_{next_rev_num:03d}"
         operation = CADOperation(
             operation_id=op_id,
             operation_type=req.operation_type,
@@ -417,9 +443,11 @@ class ManualCADService(BodyOperationsMixin):
             state["revisions"].append(new_rev_id)
         session_file.write_text(json.dumps(state, indent=2))
 
-        # Cache Topology
+        # Cache Topology & Invalidate Caches
         self._cache_topology(req.session_id, new_rev_id, modified_shape)
         self.invalidate_features_cache(req.session_id)
+        self.invalidate_parameters_cache(req.session_id)
+        self._cleanup_previews(sdir / "previews", keep_last=2)
 
         return CommitResult(
             success=True,
@@ -773,6 +801,7 @@ class ManualCADService(BodyOperationsMixin):
             "offset_face": self._apply_offset_face,
             "snap_to_plane": self._apply_snap_to_plane,
             "plug_hole": self._apply_plug_hole,
+            "transform": self._apply_transform,
             # Body-level editing (BodyOperationsMixin)
             "move": self._apply_move,
             "rotate": self._apply_rotate,
@@ -827,12 +856,6 @@ class ManualCADService(BodyOperationsMixin):
             edge, status, msg = ReferenceResolver.resolve_edge(shape, r)
             if status != OperationStatus.VALID or edge is None:
                 return None, status, msg, [], []
-            
-            edge_len = edge.length
-            max_recommended_radius = edge_len * 0.8
-            if radius > edge_len:
-                diag = f"Requested fillet radius ({radius:.2f}mm) exceeds selected edge length ({edge_len:.2f}mm). Max recommended radius is ~{max_recommended_radius:.2f}mm."
-                return None, OperationStatus.GEOMETRY_FAILURE, diag, [], []
 
             resolved_edges.append(edge)
             mod_edges.append(r.transient_id)
@@ -844,6 +867,16 @@ class ManualCADService(BodyOperationsMixin):
             new_shape = bd.fillet(resolved_edges, radius=radius)
             return new_shape, OperationStatus.VALID, f"Fillet (R{radius:.2f}mm) applied successfully on {len(resolved_edges)} edge(s).", [], mod_edges
         except Exception as e:
+            try:
+                from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
+                mf = BRepFilletAPI_MakeFillet(shape.wrapped)
+                for ed in resolved_edges:
+                    mf.Add(radius, ed.wrapped)
+                mf.Build()
+                if mf.IsDone():
+                    return bd.Solid(mf.Shape()), OperationStatus.VALID, f"Fillet (R{radius:.2f}mm) applied successfully on {len(resolved_edges)} edge(s).", [], mod_edges
+            except Exception:
+                pass
             diag = f"Fillet blending failed: radius {radius:.2f}mm creates non-manifold self-intersection or topology clash: {e}"
             return None, OperationStatus.GEOMETRY_FAILURE, diag, [], []
 
@@ -865,21 +898,31 @@ class ManualCADService(BodyOperationsMixin):
             if status != OperationStatus.VALID or edge is None:
                 return None, status, msg, [], []
 
-            edge_len = edge.length
-            if distance > edge_len:
-                diag = f"Requested chamfer distance ({distance:.2f}mm) exceeds selected edge length ({edge_len:.2f}mm)."
-                return None, OperationStatus.GEOMETRY_FAILURE, diag, [], []
-
             resolved_edges.append(edge)
             mod_edges.append(r.transient_id)
 
         if not resolved_edges:
             return None, OperationStatus.INVALID_REFERENCE, "No valid edges found for chamfer operation.", [], []
 
+        dist2 = params.get("distance2")
+        use_asym = dist2 is not None and float(dist2) > 0 and float(dist2) != distance
         try:
-            new_shape = bd.chamfer(resolved_edges, length=distance)
+            if use_asym:
+                new_shape = bd.chamfer(resolved_edges, length=distance, length2=float(dist2))
+            else:
+                new_shape = bd.chamfer(resolved_edges, length=distance)
             return new_shape, OperationStatus.VALID, f"Chamfer ({distance:.2f}mm) applied successfully on {len(resolved_edges)} edge(s).", [], mod_edges
         except Exception as e:
+            try:
+                from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer
+                mc = BRepFilletAPI_MakeChamfer(shape.wrapped)
+                for ed in resolved_edges:
+                    mc.Add(distance, ed.wrapped)
+                mc.Build()
+                if mc.IsDone():
+                    return bd.Solid(mc.Shape()), OperationStatus.VALID, f"Chamfer ({distance:.2f}mm) applied successfully on {len(resolved_edges)} edge(s).", [], mod_edges
+            except Exception:
+                pass
             diag = f"Chamfer bevel failed: distance {distance:.2f}mm creates topology conflict: {e}"
             return None, OperationStatus.GEOMETRY_FAILURE, diag, [], []
 
@@ -905,10 +948,13 @@ class ManualCADService(BodyOperationsMixin):
         pos_x = float(params.get("pos_x", params.get("position", [0.0, 0.0])[0]))
         pos_y = float(params.get("pos_y", params.get("position", [0.0, 0.0])[1] if len(params.get("position", [0.0, 0.0])) > 1 else 0.0))
 
-        # Workplane based on selected face
-        center = face.center()
-        normal = face.normal_at(center)
-        workplane = bd.Plane(origin=center, z_dir=normal)
+        # Deterministic workplane based on selected face frame
+        origin_l, u_l, v_l, n_l = get_planar_face_frame(face)
+        workplane = bd.Plane(
+            origin=bd.Vector(*origin_l),
+            x_dir=bd.Vector(*u_l),
+            z_dir=bd.Vector(*n_l),
+        )
 
         # Part bounding box for through hole depth calculation
         bnd = Bnd_Box()
@@ -977,9 +1023,22 @@ class ManualCADService(BodyOperationsMixin):
         pos_y = float(params.get("pos_y", 0.0))
         rot_deg = float(params.get("rotation_deg", 0.0))
 
-        center = face.center()
-        normal = face.normal_at(center)
-        workplane = bd.Plane(origin=center, z_dir=normal)
+        # Deterministic workplane based on selected face frame
+        origin_l, u_l, v_l, n_l = get_planar_face_frame(face)
+        workplane = bd.Plane(
+            origin=bd.Vector(*origin_l),
+            x_dir=bd.Vector(*u_l),
+            z_dir=bd.Vector(*n_l),
+        )
+
+        # Part bounding box for through-all pocket depth calculation
+        bnd = Bnd_Box()
+        BRepBndLib.Add_s(shape.wrapped, bnd)
+        xmin, ymin, zmin, xmax, ymax, zmax = bnd.Get()
+        max_dim = max(xmax - xmin, ymax - ymin, zmax - zmin) * 1.5
+        if params.get("through_all") or params.get("pocket_type") == "through":
+            depth = max_dim
+        draft_deg = float(params.get("draft_deg", 0.0))
 
         try:
             if profile_shape == "circle":
@@ -1040,9 +1099,13 @@ class ManualCADService(BodyOperationsMixin):
         pos_y = float(params.get("pos_y", 0.0))
         rot_deg = float(params.get("rotation_deg", 0.0))
 
-        center = face.center()
-        normal = face.normal_at(center)
-        workplane = bd.Plane(origin=center, z_dir=normal)
+        # Deterministic workplane based on selected face frame
+        origin_l, u_l, v_l, n_l = get_planar_face_frame(face)
+        workplane = bd.Plane(
+            origin=bd.Vector(*origin_l),
+            x_dir=bd.Vector(*u_l),
+            z_dir=bd.Vector(*n_l),
+        )
 
         try:
             if profile_shape == "circle":
@@ -1233,28 +1296,27 @@ class ManualCADService(BodyOperationsMixin):
         loc = cyl.Location()
         axis = cyl.Axis().Direction()
 
-        # Determine bore extent from bounding box of the cylindrical face
-        bnd = Bnd_Box()
-        BRepBndLib.Add_s(face.wrapped, bnd)
-        xmin, ymin, zmin, xmax, ymax, zmax = bnd.Get()
-        pts = list(itertools.product([xmin, xmax], [ymin, ymax], [zmin, zmax]))
-        t_vals = [
-            (px - loc.X()) * axis.X() + (py - loc.Y()) * axis.Y() + (pz - loc.Z()) * axis.Z()
-            for px, py, pz in pts
-        ]
-        t_min = min(t_vals) - 0.2
-        t_max = max(t_vals) + 0.2
-        bore_len = t_max - t_min
+        # Determine bore extent from UV bounds (no axis-aligned bbox or ±0.2mm extension)
+        try:
+            from OCP.BRepTools import BRepTools
+            _, _, vmin, vmax = BRepTools.UVBounds_s(face.wrapped)
+            bore_len = abs(vmax - vmin)
+            v_mid = (vmin + vmax) / 2.0
+            plug_origin = bd.Vector(loc.X(), loc.Y(), loc.Z()) + bd.Vector(axis.X(), axis.Y(), axis.Z()) * v_mid
+        except Exception:
+            bnd = Bnd_Box()
+            BRepBndLib.Add_s(face.wrapped, bnd)
+            xmin, ymin, zmin, xmax, ymax, zmax = bnd.Get()
+            bore_len = max(xmax - xmin, ymax - ymin, zmax - zmin)
+            plug_origin = face.center()
 
-        origin = bd.Vector(loc.X(), loc.Y(), loc.Z())
         z_dir = bd.Vector(axis.X(), axis.Y(), axis.Z())
-        plug_origin = origin + z_dir * t_min
         workplane = bd.Plane(origin=plug_origin, z_dir=z_dir)
 
         try:
-            # Create a solid cylinder matching the bore
-            plug = bd.Cylinder(radius=radius, height=bore_len)
-            plug = plug.located(workplane.location * bd.Location(bd.Vector(0, 0, bore_len / 2.0)))
+            # Create a solid cylinder matching the bore exactly
+            plug = bd.Cylinder(radius=radius + 1e-4, height=bore_len)
+            plug = plug.located(workplane.location)
 
             # Union to fill the bore
             result = shape + plug
@@ -1616,6 +1678,168 @@ class ManualCADService(BodyOperationsMixin):
             (feat_dir / f"{revision_id}.json").unlink(missing_ok=True)
         else:
             for f in feat_dir.glob("*.json"):
+                try:
+                    f.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    def get_parameters(self, session_id: str, revision_id: Optional[str] = None) -> ModelParametersResponse:
+        """
+        Analyze active solid revision to extract primitive classification,
+        mass properties, and detected parametric feature tree.
+        Cached per (session_id, revision_id).
+        """
+        sdir = self._get_session_dir(session_id)
+        if not revision_id:
+            topo = self.get_topology(session_id, None)
+            revision_id = topo.active_revision_id
+
+        param_cache_path = sdir / "params_cache" / f"{revision_id}.json"
+        if param_cache_path.exists():
+            try:
+                data = json.loads(param_cache_path.read_text())
+                return ModelParametersResponse(**data)
+            except Exception:
+                pass
+
+        shape = self.load_revision_shape(session_id, revision_id)
+
+        # 1. Mass properties & B-Rep counts
+        val_report = BRepValidator.validate_shape(shape)
+        bb = shape.bounding_box()
+        extents = [round(bb.max.X - bb.min.X, 3), round(bb.max.Y - bb.min.Y, 3), round(bb.max.Z - bb.min.Z, 3)]
+
+        props_v = GProp_GProps()
+        BRepGProp.VolumeProperties_s(shape.wrapped, props_v)
+        vol = max(0.0, float(props_v.Mass()))
+        cm = props_v.CentreOfMass()
+        com = [round(cm.X(), 3), round(cm.Y(), 3), round(cm.Z(), 3)]
+
+        props_s = GProp_GProps()
+        BRepGProp.SurfaceProperties_s(shape.wrapped, props_s)
+        surf_area = max(0.0, float(props_s.Mass()))
+
+        mass_props = MassProperties(
+            volume=round(vol, 3),
+            surface_area=round(surf_area, 3),
+            center_of_mass=com,
+            bbox_extents=extents,
+            solid_count=len(shape.solids()),
+            face_count=len(shape.faces()),
+            edge_count=len(shape.edges()),
+            is_valid=val_report.is_valid,
+        )
+
+        # 2. Primitive classification
+        base_solid = self._classify_base_solid(shape, extents, vol)
+
+        # 3. Parametric features
+        detected = FeatureService.detect_features(shape)
+        extracted: List[ExtractedFeature] = []
+        for feat in detected:
+            params_dict = {p.key: p.value for p in feat.params}
+            pos_uv = [round(feat.center[0], 2), round(feat.center[1], 2)] if feat.center else None
+            extracted.append(ExtractedFeature(
+                feature_id=feat.feature_id,
+                kind=feat.kind,
+                subtype=feat.subtype,
+                parameters=params_dict,
+                position_uv=pos_uv,
+                parent_face_id=feat.face_ids[0] if feat.face_ids else None,
+                face_ids=feat.face_ids,
+                confidence=feat.confidence,
+            ))
+
+        resp = ModelParametersResponse(
+            session_id=session_id,
+            revision_id=revision_id,
+            base_solid=base_solid,
+            features=extracted,
+            mass_properties=mass_props,
+        )
+
+        try:
+            param_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            param_cache_path.write_text(resp.model_dump_json(indent=2))
+        except Exception:
+            pass
+
+        return resp
+
+    def _classify_base_solid(self, shape: bd.Shape, extents: List[float], volume: float) -> BaseSolidClassification:
+        dx, dy, dz = extents[0], extents[1], extents[2]
+        bbox_vol = max(1e-6, dx * dy * dz)
+        faces = list(shape.faces())
+        num_faces = len(faces)
+
+        # Check Box: 6 planar faces, volume fills bbox >= 0.95
+        if num_faces == 6:
+            all_planar = all(f.geom_type == bd.GeomType.PLANE for f in faces)
+            if all_planar and (volume / bbox_vol) > 0.95:
+                return BaseSolidClassification(
+                    primitive="box",
+                    parameters={"length": dx, "width": dy, "height": dz},
+                    confidence=0.98,
+                )
+
+        # Check Cylinder: 1 or 2 cylinder faces + 2 planar caps
+        cyl_faces = [f for f in faces if f.geom_type == bd.GeomType.CYLINDER]
+        plane_faces = [f for f in faces if f.geom_type == bd.GeomType.PLANE]
+        if (len(cyl_faces) in (1, 2)) and len(plane_faces) == 2:
+            from OCP.BRepAdaptor import BRepAdaptor_Surface
+            surf = BRepAdaptor_Surface(cyl_faces[0].wrapped)
+            r = surf.Cylinder().Radius()
+            return BaseSolidClassification(
+                primitive="cylinder",
+                parameters={"diameter": round(2 * r, 3), "height": dz if abs(dz - 2 * r) > 1e-2 else min(dx, dy, dz)},
+                confidence=0.95,
+            )
+
+        # Check Sphere: 1 or 2 sphere faces
+        sphere_faces = [f for f in faces if f.geom_type == bd.GeomType.SPHERE]
+        if len(sphere_faces) in (1, 2) and len(plane_faces) == 0:
+            from OCP.BRepAdaptor import BRepAdaptor_Surface
+            surf = BRepAdaptor_Surface(sphere_faces[0].wrapped)
+            r = surf.Sphere().Radius()
+            return BaseSolidClassification(
+                primitive="sphere",
+                parameters={"diameter": round(2 * r, 3)},
+                confidence=0.95,
+            )
+
+        # Check Cone
+        cone_faces = [f for f in faces if f.geom_type == bd.GeomType.CONE]
+        if cone_faces and len(plane_faces) in (1, 2):
+            return BaseSolidClassification(
+                primitive="cone",
+                parameters={"height": dz, "base_diameter": max(dx, dy)},
+                confidence=0.9,
+            )
+
+        # Check Prism (all planar)
+        if all(f.geom_type == bd.GeomType.PLANE for f in faces):
+            return BaseSolidClassification(
+                primitive="prism",
+                parameters={"length": dx, "width": dy, "height": dz, "faces": num_faces},
+                confidence=0.85,
+            )
+
+        return BaseSolidClassification(
+            primitive="freeform",
+            parameters={"bbox_length": dx, "bbox_width": dy, "bbox_height": dz},
+            confidence=0.7,
+        )
+
+    def invalidate_parameters_cache(self, session_id: str, revision_id: Optional[str] = None) -> None:
+        """Invalidate extracted model parameters cache when shape revisions change."""
+        sdir = self._get_session_dir(session_id)
+        pdir = sdir / "params_cache"
+        if not pdir.exists():
+            return
+        if revision_id:
+            (pdir / f"{revision_id}.json").unlink(missing_ok=True)
+        else:
+            for f in pdir.glob("*.json"):
                 try:
                     f.unlink(missing_ok=True)
                 except Exception:

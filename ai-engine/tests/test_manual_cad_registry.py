@@ -21,7 +21,7 @@ def box_session(manual_cad_service):
 
 def test_registry_unknown_type(box_session):
     session_id, service = box_session
-    req = PreviewRequest(
+    req = PreviewRequest.model_construct(
         session_id=session_id,
         base_revision="rev_000",
         operation_type="unknown_magic",

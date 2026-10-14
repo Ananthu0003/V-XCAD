@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 from pathlib import Path
-from typing import List, Optional
+import shutil
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel
 
 from app.models.cad_modification import (
     AiPlanRequest,
@@ -21,6 +24,7 @@ from app.models.cad_modification import (
     DfmAnalysisResult,
     MeasureRequest,
     MeasureResult,
+    ModelParametersResponse,
     PreviewRequest,
     PreviewResult,
     RecomputeRequest,
@@ -35,6 +39,14 @@ from app.models.cad_modification import (
     GeometryContext,
 )
 from app.services.geometry.manual_cad_service import BASE_STORAGE_DIR, ManualCADService
+
+
+class ImportStepRequest(BaseModel):
+    session_id: str
+    filename: Optional[str] = None
+    step_base64: Optional[str] = None
+    source_step: Optional[str] = None
+
 
 router = APIRouter(prefix="/cad/modify", tags=["manual-cad"])
 cad_service = ManualCADService()
@@ -55,7 +67,7 @@ async def recompute_history(request: RecomputeRequest) -> RecomputeResult:
 async def get_topology(
     session_id: str,
     revision_id: str = Query("rev_000", description="Target revision ID"),
-    source_step: str = Query(None, description="Optional path to source STEP model"),
+    source_step: Optional[str] = Query(None, description="Optional path to source STEP model"),
     force_sync: bool = Query(False, description="Force re-syncing from source STEP")
 ) -> TopologyDataResponse:
     """Retrieve geometric references and topology map for 3D viewport raycast selection."""
@@ -187,17 +199,6 @@ async def get_session_file(session_id: str, path: str):
     return FileResponse(file_path, media_type=media_type)
 
 
-from pydantic import BaseModel
-import shutil
-import base64
-
-
-class ImportStepRequest(BaseModel):
-    session_id: str
-    filename: Optional[str] = None
-    step_base64: Optional[str] = None
-
-
 @router.post("/import-step")
 async def import_step_model(request: ImportStepRequest):
     """
@@ -231,7 +232,10 @@ async def import_step_model(request: ImportStepRequest):
                 pass
             base_step = rev0_step
         else:
-            candidate_paths = [
+            candidate_paths = []
+            if request.source_step:
+                candidate_paths.append(Path(request.source_step))
+            candidate_paths.extend([
                 Path("/app/outputs") / f"cad_{session_id}.step",
                 Path("/app/outputs") / f"cad_{session_id}.stp",
                 outputs_dir / f"cad_{session_id}.step",
@@ -239,7 +243,7 @@ async def import_step_model(request: ImportStepRequest):
                 Path(__file__).resolve().parents[2] / "outputs" / f"cad_{session_id}.step",
                 Path("outputs") / f"cad_{session_id}.step",
                 rev0_step,
-            ]
+            ])
             for p in candidate_paths:
                 if p.exists():
                     base_step = p
@@ -380,4 +384,19 @@ async def select_more_entities(request: SelectMoreRequest) -> SelectMoreResponse
         return await asyncio.to_thread(cad_service.select_more, request)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Selection expansion failed: {exc}")
+
+
+@router.get("/parameters/{session_id}", response_model=ModelParametersResponse)
+async def get_parameters(
+    session_id: str,
+    revision: Optional[str] = Query(None, description="Target revision ID (defaults to active)"),
+) -> ModelParametersResponse:
+    """
+    Extract base solid classification, parametric feature tree, and mass properties.
+    """
+    try:
+        cad_service.initialize_session_if_needed(session_id)
+        return await asyncio.to_thread(cad_service.get_parameters, session_id, revision)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to extract parameters: {exc}")
 
