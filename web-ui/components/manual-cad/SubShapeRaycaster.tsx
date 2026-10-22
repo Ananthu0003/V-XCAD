@@ -217,16 +217,6 @@ export function SubShapeRaycaster({
 }: SubShapeRaycasterProps) {
   const [localHovered, setLocalHovered] = useState<string | null>(null);
 
-  const activeHover = hoveredEntity?.transient_id || localHovered;
-
-  if (!topology) return null;
-
-  const faces = Object.values(topology.faces || {}) as any[];
-  const edges = Object.values(topology.edges || {}) as any[];
-
-  const showFaces = selectionMode === 'face' || selectionMode === 'all' || selectionMode === 'body';
-  const showEdges = selectionMode === 'edge' || selectionMode === 'all';
-
   const hlFaceSet = useMemo(() => new Set(highlightedFaceIds || []), [highlightedFaceIds]);
   const selectedFaceSet = useMemo(() => {
     const s = new Set<string>();
@@ -255,6 +245,16 @@ export function SubShapeRaycaster({
     }
     return s;
   }, [selectedEntity, selectedEntities]);
+
+  const activeHover = hoveredEntity?.transient_id || localHovered;
+
+  if (!topology) return null;
+
+  const faces = Object.values(topology.faces || {}) as any[];
+  const edges = Object.values(topology.edges || {}) as any[];
+
+  const showFaces = selectionMode === 'face' || selectionMode === 'all' || selectionMode === 'body';
+  const showEdges = selectionMode === 'edge' || selectionMode === 'all';
 
   return (
     <group name="sub-shape-raycaster">
