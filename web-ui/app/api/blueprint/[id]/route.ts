@@ -110,7 +110,7 @@ export async function GET(
 		return new NextResponse(blob, {
 			headers: {
 				'Content-Type': 'image/png',
-				'Cache-Control': 'private, no-store',
+				'Cache-Control': 'private, max-age=3600',
 			},
 		});
 	} catch (e) {

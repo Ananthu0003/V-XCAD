@@ -346,7 +346,7 @@ const SOURCES = ['app', 'components', 'lib', 'store', 'types', 'proxy.ts', 'next
   .map((p) => path.join(ROOT, p))
   .filter((p) => fs.existsSync(p))
   .flatMap((p) => (fs.statSync(p).isDirectory() ? walk(p) : [p]));
-const rel = (p: string) => path.relative(ROOT, p);
+const rel = (p: string) => path.relative(ROOT, p).replace(/\\/g, '/');
 
 describe('static guards — the service key is server-only', () => {
   it('scans a non-trivial source tree (guards against an empty glob)', () => {
@@ -389,14 +389,14 @@ describe('static guards — the service key is server-only', () => {
 
   it('only server route handlers / server code import the helper', () => {
     const importers = SOURCES.filter((f) => /from ['"]@\/lib\/aiEngine['"]/.test(fs.readFileSync(f, 'utf8'))).map(rel);
-    expect(importers.length).toBe(14);
+    expect(importers.length).toBe(16);
     for (const f of importers) expect(f).toMatch(/^app\/api\/.+\/route\.ts$/);
   });
 
   it('every route that talks to the engine uses aiEngineFetch and contains no raw fetch()', () => {
     const engineRoutes = SOURCES.filter((f) => /^app\/api\/.+\/route\.ts$/.test(rel(f)))
       .filter((f) => /FASTAPI_URL|getFastApiUrl/.test(fs.readFileSync(f, 'utf8')));
-    expect(engineRoutes.length).toBe(14);
+    expect(engineRoutes.length).toBe(16);
     for (const f of engineRoutes) {
       const src = fs.readFileSync(f, 'utf8');
       expect(src).toContain('aiEngineFetch(');

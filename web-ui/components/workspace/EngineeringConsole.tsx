@@ -26,6 +26,7 @@ interface EngineeringConsoleProps {
   setCamSetup: (v: SetupSettings) => void;
   camSetups?: any[];
   activeSetupId?: string | null;
+  setActiveSetupId?: (v: string | null) => void;
   // Tools
   camTools: Tool[];
   setCamTools: (v: Tool[]) => void;
@@ -71,6 +72,7 @@ type TabType = 'setup' | 'features' | 'tools' | 'holders' | 'params' | 'simulati
 export function EngineeringConsole(props: EngineeringConsoleProps) {
   const [activeTab, setActiveTab] = useState<TabType>('setup');
   const [gcodeViewMode, setGcodeViewMode] = useState<'iso' | 'klartext'>('klartext');
+  const [opsViewMode, setOpsViewMode] = useState<'table' | 'tree'>('table');
 
   const tabs = [
     { id: 'setup', label: 'SETUP', icon: <Settings /> },
@@ -222,70 +224,197 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                 />
               </div>
               <div className="flex flex-col gap-4">
-                <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Operations Plan</h3>
-                <OperationPlanningTable 
-                  operations={props.camOperations} 
-                  camValidation={props.camValidation} 
-                  camSetups={props.camSetups} 
-                  tools={props.camTools}
-                  selectedOperationIds={props.selectedOperationIds}
-                  features={props.camFeatures}
-                  onToggleOperation={(opId) => {
-                    if (props.selectedOperationIds && props.setSelectedOperationIds) {
-                      const newSet = new Set(props.selectedOperationIds);
-                      if (newSet.has(opId)) newSet.delete(opId);
-                      else newSet.add(opId);
-                      props.setSelectedOperationIds(newSet);
-                    }
-                  }}
-                  onToggleAll={(selectAll) => {
-                    if (props.setSelectedOperationIds) {
-                      if (selectAll) {
-                        props.setSelectedOperationIds(new Set(props.camOperations.map(o => o.id)));
-                      } else {
-                        props.setSelectedOperationIds(new Set());
+                <div className="flex justify-between items-center">
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Operations Plan</h3>
+                  <div className="flex items-center gap-1 bg-white/5 rounded-lg p-0.5 border border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => setOpsViewMode('table')}
+                      className={cn(
+                        "px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all",
+                        opsViewMode === 'table' ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-white"
+                      )}
+                    >
+                      Table View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOpsViewMode('tree')}
+                      className={cn(
+                        "px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all",
+                        opsViewMode === 'tree' ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-white"
+                      )}
+                    >
+                      Tree View
+                    </button>
+                  </div>
+                </div>
+
+                {opsViewMode === 'table' ? (
+                  <OperationPlanningTable 
+                    operations={props.camOperations} 
+                    camValidation={props.camValidation} 
+                    camSetups={props.camSetups} 
+                    tools={props.camTools}
+                    selectedOperationIds={props.selectedOperationIds}
+                    features={props.camFeatures}
+                    onToggleOperation={(opId) => {
+                      if (props.selectedOperationIds && props.setSelectedOperationIds) {
+                        const newSet = new Set(props.selectedOperationIds);
+                        if (newSet.has(opId)) newSet.delete(opId);
+                        else newSet.add(opId);
+                        props.setSelectedOperationIds(newSet);
                       }
-                    }
-                  }}
-                  onChange={(opId, updates) => {
-                    const newOps = [...props.camOperations];
-                    const idx = newOps.findIndex(o => o.id === opId);
-                    if (idx >= 0) {
-                      let opUpdates = { ...updates };
-                      
-                      // Auto-populate depth cut params on tool change
-                      if (opUpdates.toolId) {
-                          const tool = props.camTools.find(t => t.id === opUpdates.toolId || (t as any).dbId === opUpdates.toolId) || (opUpdates as any).tool;
-                          if (tool && tool.diameter) {
-                              const currentParams = newOps[idx].parameters || {} as any;
-                              const cd = tool.cuttingData || {};
-                              opUpdates.parameters = {
-                                  ...currentParams,
-                                  // Use exact manufacturer data if available, else fallback to safe baseline
-                                  maxStepdown: cd.optimalStepdown ?? (Math.round(tool.diameter * 0.5 * 100) / 100),
-                                  finishStepdown: cd.optimalStepdown ?? tool.diameter, 
-                                  finishCuts: 1,
-                                  stepoverPercentage: cd.optimalStepoverPercentage ?? 40,
-                                  ...(cd.optimalStepover ? { stepover: cd.optimalStepover } : {})
-                              };
-                              
-                              // Clear blocked status if it was blocked due to missing tool
-                              if (newOps[idx].status === 'blocked') {
-                                  opUpdates.status = 'generated';
-                                  opUpdates.errorReason = '';
-                                  if (opUpdates.parameters) {
-                                      opUpdates.parameters.error = '';
-                                      opUpdates.parameters.errorReason = '';
-                                  }
-                              }
+                    }}
+                    onToggleAll={(selectAll) => {
+                      if (props.setSelectedOperationIds) {
+                        if (selectAll) {
+                          props.setSelectedOperationIds(new Set(props.camOperations.map(o => o.id)));
+                        } else {
+                          props.setSelectedOperationIds(new Set());
+                        }
+                      }
+                    }}
+                    onChange={(opId, updates) => {
+                      const newOps = [...props.camOperations];
+                      const idx = newOps.findIndex(o => o.id === opId);
+                      if (idx >= 0) {
+                        let opUpdates = { ...updates };
+                        
+                        // Auto-populate depth cut params on tool change
+                        if (opUpdates.toolId) {
+                            const tool = props.camTools.find(t => t.id === opUpdates.toolId || (t as any).dbId === opUpdates.toolId) || (opUpdates as any).tool;
+                            if (tool && tool.diameter) {
+                                const currentParams = newOps[idx].parameters || {} as any;
+                                const cd = tool.cuttingData || {};
+                                opUpdates.parameters = {
+                                    ...currentParams,
+                                    // Use exact manufacturer data if available, else fallback to safe baseline
+                                    maxStepdown: cd.optimalStepdown ?? (Math.round(tool.diameter * 0.5 * 100) / 100),
+                                    finishStepdown: cd.optimalStepdown ?? tool.diameter, 
+                                    finishCuts: 1,
+                                    stepoverPercentage: cd.optimalStepoverPercentage ?? 40,
+                                    ...(cd.optimalStepover ? { stepover: cd.optimalStepover } : {})
+                                };
+                                
+                                // Clear blocked status if it was blocked due to missing tool
+                                if (newOps[idx].status === 'blocked') {
+                                    opUpdates.status = 'generated';
+                                    opUpdates.errorReason = '';
+                                    if (opUpdates.parameters) {
+                                        opUpdates.parameters.error = '';
+                                        opUpdates.parameters.errorReason = '';
+                                    }
+                                }
+                            }
+                        }
+                        
+                        newOps[idx] = { ...newOps[idx], ...opUpdates };
+                        props.setCamOperations(newOps);
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="h-[460px]">
+                    <OperationTreeSection
+                      operations={props.camOperations}
+                      activeOperationId={props.activeOperationId}
+                      setups={props.camSetups}
+                      activeSetupId={props.activeSetupId}
+                      onSelectSetup={(setupId) => props.setActiveSetupId?.(setupId)}
+                      onSelect={(id) => props.setActiveOperationId(id)}
+                      onAdd={(type, setupId) => {
+                        const id = `op_${Date.now()}`;
+                        const targetSetupId = setupId || props.activeSetupId || props.camSetups?.[0]?.setupId || 'setup_001';
+                        const firstTool = props.camTools[0];
+                        const newOp: CamOperation = {
+                          id,
+                          name: `New ${type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}`,
+                          type,
+                          toolId: firstTool?.id || 'T1',
+                          tool: firstTool,
+                          setup_id: targetSetupId,
+                          status: 'generated',
+                          parameters: {
+                            feedRate: 800,
+                            plungeRate: 200,
+                            maxStepdown: 1.0,
+                            totalDepth: 5.0,
+                            spindleSpeed: 10000,
+                            stepoverPercentage: 40,
+                            tolerance: 0.01,
+                            coolant: 'flood'
                           }
-                      }
-                      
-                      newOps[idx] = { ...newOps[idx], ...opUpdates };
-                      props.setCamOperations(newOps);
-                    }
-                  }}
-                />
+                        };
+                        props.setCamOperations([...props.camOperations, newOp]);
+                        props.setActiveOperationId(id);
+                        if (props.setSelectedOperationIds) {
+                          props.setSelectedOperationIds(new Set([...props.selectedOperationIds, id]));
+                        }
+                      }}
+                      onDelete={(id) => {
+                        const newOps = props.camOperations.filter(op => op.id !== id);
+                        props.setCamOperations(newOps);
+                        if (props.activeOperationId === id) {
+                          props.setActiveOperationId(newOps[0]?.id || null);
+                        }
+                      }}
+                      onDuplicate={(id) => {
+                        const op = props.camOperations.find(o => o.id === id);
+                        if (!op) return;
+                        const newId = `op_${Date.now()}`;
+                        const duplicated: CamOperation = {
+                          ...op,
+                          id: newId,
+                          name: `${op.name} (Copy)`,
+                        };
+                        const idx = props.camOperations.findIndex(o => o.id === id);
+                        const newOps = [...props.camOperations];
+                        newOps.splice(idx + 1, 0, duplicated);
+                        props.setCamOperations(newOps);
+                        props.setActiveOperationId(newId);
+                      }}
+                      onMove={(id, direction) => {
+                        const idx = props.camOperations.findIndex(o => o.id === id);
+                        if (idx === -1) return;
+                        const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+                        if (targetIdx < 0 || targetIdx >= props.camOperations.length) return;
+                        const newOps = [...props.camOperations];
+                        const [moved] = newOps.splice(idx, 1);
+                        newOps.splice(targetIdx, 0, moved);
+                        props.setCamOperations(newOps);
+                      }}
+                      onToggleEnable={(id) => {
+                        const newOps = props.camOperations.map(op => {
+                          if (op.id === id) {
+                            return { ...op, enabled: op.enabled === false ? true : false };
+                          }
+                          return op;
+                        });
+                        props.setCamOperations(newOps);
+                      }}
+                      onRegenerate={() => {
+                        props.onGenerateToolpaths();
+                      }}
+                      onReorder={(sourceIndex, destIndex, setupId) => {
+                        if (setupId) {
+                          const setupOps = props.camOperations.filter(op => (op.setup_id || (op as any).setupId || 'setup_001') === setupId);
+                          const otherOps = props.camOperations.filter(op => (op.setup_id || (op as any).setupId || 'setup_001') !== setupId);
+                          if (sourceIndex >= 0 && sourceIndex < setupOps.length && destIndex >= 0 && destIndex < setupOps.length) {
+                            const [moved] = setupOps.splice(sourceIndex, 1);
+                            setupOps.splice(destIndex, 0, moved);
+                            props.setCamOperations([...setupOps, ...otherOps]);
+                          }
+                        } else {
+                          const newOps = [...props.camOperations];
+                          const [moved] = newOps.splice(sourceIndex, 1);
+                          newOps.splice(destIndex, 0, moved);
+                          props.setCamOperations(newOps);
+                        }
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           )}

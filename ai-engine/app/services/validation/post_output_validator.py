@@ -44,11 +44,11 @@ class PostOutputValidator:
             if not line:
                 continue
                 
-            if 'M06' in line or 'M6' in line:
+            if 'M06' in line or 'M6' in line or 'TOOL CALL' in line or 'T=' in line:
                 has_tool_change = True
-            if 'M03' in line or 'M3' in line:
+            if 'M03' in line or 'M3' in line or ('TOOL CALL' in line and 'S' in line):
                 has_spindle_start = True
-            if 'G43' in line:
+            if 'G43' in line or 'D1' in line or ('TOOL CALL' in line and 'Z' in line):
                 has_tool_offset = True
                 z_match = re.search(r'Z([-\d\.]+)', line)
                 if z_match:
@@ -56,11 +56,11 @@ class PostOutputValidator:
 
             if 'M08' in line or 'M8' in line:
                 coolant_started = True
-            if 'M09' in line or 'M9' in line:
+            if 'M09' in line or 'M9' in line or 'M30' in line or 'M02' in line or 'M2' in line or 'END PGM' in line:
                 coolant_stopped = True
-            if 'M05' in line or 'M5' in line:
+            if 'M05' in line or 'M5' in line or 'M30' in line or 'M02' in line or 'M2' in line or 'END PGM' in line:
                 spindle_stopped = True
-            if 'M30' in line:
+            if 'M30' in line or 'M02' in line or 'M2' in line or 'END PGM' in line:
                 program_ended = True
                 
             # Safety check: cutting moves before setup
@@ -76,27 +76,45 @@ class PostOutputValidator:
                 if z_match:
                     current_z = float(z_match.group(1))
 
-            # Find global min_retract
-            min_retract = 5.0 # fallback
+            # Determine true minimum safe retract height from operations or toolpath segments
+            retracts = []
             if operations:
-                retracts = [op.get('safe_heights', {}).get('retract', 5.0) for op in operations if op.get('safe_heights')]
-                if retracts:
-                    min_retract = min(retracts)
+                for op in operations:
+                    if not isinstance(op, dict):
+                        continue
+                    sh = op.get('safe_heights') or op.get('parameters', {}).get('safe_heights')
+                    if isinstance(sh, dict):
+                        if 'retract' in sh and sh['retract'] is not None:
+                            retracts.append(float(sh['retract']))
+                        if 'clearance' in sh and sh['clearance'] is not None:
+                            retracts.append(float(sh['clearance']))
+                    params = op.get('parameters', {})
+                    if 'retract_z' in params and params['retract_z'] is not None:
+                        retracts.append(float(params['retract_z']))
+                    if 'clearance_z' in params and params['clearance_z'] is not None:
+                        retracts.append(float(params['clearance_z']))
+                    # Inspect actual toolpath segments if present
+                    for seg in op.get('toolpaths', []):
+                        if isinstance(seg, dict) and seg.get('moveType') in ('retract_clearance', 'rapid_clearance'):
+                            end_z = seg.get('end', {}).get('z')
+                            if end_z is not None:
+                                retracts.append(float(end_z))
 
-            # Safe Z check for G0 moves
+            min_retract = min(retracts) if retracts else 0.0
+
+            # Safe Z check for G0 moves (cannot rapid into solid workpiece or fixtures)
             if 'G00' in line or 'G0 ' in line or line.endswith('G0'):
-                # Find Z coordinate if any
                 z_match = re.search(r'Z([-\d\.]+)', line)
                 if z_match:
                     z_val = float(z_match.group(1))
                     current_z = z_val
-                    
+
                     if 'G53' in line:
                         if z_val < -500.0:
                             return {"valid": False, "reason": f"Unsafe machine-coordinate rapid move: Z below machine limit on line: {line}"}
                     else:
-                        if z_val < -1000.0: # relaxed
-                            return {"valid": False, "reason": f"Unsafe G0 rapid move below retract_z ({z_val} < {min_retract}) at line: {line}"}
+                        if z_val < (min_retract - 0.05):
+                            return {"valid": False, "reason": f"Unsafe G0 rapid plunge below safe retract plane ({z_val} < {min_retract}) at line: {line}"}
 
                 # XY Check
                 x_match = re.search(r'X([-\d\.]+)', line)
@@ -104,8 +122,8 @@ class PostOutputValidator:
                 if (x_match or y_match) and 'G53' not in line:
                     if current_z is None:
                         return {"valid": False, "reason": f"Unsafe rapid XY move before a known safe Z height is established: {line}"}
-                    if current_z < -1000.0: # relaxed
-                        return {"valid": False, "reason": f"Unsafe rapid XY move while Z ({current_z}) is below retract_z ({min_retract}): {line}"}
+                    if current_z < (min_retract - 0.05):
+                        return {"valid": False, "reason": f"Unsafe rapid XY move while Z ({current_z}) is below safe retract plane ({min_retract}): {line}"}
                     
         # Check trailers
         if not spindle_stopped:

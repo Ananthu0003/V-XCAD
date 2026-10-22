@@ -547,11 +547,11 @@ export default function HitlWorkspace() {
 	}, [camFeatures, parameters, defaultSetupMetadata, geometryInfo]);
 
 
-	// Restore session from URL search params if ?session=<id> is present on mount
+	// Restore session from URL search params if ?session=<id> or ?session_id=<id> is present on mount
 	useEffect(() => {
 		if (typeof window === 'undefined') return;
 		const urlParams = new URLSearchParams(window.location.search);
-		const initialSessionId = urlParams.get('session');
+		const initialSessionId = urlParams.get('session_id') || urlParams.get('session');
 		if (initialSessionId && !sessionId) {
 			fetch(`/api/sessions/${initialSessionId}`)
 				.then((res) => (res.ok ? res.json() : null))
@@ -699,8 +699,9 @@ export default function HitlWorkspace() {
 		}
 
 		const localUrl = URL.createObjectURL(file);
-		const newSessionId = `step_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+		const newSessionId = `step-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
 
+		setSessionId(newSessionId);
 		setStepUrl(localUrl);
 		setDxfUrl(null);
 		setGcodeUrl(null);
@@ -710,17 +711,9 @@ export default function HitlWorkspace() {
 		setParameters({});
 		setToolpaths(null);
 		setSourceFilename(file.name);
-		setStatusText(`Loaded: ${file.name}`);
+		setStatusText(`Tessellating 3D solid model: ${file.name}...`);
+		setIsGenerating(true);
 		setWorkflowStage('cad');
-
-		// Create a CAD revision for the imported STEP solid model
-		recordRevision({
-			title: `Imported STEP (${file.name})`,
-			description: `Direct 3D STEP B-Rep solid model (${(file.size / (1024 * 1024)).toFixed(2)} MB)`,
-			script: '',
-			params: {},
-			step: localUrl,
-		});
 
 		// Log into chat conversation
 		setMessages((prev) => [
@@ -734,15 +727,15 @@ export default function HitlWorkspace() {
 			{
 				id: makeId('assistant'),
 				role: 'assistant',
-				content: `Successfully loaded **${file.name}** into the 3D workspace. The solid STEP B-Rep geometry is now available for direct inspection, face/edge selection, and CAM toolpath generation.`,
+				content: `Processing **${file.name}**... Tessellating solid B-Rep geometry for 3D inspection and CAM toolpath generation.`,
 			},
 		]);
 
-		toast.success(`Imported ${file.name}`, {
-			description: '3D STEP solid model loaded into workspace',
+		toast.info(`Importing ${file.name}`, {
+			description: 'Tessellating 3D solid model...',
 		});
 
-		// Sync session to backend
+		// Sync session to backend and tessellate STL for 3D rendering
 		try {
 			const fd = new FormData();
 			fd.append('file', file);
@@ -753,21 +746,53 @@ export default function HitlWorkspace() {
 			});
 			if (res.ok) {
 				const data = await res.json();
-				if (data.sessionId) {
-					setSessionId(data.sessionId);
-					if (data.stepUrl) {
-						setStepUrl(data.stepUrl);
-					}
-					if (data.stlUrl) {
-						setStlUrl(data.stlUrl);
-					}
-					if (typeof window !== 'undefined') {
-						window.history.replaceState(null, '', `/workspace?session_id=${data.sessionId}`);
-					}
+				const effectiveSessionId = data.sessionId || newSessionId;
+				const effectiveStl = data.stlUrl || `/api/outputs/cad_${effectiveSessionId}.stl`;
+				const effectiveStep = data.stepUrl || localUrl;
+
+				setSessionId(effectiveSessionId);
+				setStepUrl(effectiveStep);
+				setStlUrl(effectiveStl);
+				setStatusText(`Loaded: ${file.name}`);
+
+				// Create a CAD revision for the imported STEP solid model with the tessellated STL
+				recordRevision({
+					title: `Imported STEP (${file.name})`,
+					description: `Direct 3D STEP B-Rep solid model (${(file.size / (1024 * 1024)).toFixed(2)} MB)`,
+					script: '',
+					params: {},
+					step: effectiveStep,
+					stl: effectiveStl,
+				});
+
+				setMessages((prev) => [
+					...prev.slice(0, -1),
+					{
+						id: makeId('assistant'),
+						role: 'assistant',
+						content: `Successfully loaded **${file.name}** into the 3D workspace. The solid STEP B-Rep geometry is now available for direct inspection, face/edge selection, and CAM toolpath generation.`,
+					},
+				]);
+
+				toast.success(`Imported ${file.name}`, {
+					description: '3D STEP solid model loaded into workspace',
+				});
+
+				if (typeof window !== 'undefined') {
+					window.history.replaceState(null, '', `/workspace?session_id=${effectiveSessionId}`);
 				}
+			} else {
+				const errData = await res.json().catch(() => ({}));
+				const errMsg = errData?.error?.message || `Server returned ${res.status}`;
+				toast.error('Failed to import STEP file', { description: errMsg });
+				setStatusText(`Import failed: ${errMsg}`);
 			}
-		} catch (err) {
+		} catch (err: any) {
 			console.warn('Backend session persistence skipped:', err);
+			toast.error('Failed to import STEP file', { description: err?.message || 'Network error' });
+			setStatusText('Import failed');
+		} finally {
+			setIsGenerating(false);
 		}
 	}, [recordRevision]);
 
@@ -919,14 +944,32 @@ export default function HitlWorkspace() {
 	}, [pythonScript]);
 
 	useEffect(() => {
-		if (toolpaths) {
+		if (toolpaths && toolpaths.length > 0) {
+			const currentSetupId = activeSetupId || camSetups[0]?.setupId || camSetups[0]?.id;
 			let filteredSegments = toolpaths;
-			if (selectedOperationIds && selectedOperationIds.size > 0) {
-				filteredSegments = toolpaths.filter(t => selectedOperationIds.has(t.operationId));
-			} else {
-				const currentSetupId = activeSetupId || camSetups[0]?.setupId;
-				filteredSegments = toolpaths.filter(t => t.setupId === currentSetupId);
+			
+			// Filter to active setup if multi-setup is present
+			if (camSetups.length > 1 && currentSetupId) {
+				const setupSpecific = toolpaths.filter(t => {
+					const sid = t.setupId || (t as any).setup_id;
+					return !sid || sid === currentSetupId;
+				});
+				if (setupSpecific.length > 0) {
+					filteredSegments = setupSpecific;
+				}
 			}
+
+			// If specific operations are selected within this setup, narrow to them
+			if (selectedOperationIds && selectedOperationIds.size > 0) {
+				const opSpecific = filteredSegments.filter(t => {
+					const opId = t.operationId || (t as any).operation_id;
+					return opId && selectedOperationIds.has(opId);
+				});
+				if (opSpecific.length > 0) {
+					filteredSegments = opSpecific;
+				}
+			}
+
 			setCamSimulation(prev => ({
 				...prev,
 				segments: filteredSegments,
@@ -1876,11 +1919,11 @@ export default function HitlWorkspace() {
 						estimated_time_s: op.estimated_time_s || 0,
 						parameters: {
 							...op.parameters,
-							feedRate: op.parameters?.feeds_and_speeds?.feedRate || op.parameters?.feedRate || 1000,
-							plungeRate: op.parameters?.feeds_and_speeds?.plungeRate || op.parameters?.plungeRate || 300,
-							maxStepdown: op.parameters?.feeds_and_speeds?.maxStepdown || op.parameters?.maxStepdown || 2.0,
-							spindleSpeed: op.parameters?.feeds_and_speeds?.spindleSpeed || op.parameters?.spindleSpeed || 10000,
-							stepoverPercentage: op.parameters?.stepoverPercentage || 40,
+							feedRate: op.parameters?.feedRate ?? op.parameters?.feed_rate ?? op.parameters?.feedrate ?? op.feed_rate ?? op.parameters?.feeds_and_speeds?.feedRate ?? 1000,
+							plungeRate: op.parameters?.plungeRate ?? op.parameters?.plunge_feed ?? op.parameters?.feeds_and_speeds?.plungeRate ?? 300,
+							maxStepdown: op.parameters?.maxStepdown ?? op.parameters?.stepdown_mm ?? op.parameters?.stepdown ?? op.stepdown_mm ?? op.parameters?.feeds_and_speeds?.maxStepdown ?? 2.0,
+							spindleSpeed: op.parameters?.spindleSpeed ?? op.parameters?.spindle_rpm ?? op.parameters?.spindle_speed ?? op.spindle_rpm ?? op.parameters?.feeds_and_speeds?.spindleSpeed ?? 10000,
+							stepoverPercentage: op.parameters?.stepoverPercentage ?? 40,
 							tolerance: op.parameters?.tolerance || 0.01,
 							coolant: op.parameters?.coolant || 'flood'
 						}
@@ -1894,6 +1937,23 @@ export default function HitlWorkspace() {
 				
 				setSelectedOperationIds(new Set(newOps.filter(op => op.status !== 'unsupported' && op.status !== 'blocked').map(op => op.id)));
 				if (newOps.length > 0) setActiveOperationId(newOps[0].id);
+
+				if (data.toolpaths && data.toolpaths.length > 0) {
+					setToolpaths(data.toolpaths);
+					setCamSimulation(prev => ({
+						...prev,
+						segments: data.toolpaths,
+						progress: 0,
+						activeSegmentIndex: 0,
+						isPlaying: false
+					}));
+				}
+
+				if (data.gcode) {
+					setGcodeContent(data.gcode);
+					setGcodeErrors([]);
+				}
+
 				toast.success(`Generated ${newOps.length} operations across ${data.setups?.length || 1} setup(s)`);
 				setWorkflowStage('cam');
 			} else {
@@ -2150,19 +2210,26 @@ export default function HitlWorkspace() {
 
 	useEffect(() => {
 		const handleModelRotate = (e: CustomEvent<{axis: 'x'|'y'|'z', degrees: number}>) => {
-			if (workflowStage !== 'cad' || !pythonScript) return;
 			const { axis, degrees } = e.detail;
 			const paramKey = `_model_rotation_${axis}`;
 			const currentVal = (parameters[paramKey] as number) || 0;
-			const newParams = setParameterValue(parameters, paramKey, (currentVal + degrees) % 360);
+			const newVal = (currentVal + degrees) % 360;
+			const newParams = setParameterValue(parameters, paramKey, newVal);
 			setParameters(newParams);
-			const newScript = injectParameters(pythonScript, newParams);
-			updatePythonScript(newScript);
-			void performSync(newScript, newParams, sessionId || '');
+
+			toast.success(`Rotated model ${axis.toUpperCase()} +${degrees}°`, {
+				description: `Current ${axis.toUpperCase()} orientation: ${newVal}°`
+			});
+
+			if (pythonScript && pythonScript.includes(paramKey)) {
+				const newScript = injectParameters(pythonScript, newParams);
+				updatePythonScript(newScript);
+				void performSync(newScript, newParams, sessionId || '');
+			}
 		};
 		window.addEventListener('model-rotate', handleModelRotate as EventListener);
 		return () => window.removeEventListener('model-rotate', handleModelRotate as EventListener);
-	}, [parameters, pythonScript, workflowStage, sessionId, updatePythonScript]);
+	}, [parameters, pythonScript, sessionId, updatePythonScript]);
 
 	return (
 		<div className="h-screen w-full bg-background text-foreground overflow-hidden flex flex-col p-3">
@@ -2311,7 +2378,7 @@ export default function HitlWorkspace() {
 												</div>
 											) : workflowStage === 'manual_cad' ? (
 												<ManualCadWorkspace
-													sessionId={sessionId || 'default_session'}
+													sessionId={sessionId || ''}
 													initialStlUrl={stlUrl}
 													initialStepUrl={stepUrl}
 													onSwitchStage={async (st) => {
@@ -2370,7 +2437,16 @@ export default function HitlWorkspace() {
 													onDownloadGcode={() => handleDownloadArtifact(null, 'gcode')}
 													isSharing={isSharing}
 													onShare={handleShare}
-													toolpaths={toolpaths?.filter(t => !t.setupId || t.setupId === (activeSetupId || camSetups[0]?.setupId)) as any}
+													toolpaths={(() => {
+														if (!toolpaths || toolpaths.length === 0) return null;
+														const currentSetupId = activeSetupId || camSetups[0]?.setupId || camSetups[0]?.id;
+														if (!currentSetupId || camSetups.length <= 1) return toolpaths as any;
+														const filtered = toolpaths.filter(t => {
+															const sid = t.setupId || (t as any).setup_id;
+															return !sid || sid === currentSetupId;
+														});
+														return (filtered.length > 0 ? filtered : toolpaths) as any;
+													})()}
 													showToolpaths={camViewport.showToolpath}
 													camFeatures={camFeatures}
 													camOperations={camOperations}
@@ -2380,8 +2456,8 @@ export default function HitlWorkspace() {
 													camTools={camTools}
 													camSetup={camSetup}
 													debugMode={debugMode}
-													setupToolAxis={camSetups.find(s => s.setupId === (activeSetupId || camSetups[0]?.setupId))?.toolAxis}
-													setupMetadata={{ ...(defaultSetupMetadata || {}), ...(camSetups.find(s => s.setupId === (activeSetupId || camSetups[0]?.setupId)) || {}) }}
+													setupToolAxis={camSetups.find(s => (s.setupId || s.id) === (activeSetupId || camSetups[0]?.setupId || camSetups[0]?.id))?.toolAxis}
+													setupMetadata={{ ...(defaultSetupMetadata || {}), ...(camSetups.find(s => (s.setupId || s.id) === (activeSetupId || camSetups[0]?.setupId || camSetups[0]?.id)) || {}) }}
 													xRayMode={xRayMode}
 													onToggleXRay={() => setXRayMode(prev => !prev)}
 													blueprintUrl={blueprintUrl}
@@ -2472,129 +2548,6 @@ export default function HitlWorkspace() {
 														</button>
 													</div>
 												)}
-
-												{/* CAM Metrics Pill */}
-												{(workflowStage === 'cam' || workflowStage === 'gcode') && (
-													<div className="flex items-center justify-center pointer-events-auto mt-2">
-														<div className="relative group">
-															{/* Glowing blue underline */}
-															<div className="absolute -bottom-[1px] left-8 right-8 h-[2px] bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,1)] z-10" />
-
-															<div className="flex flex-col gap-3 bg-[#09090b]/80 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] relative z-0 w-fit mx-auto pointer-events-auto">
-																{/* Setup Details Row */}
-																<div className="flex items-center gap-6 pb-3 border-b border-white/10">
-																	<div className="flex items-center gap-2.5 min-w-[140px]">
-																		<div className="p-1.5 bg-blue-500/20 rounded-md">
-																			<svg className="size-4 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg>
-																		</div>
-																		<div className="flex flex-col">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Material</span>
-																			<span className="text-[12px] font-bold text-foreground capitalize truncate max-w-[130px]" title={camSetup.material?.replace(/_/g, ' ') || 'Unknown'}>
-																				{camSetup.material?.replace(/_/g, ' ') || 'Unknown'}
-																			</span>
-																		</div>
-																	</div>
-
-																	<div className="w-px h-8 bg-white/10" />
-
-																	<div className="flex items-center gap-2.5 min-w-[140px]">
-																		<div className="p-1.5 bg-purple-500/20 rounded-md">
-																			<svg className="size-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
-																		</div>
-																		<div className="flex flex-col">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
-																				Machine
-																				{camRecommendation?.primaryRecommendation?.profileId === camSetup.machineProfile && (
-																					<span className="text-[8px] text-emerald-400 font-bold bg-emerald-500/20 px-1 py-0.2 rounded inline-flex items-center gap-0.5">
-																						<Sparkles className="size-2" /> AI
-																					</span>
-																				)}
-																			</span>
-																			<span className="text-[12px] font-bold text-foreground capitalize truncate max-w-[140px]" title={MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Generic VMC'}>
-																				{MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Generic VMC'}
-																			</span>
-																		</div>
-
-																	</div>
-
-																	<div className="w-px h-8 bg-white/10" />
-
-																	<div className="flex items-center gap-2.5 min-w-[140px]">
-																		<div className="p-1.5 bg-emerald-500/20 rounded-md">
-																			<svg className="size-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
-																		</div>
-																		<div className="flex flex-col">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Controller</span>
-																			<span className="text-[12px] font-bold text-foreground capitalize truncate max-w-[140px]" title={MACHINE_MATRIX.controllers[(camSetup.controller as ControllerId) || 'FANUC_0I_MF']?.label || camSetup.controller || 'FANUC'}>
-																				{MACHINE_MATRIX.controllers[(camSetup.controller as ControllerId) || 'FANUC_0I_MF']?.label || camSetup.controller || 'FANUC'}
-																			</span>
-																		</div>
-																	</div>
-																</div>
-
-																{/* Metrics Row */}
-																<div className="flex items-center justify-between gap-6 px-1">
-																	<div className="flex items-center gap-5">
-																		<div className="flex flex-col items-center">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Features</span>
-																			<span className="text-[13px] font-black text-cyan-400">{camFeatures.length}</span>
-																		</div>
-																		<div className="flex flex-col items-center">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Tools</span>
-																			<span className="text-[13px] font-black text-emerald-400">{camTools.length}</span>
-																		</div>
-																		<div className="flex flex-col items-center">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Ops</span>
-																			<span className="text-[13px] font-black text-purple-400">{camOperations.length}</span>
-																		</div>
-
-																		<div className="w-px h-6 bg-white/10 mx-2" />
-
-																		<div className="flex items-center gap-2">
-																			<svg className="size-3.5 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-																			<span className="text-[12px] font-bold text-yellow-500 tracking-wide">
-																				{(() => {
-																					const opsTime = camOperations.reduce((acc, op) => acc + (op.estimated_time_s || op.statistics?.cycleTimeSeconds || 0), 0);
-																					const totalCycleTimeSeconds = plannedCycleTimeSeconds > opsTime ? plannedCycleTimeSeconds : (opsTime || plannedCycleTimeSeconds);
-																					if (!totalCycleTimeSeconds) return '00s';
-																					const h = Math.floor(totalCycleTimeSeconds / 3600);
-																					const m = Math.floor((totalCycleTimeSeconds % 3600) / 60);
-																					const s = Math.floor(totalCycleTimeSeconds % 60);
-																					if (h > 0) return `${h}h ${m}m ${s}s`;
-																					if (m > 0) return `${m}m ${s}s`;
-																					return `${s}s`;
-																				})()}
-																			</span>
-																		</div>
-																		
-																		<div className="flex items-center gap-2 ml-2">
-																			<IndianRupee className="size-3.5 text-green-400" />
-																			<span className="text-[12px] font-bold text-green-400 tracking-wide">
-																				{(() => {
-																					const sp = camStats?.costEstimate?.selling_price?.per_unit ?? camStats?.costEstimate?.manufacturing_cost?.per_part;
-																					return sp != null ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: camStats.costEstimate.currency || 'INR', maximumFractionDigits: 0 }).format(sp).replace('₹', '') : '---';
-																				})()}
-																			</span>
-																		</div>
-																	</div>
-
-																	<div className="flex items-center gap-4 border-l border-white/10 pl-5">
-																		<div className="flex flex-col items-center">
-																			<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Removal</span>
-																			<span className="text-[12px] font-bold text-foreground">82%</span>
-																		</div>
-																		<button className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 hover:border-emerald-500/60 transition-all font-semibold shadow-[0_0_10px_rgba(16,185,129,0.1)]">
-																			<svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
-																				<polyline points="20 6 9 17 4 12" />
-																			</svg>
-																			READY
-																		</button>
-																	</div>
-																</div>
-															</div>
-														</div>
-													</div>
-												)}
 											</div>
 
 											{/* Modals & Overlays */}
@@ -2682,7 +2635,125 @@ export default function HitlWorkspace() {
 														)}
 
 														{activeRightTab === 'cam' && (
-															<div className="p-5">
+															<div className="p-4 flex flex-col gap-4">
+																{/* CAM Machine & Setup Status Card */}
+																<div className="relative group w-full">
+																	{/* Glowing blue underline */}
+																	<div className="absolute -bottom-[1px] left-6 right-6 h-[2px] bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,1)] z-10" />
+
+																	<div className="flex flex-col gap-3 bg-[#09090b]/80 backdrop-blur-xl border border-white/10 p-3.5 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)] relative z-0 w-full">
+																		{/* Setup Details Grid */}
+																		<div className="grid grid-cols-3 gap-2 pb-3 border-b border-white/10">
+																			<div className="flex items-center gap-2 min-w-0">
+																				<div className="p-1.5 bg-blue-500/20 rounded-md shrink-0">
+																					<svg className="size-3.5 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg>
+																				</div>
+																				<div className="flex flex-col min-w-0">
+																					<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Material</span>
+																					<span className="text-[11px] font-bold text-foreground capitalize truncate" title={camSetup.material?.replace(/_/g, ' ') || 'Unknown'}>
+																						{camSetup.material?.replace(/_/g, ' ') || 'Unknown'}
+																					</span>
+																				</div>
+																			</div>
+
+																			<div className="flex items-center gap-2 min-w-0 border-l border-white/10 pl-2">
+																				<div className="p-1.5 bg-purple-500/20 rounded-md shrink-0">
+																					<svg className="size-3.5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
+																				</div>
+																				<div className="flex flex-col min-w-0">
+																					<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold flex items-center gap-1">
+																						Machine
+																						{camRecommendation?.primaryRecommendation?.profileId === camSetup.machineProfile && (
+																							<span className="text-[7.5px] text-emerald-400 font-bold bg-emerald-500/20 px-1 py-0.2 rounded inline-flex items-center gap-0.5">
+																								<Sparkles className="size-2" /> AI
+																							</span>
+																						)}
+																					</span>
+																					<span className="text-[11px] font-bold text-foreground capitalize truncate" title={MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Generic VMC'}>
+																						{MACHINE_MATRIX.machineProfiles.find(p => p.id === camSetup.machineProfile)?.label || camSetup.machineProfile || 'Generic VMC'}
+																					</span>
+																				</div>
+																			</div>
+
+																			<div className="flex items-center gap-2 min-w-0 border-l border-white/10 pl-2">
+																				<div className="p-1.5 bg-emerald-500/20 rounded-md shrink-0">
+																					<svg className="size-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
+																				</div>
+																				<div className="flex flex-col min-w-0">
+																					<span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground font-bold">Controller</span>
+																					<span className="text-[11px] font-bold text-foreground capitalize truncate" title={(MACHINE_MATRIX.controllers as any)[camSetup.controller || 'FANUC_0I_MF']?.label || camSetup.controller || 'FANUC'}>
+																						{(MACHINE_MATRIX.controllers as any)[camSetup.controller || 'FANUC_0I_MF']?.label || camSetup.controller || 'FANUC'}
+																					</span>
+																				</div>
+																			</div>
+																		</div>
+
+																		{/* Metrics Row */}
+																		<div className="flex flex-wrap items-center justify-between gap-3 pt-0.5">
+																			<div className="flex items-center gap-3">
+																				<div className="flex flex-col items-center">
+																					<span className="text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Features</span>
+																					<span className="text-[12px] font-black text-cyan-400">{camFeatures.length}</span>
+																				</div>
+																				<div className="flex flex-col items-center">
+																					<span className="text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Tools</span>
+																					<span className="text-[12px] font-black text-emerald-400">{camTools.length}</span>
+																				</div>
+																				<div className="flex flex-col items-center">
+																					<span className="text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Ops</span>
+																					<span className="text-[12px] font-black text-purple-400">{camOperations.length}</span>
+																				</div>
+
+																				<div className="w-px h-5 bg-white/10" />
+
+																				<div className="flex items-center gap-1.5" title="Total Cycle Time">
+																					<svg className="size-3.5 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+																					<span className="text-[11px] font-bold text-yellow-500 tracking-wide font-mono">
+																						{(() => {
+																							const opsTime = camOperations.reduce((acc, op) => acc + (op.estimated_time_s || op.statistics?.cycleTimeSeconds || 0), 0);
+																							const totalCycleTimeSeconds = plannedCycleTimeSeconds > opsTime ? plannedCycleTimeSeconds : (opsTime || plannedCycleTimeSeconds);
+																							if (!totalCycleTimeSeconds) return '00s';
+																							const h = Math.floor(totalCycleTimeSeconds / 3600);
+																							const m = Math.floor((totalCycleTimeSeconds % 3600) / 60);
+																							const s = Math.floor(totalCycleTimeSeconds % 60);
+																							if (h > 0) return `${h}h ${m}s`;
+																							if (m > 0) return `${m}m ${s}s`;
+																							return `${s}s`;
+																						})()}
+																					</span>
+																				</div>
+																				
+																				<div className="flex items-center gap-1.5" title="Estimated Part Price / Mfg Cost">
+																					<IndianRupee className="size-3 text-green-400" />
+																					<span className="text-[11px] font-bold text-green-400 tracking-wide font-mono">
+																						{(() => {
+																							const sp = camStats?.costEstimate?.selling_price?.per_unit ?? camStats?.costEstimate?.manufacturing_cost?.per_part;
+																							return sp != null ? new Intl.NumberFormat('en-IN', { style: 'currency', currency: camStats.costEstimate.currency || 'INR', maximumFractionDigits: 0 }).format(sp).replace('₹', '') : '---';
+																						})()}
+																					</span>
+																				</div>
+																			</div>
+
+																			<div className="flex items-center gap-3 border-l border-white/10 pl-3">
+																				<div className="flex flex-col items-center">
+																					<span className="text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground font-medium">Removal</span>
+																					<span className="text-[11.5px] font-bold text-foreground">82%</span>
+																				</div>
+																				<button 
+																					onClick={() => setIsCamDrawerOpen(true)}
+																					className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/60 transition-all font-semibold text-[10.5px] shadow-[0_0_10px_rgba(16,185,129,0.15)] cursor-pointer"
+																					title="Open Engineering Console"
+																				>
+																					<svg className="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+																						<polyline points="20 6 9 17 4 12" />
+																					</svg>
+																					READY
+																				</button>
+																			</div>
+																		</div>
+																	</div>
+																</div>
+
 																<CamSummaryPanel 
 																	setup={camSetup as any} 
 																	setups={camSetups}
@@ -2724,6 +2795,7 @@ export default function HitlWorkspace() {
 										camSetup={camSetup}
 										camSetups={camSetups}
 										activeSetupId={activeSetupId}
+										setActiveSetupId={setActiveSetupId}
 										setCamSetup={setCamSetup}
 										camTools={camTools}
 										setCamTools={setCamTools}

@@ -90,7 +90,7 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                     <span className="text-xs font-semibold text-foreground capitalize">{operation.type.replace('_', ' ')} Passes</span>
                 </div>
 
-                {operation.type === '2d_contour' && (
+                {['2d_contour', 'roughing', 'finishing', 'rest_machining'].includes(operation.type) && (
                     <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Side</label>
@@ -136,7 +136,7 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                     </div>
                 )}
 
-                {operation.type === 'pocket' && (
+                {['pocket', 'pocketing'].includes(operation.type) && (
                     <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-2 col-span-2">
                             <label className="text-[10px] font-bold flex items-center gap-2"><input type="checkbox" checked={params.adaptive || false} onChange={e => updateParams('adaptive', e.target.checked)} className="rounded" /> Adaptive Clearing</label>
@@ -182,7 +182,7 @@ export function OperationPropertyPanel({ operation, onChange }: OperationPropert
                 )}
 
                 {/* Depth Cuts Section */}
-                {['2d_contour', 'pocket', 'facing'].includes(operation.type) && (
+                {['2d_contour', 'pocket', 'facing', 'roughing', 'finishing', 'rest_machining'].includes(operation.type) && (
                     <div className="flex flex-col gap-3 mt-2 bg-black/20 p-3 rounded-lg border border-border/50">
                         <div className="flex items-center gap-2">
                             <input 

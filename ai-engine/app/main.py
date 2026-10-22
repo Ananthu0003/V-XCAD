@@ -35,6 +35,16 @@ app = FastAPI(
 # ownership remain the BFF's responsibility. /health (below) is intentionally exempt.
 app.include_router(v1_router, prefix="/api/v1", dependencies=[Depends(validate_service_key)])
 
+# Mount Generic-CAM CamError handler
+from cam_engine.api.routes import cam_error_response
+from cam_engine.errors import CamError
+
+
+@app.exception_handler(CamError)
+def cam_error_handler(request: Request, exc: CamError) -> JSONResponse:
+    return cam_error_response(exc)
+
+
 # NOTE: the former unauthenticated `/outputs` StaticFiles mount was removed. It exposed every
 # user's artifacts (scripts, logs, blueprints) to any caller that could reach the engine, and
 # nothing uses it: the BFF serves artifacts itself from the shared volume with per-session

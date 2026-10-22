@@ -174,7 +174,8 @@ class ManualCADService:
             if base_shape is not None:
                 export_step(base_shape, str(rev0_step))
             elif base_step_path and base_step_path.exists():
-                shutil.copy2(base_step_path, rev0_step)
+                if base_step_path.resolve() != rev0_step.resolve():
+                    shutil.copy2(base_step_path, rev0_step)
             elif matching_steps and matching_steps[0].exists():
                 shutil.copy2(matching_steps[0], rev0_step)
             elif not rev0_step.exists():

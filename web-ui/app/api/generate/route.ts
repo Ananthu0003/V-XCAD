@@ -162,6 +162,16 @@ export async function POST(request: Request): Promise<Response> {
 		formData.set('session_id', sessionId);
 	} else {
 		sessionId = rawSessionId.trim();
+		const existingSession = await prisma.cadSession.findUnique({
+			where: { id: sessionId },
+			select: { userId: true },
+		});
+		if (existingSession && existingSession.userId && existingSession.userId !== validUserId) {
+			return NextResponse.json(
+				buildError('Forbidden', 'You do not own this session.'),
+				{ status: 403 }
+			);
+		}
 	}
 
 	// If no file was uploaded, remove the empty image field so FastAPI treats it as optional

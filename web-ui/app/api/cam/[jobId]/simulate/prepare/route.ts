@@ -77,6 +77,8 @@ export async function POST(
 				setup: body.setup,
 				tools: body.tools || [],
 				operations: body.operations,
+				session_id: jobId,
+				job_id: jobId,
 			}),
 			cache: 'no-store',
 		});

@@ -2,6 +2,7 @@ import { Toaster } from '@/components/ui/sonner';
 import type { Metadata } from 'next';
 import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 import './globals.css';
+import { headers } from 'next/headers';
 import { ThemeProvider } from '@/components/shared/theme-provider';
 import { ThemeToggle } from '@/components/shared/theme-toggle';
 
@@ -28,11 +29,14 @@ export const metadata: Metadata = {
 // root layout.
 export const dynamic = 'force-dynamic';
 
-export default function RootLayout({
+export default async function RootLayout({
 	children,
 }: Readonly<{
 	children: React.ReactNode;
 }>) {
+	const headersList = await headers();
+	const nonce = headersList.get('x-nonce') ?? undefined;
+
 	return (
 		<html lang="en" className={`${ibmPlexMono.variable} ${ibmPlexSans.variable} h-full antialiased`} suppressHydrationWarning>
 			<body className={`${ibmPlexMono.className} min-h-full flex flex-col`}>
@@ -41,6 +45,7 @@ export default function RootLayout({
 					defaultTheme="dark"
 					enableSystem
 					disableTransitionOnChange
+					nonce={nonce}
 				>
 					{children}
 					<Toaster richColors position="top-right" />

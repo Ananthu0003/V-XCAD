@@ -78,6 +78,7 @@ class CamSimulationService:
         }
 
         return {
+            "status": status,
             "simulationRunId": run_id,
             "simulationRun": simulation_run,
             "setup": setup,

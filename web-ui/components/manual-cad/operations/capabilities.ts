@@ -130,10 +130,13 @@ export function getApplicableOperations(
   const classification = classifyEntity(entity, ctx);
   if (!classification) return [];
   if (classification === 'face.planar') {
-    return ['hole', 'pocket', 'pad', 'measure'];
+    return ['hole', 'pocket', 'pad'];
   }
   if (classification === 'face.cylindrical') {
-    return ['edit_feature', 'measure'];
+    if (ctx?.features && Object.keys(ctx.features).length > 0) {
+      return ['edit_feature', 'measure'];
+    }
+    return ['measure'];
   }
   if (classification.startsWith('edge.')) {
     return ['fillet', 'chamfer', 'measure'];

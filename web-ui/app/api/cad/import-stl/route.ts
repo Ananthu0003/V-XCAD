@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
 import { writeFile } from 'fs/promises';
 import { join } from 'path';
 import { getSession } from '@/lib/auth';
@@ -57,19 +58,55 @@ export async function POST(request: NextRequest): Promise<Response> {
     const fileName = file.name;
     const fileExt = isStep ? 'step' : 'stl';
     const filenameOnDisk = `cad_${sessionId}.${fileExt}`;
+    const buffer = Buffer.from(await file.arrayBuffer());
     const outputsDir = resolveOutputsDir();
 
     if (outputsDir) {
-      const buffer = Buffer.from(await file.arrayBuffer());
       await writeFile(join(outputsDir, filenameOnDisk), buffer);
+    } else {
+      // Host-side local development fallback
+      const devDirs = [
+        join(process.cwd(), '../ai-engine/outputs'),
+        join(process.cwd(), '../outputs'),
+        join(process.cwd(), 'outputs'),
+      ];
+      for (const d of devDirs) {
+        try {
+          if (!fs.existsSync(d)) {
+            fs.mkdirSync(d, { recursive: true });
+          }
+          await writeFile(join(d, filenameOnDisk), buffer);
+        } catch {
+          // ignore
+        }
+      }
     }
 
     const fileUrl = `/api/outputs/${filenameOnDisk}`;
     const stepUrl = isStep ? fileUrl : undefined;
     const stlUrl = isStl ? fileUrl : `/api/outputs/cad_${sessionId}.stl`;
 
-    const cadSession = await prisma.cadSession.create({
-      data: {
+    const existingSession = await prisma.cadSession.findUnique({
+      where: { id: sessionId },
+      select: { userId: true },
+    });
+
+    if (existingSession && existingSession.userId && existingSession.userId !== authSession.userId) {
+      return NextResponse.json(
+        { error: { message: 'Forbidden. You do not own this session.' } },
+        { status: 403 }
+      );
+    }
+
+    const cadSession = await prisma.cadSession.upsert({
+      where: { id: sessionId },
+      update: {
+        prompt: `Imported 3D Model: ${fileName}`,
+        fileName: fileName,
+        stlUrl: stlUrl,
+        stepUrl: stepUrl,
+      },
+      create: {
         id: sessionId,
         prompt: `Imported 3D Model: ${fileName}`,
         fileName: fileName,
