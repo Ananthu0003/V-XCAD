@@ -121,7 +121,7 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                         <tbody className="divide-y divide-border/30">
                             {setupIds.length === 0 && operations.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="py-12 text-center">
+                                    <td colSpan={7} className="py-12 text-center">
                                         <div className="flex flex-col items-center justify-center text-muted-foreground/50">
                                             <Activity className="size-8 mb-3 opacity-20" />
                                             <span className="text-sm font-medium">No operations generated</span>
@@ -133,15 +133,25 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                 setupIds.map(setupId => {
                                     const setupOps = groupedOps[setupId];
                                     const setupInfo = camSetups?.find(s => s.setupId === setupId || s.id === setupId);
-                                    const setupName = setupInfo ? (setupInfo.setupName || `Setup ${setupIds.indexOf(setupId) + 1} (${setupInfo.machineType === 'milling_3axis' && setupInfo.fixtureSide ? setupInfo.fixtureSide.toUpperCase() : 'MAIN'})`) : 'Unassigned Features';
+                                    const setupName = setupInfo ? (setupInfo.setupName || `Setup ${setupIds.indexOf(setupId) + 1}`) : (setupId === 'unassigned' ? 'Unassigned Features' : `Setup (${setupId})`);
+                                    const wcs = setupInfo?.workCoordinateSystem || (setupInfo as any)?.wcs || (setupId === 'setup_002' ? 'G55' : 'G54');
+                                    const isFlip = setupInfo?.requiresManualReclamp || setupId === 'setup_002';
                                     
                                     return (
                                         <React.Fragment key={setupId}>
                                             <tr className="bg-muted/10 border-t border-b border-border/40">
-                                                <td colSpan={6} className="py-2.5 px-4">
-                                                    <div className="flex items-center gap-2">
+                                                <td colSpan={7} className="py-2.5 px-4">
+                                                    <div className="flex items-center gap-2 flex-wrap">
                                                         <span className="text-[10px] font-bold text-primary uppercase tracking-widest">{setupName}</span>
-                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-background border border-border/50 text-muted-foreground">
+                                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                                                            {wcs}
+                                                        </span>
+                                                        {isFlip && (
+                                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                                                                M00 Flip Part
+                                                            </span>
+                                                        )}
+                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-background border border-border/50 text-muted-foreground ml-auto">
                                                             {setupOps.length} ops
                                                         </span>
                                                     </div>
@@ -223,6 +233,9 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                                         if (!val) return;
                                                                         const options: Record<string, string> = {
                                                                             "facing": "Facing",
+                                                                            "roughing": "Roughing",
+                                                                            "finishing": "Finishing",
+                                                                            "rest_machining": "Rest Machining",
                                                                             "pocketing": "Pocketing",
                                                                             "drilling": "Drilling",
                                                                             "2d_contour_outer": "Contouring",
@@ -241,6 +254,9 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                                     </SelectTrigger>
                                                                     <SelectContent>
                                                                         <SelectItem value="facing">Facing</SelectItem>
+                                                                        <SelectItem value="roughing">Roughing</SelectItem>
+                                                                        <SelectItem value="finishing">Finishing</SelectItem>
+                                                                        <SelectItem value="rest_machining">Rest Machining</SelectItem>
                                                                         <SelectItem value="pocketing">Pocketing</SelectItem>
                                                                         <SelectItem value="drilling">Drilling</SelectItem>
                                                                         <SelectItem value="2d_contour_outer">Contouring</SelectItem>
@@ -249,7 +265,7 @@ export const OperationPlanningTable: React.FC<OperationPlanningTableProps> = ({
                                                                         <SelectItem value="od_turning">Turning (OD)</SelectItem>
                                                                         <SelectItem value="rotary_milling">Rotary Milling</SelectItem>
                                                                         <SelectItem value="indexed_4axis_milling">Indexed 4-Axis</SelectItem>
-                                                                        {!["facing", "pocketing", "drilling", "2d_contour_outer", "chamfer_milling", "boss_clearing", "od_turning", "rotary_milling", "indexed_4axis_milling"].includes(op.type) && (
+                                                                        {!["facing", "roughing", "finishing", "rest_machining", "pocketing", "drilling", "2d_contour_outer", "chamfer_milling", "boss_clearing", "od_turning", "rotary_milling", "indexed_4axis_milling"].includes(op.type) && (
                                                                             <SelectItem value={op.type}>{op.name || op.type}</SelectItem>
                                                                         )}
                                                                     </SelectContent>

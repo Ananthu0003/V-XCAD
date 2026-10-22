@@ -601,11 +601,11 @@ export default function HitlWorkspace() {
 	}, [camFeatures, parameters, defaultSetupMetadata, geometryInfo]);
 
 
-	// Restore session from URL search params if ?session=<id> is present on mount
+	// Restore session from URL search params if ?session=<id> or ?session_id=<id> is present on mount
 	useEffect(() => {
 		if (typeof window === 'undefined') return;
 		const urlParams = new URLSearchParams(window.location.search);
-		const initialSessionId = urlParams.get('session');
+		const initialSessionId = urlParams.get('session_id') || urlParams.get('session');
 		if (initialSessionId && !sessionId) {
 			fetch(`/api/sessions/${initialSessionId}`)
 				.then((res) => (res.ok ? res.json() : null))
@@ -755,7 +755,7 @@ export default function HitlWorkspace() {
 		const localUrl = URL.createObjectURL(file);
 		const newSessionId = `step-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
 
-		setIsGenerating(true);
+		setSessionId(newSessionId);
 		setStepUrl(localUrl);
 		setDxfUrl(null);
 		setGcodeUrl(null);
@@ -765,17 +765,9 @@ export default function HitlWorkspace() {
 		setParameters({});
 		setToolpaths(null);
 		setSourceFilename(file.name);
-		setStatusText(`Tessellating STEP model: ${file.name}...`);
+		setStatusText(`Tessellating 3D solid model: ${file.name}...`);
+		setIsGenerating(true);
 		setWorkflowStage('cad');
-
-		// Create a CAD revision for the imported STEP solid model
-		recordRevision({
-			title: `Imported STEP (${file.name})`,
-			description: `Direct 3D STEP B-Rep solid model (${(file.size / (1024 * 1024)).toFixed(2)} MB)`,
-			script: '',
-			params: {},
-			step: localUrl,
-		});
 
 		// Log into chat conversation
 		setMessages((prev) => [
@@ -789,11 +781,15 @@ export default function HitlWorkspace() {
 			{
 				id: makeId('assistant'),
 				role: 'assistant',
-				content: `Loading **${file.name}** into the 3D workspace. Tessellating B-Rep geometry for viewport...`,
+				content: `Processing **${file.name}**... Tessellating solid B-Rep geometry for 3D inspection and CAM toolpath generation.`,
 			},
 		]);
 
-		// Sync session to backend
+		toast.info(`Importing ${file.name}`, {
+			description: 'Tessellating 3D solid model...',
+		});
+
+		// Sync session to backend and tessellate STL for 3D rendering
 		try {
 			const fd = new FormData();
 			fd.append('file', file);
@@ -804,40 +800,50 @@ export default function HitlWorkspace() {
 			});
 			if (res.ok) {
 				const data = await res.json();
-				if (data.sessionId) {
-					setSessionId(data.sessionId);
-					if (data.stepUrl) {
-						setStepUrl(data.stepUrl);
-					}
-					if (data.stlUrl) {
-						setStlUrl(data.stlUrl);
-					}
-					if (typeof window !== 'undefined') {
-						window.history.replaceState(null, '', `/workspace?session_id=${data.sessionId}`);
-					}
-					setRevisions((prev) =>
-						prev.map((r, idx) =>
-							idx === 0
-								? { ...r, stlUrl: data.stlUrl, stepUrl: data.stepUrl || localUrl }
-								: r
-						)
-					);
-					setStatusText(`Loaded: ${file.name}`);
-					toast.success(`Imported ${file.name}`, {
-						description: '3D STEP solid model loaded and rendered in workspace',
-					});
+				const effectiveSessionId = data.sessionId || newSessionId;
+				const effectiveStl = data.stlUrl || `/api/outputs/cad_${effectiveSessionId}.stl`;
+				const effectiveStep = data.stepUrl || localUrl;
+
+				setSessionId(effectiveSessionId);
+				setStepUrl(effectiveStep);
+				setStlUrl(effectiveStl);
+				setStatusText(`Loaded: ${file.name}`);
+
+				// Create a CAD revision for the imported STEP solid model with the tessellated STL
+				recordRevision({
+					title: `Imported STEP (${file.name})`,
+					description: `Direct 3D STEP B-Rep solid model (${(file.size / (1024 * 1024)).toFixed(2)} MB)`,
+					script: '',
+					params: {},
+					step: effectiveStep,
+					stl: effectiveStl,
+				});
+
+				setMessages((prev) => [
+					...prev.slice(0, -1),
+					{
+						id: makeId('assistant'),
+						role: 'assistant',
+						content: `Successfully loaded **${file.name}** into the 3D workspace. The solid STEP B-Rep geometry is now available for direct inspection, face/edge selection, and CAM toolpath generation.`,
+					},
+				]);
+
+				toast.success(`Imported ${file.name}`, {
+					description: '3D STEP solid model loaded into workspace',
+				});
+
+				if (typeof window !== 'undefined') {
+					window.history.replaceState(null, '', `/workspace?session_id=${effectiveSessionId}`);
 				}
 			} else {
 				const errData = await res.json().catch(() => ({}));
-				const msg = errData?.error?.message || 'Failed to process STEP file on server.';
-				toast.error('Import Failed', { description: msg });
-				setStatusText(`Import failed: ${msg}`);
+				const errMsg = errData?.error?.message || `Server returned ${res.status}`;
+				toast.error('Failed to import STEP file', { description: errMsg });
+				setStatusText(`Import failed: ${errMsg}`);
 			}
 		} catch (err: any) {
-			console.error('Backend session persistence failed:', err);
-			toast.error('Import Failed', {
-				description: err?.message || 'Could not connect to CAD engine.',
-			});
+			console.warn('Backend session persistence skipped:', err);
+			toast.error('Failed to import STEP file', { description: err?.message || 'Network error' });
 			setStatusText('Import failed');
 		} finally {
 			setIsGenerating(false);
@@ -992,14 +998,32 @@ export default function HitlWorkspace() {
 	}, [pythonScript]);
 
 	useEffect(() => {
-		if (toolpaths) {
+		if (toolpaths && toolpaths.length > 0) {
+			const currentSetupId = activeSetupId || camSetups[0]?.setupId || (camSetups[0] as any)?.id;
 			let filteredSegments = toolpaths;
-			if (selectedOperationIds && selectedOperationIds.size > 0) {
-				filteredSegments = toolpaths.filter(t => selectedOperationIds.has(t.operationId));
-			} else {
-				const currentSetupId = activeSetupId || camSetups[0]?.setupId;
-				filteredSegments = toolpaths.filter(t => t.setupId === currentSetupId);
+
+			// Filter to active setup if multi-setup is present
+			if (camSetups.length > 1 && currentSetupId) {
+				const setupSpecific = toolpaths.filter(t => {
+					const sid = t.setupId || (t as any).setup_id;
+					return !sid || sid === currentSetupId;
+				});
+				if (setupSpecific.length > 0) {
+					filteredSegments = setupSpecific;
+				}
 			}
+
+			// If specific operations are selected within this setup, narrow to them
+			if (selectedOperationIds && selectedOperationIds.size > 0) {
+				const opSpecific = filteredSegments.filter(t => {
+					const opId = t.operationId || (t as any).operation_id;
+					return opId && selectedOperationIds.has(opId);
+				});
+				if (opSpecific.length > 0) {
+					filteredSegments = opSpecific;
+				}
+			}
+
 			setCamSimulation(prev => ({
 				...prev,
 				segments: filteredSegments,
@@ -1949,11 +1973,11 @@ export default function HitlWorkspace() {
 						estimated_time_s: op.estimated_time_s || 0,
 						parameters: {
 							...op.parameters,
-							feedRate: op.parameters?.feeds_and_speeds?.feedRate || op.parameters?.feedRate || 1000,
-							plungeRate: op.parameters?.feeds_and_speeds?.plungeRate || op.parameters?.plungeRate || 300,
-							maxStepdown: op.parameters?.feeds_and_speeds?.maxStepdown || op.parameters?.maxStepdown || 2.0,
-							spindleSpeed: op.parameters?.feeds_and_speeds?.spindleSpeed || op.parameters?.spindleSpeed || 10000,
-							stepoverPercentage: op.parameters?.stepoverPercentage || 40,
+							feedRate: op.parameters?.feedRate ?? op.parameters?.feed_rate ?? op.parameters?.feedrate ?? op.feed_rate ?? op.parameters?.feeds_and_speeds?.feedRate ?? 1000,
+							plungeRate: op.parameters?.plungeRate ?? op.parameters?.plunge_feed ?? op.parameters?.feeds_and_speeds?.plungeRate ?? 300,
+							maxStepdown: op.parameters?.maxStepdown ?? op.parameters?.stepdown_mm ?? op.parameters?.stepdown ?? op.stepdown_mm ?? op.parameters?.feeds_and_speeds?.maxStepdown ?? 2.0,
+							spindleSpeed: op.parameters?.spindleSpeed ?? op.parameters?.spindle_rpm ?? op.parameters?.spindle_speed ?? op.spindle_rpm ?? op.parameters?.feeds_and_speeds?.spindleSpeed ?? 10000,
+							stepoverPercentage: op.parameters?.stepoverPercentage ?? 40,
 							tolerance: op.parameters?.tolerance || 0.01,
 							coolant: op.parameters?.coolant || 'flood'
 						}
@@ -1967,6 +1991,23 @@ export default function HitlWorkspace() {
 				
 				setSelectedOperationIds(new Set(newOps.filter(op => op.status !== 'unsupported' && op.status !== 'blocked').map(op => op.id)));
 				if (newOps.length > 0) setActiveOperationId(newOps[0].id);
+
+				if (data.toolpaths && data.toolpaths.length > 0) {
+					setToolpaths(data.toolpaths);
+					setCamSimulation(prev => ({
+						...prev,
+						segments: data.toolpaths,
+						progress: 0,
+						activeSegmentIndex: 0,
+						isPlaying: false
+					}));
+				}
+
+				if (data.gcode) {
+					setGcodeContent(data.gcode);
+					setGcodeErrors([]);
+				}
+
 				toast.success(`Generated ${newOps.length} operations across ${data.setups?.length || 1} setup(s)`);
 				setWorkflowStage('cam');
 			} else {
@@ -2223,19 +2264,26 @@ export default function HitlWorkspace() {
 
 	useEffect(() => {
 		const handleModelRotate = (e: CustomEvent<{axis: 'x'|'y'|'z', degrees: number}>) => {
-			if (workflowStage !== 'cad' || !pythonScript) return;
 			const { axis, degrees } = e.detail;
 			const paramKey = `_model_rotation_${axis}`;
 			const currentVal = (parameters[paramKey] as number) || 0;
-			const newParams = setParameterValue(parameters, paramKey, (currentVal + degrees) % 360);
+			const newVal = (currentVal + degrees) % 360;
+			const newParams = setParameterValue(parameters, paramKey, newVal);
 			setParameters(newParams);
-			const newScript = injectParameters(pythonScript, newParams);
-			updatePythonScript(newScript);
-			void performSync(newScript, newParams, sessionId || '');
+
+			toast.success(`Rotated model ${axis.toUpperCase()} +${degrees}°`, {
+				description: `Current ${axis.toUpperCase()} orientation: ${newVal}°`
+			});
+
+			if (pythonScript && pythonScript.includes(paramKey)) {
+				const newScript = injectParameters(pythonScript, newParams);
+				updatePythonScript(newScript);
+				void performSync(newScript, newParams, sessionId || '');
+			}
 		};
 		window.addEventListener('model-rotate', handleModelRotate as EventListener);
 		return () => window.removeEventListener('model-rotate', handleModelRotate as EventListener);
-	}, [parameters, pythonScript, workflowStage, sessionId, updatePythonScript]);
+	}, [parameters, pythonScript, sessionId, updatePythonScript]);
 
 	const showChat = workflowStage !== 'manual_cad' && workflowStage !== 'cam' && workflowStage !== 'gcode';
 
@@ -2708,6 +2756,7 @@ export default function HitlWorkspace() {
 										camSetup={camSetup}
 										camSetups={camSetups}
 										activeSetupId={activeSetupId}
+										setActiveSetupId={setActiveSetupId}
 										setCamSetup={setCamSetup}
 										camTools={camTools}
 										setCamTools={setCamTools}

@@ -244,6 +244,9 @@ export function getApplicableOperations(
     return ['hole', 'pocket', 'pad', 'push_pull', 'round_face_edges', 'shell', 'split', 'mirror', 'align', 'primitive', 'measure'];
   }
   if (classification === 'face.cylindrical') {
+    if ((ctx as any)?.features) {
+      return Object.keys((ctx as any).features).length > 0 ? ['edit_feature', 'measure'] : ['measure'];
+    }
     return ['edit_feature', 'measure'];
   }
   if (classification === 'face.conical') {

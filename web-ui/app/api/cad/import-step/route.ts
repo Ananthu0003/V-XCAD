@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFile } from 'fs/promises';
 import { join } from 'path';
@@ -54,14 +55,31 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     const fileName = file.name;
     const filenameOnDisk = `cad_${sessionId}.step`;
-    const outputsDir = resolveOutputsDir();
     const buffer = Buffer.from(await file.arrayBuffer());
+    const outputsDir = resolveOutputsDir();
 
     if (outputsDir) {
       try {
         await writeFile(join(outputsDir, filenameOnDisk), buffer);
       } catch (writeErr) {
         console.warn('Direct file write to outputs directory skipped/failed, forwarding payload:', writeErr);
+      }
+    } else {
+      // Host-side local development fallback
+      const devDirs = [
+        join(process.cwd(), '../ai-engine/outputs'),
+        join(process.cwd(), '../outputs'),
+        join(process.cwd(), 'outputs'),
+      ];
+      for (const d of devDirs) {
+        try {
+          if (!fs.existsSync(d)) {
+            fs.mkdirSync(d, { recursive: true });
+          }
+          await writeFile(join(d, filenameOnDisk), buffer);
+        } catch {
+          // ignore
+        }
       }
     }
 
@@ -80,14 +98,15 @@ export async function POST(request: NextRequest): Promise<Response> {
         ? `${cleanBase}/cad/modify/import-step`
         : `${cleanBase}/api/v1/cad/modify/import-step`;
 
+      const engineForm = new FormData();
+      const stepBlob = new Blob([buffer], { type: 'application/step' });
+      engineForm.append('file', stepBlob, fileName);
+      engineForm.append('session_id', sessionId);
+      engineForm.append('filename', fileName);
+
       const aiRes = await aiEngineFetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sessionId,
-          filename: fileName,
-          step_base64: buffer.toString('base64'),
-        }),
+        body: engineForm,
       });
 
       if (aiRes.ok) {
@@ -112,8 +131,27 @@ export async function POST(request: NextRequest): Promise<Response> {
       console.warn('AI engine B-Rep preprocessing skipped or failed:', engineErr);
     }
 
-    const cadSession = await prisma.cadSession.create({
-      data: {
+    const existingSession = await prisma.cadSession.findUnique({
+      where: { id: sessionId },
+      select: { userId: true },
+    });
+
+    if (existingSession && existingSession.userId && existingSession.userId !== authSession.userId) {
+      return NextResponse.json(
+        { error: { message: 'Forbidden. You do not own this session.' } },
+        { status: 403 }
+      );
+    }
+
+    const cadSession = await prisma.cadSession.upsert({
+      where: { id: sessionId },
+      update: {
+        prompt: `Imported 3D Model: ${fileName}`,
+        fileName: fileName,
+        stepUrl: stepUrl,
+        stlUrl: stlUrl || `/api/outputs/cad_${sessionId}.stl`,
+      },
+      create: {
         id: sessionId,
         prompt: `Imported 3D Model: ${fileName}`,
         fileName: fileName,

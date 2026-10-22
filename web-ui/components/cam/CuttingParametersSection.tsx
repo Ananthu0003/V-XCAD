@@ -72,10 +72,10 @@ export function CuttingParametersSection({ parameters, onChange }: CuttingParame
 				<input
 					type="range"
 					min="0.1"
-					max="6.0"
+					max={Math.max(60, Math.ceil((parameters.maxStepdown || 6) * 1.5))}
 					step="0.1"
 					value={parameters.maxStepdown}
-					onChange={(e) => update('maxStepdown', parseFloat(e.target.value))}
+					onChange={(e) => update('maxStepdown', parseFloat(e.target.value) || 0.1)}
 					className="w-full accent-blue-500 cursor-pointer h-1.5 rounded-lg bg-zinc-800"
 				/>
 			</div>

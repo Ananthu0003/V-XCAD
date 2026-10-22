@@ -32,6 +32,7 @@ export function ViewportController({
 			// Don't stop if the event originated from outside the canvas (like clicking UI buttons)
 			if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
 			setIsAutoRotating(false);
+			window.dispatchEvent(new CustomEvent('viewport-action', { detail: 'stop-auto-rotate' }));
 		};
 		
 		window.addEventListener('pointerdown', stopAutoRotate);
@@ -43,9 +44,9 @@ export function ViewportController({
 		};
 	}, []);
 
-	useFrame((state, delta) => {
+	useFrame((_, delta) => {
 		if (isAutoRotating && controlsRef.current) {
-			controlsRef.current.azimuthAngle += 0.5 * delta;
+			controlsRef.current.rotate(0.5 * delta, 0, false);
 		}
 	});
 
@@ -169,7 +170,7 @@ export function ViewportController({
 				controlsRef.current.rotateTo(-Math.PI / 2, Math.PI / 2, true);
 			} else if (action === 'right') {
 				controlsRef.current.rotateTo(Math.PI / 2, Math.PI / 2, true);
-			} else if (action === 'auto-rotate') {
+			} else if (action === 'auto-rotate' || action === 'rotate') {
 				setIsAutoRotating(prev => !prev);
 			} else if (action === 'reset' || action === 'home') {
 				let box: THREE.Box3 | null = null;
@@ -188,6 +189,8 @@ export function ViewportController({
 					const maxDim = Math.max(sizeVec.x, sizeVec.y, sizeVec.z);
 					box.expandByScalar(maxDim * 0.4);
 					controlsRef.current.fitToBox(box, true, { paddingLeft: 0.1, paddingRight: 0.1, paddingBottom: 0.2, paddingTop: 0.1 });
+					controlsRef.current.rotateTo(Math.PI / 4, Math.PI / 4, true);
+				} else {
 					controlsRef.current.rotateTo(Math.PI / 4, Math.PI / 4, true);
 				}
 			}

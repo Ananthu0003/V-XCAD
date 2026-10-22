@@ -36,18 +36,20 @@ const MIME_TYPES: Record<string, string> = {
  */
 function extractSessionIdFromFilename(filename: string): string | null {
 	if (!filename.startsWith('cad_')) return null;
-	let name = filename.slice(4);
-	// Strip file extension
-	name = name.replace(/\.(stl|step|stp|dxf|gcode|ngc|json|png|jpg|jpeg|py\.txt|txt)$/i, '');
-	// Strip version suffix if present (_v1, _v2, etc.)
-	name = name.replace(/_v\d+$/, '');
-	// Strip _annotations if present
-	name = name.replace(/_annotations$/, '');
+	let body = filename.slice(4);
 
-	if (/^[a-zA-Z0-9_-]+$/.test(name)) {
-		return name;
+	// Remove known versioned / auxiliary suffixes
+	body = body.replace(/_annotations\.json$/i, '');
+	body = body.replace(/\.py\.txt$/i, '');
+	body = body.replace(/_v\d+(\.[^.]+)?$/i, '');
+	body = body.replace(/\.(stl|step|stp|dxf|gcode|ngc|json|png|jpg|jpeg|txt)$/i, '');
+	body = body.replace(/\.[^.]+$/, '');
+	body = body.replace(/_annotations$/, '');
+
+	if (/^[a-zA-Z0-9_-]+$/.test(body)) {
+		return body;
 	}
-	const match = name.match(/^([a-zA-Z0-9_-]+)/);
+	const match = body.match(/^([a-zA-Z0-9_-]+)/);
 	return match ? match[1] : null;
 }
 
@@ -129,6 +131,7 @@ export async function GET(
 				join(process.cwd(), '../ai-engine/outputs', filePath),
 				join(process.cwd(), 'outputs', filePath),
 				join(process.cwd(), '../outputs', filePath),
+				join(process.cwd(), '../ai-engine/storage/jobs', sessionId, 'revisions', filePath.endsWith('.stl') ? 'rev_000.stl' : 'rev_000.step'),
 			];
 			let foundData: Buffer | null = null;
 			for (const devPath of devPaths) {

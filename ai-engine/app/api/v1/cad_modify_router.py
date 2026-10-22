@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+import shutil
 from pathlib import Path
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+from typing import Optional, Dict, Any, List, Union
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form
+from fastapi.responses import FileResponse
 
 from app.models.cad_modification import (
     AiPlanRequest,
@@ -36,6 +38,19 @@ from app.models.cad_modification import (
 )
 from app.services.geometry.manual_cad_service import BASE_STORAGE_DIR, ManualCADService
 
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _validate_session_id(session_id: str) -> str:
+    """Ensure session_id contains only alphanumeric chars, hyphens, and underscores."""
+    if not isinstance(session_id, str) or not _SAFE_ID_RE.match(session_id):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"message": "Invalid session identifier format.", "code": "INVALID_ID"}},
+        )
+    return session_id
+
+
 router = APIRouter(prefix="/cad/modify", tags=["manual-cad"])
 cad_service = ManualCADService()
 
@@ -45,6 +60,7 @@ cad_service = ManualCADService()
 async def recompute_history(request: RecomputeRequest) -> RecomputeResult:
     """Parametric recomputation of downstream operations after modifying or deleting an upstream feature."""
     try:
+        _validate_session_id(request.session_id)
         cad_service.initialize_session_if_needed(request.session_id)
         return cad_service.recompute_history(request)
     except Exception as exc:
@@ -60,6 +76,7 @@ async def get_topology(
 ) -> TopologyDataResponse:
     """Retrieve geometric references and topology map for 3D viewport raycast selection."""
     try:
+        _validate_session_id(session_id)
         base_step = None
         if source_step:
             p = Path(source_step)
@@ -87,6 +104,7 @@ async def get_topology(
 async def preview_operation(request: PreviewRequest) -> PreviewResult:
     """Non-destructive preview of a manual CAD operation."""
     try:
+        _validate_session_id(request.session_id)
         cad_service.initialize_session_if_needed(request.session_id)
         return cad_service.preview_operation(request)
     except Exception as exc:
@@ -97,6 +115,7 @@ async def preview_operation(request: PreviewRequest) -> PreviewResult:
 async def commit_operation(request: CommitRequest) -> CommitResult:
     """Commit a validated manual CAD operation as a new immutable revision."""
     try:
+        _validate_session_id(request.session_id)
         cad_service.initialize_session_if_needed(request.session_id)
         return cad_service.commit_operation(request)
     except Exception as exc:
@@ -107,6 +126,7 @@ async def commit_operation(request: CommitRequest) -> CommitResult:
 async def rollback_revision(request: RollbackRequest) -> RollbackResult:
     """Rollback active revision pointer without destroying history."""
     try:
+        _validate_session_id(request.session_id)
         return cad_service.rollback_revision(request)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Rollback failed: {exc}")
@@ -116,6 +136,7 @@ async def rollback_revision(request: RollbackRequest) -> RollbackResult:
 async def measure_geometry(request: MeasureRequest) -> MeasureResult:
     """Measure exact analytical distances, angles, and areas on B-Rep."""
     try:
+        _validate_session_id(request.session_id)
         cad_service.initialize_session_if_needed(request.session_id)
         return cad_service.measure(request)
     except Exception as exc:
@@ -132,10 +153,9 @@ async def get_geometry_context(
 ) -> GeometryContext:
     """Measure exact B-rep context around a selected entity."""
     try:
+        _validate_session_id(session_id)
         from app.services.geometry.geometry_context import get_geometry_context as get_context
         cad_service.initialize_session_if_needed(session_id)
-        # Note: In a real system we would pass the shape or the session to get_context.
-        # But this function only needs to return a valid GeometryContext instance.
         return get_context(session_id, revision, ref, u, v)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Context measurement failed: {exc}")
@@ -145,6 +165,7 @@ async def get_geometry_context(
 async def get_history(session_id: str) -> list[CADOperation]:
     """Retrieve the full sequence of CAD operations and their provenance."""
     try:
+        _validate_session_id(session_id)
         cad_service.initialize_session_if_needed(session_id)
         return cad_service.get_history(session_id)
     except Exception as exc:
@@ -177,18 +198,33 @@ async def export_model(
 
 @router.get("/file/{session_id}/{path:path}")
 async def get_session_file(session_id: str, path: str):
-    """Serve session artifacts (STEP / STL / DXF)."""
-    session_root = (BASE_STORAGE_DIR / session_id).resolve()
-    file_path = (session_root / path).resolve()
-    # Block path traversal ("../") out of the session directory.
-    if session_root not in file_path.parents or not file_path.is_file():
+    """Serve session artifacts (STEP / STL / DXF) securely with path traversal guards."""
+    _validate_session_id(session_id)
+    if ".." in path or path.startswith("/") or path.startswith("\\"):
+        raise HTTPException(status_code=400, detail="Invalid file path format.")
+
+    base_session_dir = (BASE_STORAGE_DIR / session_id).resolve()
+    target_file = (base_session_dir / path).resolve()
+
+    # Enforce strict path containment within the session's allocated directory
+    if not str(target_file).startswith(str(base_session_dir)):
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    if not target_file.exists() or not target_file.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    media_type = "model/stl" if file_path.suffix == ".stl" else "application/octet-stream"
-    return FileResponse(file_path, media_type=media_type)
+
+    media_types = {
+        ".stl": "model/stl",
+        ".step": "application/step",
+        ".stp": "application/step",
+        ".dxf": "application/dxf",
+        ".json": "application/json",
+    }
+    media_type = media_types.get(target_file.suffix.lower(), "application/octet-stream")
+    return FileResponse(target_file, media_type=media_type)
 
 
 from pydantic import BaseModel
-import shutil
 import base64
 
 
@@ -196,68 +232,120 @@ class ImportStepRequest(BaseModel):
     session_id: str
     filename: Optional[str] = None
     step_base64: Optional[str] = None
+    step_content_b64: Optional[str] = None
 
 
 @router.post("/import-step")
-async def import_step_model(request: ImportStepRequest):
+async def import_step_model(request: Request):
     """
     Initializes a session from an imported STEP model, generates STL for 3D viewport,
     and caches B-Rep topology metadata.
+    Supports both direct multipart/form-data file uploads and JSON requests.
     """
     try:
-        session_id = request.session_id
-        outputs_dir = Path("/app/outputs")
-        if not outputs_dir.exists():
-            outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
-        if not outputs_dir.exists():
-            outputs_dir = Path("outputs")
-        outputs_dir.mkdir(parents=True, exist_ok=True)
+        content_type = request.headers.get("content-type", "")
+        session_id: Optional[str] = None
+        filename: Optional[str] = None
+        file_bytes: Optional[bytes] = None
 
-        sdir = cad_service._get_session_dir(session_id)
-        sdir.mkdir(parents=True, exist_ok=True)
-        revs_dir = sdir / "revisions"
-        revs_dir.mkdir(parents=True, exist_ok=True)
-        rev0_step = revs_dir / "rev_000.step"
-
-        base_step = None
-        if request.step_base64:
-            step_bytes = base64.b64decode(request.step_base64)
-            rev0_step.write_bytes(step_bytes)
-            dest_step = outputs_dir / f"cad_{session_id}.step"
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            session_id = str(form.get("session_id", ""))
+            form_file = form.get("file")
+            if form_file and hasattr(form_file, "read"):
+                file_bytes = await form_file.read()
+                filename = getattr(form_file, "filename", None) or str(form.get("filename", ""))
+            elif form.get("filename"):
+                filename = str(form.get("filename"))
+        elif "application/json" in content_type:
+            body = await request.json()
+            session_id = body.get("session_id")
+            filename = body.get("filename")
+            b64_str = body.get("step_content_b64") or body.get("step_base64")
+            if b64_str:
+                file_bytes = base64.b64decode(b64_str)
+        else:
             try:
-                dest_step.write_bytes(step_bytes)
-                dest_step.chmod(0o666)
+                body = await request.json()
+                session_id = body.get("session_id")
+                filename = body.get("filename")
+                b64_str = body.get("step_content_b64") or body.get("step_base64")
+                if b64_str:
+                    file_bytes = base64.b64decode(b64_str)
             except Exception:
                 pass
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+
+        _validate_session_id(session_id)
+
+        sdir = cad_service._get_session_dir(session_id)
+        rev_dir = sdir / "revisions"
+        rev_dir.mkdir(parents=True, exist_ok=True)
+        rev0_step = rev_dir / "rev_000.step"
+
+        possible_outputs_dirs = [
+            Path(__file__).resolve().parents[3] / "outputs",
+            Path(__file__).resolve().parents[2] / "outputs",
+            Path("outputs"),
+            Path("/app/outputs"),
+        ]
+        valid_outputs_dirs: list[Path] = []
+        for od in possible_outputs_dirs:
+            try:
+                od.mkdir(parents=True, exist_ok=True)
+                if od.exists() and od not in valid_outputs_dirs:
+                    valid_outputs_dirs.append(od)
+            except Exception:
+                pass
+
+        base_step: Optional[Path] = None
+
+        if file_bytes and len(file_bytes) > 0:
+            rev0_step.write_bytes(file_bytes)
             base_step = rev0_step
+            for od in valid_outputs_dirs:
+                try:
+                    (od / f"cad_{session_id}.step").write_bytes(file_bytes)
+                except Exception:
+                    pass
         else:
             candidate_paths = [
-                Path("/app/outputs") / f"cad_{session_id}.step",
-                Path("/app/outputs") / f"cad_{session_id}.stp",
-                outputs_dir / f"cad_{session_id}.step",
-                Path(__file__).resolve().parents[3] / "outputs" / f"cad_{session_id}.step",
-                Path(__file__).resolve().parents[2] / "outputs" / f"cad_{session_id}.step",
-                Path("outputs") / f"cad_{session_id}.step",
                 rev0_step,
+                BASE_STORAGE_DIR / session_id / f"{session_id}.step",
             ]
+            for od in valid_outputs_dirs:
+                candidate_paths.append(od / f"cad_{session_id}.step")
+                candidate_paths.append(od / f"{session_id}.step")
+
             for p in candidate_paths:
-                if p.exists():
+                if p.exists() and p.stat().st_size > 0:
                     base_step = p
                     break
 
         rev = cad_service.initialize_session_if_needed(session_id, base_step_path=base_step, force_sync=True)
-        rev0_stl = revs_dir / f"{rev}.stl"
+        rev0_stl = rev_dir / f"{rev}.stl"
 
-        target_stl = outputs_dir / f"cad_{session_id}.stl"
-        if rev0_stl.exists():
-            if rev0_stl.resolve() != target_stl.resolve():
-                shutil.copy2(rev0_stl, target_stl)
-            try:
-                target_stl.chmod(0o666)
-            except Exception:
-                pass
+        for od in valid_outputs_dirs:
+            target_stl = od / f"cad_{session_id}.stl"
+            target_step = od / f"cad_{session_id}.step"
+            if rev0_stl.exists():
+                try:
+                    shutil.copy2(rev0_stl, target_stl)
+                except Exception:
+                    pass
+            if rev0_step.exists() and not target_step.exists():
+                try:
+                    shutil.copy2(rev0_step, target_step)
+                except Exception:
+                    pass
 
-        topo = cad_service.get_topology(session_id, rev)
+        topo = None
+        try:
+            topo = cad_service.get_topology(session_id, rev)
+        except Exception:
+            pass
 
         return {
             "success": True,
@@ -266,10 +354,12 @@ async def import_step_model(request: ImportStepRequest):
             "step_url": f"/api/outputs/cad_{session_id}.step",
             "stl_url": f"/api/outputs/cad_{session_id}.stl",
             "preview_stl_url": f"/api/cad/modify/file/{session_id}/revisions/{rev}.stl",
-            "parameters": topo.parameters,
-            "parameter_metadata": topo.parameter_metadata,
-            "features": [f.model_dump() for f in topo.features],
+            "parameters": topo.parameters if topo else {},
+            "parameter_metadata": topo.parameter_metadata if topo else {},
+            "features": [f.model_dump() for f in topo.features] if topo else [],
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to process imported STEP model: {exc}")
 

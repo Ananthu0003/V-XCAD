@@ -187,20 +187,31 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
             <div className="grid grid-cols-1 gap-2">
                 {/* Setups Section - Maps over multiple setups if available */}
                 {setups.length > 0 ? setups.map((s, idx) => {
-                    const setupFeatures = features.filter(f => s.assignedFeatureIds.includes(f.id));
-                    const setupOps = operations.filter(op => op.setup_id === s.setupId || (!op.setup_id && idx === 0)); // fallback if no setup_id on op
+                    const assignedIds: string[] = s.assignedFeatureIds || (s as any).assigned_feature_ids || [];
+                    const setupFeatures = (assignedIds.length > 0)
+                        ? features.filter(f => assignedIds.includes(f.id))
+                        : (setups.length === 1 ? features : []);
+                    const currentSetupId = s.setupId || (s as any).setup_id || `setup_${idx + 1}`;
+                    const setupOps = operations.filter(op => {
+                        const opSetupId = op.setup_id || (op as any).setupId;
+                        return opSetupId === currentSetupId || (!opSetupId && idx === 0);
+                    });
+                    const setupToolAxis = s.toolAxis || (s as any).tool_axis || [0, 0, 1];
+                    const setupWcs = s.workCoordinateSystem || (s as any).work_coordinate_system || (s as any).wcs || 'G54';
+                    const setupName = s.setupName || (s as any).setup_name || `Setup ${idx + 1}`;
+                    const setupType = s.setupType || (s as any).setup_type || 'milling_3axis';
                     return (
-                        <div key={s.setupId} className="flex flex-col gap-2 mt-2 pt-2 border-t border-border">
+                        <div key={currentSetupId} className="flex flex-col gap-2 mt-2 pt-2 border-t border-border">
                             <div 
                                 onClick={() => onClickSection('setup')}
                                 className="p-4 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer transition-all flex flex-col gap-2 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)]"
                             >
                                 <div className="flex items-center gap-2 text-blue-700 dark:text-blue-400 font-bold text-[11px] uppercase tracking-widest">
-                                    <Settings2 className="size-3.5" /> {s.setupName} ({s.setupType})
+                                    <Settings2 className="size-3.5" /> {setupName} ({setupType})
                                 </div>
                                 <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-muted-foreground mt-1">
-                                    <div>Tool Axis:</div><div className="text-foreground font-mono">[{(s.toolAxis || []).join(', ')}]</div>
-                                    <div>WCS:</div><div className="text-foreground">{s.workCoordinateSystem}</div>
+                                    <div>Tool Axis:</div><div className="text-foreground font-mono">[{Array.isArray(setupToolAxis) ? setupToolAxis.join(', ') : '0, 0, 1'}]</div>
+                                    <div>WCS:</div><div className="text-foreground">{setupWcs}</div>
                                 </div>
                             </div>
                             
@@ -410,7 +421,7 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                         <FileCode className="size-3.5" /> Manufacturing Details
                     </div>
                     <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-muted-foreground mt-1">
-                        <div>Post:</div><div className="text-foreground capitalize">{setup.postProcessor || 'Not selected'}</div>
+                        <div>Post:</div><div className="text-foreground capitalize">{setup?.postProcessor || 'Not selected'}</div>
                         <div>Cycle Time:</div><div className="text-foreground font-mono">{formatTime(totalCycleTime)}</div>
                     </div>
                 </div>
