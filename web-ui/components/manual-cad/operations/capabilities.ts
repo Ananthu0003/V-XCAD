@@ -478,13 +478,11 @@ export function getSelectionReadout(entity: TopologyEntity | null | undefined): 
           value: `⌀${(entity.radius * 2).toFixed(1)} mm`,
         });
       } else {
-        // Square, rectangular or planar boundary face: show Length, Width or Size
+        // Square, rectangular or planar boundary face: show Size or Span
         if (entity.width != null && entity.height != null) {
-          props.push({ label: 'Width', value: `${entity.width.toFixed(1)} mm` });
-          props.push({ label: 'Length', value: `${entity.height.toFixed(1)} mm` });
+          props.push({ label: 'Size', value: `${entity.width.toFixed(1)} × ${entity.height.toFixed(1)} mm` });
         } else if (nonZeroDims.length >= 2) {
-          props.push({ label: 'Length', value: `${nonZeroDims[0].toFixed(1)} mm` });
-          props.push({ label: 'Width', value: `${nonZeroDims[1].toFixed(1)} mm` });
+          props.push({ label: 'Size', value: `${nonZeroDims[0].toFixed(1)} × ${nonZeroDims[1].toFixed(1)} mm` });
           if (nonZeroDims.length >= 3 && nonZeroDims[2] > 0.1) {
             props.push({ label: 'Height', value: `${nonZeroDims[2].toFixed(1)} mm` });
           }

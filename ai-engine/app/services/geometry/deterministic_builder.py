@@ -53,10 +53,12 @@ class DeterministicGeometryBuilder:
     def _execute_script_to_shape(self, script: str) -> b3d.Shape:
         """
         Safely executes the deterministic build123d script in an isolated namespace
-        and extracts the built `part.part` Shape.
+        with restricted builtins and extracts the built `part.part` Shape.
         """
+        from app.services.llm.parameter_render import RESTRICTED_BUILTINS
+
         local_scope: Dict[str, Any] = {}
-        exec(script, {}, local_scope)
+        exec(script, {"__builtins__": RESTRICTED_BUILTINS}, local_scope)
 
         part_obj = local_scope.get("part")
         if part_obj and hasattr(part_obj, "part"):

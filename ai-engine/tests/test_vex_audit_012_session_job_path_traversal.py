@@ -207,3 +207,29 @@ class TestVexAudit012FilesystemContainment:
 
         # Verify no path was constructed — the directory should have no files
         assert list(bp_dir.iterdir()) == []
+
+
+class TestCadModifyRouterIdValidation:
+    """Verify that _validate_session_id and _validate_revision_id reject directory traversal."""
+
+    def test_cad_modify_validate_session_id_valid(self):
+        from app.api.v1.cad_modify_router import _validate_session_id
+        assert _validate_session_id("session_123-abc") == "session_123-abc"
+
+    def test_cad_modify_validate_session_id_traversal(self):
+        from app.api.v1.cad_modify_router import _validate_session_id
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_session_id("../../../etc/passwd")
+        assert exc_info.value.status_code == 400
+
+    def test_cad_modify_validate_revision_id_valid(self):
+        from app.api.v1.cad_modify_router import _validate_revision_id
+        assert _validate_revision_id("rev_001") == "rev_001"
+        assert _validate_revision_id(None) is None
+
+    def test_cad_modify_validate_revision_id_traversal(self):
+        from app.api.v1.cad_modify_router import _validate_revision_id
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_revision_id("../../revisions/rev_000")
+        assert exc_info.value.status_code == 400
+

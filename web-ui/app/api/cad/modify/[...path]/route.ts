@@ -40,9 +40,9 @@ export async function GET(
     const subpath = path.join('/');
 
     // Extract sessionId from known subpath structures:
-    // e.g. topology/{session_id}, history/{session_id}, context/{session_id}, file/{session_id}/...
+    // e.g. topology/{session_id}, history/{session_id}, context/{session_id}, file/{session_id}/..., export/{session_id}, features/{session_id}
     let targetSessionId: string | null = null;
-    if (path.length >= 2 && ['topology', 'history', 'context', 'file'].includes(path[0])) {
+    if (path.length >= 2 && ['topology', 'history', 'context', 'file', 'export', 'features'].includes(path[0])) {
       targetSessionId = path[1];
     }
 
@@ -104,7 +104,7 @@ export async function POST(
     const subpath = path.join('/');
     const body = await request.json().catch(() => ({}));
 
-    const targetSessionId = body?.session_id;
+    const targetSessionId = body?.session_id || (path.length >= 2 ? path[1] : null);
     if (targetSessionId && typeof targetSessionId === 'string') {
       const isAuthorized = await verifySessionOwnership(targetSessionId, userId);
       if (!isAuthorized) {

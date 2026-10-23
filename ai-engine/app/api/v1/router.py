@@ -2034,6 +2034,7 @@ async def retrieve_knowledge(query: Dict[str, Any], _service_auth: None = Depend
 
 @router.delete("/knowledge/documents/{doc_id}")
 async def delete_knowledge_document(doc_id: str, _service_auth: None = Depends(validate_service_key)):
+    _validate_id(doc_id, "doc_id")
     try:
         from app.services.knowledge.repository import KnowledgeRepository
         repo = KnowledgeRepository()

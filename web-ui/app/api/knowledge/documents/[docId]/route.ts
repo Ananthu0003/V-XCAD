@@ -26,8 +26,8 @@ export async function DELETE(
 	}
 
 	const { docId } = await params;
-	if (!docId) {
-		return NextResponse.json({ error: { message: 'Missing document ID.' } }, { status: 400 });
+	if (!docId || !/^[a-zA-Z0-9_-]+$/.test(docId)) {
+		return NextResponse.json({ error: { message: 'Invalid or missing document ID.' } }, { status: 400 });
 	}
 
 	let upstream: Response;

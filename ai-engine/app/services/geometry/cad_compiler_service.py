@@ -167,7 +167,7 @@ class CADCompilerService:
                 pts_expr.append(f"({p_rad_name}, {p_z_name})")
                 
             body_lines.append(f"        pts = [{', '.join(pts_expr)}]")
-            body_lines.append("        bd.Polygon(pts)")
+            body_lines.append("        bd.Polygon(pts, align=None)")
             body_lines.append("    bd.revolve(axis=bd.Axis.Z)")
         else:
             # Reconstruct stepped profile from diameters
@@ -184,7 +184,7 @@ class CADCompilerService:
             body_lines.append("            (outer_dia_max / 2.0, total_length),")
             body_lines.append("            (0.0, total_length),")
             body_lines.append("        ]")
-            body_lines.append("        bd.Polygon(pts)")
+            body_lines.append("        bd.Polygon(pts, align=None)")
             body_lines.append("    bd.revolve(axis=bd.Axis.Z)")
 
         # 2. Subtractive stepped bores and internal cutouts
@@ -208,7 +208,7 @@ class CADCompilerService:
                     metadata[p_name_z] = {"group": "Internal Bore", "confidence": 1.0, "description": f"Internal bore Z {i}"}
                     b_pts_expr.append(f"({p_name_r}, {p_name_z})")
                 body_lines.append(f"        b_pts = [{', '.join(b_pts_expr)}]")
-                body_lines.append("        bd.Polygon(b_pts)")
+                body_lines.append("        bd.Polygon(b_pts, align=None)")
                 body_lines.append("    bd.revolve(axis=bd.Axis.Z, mode=bd.Mode.SUBTRACT)")
             else:
                 dia = float(b_dims.get("bore_dia_1", b_dims.get("diameter", b_dims.get("bore_dia", 10.0))))

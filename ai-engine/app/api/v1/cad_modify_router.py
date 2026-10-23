@@ -7,8 +7,9 @@ import re
 import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form
-from fastapi.responses import FileResponse
+import base64
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form, Response
+from fastapi.responses import FileResponse, Response
 
 from app.models.cad_modification import (
     AiPlanRequest,
@@ -51,6 +52,17 @@ def _validate_session_id(session_id: str) -> str:
     return session_id
 
 
+def _validate_revision_id(revision_id: Optional[str]) -> Optional[str]:
+    """Ensure revision_id contains only alphanumeric chars, hyphens, and underscores."""
+    if revision_id is not None:
+        if not isinstance(revision_id, str) or not _SAFE_ID_RE.match(revision_id):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": {"message": "Invalid revision identifier format.", "code": "INVALID_ID"}},
+            )
+    return revision_id
+
+
 router = APIRouter(prefix="/cad/modify", tags=["manual-cad"])
 cad_service = ManualCADService()
 
@@ -62,7 +74,7 @@ async def recompute_history(request: RecomputeRequest) -> RecomputeResult:
     try:
         _validate_session_id(request.session_id)
         cad_service.initialize_session_if_needed(request.session_id)
-        return cad_service.recompute_history(request)
+        return await asyncio.to_thread(cad_service.recompute_history, request)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Parametric recompute failed: {exc}")
 
@@ -77,6 +89,7 @@ async def get_topology(
     """Retrieve geometric references and topology map for 3D viewport raycast selection."""
     try:
         _validate_session_id(session_id)
+        _validate_revision_id(revision_id)
         base_step = None
         if source_step:
             p = Path(source_step)
@@ -95,7 +108,7 @@ async def get_topology(
                         break
 
         cad_service.initialize_session_if_needed(session_id, base_step_path=base_step, force_sync=force_sync)
-        return cad_service.get_topology(session_id, revision_id)
+        return await asyncio.to_thread(cad_service.get_topology, session_id, revision_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to extract topology: {exc}")
 
@@ -105,8 +118,9 @@ async def preview_operation(request: PreviewRequest) -> PreviewResult:
     """Non-destructive preview of a manual CAD operation."""
     try:
         _validate_session_id(request.session_id)
+        _validate_revision_id(request.base_revision)
         cad_service.initialize_session_if_needed(request.session_id)
-        return cad_service.preview_operation(request)
+        return await asyncio.to_thread(cad_service.preview_operation, request)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Preview generation failed: {exc}")
 
@@ -116,8 +130,9 @@ async def commit_operation(request: CommitRequest) -> CommitResult:
     """Commit a validated manual CAD operation as a new immutable revision."""
     try:
         _validate_session_id(request.session_id)
+        _validate_revision_id(request.base_revision)
         cad_service.initialize_session_if_needed(request.session_id)
-        return cad_service.commit_operation(request)
+        return await asyncio.to_thread(cad_service.commit_operation, request)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Commit failed: {exc}")
 
@@ -127,7 +142,8 @@ async def rollback_revision(request: RollbackRequest) -> RollbackResult:
     """Rollback active revision pointer without destroying history."""
     try:
         _validate_session_id(request.session_id)
-        return cad_service.rollback_revision(request)
+        _validate_revision_id(request.target_revision)
+        return await asyncio.to_thread(cad_service.rollback_revision, request)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Rollback failed: {exc}")
 
@@ -137,8 +153,9 @@ async def measure_geometry(request: MeasureRequest) -> MeasureResult:
     """Measure exact analytical distances, angles, and areas on B-Rep."""
     try:
         _validate_session_id(request.session_id)
+        _validate_revision_id(request.revision_id)
         cad_service.initialize_session_if_needed(request.session_id)
-        return cad_service.measure(request)
+        return await asyncio.to_thread(cad_service.measure, request)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Measurement failed: {exc}")
 
@@ -154,9 +171,10 @@ async def get_geometry_context(
     """Measure exact B-rep context around a selected entity."""
     try:
         _validate_session_id(session_id)
+        _validate_revision_id(revision)
         from app.services.geometry.geometry_context import get_geometry_context as get_context
         cad_service.initialize_session_if_needed(session_id)
-        return get_context(session_id, revision, ref, u, v)
+        return await asyncio.to_thread(get_context, session_id, revision, ref, u, v)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Context measurement failed: {exc}")
 
@@ -167,7 +185,7 @@ async def get_history(session_id: str) -> list[CADOperation]:
     try:
         _validate_session_id(session_id)
         cad_service.initialize_session_if_needed(session_id)
-        return cad_service.get_history(session_id)
+        return await asyncio.to_thread(cad_service.get_history, session_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch history: {exc}")
 
@@ -180,6 +198,8 @@ async def export_model(
 ) -> Response:
     """Download the current (or a chosen) revision as STL, STEP, OBJ or 3MF."""
     try:
+        _validate_session_id(session_id)
+        _validate_revision_id(revision_id)
         data, media_type, filename = await asyncio.to_thread(
             cad_service.export_revision, session_id, revision_id, fmt
         )
@@ -207,8 +227,12 @@ async def get_session_file(session_id: str, path: str):
     target_file = (base_session_dir / path).resolve()
 
     # Enforce strict path containment within the session's allocated directory
-    if not str(target_file).startswith(str(base_session_dir)):
-        raise HTTPException(status_code=403, detail="Access denied.")
+    try:
+        if not target_file.is_relative_to(base_session_dir):
+            raise HTTPException(status_code=403, detail="Access denied.")
+    except AttributeError:
+        if not str(target_file).startswith(str(base_session_dir)):
+            raise HTTPException(status_code=403, detail="Access denied.")
 
     if not target_file.exists() or not target_file.is_file():
         raise HTTPException(status_code=404, detail="File not found")
@@ -356,7 +380,7 @@ async def import_step_model(request: Request):
             "preview_stl_url": f"/api/cad/modify/file/{session_id}/revisions/{rev}.stl",
             "parameters": topo.parameters if topo else {},
             "parameter_metadata": topo.parameter_metadata if topo else {},
-            "features": [f.model_dump() for f in topo.features] if topo else [],
+            "features": [f.model_dump() if hasattr(f, "model_dump") else f for f in topo.features] if topo else [],
         }
     except HTTPException:
         raise
@@ -376,9 +400,13 @@ async def ai_geometry_plan(request: AiPlanRequest) -> AiPlanResult:
     Never modifies geometry directly — returns a plan for user review.
     """
     try:
+        _validate_session_id(request.session_id)
+        _validate_revision_id(request.revision_id)
         from app.services.agents.ai_geometry_planner import AiGeometryPlanner
         planner = AiGeometryPlanner()
-        return planner.plan(request)
+        return await asyncio.to_thread(planner.plan, request)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"AI geometry planning failed: {exc}")
 
@@ -394,8 +422,12 @@ async def select_coplanar_faces(request: CoplanarQueryRequest) -> CoplanarQueryR
     Returns a list of transient face IDs. Does NOT modify the model.
     """
     try:
+        _validate_session_id(request.session_id)
+        _validate_revision_id(request.revision_id)
         cad_service.initialize_session_if_needed(request.session_id)
-        return cad_service.coplanar_faces(request)
+        return await asyncio.to_thread(cad_service.coplanar_faces, request)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Coplanar query failed: {exc}")
 
@@ -409,8 +441,12 @@ async def select_similar_entities(request: SimilarQueryRequest) -> SimilarQueryR
     Returns a list of transient entity IDs. Does NOT modify the model.
     """
     try:
+        _validate_session_id(request.session_id)
+        _validate_revision_id(request.revision_id)
         cad_service.initialize_session_if_needed(request.session_id)
-        return cad_service.similar_entities(request)
+        return await asyncio.to_thread(cad_service.similar_entities, request)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Similar entity query failed: {exc}")
 
@@ -425,23 +461,14 @@ async def dfm_analysis(request: DfmAnalysisRequest) -> DfmAnalysisResult:
     Does NOT modify geometry.
     """
     try:
+        _validate_session_id(request.session_id)
+        _validate_revision_id(request.revision_id)
         cad_service.initialize_session_if_needed(request.session_id)
-        return cad_service.dfm_analysis(request)
+        return await asyncio.to_thread(cad_service.dfm_analysis, request)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"DFM analysis failed: {exc}")
-
-
-@router.post("/measure", response_model=MeasureResult)
-async def measure_entity(request: MeasureRequest) -> MeasureResult:
-    """
-    Measure entity dimensions or distance between entities, returning constituent shape
-    parameters and AI CAD feature naming.
-    """
-    try:
-        cad_service.initialize_session_if_needed(request.session_id)
-        return cad_service.measure(request)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Measure query failed: {exc}")
 
 
 @router.get("/features/{session_id}", response_model=List[DetectedFeature])
@@ -454,8 +481,12 @@ async def get_detected_features(
     with editable parameter schemas.
     """
     try:
+        _validate_session_id(session_id)
+        _validate_revision_id(revision_id)
         cad_service.initialize_session_if_needed(session_id)
         return await asyncio.to_thread(cad_service.get_detected_features, session_id, revision_id)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Feature extraction failed: {exc}")
 
@@ -466,8 +497,12 @@ async def select_more_entities(request: SelectMoreRequest) -> SelectMoreResponse
     Topological selection expansion: adjacent, coplanar, tangent chain, edge loop, same type/size, invert, clear.
     """
     try:
+        _validate_session_id(request.session_id)
+        _validate_revision_id(request.revision_id)
         cad_service.initialize_session_if_needed(request.session_id)
         return await asyncio.to_thread(cad_service.select_more, request)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Selection expansion failed: {exc}")
 

@@ -49,9 +49,9 @@ export async function POST(request: NextRequest): Promise<Response> {
       );
     }
 
-    // Generate or sanitize session ID (alphanumeric + hyphen only to prevent directory traversal)
+    // Generate or sanitize session ID (alphanumeric + hyphen/underscore only to prevent directory traversal)
     const rawSessionId = formData.get('session_id');
-    const sessionId = (typeof rawSessionId === 'string' && /^[a-zA-Z0-9-]+$/.test(rawSessionId))
+    const sessionId = (typeof rawSessionId === 'string' && /^[a-zA-Z0-9_-]+$/.test(rawSessionId))
       ? rawSessionId
       : `${isStep ? 'step' : 'stl'}-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`;
 

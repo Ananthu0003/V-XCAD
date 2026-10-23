@@ -356,22 +356,18 @@ class CamEngineAdapter:
             ids.append(str(job_id))
 
         possible_dirs = [
-            Path(__file__).resolve().parents[2] / "outputs",
             Path(__file__).resolve().parents[3] / "outputs",
             Path(__file__).resolve().parents[4] / "outputs",
-            Path("C:/Users/user/Downloads/VEXCAD/ai-engine/outputs"),
-            Path("C:/Users/user/Downloads/VEXCAD/outputs"),
             Path("/app/outputs"),
+            Path("outputs"),
         ]
 
         storage_base = Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs"))
         possible_storage = [
             storage_base,
             Path("/app") / storage_base,
-            Path(__file__).resolve().parents[2] / "storage" / "jobs",
             Path(__file__).resolve().parents[3] / "storage" / "jobs",
             Path(__file__).resolve().parents[4] / "storage" / "jobs",
-            Path("C:/Users/user/Downloads/VEXCAD/storage/jobs"),
         ]
 
         # 1. Check direct filenames in outputs directories
@@ -410,7 +406,12 @@ class CamEngineAdapter:
             cand = pdir / "sample_bracket.step"
             if cand.exists() and cand.is_file() and cand.stat().st_size > 0:
                 return cand
-        gen_cand = Path("C:/Users/user/Downloads/Generic-cam/sample_bracket.step")
+        gen_dir = os.getenv("GENERIC_CAM_DIR")
+        if gen_dir:
+            gen_cand = Path(gen_dir) / "sample_bracket.step"
+            if gen_cand.exists() and gen_cand.is_file() and gen_cand.stat().st_size > 0:
+                return gen_cand
+        gen_cand = Path(__file__).resolve().parents[4].parent / "Generic-cam" / "sample_bracket.step"
         if gen_cand.exists() and gen_cand.is_file() and gen_cand.stat().st_size > 0:
             return gen_cand
 
@@ -723,9 +724,10 @@ class CamEngineAdapter:
         if save_artifacts:
             target_ids = {session_id, job_id, effective_job_id} - {None, ""}
             storage_bases = [
+                Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs")),
                 Path(__file__).resolve().parents[4] / "storage" / "jobs",
                 Path(__file__).resolve().parents[3] / "storage" / "jobs",
-                Path("C:/Users/user/Downloads/VEXCAD/storage/jobs"),
+                Path("/app/storage/jobs"),
             ]
             for tid in target_ids:
                 for sbase in storage_bases:

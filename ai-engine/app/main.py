@@ -35,9 +35,11 @@ app = FastAPI(
 # ownership remain the BFF's responsibility. /health (below) is intentionally exempt.
 app.include_router(v1_router, prefix="/api/v1", dependencies=[Depends(validate_service_key)])
 
-# Mount Generic-CAM CamError handler
-from cam_engine.api.routes import cam_error_response
+# Mount Generic-CAM API routes and CamError handler
+from cam_engine.api.routes import router as cam_router, cam_error_response
 from cam_engine.errors import CamError
+
+app.include_router(cam_router)
 
 
 @app.exception_handler(CamError)
@@ -69,3 +71,8 @@ async def http_handler(request: Request, exc: HTTPException) -> JSONResponse:
 @app.get("/health", tags=["system"])
 def health() -> dict:
     return {"status": "ok", "version": "2.0.0"}
+
+
+@app.get("/", include_in_schema=False)
+def root() -> dict:
+    return {"name": "VexCAM Studio", "status": "online", "version": "2.0.0"}

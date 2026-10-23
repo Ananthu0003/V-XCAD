@@ -288,10 +288,10 @@ def _evict_expired_sessions():
 def _get_session(request: Optional[Request] = None) -> SessionState:
     _evict_expired_sessions()
     if request is None:
-        return SessionState()
+        return _default_session
     sid = request.headers.get("X-Session-ID", "").strip()
-    if not sid:
-        sid = f"ephemeral_{uuid.uuid4().hex[:12]}"
+    if not sid or sid == "default":
+        return _default_session
     if sid not in _sessions:
         _sessions[sid] = (SessionState(), time.time())
     state, _ = _sessions[sid]
