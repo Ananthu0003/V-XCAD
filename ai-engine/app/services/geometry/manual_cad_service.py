@@ -104,14 +104,20 @@ class ManualCADService(BodyOperationsMixin):
         if rev0.exists():
             return rev0
 
-        outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
-        matching_steps = sorted(
-            outputs_dir.glob(f"cad_{session_id}*.step"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True
-        )
-        if matching_steps and matching_steps[0].exists():
-            return matching_steps[0]
+        for out_dir in [
+            Path("/app/outputs"),
+            Path(__file__).resolve().parents[3] / "outputs",
+            Path(__file__).resolve().parents[4] / "outputs",
+            Path("outputs"),
+        ]:
+            if out_dir.exists():
+                matching_steps = sorted(
+                    out_dir.glob(f"cad_{session_id}*.step"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True
+                )
+                if matching_steps and matching_steps[0].exists():
+                    return matching_steps[0]
 
         return None
 
@@ -133,14 +139,20 @@ class ManualCADService(BodyOperationsMixin):
         if rev0_stl.exists():
             return rev0_stl
 
-        outputs_dir = Path(__file__).resolve().parents[3] / "outputs"
-        matching_stls = sorted(
-            outputs_dir.glob(f"cad_{session_id}*.stl"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True
-        )
-        if matching_stls and matching_stls[0].exists():
-            return matching_stls[0]
+        for out_dir in [
+            Path("/app/outputs"),
+            Path(__file__).resolve().parents[3] / "outputs",
+            Path(__file__).resolve().parents[4] / "outputs",
+            Path("outputs"),
+        ]:
+            if out_dir.exists():
+                matching_stls = sorted(
+                    out_dir.glob(f"cad_{session_id}*.stl"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True
+                )
+                if matching_stls and matching_stls[0].exists():
+                    return matching_stls[0]
 
         return None
 
@@ -166,9 +178,11 @@ class ManualCADService(BodyOperationsMixin):
 
         # Search possible outputs directories for latest AI generated step
         possible_output_dirs = [
+            Path("/app/outputs"),
             Path(__file__).resolve().parents[3] / "outputs",
             Path(__file__).resolve().parents[4] / "outputs",
             self.storage_dir.parent / "outputs",
+            Path("outputs"),
         ]
         matching_steps: list[Path] = []
         for out_dir in possible_output_dirs:
@@ -240,6 +254,22 @@ class ManualCADService(BodyOperationsMixin):
         sdir = self._get_session_dir(session_id)
         step_path = sdir / "revisions" / f"{revision_id}.step"
         if not step_path.exists():
+            session_file = sdir / "session.json"
+            if session_file.exists():
+                try:
+                    state = json.loads(session_file.read_text())
+                    active_rev = state.get("active_revision", "rev_000")
+                    step_file = sdir / "revisions" / f"{active_rev}.step"
+                    if step_file.exists():
+                        return import_step(str(step_file))
+                except Exception:
+                    pass
+            rev0 = sdir / "revisions" / "rev_000.step"
+            if rev0.exists():
+                return import_step(str(rev0))
+            active_step = self.get_active_step_path(session_id)
+            if active_step and active_step.exists():
+                return import_step(str(active_step))
             raise FileNotFoundError(f"Revision {revision_id} not found for session {session_id}")
         return import_step(str(step_path))
 
@@ -298,6 +328,8 @@ class ManualCADService(BodyOperationsMixin):
         """Retrieve cached topology or recompute on the fly."""
         sdir = self._get_session_dir(session_id)
         topo_path = sdir / "topology" / f"{revision_id}.json"
+        if not topo_path.exists():
+            topo_path = sdir / "topology" / "rev_000.json"
         if topo_path.exists():
             try:
                 data_dict = json.loads(topo_path.read_text())

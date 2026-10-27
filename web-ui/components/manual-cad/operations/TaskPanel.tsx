@@ -286,7 +286,7 @@ export function TaskPanel({
               <button
                 type="button"
                 className="mcad-btn mcad-btn--ghost"
-                onClick={onPreview}
+                onClick={() => onPreview?.()}
                 disabled={isLoading || !selectedEntity}
               >
                 {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
@@ -312,7 +312,7 @@ export function TaskPanel({
             type="button"
             className="mcad-btn mcad-btn--primary"
             style={{ flex: 2 }}
-            onClick={onCommit}
+            onClick={() => onCommit?.()}
             disabled={okDisabled}
             title={!isApplicable ? (OPERATION_REQUIREMENTS[definition.id] || 'Target not applicable') : undefined}
           >

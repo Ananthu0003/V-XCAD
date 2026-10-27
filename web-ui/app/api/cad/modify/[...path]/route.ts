@@ -49,8 +49,12 @@ export async function GET(
       });
     }
   } catch (err: any) {
+    const isConnRefused = err?.message === 'fetch failed' || err?.code === 'ECONNREFUSED' || err?.cause?.code === 'ECONNREFUSED';
+    const message = isConnRefused
+      ? `AI Geometry Engine (FastAPI) is unreachable at ${getFastApiUrl()}. Please verify that the ai-engine service (uvicorn app.main:app) is running.`
+      : (err?.message || 'Manual CAD request failed');
     return NextResponse.json(
-      { error: { message: err?.message || 'Manual CAD request failed' } },
+      { error: { message } },
       { status: 500 }
     );
   }
@@ -84,8 +88,12 @@ export async function POST(
     const data = await response.json().catch(() => ({}));
     return NextResponse.json(data, { status: response.status });
   } catch (err: any) {
+    const isConnRefused = err?.message === 'fetch failed' || err?.code === 'ECONNREFUSED' || err?.cause?.code === 'ECONNREFUSED';
+    const message = isConnRefused
+      ? `AI Geometry Engine (FastAPI) is unreachable at ${getFastApiUrl()}. Please verify that the ai-engine service (uvicorn app.main:app) is running.`
+      : (err?.message || 'Manual CAD operation failed');
     return NextResponse.json(
-      { error: { message: err?.message || 'Manual CAD operation failed' } },
+      { error: { message } },
       { status: 500 }
     );
   }

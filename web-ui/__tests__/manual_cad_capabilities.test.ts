@@ -80,8 +80,8 @@ describe('Manual CAD Step 1: Capabilities & Classification', () => {
     // An edge offers fillet/chamfer/measure
     expect(getApplicableOperations(edge)).toEqual(['fillet', 'chamfer', 'measure']);
 
-    // A cylindrical face can be edited as a feature and measured
-    expect(getApplicableOperations(cylFace)).toEqual(['edit_feature', 'measure']);
+    // A cylindrical face can be edited as a feature, deleted, and measured
+    expect(getApplicableOperations(cylFace)).toEqual(['edit_feature', 'delete_feature', 'measure']);
   });
 
   it('whole-model selection offers every body-level editing tool', () => {

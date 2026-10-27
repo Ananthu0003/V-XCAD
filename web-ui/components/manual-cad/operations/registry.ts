@@ -1005,12 +1005,16 @@ export const OPERATION_REGISTRY: Record<CADToolType, OperationDefinition> = {
     id: 'delete_feature',
     label: 'Delete Feature',
     icon: Trash2,
-    shortcut: '',
+    shortcut: 'Del',
     appliesTo: CAPABILITY_MATRIX.delete_feature,
     requiresSelection: true,
     previewable: false,
     fields: [],
-    toRequest: (values) => ({ ...values }),
+    toRequest: (values, selectedEntity) => ({
+      face_ids: selectedEntity?.face_ids || (selectedEntity?.transient_id ? [selectedEntity.transient_id] : []),
+      feature_id: selectedEntity?.feature_id,
+      ...values,
+    }),
   },
 
   move_feature: {

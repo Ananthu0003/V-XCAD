@@ -862,7 +862,7 @@ class LLMCodegenService:
         self.primary_metadata = get_model_by_id(self.model_id)
         if not self.primary_metadata:
             # Fallback if unknown model
-            self.primary_metadata = get_model_by_id("gemini-3.1-flash-lite")
+            self.primary_metadata = get_model_by_id("gemini-3.5-flash-lite")
             self.model_id = self.primary_metadata.id
 
     # -- Private helpers ---------------------------------------------------------
@@ -1395,6 +1395,89 @@ class LLMCodegenService:
             print(f"[targeted_audit] Failed to parse targeted feature JSON: {exc}")
             return {"raw_report": raw}
 
+    @staticmethod
+    def _build_selection_context_parts(selection_context: Any) -> list[str]:
+        if not selection_context:
+            return []
+        parts: list[str] = []
+        try:
+            ctx = json.loads(selection_context) if isinstance(selection_context, str) else selection_context
+            if isinstance(ctx, list) and len(ctx) == 3:
+                parts.append(
+                    f"TARGET_3D_COORDINATE:\n"
+                    f"[The user clicked directly on the 3D model mesh at coordinate X: {ctx[0]}, Y: {ctx[1]}, Z: {ctx[2]}. "
+                    f"Apply the requested geometric modification specifically at or centered around this spatial location on the part.]"
+                )
+            elif isinstance(ctx, dict):
+                if ctx.get("face_id") is not None or ctx.get("entity_type") == "face" or (ctx.get("transient_id") is not None and "surface_type" in ctx):
+                    face_id = ctx.get("face_id") or ctx.get("transient_id")
+                    stype = ctx.get("surface_type", "surface")
+                    normal = ctx.get("normal")
+                    centroid = ctx.get("centroid")
+                    area = ctx.get("area")
+                    
+                    face_lines = [
+                        f"[The user selected specific Face #{face_id} on the 3D model ({stype}).",
+                        f"Surface Type: {stype}",
+                    ]
+                    if normal:
+                        face_lines.append(f"Surface Normal: {normal}")
+                    if centroid:
+                        face_lines.append(f"Face Centroid: {centroid}")
+                    if area:
+                        face_lines.append(f"Face Area: {area:.2f} mm²" if isinstance(area, (int, float)) else f"Face Area: {area}")
+                    if ctx.get("plane_d") is not None:
+                        face_lines.append(f"Plane Distance (d): {ctx.get('plane_d')}")
+                    if ctx.get("radius") is not None:
+                        face_lines.append(f"Feature Radius: {ctx.get('radius')}")
+
+                    face_lines.extend([
+                        "",
+                        "BUILD123D CODE MODIFICATION GUIDANCE (REFERENCE):",
+                        "- Target this specific face in build123d using geometric B-Rep selectors:",
+                    ])
+                    if centroid and isinstance(centroid, list) and len(centroid) == 3:
+                        cx, cy, cz = centroid[0], centroid[1], centroid[2]
+                        face_lines.append(
+                            f"  * By Centroid Proximity: target_face = min(part.faces(), key=lambda f: (f.center() - Vector({cx}, {cy}, {cz})).length)"
+                        )
+                    if normal and isinstance(normal, list) and len(normal) == 3:
+                        nx, ny, nz = normal[0], normal[1], normal[2]
+                        axis_hint = "Axis.Z" if abs(nz) > 0.8 else ("Axis.Y" if abs(ny) > 0.8 else "Axis.X")
+                        sign_hint = "[-1]" if (nz + ny + nx) > 0 else "[0]"
+                        face_lines.append(
+                            f"  * By Normal / Orientation: target_face = part.faces().filter_by({axis_hint}).sort_by({axis_hint}){sign_hint}"
+                        )
+                    face_lines.extend([
+                        "- When adding or modifying features on this face:",
+                        "  * Use `with Locations(target_face):` or edit the specific sketch/block that produces this surface.",
+                        "  * If making a pocket, hole, slot, or boss, anchor the sketch directly onto the targeted face coordinate system.",
+                        "",
+                        "CRITICAL INSTRUCTION: The user request MUST be applied ONLY to this specific selected face or features directly originating from it. "
+                        "Do NOT modify, delete, or alter the remaining unrelated faces, bodies, or geometry of the model. Preserve all other dimensions and features intact.]"
+                    ])
+                    parts.append("TARGET_SELECTED_FACE:\n" + "\n".join(face_lines))
+                else:
+                    desc_lines = []
+                    if ctx.get("portion_name"):
+                        desc_lines.append(f"Target Feature: {ctx['portion_name']}")
+                    if ctx.get("category"):
+                        desc_lines.append(f"Category: {ctx['category']}")
+                    if ctx.get("description"):
+                        desc_lines.append(f"Details: {ctx['description']}")
+                    if ctx.get("crop_box"):
+                        cb = ctx["crop_box"]
+                        desc_lines.append(f"Cropped Blueprint Region: X:{cb.get('x')}% Y:{cb.get('y')}% W:{cb.get('w')}% H:{cb.get('h')}%")
+                    if desc_lines:
+                        parts.append("TARGET_PORTION_DETAILS:\n" + "\n".join(desc_lines))
+                    else:
+                        parts.append(f"TARGET_PORTION_OR_COORDINATE:\n{selection_context}")
+            else:
+                parts.append(f"TARGET_PORTION_OR_COORDINATE:\n{selection_context}")
+        except Exception:
+            parts.append(f"TARGET_PORTION_OR_COORDINATE:\n{selection_context}")
+        return parts
+
     async def generate_script(
         self,
         prompt: str,
@@ -1411,30 +1494,7 @@ class LLMCodegenService:
         parts: list[str] = [f"USER_REQUEST (HIGHEST PRIORITY):\n{prompt}"]
 
         if selection_context:
-            try:
-                ctx = json.loads(selection_context) if isinstance(selection_context, str) else selection_context
-                if isinstance(ctx, list) and len(ctx) == 3:
-                    parts.append(
-                        f"TARGET_3D_COORDINATE:\n"
-                        f"[The user clicked directly on the 3D model mesh at coordinate X: {ctx[0]}, Y: {ctx[1]}, Z: {ctx[2]}. "
-                        f"Apply the requested geometric modification specifically at or centered around this spatial location on the part.]"
-                    )
-                elif isinstance(ctx, dict):
-                    desc_lines = []
-                    if ctx.get("portion_name"):
-                        desc_lines.append(f"Target Feature: {ctx['portion_name']}")
-                    if ctx.get("category"):
-                        desc_lines.append(f"Category: {ctx['category']}")
-                    if ctx.get("description"):
-                        desc_lines.append(f"Details: {ctx['description']}")
-                    if ctx.get("crop_box"):
-                        cb = ctx["crop_box"]
-                        desc_lines.append(f"Cropped Blueprint Region: X:{cb.get('x')}% Y:{cb.get('y')}% W:{cb.get('w')}% H:{cb.get('h')}%")
-                    parts.append("TARGET_PORTION_DETAILS:\n" + "\n".join(desc_lines))
-                else:
-                    parts.append(f"TARGET_PORTION_OR_COORDINATE:\n{selection_context}")
-            except Exception:
-                parts.append(f"TARGET_PORTION_OR_COORDINATE:\n{selection_context}")
+            parts.extend(self._build_selection_context_parts(selection_context))
 
         if targeted_feature:
             if isinstance(targeted_feature, dict):
@@ -1492,30 +1552,7 @@ class LLMCodegenService:
         parts: list[str] = [f"USER_REQUEST (HIGHEST PRIORITY):\n{prompt}"]
 
         if selection_context:
-            try:
-                ctx = json.loads(selection_context) if isinstance(selection_context, str) else selection_context
-                if isinstance(ctx, list) and len(ctx) == 3:
-                    parts.append(
-                        f"TARGET_3D_COORDINATE:\n"
-                        f"[The user clicked directly on the 3D model mesh at coordinate X: {ctx[0]}, Y: {ctx[1]}, Z: {ctx[2]}. "
-                        f"Apply the requested geometric modification specifically at or centered around this spatial location on the part.]"
-                    )
-                elif isinstance(ctx, dict):
-                    desc_lines = []
-                    if ctx.get("portion_name"):
-                        desc_lines.append(f"Target Feature: {ctx['portion_name']}")
-                    if ctx.get("category"):
-                        desc_lines.append(f"Category: {ctx['category']}")
-                    if ctx.get("description"):
-                        desc_lines.append(f"Details: {ctx['description']}")
-                    if ctx.get("crop_box"):
-                        cb = ctx["crop_box"]
-                        desc_lines.append(f"Cropped Blueprint Region: X:{cb.get('x')}% Y:{cb.get('y')}% W:{cb.get('w')}% H:{cb.get('h')}%")
-                    parts.append("TARGET_PORTION_DETAILS:\n" + "\n".join(desc_lines))
-                else:
-                    parts.append(f"TARGET_PORTION_OR_COORDINATE:\n{selection_context}")
-            except Exception:
-                parts.append(f"TARGET_PORTION_OR_COORDINATE:\n{selection_context}")
+            parts.extend(self._build_selection_context_parts(selection_context))
 
         if targeted_feature:
             if isinstance(targeted_feature, dict):

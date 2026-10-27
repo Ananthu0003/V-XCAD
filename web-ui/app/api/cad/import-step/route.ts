@@ -71,6 +71,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     let extractedParams: Record<string, any> = {};
     let extractedMetadata: Record<string, any> = {};
     let extractedFeatures: any[] = [];
+    let extractedTopology: any = null;
 
     // Trigger AI engine to initialize the B-Rep session and tessellate STL for viewport
     try {
@@ -104,6 +105,9 @@ export async function POST(request: NextRequest): Promise<Response> {
         if (aiData.features) {
           extractedFeatures = aiData.features;
         }
+        if (aiData.topology) {
+          extractedTopology = aiData.topology;
+        }
       } else {
         const errText = await aiRes.text().catch(() => '');
         console.error('AI engine import-step error response:', aiRes.status, errText);
@@ -133,6 +137,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       parameters: extractedParams,
       parameterMetadata: extractedMetadata,
       features: extractedFeatures,
+      topology: extractedTopology,
     });
   } catch (error: any) {
     console.error('Error importing STEP:', error);

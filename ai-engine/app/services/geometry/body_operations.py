@@ -12,7 +12,7 @@ Every handler follows the same contract as the face/edge operations in
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import build123d as bd
 
@@ -464,32 +464,75 @@ class BodyOperationsMixin:
     def _apply_delete_feature(
         self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]
     ) -> OpResult:
-        """Remove a detected feature using BRepAlgoAPI_Defeaturing."""
+        """Remove a detected feature or face using BRepAlgoAPI_Defeaturing with compound feature clustering."""
+        shape_faces = list(shape.faces())
         faces_to_remove: List[bd.Face] = []
+        specified_fids: Set[str] = set()
 
-        # 1. From refs
+        # 1. From params["face_ids"]
+        face_ids = params.get("face_ids", [])
+        if isinstance(face_ids, list):
+            for fid in face_ids:
+                if isinstance(fid, str):
+                    specified_fids.add(fid)
+                elif isinstance(fid, int) and 0 <= fid < len(shape_faces):
+                    specified_fids.add(f"face_{fid}")
+
+        # 2. From refs
+        resolved_faces: List[bd.Face] = []
         for ref in refs:
             if ref.entity_type == "face":
                 f, status, _ = ReferenceResolver.resolve_face(shape, ref)
                 if f:
-                    faces_to_remove.append(f)
+                    resolved_faces.append(f)
+                    if ref.transient_id:
+                        specified_fids.add(ref.transient_id)
+                    else:
+                        for i, sf in enumerate(shape_faces):
+                            if sf.is_same(f):
+                                specified_fids.add(f"face_{i}")
+                                break
 
-        # 2. Or from params["face_ids"]
-        face_ids = params.get("face_ids", [])
-        if isinstance(face_ids, list):
-            shape_faces = list(shape.faces())
-            for fid in face_ids:
-                if isinstance(fid, str) and fid.startswith("face_"):
-                    try:
-                        idx = int(fid.replace("face_", ""))
-                        if 0 <= idx < len(shape_faces):
-                            faces_to_remove.append(shape_faces[idx])
-                    except Exception:
-                        pass
+        # 3. Detect features on shape and correlate with target feature
+        detected_features = FeatureService.detect_features(shape)
+        feat_id = params.get("feature_id")
+        matched_features = []
+
+        if feat_id:
+            for feat in detected_features:
+                if feat.feature_id == feat_id:
+                    matched_features.append(feat)
+
+        if not matched_features and specified_fids:
+            for feat in detected_features:
+                if any(fid in feat.face_ids for fid in specified_fids):
+                    matched_features.append(feat)
+
+        # Expand specified_fids with all faces belonging to matched features
+        for feat in matched_features:
+            for fid in feat.face_ids:
+                specified_fids.add(fid)
+
+        # 4. Resolve all specified_fids into bd.Face objects
+        for fid in specified_fids:
+            if fid.startswith("face_"):
+                try:
+                    idx = int(fid.replace("face_", ""))
+                    if 0 <= idx < len(shape_faces):
+                        f = shape_faces[idx]
+                        if not any(f.is_same(existing) for existing in faces_to_remove):
+                            faces_to_remove.append(f)
+                except Exception:
+                    pass
+
+        for f in resolved_faces:
+            if not any(f.is_same(existing) for existing in faces_to_remove):
+                faces_to_remove.append(f)
 
         if not faces_to_remove:
             return _fail("No feature faces specified for deletion.", OperationStatus.INVALID_REFERENCE)
 
+        # 5. Attempt BRepAlgoAPI_Defeaturing
         try:
             df = BRepAlgoAPI_Defeaturing()
             df.SetShape(shape.wrapped)
@@ -498,12 +541,24 @@ class BodyOperationsMixin:
                 occ_list.Append(f.wrapped)
             df.AddFacesToRemove(occ_list)
             df.Build()
-            if not df.IsDone():
-                return _fail("Defeaturing failed: feature boundary could not be healed.")
-            new_shape = bd.Solid(df.Shape())
-            return _ok(new_shape, f"Feature deleted ({len(faces_to_remove)} face(s) removed).")
-        except Exception as e:
-            return _fail(f"Delete feature failed: {e}")
+            if df.IsDone():
+                new_shape = bd.Solid(df.Shape())
+                return _ok(new_shape, f"Feature deleted ({len(faces_to_remove)} face(s) removed).")
+        except Exception:
+            pass
+
+        # 6. Fallback: If defeaturing failed and a cylindrical bore is present, attempt bore plugging
+        for f in faces_to_remove:
+            if f.geom_type == bd.GeomType.CYLINDER:
+                try:
+                    cyl_ref = ReferenceResolver.extract_face_reference(f, "face_cyl")
+                    plug_res, plug_status, plug_msg, _, _ = self._apply_plug_hole(shape, [cyl_ref], params)
+                    if plug_status == OperationStatus.VALID and plug_res is not None:
+                        return _ok(plug_res, f"Feature bore plugged ({plug_msg}).")
+                except Exception:
+                    pass
+
+        return _fail("Defeaturing failed: feature boundary could not be healed.")
 
     def _apply_edit_feature(
         self, shape: bd.Shape, refs: List[GeometricReference], params: Dict[str, Any]

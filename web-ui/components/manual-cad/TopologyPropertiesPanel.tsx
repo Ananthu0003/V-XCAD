@@ -45,7 +45,7 @@ export interface TopologyPropertiesPanelProps {
   setParams: React.Dispatch<React.SetStateAction<Record<string, any>>>;
   onPreview: () => void;
   onCancelPreview: () => void;
-  onCommit: () => void;
+  onCommit: (overrideOpType?: CADToolType | 'edit_feature', overrideParams?: Record<string, any>) => void;
   isPreviewActive: boolean;
   isLoading: boolean;
   validationReport: any | null;
@@ -310,7 +310,7 @@ export function TopologyPropertiesPanel({
 
           {/* Feature membership chip for a face */}
           {parentFeature && (
-            <div style={{ marginBottom: 8 }}>
+            <div style={{ marginBottom: 8, display: 'flex', gap: 6 }}>
               <button
                 type="button"
                 onClick={() => onSelectTopologyEntity?.({ entity_type: 'feature', ...parentFeature })}
@@ -318,7 +318,7 @@ export function TopologyPropertiesPanel({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  width: '100%',
+                  flex: 1,
                   padding: '5px 8px',
                   borderRadius: 6,
                   background: 'rgba(76,123,244,0.12)',
@@ -331,7 +331,28 @@ export function TopologyPropertiesPanel({
                 }}
               >
                 <Sliders size={12} />
-                <span>Part of {parentFeature.name || (parentFeature as any).part_name || 'Feature'} · Click to edit feature</span>
+                <span>Part of {parentFeature.name || (parentFeature as any).part_name || 'Feature'} · Edit</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onCommit?.('delete_feature', { feature_id: parentFeature.feature_id, face_ids: parentFeature.face_ids })}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '5px 8px',
+                  borderRadius: 6,
+                  background: 'rgba(239,68,68,0.1)',
+                  border: '1px solid rgba(239,68,68,0.3)',
+                  color: 'var(--mcad-danger, #ef4444)',
+                  fontSize: 11,
+                  fontFamily: 'var(--font-sans)',
+                  cursor: 'pointer',
+                }}
+                title={`Delete ${parentFeature.name || 'Feature'}`}
+              >
+                <Trash2 size={12} />
+                <span>Delete</span>
               </button>
             </div>
           )}
@@ -376,6 +397,28 @@ export function TopologyPropertiesPanel({
               </>
             )}
           </div>
+
+          {/* Quick Delete for selected Face */}
+          {e.entity_type === 'face' && !hasOp && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="mcad-btn mcad-btn--ghost"
+                onClick={() => {
+                  if (parentFeature) {
+                    onCommit?.('delete_feature', { feature_id: parentFeature.feature_id, face_ids: parentFeature.face_ids });
+                  } else {
+                    onCommit?.('delete_feature', { face_ids: [e.transient_id] });
+                  }
+                }}
+                style={{ width: '100%', fontSize: 11, color: 'var(--mcad-danger, #ef4444)', borderColor: 'rgba(239,68,68,0.3)', gap: 6 }}
+                title={parentFeature ? `Delete entire ${parentFeature.name || parentFeature.kind}` : 'Delete this face (Defeature)'}
+              >
+                <Trash2 size={12} />
+                <span>{parentFeature ? `Delete ${parentFeature.name || parentFeature.kind}` : 'Delete Face'}</span>
+              </button>
+            </div>
+          )}
 
           {/* Extracted Base Primitive & Sub-Shape Dimensions (Part C) */}
           {e.entity_type === 'body' && (
@@ -787,9 +830,7 @@ export function TopologyPropertiesPanel({
               type="button"
               className="mcad-btn mcad-btn--ghost"
               onClick={() => {
-                setParams({ face_ids: e.face_ids });
-                onSelectTool?.('delete_feature');
-                onCommit();
+                onCommit?.('delete_feature', { feature_id: e.feature_id, face_ids: e.face_ids });
               }}
               style={{ width: '100%', color: 'var(--mcad-danger, #ef4444)', borderColor: 'rgba(239,68,68,0.3)', gap: 6 }}
             >

@@ -76,11 +76,11 @@ class TestAllowlistExcludesLegacyModels:
 
     def test_gemini_3_1_flash_lite_removed_no_concrete_runtime_dependency(self):
         # This assistant never receives a caller-selected model in practice
-        # (PromptAssistantWidget.tsx sends no `model` field), and gemini-3.1-flash-lite is
+        # (PromptAssistantWidget.tsx sends no `model` field), and gemini-3.5-flash-lite is
         # not used as a default/fallback anywhere in this module or google.py's fallback
         # chain, so it was removed from this specific allowlist. It remains untouched in
         # the unrelated model registries (registry.py / models-registry.ts).
-        assert "gemini-3.1-flash-lite" not in ALLOWED_GEMINI_MODELS
+        assert "gemini-3.5-flash-lite" not in ALLOWED_GEMINI_MODELS
 
     def test_allowlist_matches_exact_expected_set(self):
         assert ALLOWED_GEMINI_MODELS == {
@@ -369,4 +369,4 @@ class TestGoogleGatewayFallbackChain:
     def test_gemini_3_1_flash_lite_is_not_in_the_fallback_chain(self):
         # Removed per the same "no concrete runtime dependency" reasoning applied to
         # cad_prompt_assistant.py's allowlist.
-        assert "gemini-3.1-flash-lite" not in EXPECTED_FALLBACK_TAIL
+        assert "gemini-3.5-flash-lite" not in EXPECTED_FALLBACK_TAIL

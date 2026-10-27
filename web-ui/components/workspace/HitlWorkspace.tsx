@@ -20,10 +20,11 @@ import { ChatPanel, type TargetPortion } from '@/components/chat/ChatPanel';
 import { SessionBrowserModal } from '@/components/workspace/SessionBrowserModal';
 import { PromptAssistantWidget } from '@/components/assistant/PromptAssistantWidget';
 import { ManualCadWorkspace } from '@/components/manual-cad/ManualCadWorkspace';
+import { SubShapeRaycaster, findFaceFromHit } from '@/components/manual-cad/SubShapeRaycaster';
 import { StageSwitcher } from '@/components/workspace/StageSwitcher';
 import { ThemeToggle } from '@/components/shared/theme-toggle';
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { History, Cuboid, RotateCcw, Plus, FolderKanban, Sparkles, ChevronRight, Ruler, Wrench, Settings } from 'lucide-react';
+import { History, Cuboid, RotateCcw, Plus, FolderKanban, Sparkles, ChevronRight, Ruler, Wrench, Settings, Square, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, CamFeature, PostProcessor, OperationType, ToolType, ToolMaterial, CoolantType, CamSetupPlan } from '@/types/cam';
 
@@ -491,8 +492,50 @@ export default function HitlWorkspace() {
 	const [camRecommendation, setCamRecommendation] = useState<MachineRecommendationResponse | null>(null);
 	const [xRayMode, setXRayMode] = useState(false);
 
+	// 3D Topology Face Selection State
+	const [selectionMode, setSelectionMode] = useState<'body' | 'face'>('face');
+	const [selectedEntity, setSelectedEntity] = useState<any | null>(null);
+	const [selectedEntities, setSelectedEntities] = useState<any[]>([]);
+	const [hoveredEntity, setHoveredEntity] = useState<any | null>(null);
+	const [highlightedFaceIds, setHighlightedFaceIds] = useState<string[] | null>(null);
+	const [topology, setTopology] = useState<any | null>(null);
 
+	const fetchTopology = useCallback(async (targetSessionId?: string, revId: string = 'rev_000', forceSync: boolean = false) => {
+		const sId = targetSessionId || sessionId;
+		if (!sId || sId === 'default_session') return;
+		try {
+			const stepParam = stepUrl ? `&source_step=${encodeURIComponent(stepUrl)}` : '';
+			const syncParam = forceSync ? `&force_sync=true` : '';
+			const res = await fetch(`/api/cad/modify/topology/${sId}?revision_id=${revId}${stepParam}${syncParam}`);
+			if (!res.ok) return;
+			const data = await res.json();
+			if (data && data.faces) {
+				setTopology(data);
+			}
+		} catch (err) {
+			console.error('Failed to fetch CAD B-Rep topology:', err);
+		}
+	}, [sessionId, stepUrl]);
 
+	const handleSelectTopologyEntity = useCallback((entity: any) => {
+		setSelectedEntity(entity);
+		if (entity?.entity_type === 'face') {
+			setSelectedEntities([entity]);
+			setSelectionContext(null);
+		}
+	}, []);
+
+	const handleDirectMeshClick = useCallback((point: [number, number, number], normal?: [number, number, number]) => {
+		if (!topology) return;
+		if (selectionMode === 'face' && topology.faces) {
+			const face = findFaceFromHit(point, normal, topology.faces);
+			if (face) {
+				setSelectedEntity(face);
+				setSelectedEntities([face]);
+				setSelectionContext(null);
+			}
+		}
+	}, [topology, selectionMode]);
 
 	const [isSharing, setIsSharing] = useState(false);
 
@@ -506,6 +549,13 @@ export default function HitlWorkspace() {
 	const [revisions, setRevisions] = useState<CadRevision[]>([]);
 	const [activeRevisionIndex, setActiveRevisionIndex] = useState<number>(-1);
 	const activeRevisionId = activeRevisionIndex >= 0 && revisions[activeRevisionIndex] ? revisions[activeRevisionIndex].id : null;
+
+	// Automatically sync B-Rep topology for 3D viewport raycast & face selection
+	useEffect(() => {
+		if (sessionId && (stepUrl || stlUrl)) {
+			fetchTopology(sessionId, activeRevisionId || 'rev_000');
+		}
+	}, [sessionId, stepUrl, stlUrl, activeRevisionId, fetchTopology]);
 
 	const [statusText, setStatusText] = useState<string>('Ready');
 	const [workflowStage, setWorkflowStage] = useState<'blueprint' | 'extraction' | 'cad' | 'manual_cad' | 'cam' | 'gcode'>('blueprint');
@@ -822,10 +872,14 @@ export default function HitlWorkspace() {
 								: r
 						)
 					);
+					if (data.topology) {
+						setTopology(data.topology);
+					}
 					setStatusText(`Loaded: ${file.name}`);
 					toast.success(`Imported ${file.name}`, {
 						description: '3D STEP solid model loaded and rendered in workspace',
 					});
+					fetchTopology(data.sessionId, 'rev_000', true);
 				}
 			} else {
 				const errData = await res.json().catch(() => ({}));
@@ -852,6 +906,12 @@ export default function HitlWorkspace() {
 			return;
 		}
 		setSelectedFile(file);
+		if (file) {
+			setShowBlueprintPIP(true);
+			toast.success('Blueprint drawing attached to workspace', {
+				description: file.name,
+			});
+		}
 	}, [handleImportStep]);
 
 	const canUndo = activeRevisionIndex > 0;
@@ -1032,7 +1092,12 @@ export default function HitlWorkspace() {
 		const assistantMessageId = makeId('assistant');
 		const submittedTargetPortion = targetPortion;
 		const submittedSelectionContext = selectionContext;
-		const activeTargetName = targetPortion ? targetPortion.name : undefined;
+		const isFaceSelected = selectedEntity && selectedEntity.entity_type === 'face';
+		const activeTargetName = targetPortion 
+			? targetPortion.name 
+			: isFaceSelected
+			? `Face #${selectedEntity.transient_id} (${selectedEntity.surface_type || 'surface'})`
+			: undefined;
 
 		setMessages((prev) => [
 			...prev,
@@ -1048,15 +1113,31 @@ export default function HitlWorkspace() {
 		setIsGenerating(true);
 		setWorkflowStage('extraction');
 
+		const targetFacePrefix = isFaceSelected
+			? `[TARGET: EDIT ONLY Face #${selectedEntity.transient_id} (${selectedEntity.surface_type || 'surface'}) - PRESERVE ALL OTHER GEOMETRY]: `
+			: '';
+
 		const formData = new FormData();
-		formData.append('prompt', submittedPrompt);
+		formData.append('prompt', `${targetFacePrefix}${submittedPrompt}`);
 		if (selectedFile) {
 			formData.append('image', selectedFile);
 			// New blueprint file uploaded -> Start a new Project Section without carrying over previous session_id
 		} else if (sessionId) {
 			formData.append('session_id', sessionId);
 		}
-		if (selectionContext) {
+		if (isFaceSelected) {
+			formData.append('selection_context', JSON.stringify({
+				entity_type: 'face',
+				face_id: selectedEntity.transient_id,
+				transient_id: selectedEntity.transient_id,
+				surface_type: selectedEntity.surface_type,
+				normal: selectedEntity.normal,
+				centroid: selectedEntity.centroid,
+				area: selectedEntity.area,
+				plane_d: selectedEntity.plane_d,
+				radius: selectedEntity.radius,
+			}));
+		} else if (selectionContext) {
 			formData.append('selection_context', JSON.stringify(selectionContext));
 		}
 		const activeBaseCode = pythonScriptRef.current || pythonScript;
@@ -1071,7 +1152,7 @@ export default function HitlWorkspace() {
 			if (targetPortion.cropBox) {
 				formData.append('crop_box', JSON.stringify(targetPortion.cropBox));
 			}
-			if (!selectionContext) {
+			if (!selectionContext && !isFaceSelected) {
 				formData.append('selection_context', JSON.stringify({
 					portion_id: targetPortion.id,
 					portion_name: targetPortion.name,
@@ -1088,6 +1169,8 @@ export default function HitlWorkspace() {
 		setSourceFilename(selectedFile?.name || null);
 		setSelectedFile(null);
 		setSelectionContext(null);
+		setSelectedEntity(null);
+		setSelectedEntities([]);
 		setTargetPortion(null);
 		setShowBlueprintPIP(false);
 
@@ -1388,6 +1471,8 @@ export default function HitlWorkspace() {
 					setupMetadata: setupMeta,
 					revisionNumber: targetRevNumber,
 				});
+
+				fetchTopology(sessionId || undefined, revId, true);
 
 				if (revisionContext) {
 					// Extract structured change log for this iteration
@@ -2483,12 +2568,42 @@ export default function HitlWorkspace() {
 													)}
 												</div>
 											}
+											onClearSelection={() => {
+												if (selectionMode === 'face') {
+													setSelectedEntity(null);
+													setSelectedEntities([]);
+												}
+											}}
 										>
-											{stlUrl ? <StlMesh url={stlUrl} workpieceMaterial={camSetup.material} xRayMode={xRayMode} expectedSize={(() => {
-												if (!parameters) return undefined;
-												const vals = Object.values(parameters).filter(v => typeof v === 'number') as number[];
-												return vals.length > 0 ? Math.max(...vals) : undefined;
-											})()} onGeometryReady={setGeometryInfo} onMeshClick={(p) => setSelectionContext(p)} /> : null}
+											{stlUrl ? (
+												<StlMesh
+													url={stlUrl}
+													workpieceMaterial={camSetup.material}
+													xRayMode={xRayMode}
+													expectedSize={(() => {
+														if (!parameters) return undefined;
+														const vals = Object.values(parameters).filter(v => typeof v === 'number') as number[];
+														return vals.length > 0 ? Math.max(...vals) : undefined;
+													})()}
+													onGeometryReady={setGeometryInfo}
+													onMeshClick={(p) => setSelectionContext(p)}
+													onDirectClick={handleDirectMeshClick}
+												/>
+											) : null}
+											{topology && (
+												<SubShapeRaycaster
+													topology={topology}
+													selectedEntity={selectedEntity}
+													selectedEntities={selectedEntities}
+													onSelectEntity={handleSelectTopologyEntity}
+													hoveredEntity={hoveredEntity}
+													onHoverEntity={setHoveredEntity}
+													selectionMode={selectionMode}
+													highlightedFaceIds={highlightedFaceIds}
+													onHighlightFaces={setHighlightedFaceIds}
+													detectedFeatures={topology?.features}
+												/>
+											)}
 											{selectionContext && (
 												<group position={selectionContext}>
 													{/* Core dot */}
@@ -2506,21 +2621,63 @@ export default function HitlWorkspace() {
 										</CadViewport>
 									)}
 
-									{/* Bottom Overlay with Manual CAD Switch */}
+									{/* Bottom Overlay with Face Selection & Manual CAD Switch */}
 									{workflowStage === 'cad' && stlUrl && (
-										<div className="absolute bottom-2 left-1/2 -translate-x-1/2 pointer-events-none z-30 flex flex-col items-center">
-											<div className="flex items-center gap-2 pointer-events-auto">
+										<div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none z-30 flex flex-col items-center">
+											<div className="flex items-center gap-1.5 p-1 rounded-xl bg-[var(--ui-panel)]/90 backdrop-blur-xl border border-[var(--ui-border)] shadow-xl pointer-events-auto">
 												<button
+													type="button"
+													onClick={() => setSelectionMode(prev => prev === 'face' ? 'body' : 'face')}
+													className={`flex items-center gap-1.5 !h-7 px-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+														selectionMode === 'face'
+															? 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm font-semibold'
+															: 'text-[var(--ui-text-muted)] hover:text-[var(--ui-text-primary)] hover:bg-[var(--ui-input)]'
+													}`}
+													title="Toggle Face Selection - Click any 3D face to target in AI prompt"
+												>
+													<Square className="size-3.5" />
+													<span>Select Face</span>
+												</button>
+
+												{selectedEntity?.entity_type === 'face' && (
+													<div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-400 font-mono text-[11px]">
+														<span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
+														<span>Face #{selectedEntity.transient_id}</span>
+														{selectedEntity.surface_type && (
+															<span className="text-[var(--ui-text-muted)] text-[10px]">
+																({selectedEntity.surface_type})
+															</span>
+														)}
+														<button
+															type="button"
+															onClick={() => {
+																setSelectedEntity(null);
+																setSelectedEntities([]);
+															}}
+															className="text-[var(--ui-text-muted)] hover:text-rose-400 p-0.5 ml-0.5 transition-colors cursor-pointer"
+															title="Clear selected face"
+														>
+															<X className="size-3" />
+														</button>
+													</div>
+												)}
+
+												<div className="w-[1px] h-4 bg-[var(--ui-border)] mx-1" />
+
+												<button
+													type="button"
 													onClick={() => {
 														setIsCamDrawerOpen((prev) => !prev);
 													}}
-													className="ui-btn ui-btn--ghost !h-7 px-3 rounded-lg font-mono text-[11px] font-semibold shadow-md backdrop-blur-md cursor-pointer"
+													className="ui-btn ui-btn--ghost !h-7 px-3 rounded-lg font-mono text-[11px] font-semibold cursor-pointer"
 													title="Toggle bottom CAD/CAM Property & Setup Console"
 												>
 													<Settings className="size-3 text-[var(--ui-accent)]" />
 													<span>{isCamDrawerOpen ? 'Hide Console' : 'Show Console'}</span>
 												</button>
+
 												<button
+													type="button"
 													onClick={() => {
 														setWorkflowStage('manual_cad');
 														setActiveRightTab('manual_cad');
@@ -2570,6 +2727,11 @@ export default function HitlWorkspace() {
 											fileInputRef={fileUploadRef}
 											selectionContext={selectionContext}
 											onClearSelectionContext={() => setSelectionContext(null)}
+											selectedFace={selectedEntity?.entity_type === 'face' ? selectedEntity : null}
+											onClearSelectedFace={() => {
+												setSelectedEntity(null);
+												setSelectedEntities([]);
+											}}
 											hasActiveModel={Boolean(pythonScript)}
 											parameters={parameters}
 											parameterEntries={parameterEntries}
@@ -2782,6 +2944,15 @@ export default function HitlWorkspace() {
 				<PromptAssistantWidget
 					blueprintUrl={blueprintUrl}
 					sessionId={sessionId}
+					selectedFace={selectedEntity?.entity_type === 'face' ? selectedEntity : null}
+					onClearSelectedFace={() => {
+						setSelectedEntity(null);
+						setSelectedEntities([]);
+					}}
+					onStartFaceSelection={() => setSelectionMode('face')}
+					selectedModel={selectedModel}
+					onSelectModel={setSelectedModel}
+					modelOptions={MODEL_OPTIONS}
 					onApplyPrompt={(newPrompt) => {
 						setPrompt(newPrompt);
 						if (showChat) setIsChatOpen(true);

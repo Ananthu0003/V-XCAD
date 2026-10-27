@@ -5,7 +5,7 @@ import {
 	Bot, LogOut, Loader2, SendHorizontal, Zap, Upload, FileImage, 
 	Settings, BrainCircuit, Cuboid, Trash2, Crosshair, Sparkles, 
 	ChevronDown, ChevronRight, Check, SlidersHorizontal, Wrench, Layers, Tag, X,
-	Target, PlusCircle, RefreshCw, Paperclip, Send, Plus, Ruler
+	Target, PlusCircle, RefreshCw, Paperclip, Send, Plus, Ruler, Square
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -57,6 +57,8 @@ type ChatPanelProps = {
 	fileInputRef?: React.RefObject<HTMLInputElement | null>;
 	selectionContext?: [number, number, number] | null;
 	onClearSelectionContext?: () => void;
+	selectedFace?: any | null;
+	onClearSelectedFace?: () => void;
 	hasActiveModel?: boolean;
 	parameters?: Record<string, unknown>;
 	parameterEntries?: [string, unknown][];
@@ -91,6 +93,8 @@ export function ChatPanel({
 	fileInputRef,
 	selectionContext,
 	onClearSelectionContext,
+	selectedFace,
+	onClearSelectedFace,
 	hasActiveModel = false,
 	parameters = {},
 	parameterEntries = [],
@@ -459,12 +463,13 @@ export function ChatPanel({
 						{/* Attached File Preview */}
 						{selectedFile && (
 							<div className="flex items-center gap-2 rounded-lg border border-[var(--ui-border-ctrl)] bg-[var(--ui-input)] px-2.5 py-1 text-xs text-[var(--ui-text-primary)] font-mono">
-								<Paperclip className="size-3.5 shrink-0 text-[var(--ui-accent)]" />
+								<FileImage className="size-3.5 shrink-0 text-[var(--ui-accent)]" />
 								<span className="truncate flex-1 font-medium">{selectedFile.name}</span>
 								<button
 									type="button"
 									onClick={() => handleFileChange(null)}
 									className="p-0.5 hover:text-rose-400 transition-colors cursor-pointer"
+									title="Remove attached image"
 								>
 									<X className="size-3.5" />
 								</button>
@@ -485,6 +490,36 @@ export function ChatPanel({
 								>
 									<X className="size-3.5" />
 								</button>
+							</div>
+						)}
+
+						{/* 3D Face Targeting Chip */}
+						{selectedFace && (
+							<div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs font-mono text-amber-400 animate-in fade-in duration-150">
+								<Square className="size-3.5 shrink-0 text-amber-400" />
+								<div className="flex flex-col flex-1 min-w-0">
+									<div className="flex items-center gap-1.5">
+										<span className="font-bold">Target Face #{selectedFace.transient_id}</span>
+										{selectedFace.surface_type && (
+											<span className="text-[10px] text-amber-300/80 uppercase">
+												({selectedFace.surface_type})
+											</span>
+										)}
+									</div>
+									<span className="text-[10px] text-[var(--ui-text-muted)] truncate">
+										Prompt will edit only this selected face
+									</span>
+								</div>
+								{onClearSelectedFace && (
+									<button
+										type="button"
+										onClick={onClearSelectedFace}
+										className="p-1 hover:text-rose-400 transition-colors cursor-pointer text-amber-400/80 hover:bg-amber-500/20 rounded"
+										title="Clear face target"
+									>
+										<X className="size-3.5" />
+									</button>
+								)}
 							</div>
 						)}
 
@@ -509,26 +544,34 @@ export function ChatPanel({
 									className={`ui-btn ui-btn--ghost !h-7 !w-7 !p-0 cursor-pointer flex items-center justify-center ${
 										selectedFile ? 'border-[var(--ui-accent)] text-[var(--ui-accent)]' : ''
 									}`}
-									title="Attach 3D CAD solid model (.STEP, .STP)"
+									title="Attach blueprint image or drawing (PNG, JPG, WEBP, PDF)"
 								>
 									<Paperclip className="size-3.5" />
 									<input
 										ref={fileInputRef}
 										type="file"
-										accept=".step,.stp"
+										accept="image/png,image/jpeg,image/webp,image/jpg,application/pdf,.png,.jpg,.jpeg,.webp,.pdf"
 										className="hidden"
 										onChange={(e) => {
 											const file = e.target.files?.[0] || null;
 											if (file) {
-												const isStep = file.name.toLowerCase().endsWith('.step') || file.name.toLowerCase().endsWith('.stp');
-												const maxLimit = 50 * 1024 * 1024;
+												const validExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.pdf'];
+												const hasValidExt = validExtensions.some((ext) => file.name.toLowerCase().endsWith(ext));
+												const hasValidType = file.type.startsWith('image/') || file.type === 'application/pdf';
+												if (!hasValidExt && !hasValidType) {
+													alert('Please select a valid blueprint image (PNG, JPG, WEBP) or PDF drawing.');
+													e.target.value = '';
+													return;
+												}
+												const maxLimit = 10 * 1024 * 1024;
 												if (file.size > maxLimit) {
-													alert('File size exceeds the 50MB limit.');
+													alert('File size exceeds the 10MB limit. Please select a smaller blueprint file.');
 													e.target.value = '';
 													return;
 												}
 											}
 											handleFileChange(file);
+											e.target.value = '';
 										}}
 									/>
 								</label>

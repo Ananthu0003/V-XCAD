@@ -80,6 +80,7 @@ async def get_topology(
             else:
                 filename = p.name
                 for candidate_dir in [
+                    Path("/app/outputs"),
                     Path(__file__).resolve().parents[3] / "outputs",
                     Path(__file__).resolve().parents[2] / "outputs",
                     Path("outputs"),
@@ -273,6 +274,7 @@ async def import_step_model(request: ImportStepRequest):
             "parameters": topo.parameters,
             "parameter_metadata": topo.parameter_metadata,
             "features": [f.model_dump() for f in topo.features],
+            "topology": topo.model_dump(),
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to process imported STEP model: {exc}")

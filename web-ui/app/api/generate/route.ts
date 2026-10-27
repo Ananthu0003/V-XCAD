@@ -70,12 +70,23 @@ const MAX_BLUEPRINT_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 function isSupportedUpload(upload: File): boolean {
 	const mimeType = upload.type.toLowerCase();
-	if (mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'application/pdf') {
+	if (
+		mimeType === 'image/jpeg' ||
+		mimeType === 'image/png' ||
+		mimeType === 'image/webp' ||
+		mimeType === 'application/pdf'
+	) {
 		return true;
 	}
 
 	const name = upload.name.toLowerCase();
-	return name.endsWith('.pdf') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png');
+	return (
+		name.endsWith('.pdf') ||
+		name.endsWith('.jpg') ||
+		name.endsWith('.jpeg') ||
+		name.endsWith('.png') ||
+		name.endsWith('.webp')
+	);
 }
 
 function getFastApiUrl(): string {
@@ -112,12 +123,12 @@ export async function POST(request: Request): Promise<Response> {
 
 	const upload = formData.get('image');
 	if (upload && !(upload instanceof File)) {
-		return NextResponse.json(buildError('Uploaded file must be a JPEG, PNG, or PDF.'), { status: 400 });
+		return NextResponse.json(buildError('Uploaded file must be a JPEG, PNG, WEBP, or PDF.'), { status: 400 });
 	}
 
 	if (upload && upload instanceof File) {
 		if (!isSupportedUpload(upload)) {
-			return NextResponse.json(buildError('Uploaded file must be a JPEG, PNG, or PDF.'), { status: 400 });
+			return NextResponse.json(buildError('Uploaded file must be a JPEG, PNG, WEBP, or PDF.'), { status: 400 });
 		}
 		if (upload.size > MAX_BLUEPRINT_FILE_SIZE) {
 			return NextResponse.json(

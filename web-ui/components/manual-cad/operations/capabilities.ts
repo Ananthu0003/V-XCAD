@@ -167,8 +167,10 @@ export const CAPABILITY_MATRIX: Record<CADToolType | 'edit_feature', EntityClass
   push_pull: ['face.planar'],
   round_face_edges: ['face.planar'],
   delete_feature: [
+    'face.planar',
     'face.cylindrical',
     'face.conical',
+    'face.other',
     'feature.hole',
     'feature.boss',
     'feature.pocket',
@@ -221,7 +223,7 @@ export const OPERATION_REQUIREMENTS: Record<CADToolType | 'edit_feature', string
   transform: 'Select the 3D model, face, or feature to transform',
   push_pull: 'Select a planar face',
   round_face_edges: 'Select a planar face',
-  delete_feature: 'Select a feature or cylindrical face',
+  delete_feature: 'Select a face or feature to delete',
   move_feature: 'Select a feature or cylindrical face',
   pattern_feature: 'Select a feature or cylindrical face',
   move: 'Select the 3D model',
@@ -259,10 +261,10 @@ export function getApplicableOperations(
   const classification = classifyEntity(entity, ctx);
   if (!classification) return [];
   if (classification === 'face.planar') {
-    return ['hole', 'pocket', 'pad', 'edit_feature', 'push_pull', 'round_face_edges', 'shell', 'split', 'mirror', 'align', 'primitive', 'measure'];
+    return ['hole', 'pocket', 'pad', 'edit_feature', 'push_pull', 'round_face_edges', 'shell', 'split', 'mirror', 'align', 'primitive', 'delete_feature', 'measure'];
   }
   if (classification === 'face.cylindrical') {
-    return ['edit_feature', 'measure'];
+    return ['edit_feature', 'delete_feature', 'measure'];
   }
   if (classification === 'face.conical') {
     return ['edit_feature', 'delete_feature', 'measure'];
@@ -274,7 +276,7 @@ export function getApplicableOperations(
     return ['edit_feature', 'delete_feature', 'move_feature', 'pattern_feature', 'measure'];
   }
   if (classification.startsWith('face.')) {
-    return ['offset', 'measure'];
+    return ['offset', 'delete_feature', 'measure'];
   }
   if (classification === 'body') {
     return [

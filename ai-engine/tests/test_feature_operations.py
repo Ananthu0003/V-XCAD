@@ -183,3 +183,26 @@ def test_pattern_feature(manual_service):
     new_feats = FeatureService.detect_features(res)
     holes = [f for f in new_feats if f.kind == "hole"]
     assert len(holes) == 3
+
+
+def test_delete_feature_by_single_face_reference(test_bracket, manual_service):
+    """Deleting a feature by selecting only a single constituent face automatically finds the whole feature."""
+    from app.services.geometry.reference_resolver import ReferenceResolver
+    features = FeatureService.detect_features(test_bracket)
+    th = [f for f in features if f.kind == "hole" and f.subtype == "through"]
+    assert len(th) >= 1
+    target = th[0]
+
+    # Select only the first face reference
+    fid = target.face_ids[0]
+    idx = int(fid.replace("face_", ""))
+    face = list(test_bracket.faces())[idx]
+    face_ref = ReferenceResolver.extract_face_reference(face, fid)
+
+    new_shape, status, msg, _, _ = manual_service._apply_delete_feature(
+        test_bracket, [face_ref], {}
+    )
+    assert status == OperationStatus.VALID
+    assert new_shape is not None
+    assert new_shape.volume > test_bracket.volume
+

@@ -235,7 +235,13 @@ export function ManualCadToolbar({
   const shortcutMap = useRef<Record<string, ToolDef>>({});
   useEffect(() => {
     const map: Record<string, ToolDef> = {};
-    toolGroups.forEach((g) => g.tools.forEach((t) => { map[t.shortcut.toLowerCase()] = t; }));
+    toolGroups.forEach((g) => g.tools.forEach((t) => {
+      const key = t.shortcut.toLowerCase();
+      map[key] = t;
+      if (key === 'del') {
+        map['delete'] = t;
+      }
+    }));
     shortcutMap.current = map;
   }, [toolGroups]);
 

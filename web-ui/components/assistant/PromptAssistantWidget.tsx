@@ -4,9 +4,11 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
 	Sparkles, X, Send, Camera, RefreshCw, Copy, Check, 
 	ArrowUpRight, AlertCircle, AlertTriangle, Trash2, Eye, FileImage, Plus, Bot, Layers,
-	ZoomIn, ZoomOut, RotateCcw, Crop, CheckCircle2, Maximize2, Move
+	ZoomIn, ZoomOut, RotateCcw, Crop, CheckCircle2, Maximize2, Move, Square
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { MODEL_REGISTRY } from '@/lib/models-registry';
 
 export type DiscrepancyItem = {
 	feature: string;
@@ -54,6 +56,12 @@ interface PromptAssistantWidgetProps {
 	blueprintUrl?: string | null;
 	sessionId?: string | null;
 	onApplyPrompt?: (prompt: string) => void;
+	selectedFace?: any | null;
+	onClearSelectedFace?: () => void;
+	onStartFaceSelection?: () => void;
+	selectedModel?: string;
+	onSelectModel?: (model: string) => void;
+	modelOptions?: { value: string; label: string }[];
 }
 
 interface CropBoxPercent {
@@ -74,6 +82,12 @@ export function PromptAssistantWidget({
 	blueprintUrl,
 	sessionId,
 	onApplyPrompt,
+	selectedFace,
+	onClearSelectedFace,
+	onStartFaceSelection,
+	selectedModel,
+	onSelectModel,
+	modelOptions,
 }: PromptAssistantWidgetProps) {
 	const [isOpen, setIsOpen] = useState(false);
 	const [inputMessage, setInputMessage] = useState('');
@@ -81,6 +95,20 @@ export function PromptAssistantWidget({
 	const [copiedId, setCopiedId] = useState<string | null>(null);
 	const [appliedId, setAppliedId] = useState<string | null>(null);
 	const [capturedSnapshots, setCapturedSnapshots] = useState<string[]>([]);
+	const [activeModel, setActiveModel] = useState<string>(selectedModel || 'gemini-3.5-flash-lite');
+
+	useEffect(() => {
+		if (selectedModel) {
+			setActiveModel(selectedModel);
+		}
+	}, [selectedModel]);
+
+	const handleModelChange = (model: string) => {
+		setActiveModel(model);
+		onSelectModel?.(model);
+	};
+
+	const availableModelOptions = modelOptions || MODEL_REGISTRY.map((m) => ({ value: m.id, label: m.name }));
 	
 	// Cropped & Target Region Blueprint state
 	const [croppedBlueprintUrl, setCroppedBlueprintUrl] = useState<string | null>(null);
@@ -399,16 +427,31 @@ export function PromptAssistantWidget({
 				content: m.content,
 			}));
 
+			const messageParts = [];
+			if (selectedFace) {
+				messageParts.push(`[Referencing selected 3D Face #${selectedFace.transient_id} (${selectedFace.surface_type || 'surface'})]`);
+			}
+			if (croppedBlueprintUrl) {
+				messageParts.push(`${text} (Note: Inspecting the specifically zoomed-in/cropped section of the blueprint).`);
+			} else {
+				messageParts.push(text);
+			}
+
 			const res = await fetch('/api/assistant/compare', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					blueprint_image: blueprintBase64,
 					model_snapshots: capturedSnapshots,
-					message: croppedBlueprintUrl
-						? `${text} (Note: Inspecting the specifically zoomed-in/cropped section of the blueprint).`
-						: text,
+					message: messageParts.join(' '),
 					history: historyPayload,
+					model: activeModel,
+					selected_face: selectedFace ? {
+						face_id: selectedFace.transient_id,
+						surface_type: selectedFace.surface_type,
+						normal: selectedFace.normal,
+						centroid: selectedFace.centroid,
+					} : undefined,
 				}),
 			});
 
@@ -548,6 +591,30 @@ export function PromptAssistantWidget({
 							>
 								<X className="size-4" />
 							</button>
+						</div>
+					</div>
+
+					{/* Model Selector Bar */}
+					<div className="flex items-center justify-between px-4 py-2 border-b border-border/70 dark:border-white/[0.06] bg-muted/30 dark:bg-black/20">
+						<div className="flex items-center gap-2 flex-1 min-w-0">
+							<Sparkles className="size-3.5 text-primary dark:text-cyan-400 shrink-0" />
+							<span className="text-[11px] font-semibold text-muted-foreground shrink-0 font-mono">MODEL:</span>
+							<Select value={activeModel} onValueChange={(val: string | null) => val && handleModelChange(val)}>
+								<SelectTrigger className="h-7 px-2.5 text-[11px] font-mono gap-1.5 rounded-lg border border-border/80 bg-background/80 hover:bg-background text-foreground cursor-pointer shadow-xs max-w-[240px]">
+									<SelectValue placeholder="Model" />
+								</SelectTrigger>
+								<SelectContent className="rounded-xl border border-border bg-popover text-popover-foreground text-xs z-50 shadow-xl max-h-64">
+									{availableModelOptions.map((opt) => (
+										<SelectItem key={opt.value} value={opt.value} className="text-xs font-mono">
+											{opt.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground font-mono shrink-0 pl-2">
+							<span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+							<span className="text-emerald-500 font-semibold">Active</span>
 						</div>
 					</div>
 
@@ -1112,8 +1179,55 @@ export function PromptAssistantWidget({
 						<div ref={chatEndRef} />
 					</div>
 
+					{/* Selected Face Reference Pill */}
+					{selectedFace && (
+						<div className="mx-3 my-1.5 flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400 text-xs font-mono">
+							<div className="flex items-center gap-1.5 truncate">
+								<Square className="size-3.5 shrink-0 text-amber-400" />
+								<span className="font-semibold truncate">Target Reference: Face #{selectedFace.transient_id}</span>
+								{selectedFace.surface_type && (
+									<span className="text-[10px] text-amber-300/80 uppercase">({selectedFace.surface_type})</span>
+								)}
+							</div>
+							{onClearSelectedFace && (
+								<button
+									type="button"
+									onClick={onClearSelectedFace}
+									className="text-amber-400/80 hover:text-rose-400 p-0.5 rounded cursor-pointer transition-colors"
+									title="Clear face reference"
+								>
+									<X className="size-3" />
+								</button>
+							)}
+						</div>
+					)}
+
 					{/* Quick Suggestions Strip */}
 					<div className="px-3.5 py-2 border-t border-border dark:border-white/[0.06] bg-muted/40 dark:bg-black/40 flex gap-1.5 overflow-x-auto no-scrollbar">
+						{selectedFace && (
+							<button
+								type="button"
+								disabled={isLoading}
+								onClick={() => handleSendMessage(`Focus specifically on Face #${selectedFace.transient_id} (${selectedFace.surface_type || 'surface'}): verify its dimensions and required geometric features against the blueprint.`)}
+								className="shrink-0 text-[10.5px] font-medium px-3 py-1 rounded-full border border-amber-500/40 bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-all cursor-pointer shadow-sm flex items-center gap-1 font-mono"
+							>
+								<Square className="size-3" />
+								<span>Inspect Face #{selectedFace.transient_id}</span>
+							</button>
+						)}
+						{onStartFaceSelection && !selectedFace && (
+							<button
+								type="button"
+								onClick={() => {
+									onStartFaceSelection();
+									toast.info('Click any 3D face on the model to target it for reference.');
+								}}
+								className="shrink-0 text-[10.5px] font-medium px-3 py-1 rounded-full border border-amber-500/30 hover:border-amber-500 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition-all cursor-pointer shadow-sm flex items-center gap-1"
+							>
+								<Square className="size-3" />
+								<span>Select 3D Face</span>
+							</button>
+						)}
 						<button
 							type="button"
 							disabled={isLoading}

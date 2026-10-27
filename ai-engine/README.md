@@ -133,7 +133,7 @@ cp .env.example .env
 Fill in your Google AI key:
 ```env
 GOOGLE_API_KEY=AIzaSy...
-GENAI_MODEL=gemini-3.1-flash-lite
+GENAI_MODEL=gemini-3.5-flash-lite
 ```
 
 ### 3. Run the Development Server

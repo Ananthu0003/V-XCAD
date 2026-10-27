@@ -441,12 +441,19 @@ export function ManualCadWorkspace({
     targets.forEach((ent) => {
       if (!ent || ent.entity_type === 'body') return;
       if (ent.entity_type === 'feature') {
-        const firstFid = ent.face_ids?.[0];
-        if (firstFid && topology?.faces?.[firstFid]) {
-          refs.push(topology.faces[firstFid]);
-        } else if (firstFid) {
-          refs.push({ entity_type: 'face', transient_id: firstFid });
-        }
+        const fids = ent.face_ids || [];
+        fids.forEach((fid: string) => {
+          if (fid && topology?.faces?.[fid]) {
+            refs.push(topology.faces[fid]);
+          } else if (fid) {
+            refs.push({
+              ref_id: fid,
+              transient_id: fid,
+              entity_type: 'face',
+              centroid: [0, 0, 0],
+            });
+          }
+        });
       } else {
         refs.push(ent);
       }
@@ -456,25 +463,48 @@ export function ManualCadWorkspace({
   };
 
   // Build parameters dictionary using definition.toRequest (A9)
-  const buildRequestParameters = (): Record<string, any> => {
+  const buildRequestParameters = (customParams?: Record<string, any>, opOverride?: string): Record<string, any> => {
     const isFeat = selectedEntity?.entity_type === 'feature';
-    if (isFeat) {
+    const mergedParams = (customParams && typeof customParams === 'object' && !('nativeEvent' in customParams) && !(customParams instanceof Event))
+      ? { ...params, ...customParams }
+      : params;
+    const opType = (typeof opOverride === 'string' && opOverride.trim().length > 0)
+      ? opOverride
+      : (activeTool !== 'select' ? activeTool : (isFeat ? 'edit_feature' : activeTool));
+
+    if (isFeat && opType === 'edit_feature') {
       return {
         feature_id: selectedEntity.feature_id,
-        changes: params.changes || params,
-        ...params,
+        face_ids: selectedEntity.face_ids,
+        changes: mergedParams.changes || mergedParams,
+        ...mergedParams,
       };
     }
-    const opType = activeTool;
-    const def = getOperationDefinition(opType);
-    if (def && typeof def.toRequest === 'function') {
-      return def.toRequest(params, selectedEntity);
+
+    const def = getOperationDefinition(opType as CADToolType);
+    let baseReq = def && typeof def.toRequest === 'function' ? def.toRequest(mergedParams, selectedEntity) : { ...getDefaultParams(activeTool), ...mergedParams };
+
+    if (opType === 'delete_feature') {
+      const fids = (mergedParams.face_ids && Array.isArray(mergedParams.face_ids) && mergedParams.face_ids.length > 0)
+        ? mergedParams.face_ids
+        : (selectedEntities.length > 1
+            ? selectedEntities.map(e => e.transient_id).filter(Boolean)
+            : (selectedEntity?.transient_id ? [selectedEntity.transient_id] : (selectedEntity?.face_ids || [])));
+      baseReq = {
+        ...baseReq,
+        face_ids: fids,
+        feature_id: mergedParams.feature_id || selectedEntity?.feature_id,
+      };
     }
-    return { ...getDefaultParams(activeTool), ...params };
+
+    return baseReq;
   };
 
   // Preview Operation with AbortController and parseApiError (A8 & A13)
-  const handlePreview = async () => {
+  const handlePreview = async (
+    overrideOpType?: CADToolType | 'edit_feature',
+    overrideParams?: Record<string, any>
+  ) => {
     if (!selectedEntity) {
       toast.error('Please select something to edit first.');
       return;
@@ -489,7 +519,13 @@ export function ManualCadWorkspace({
     setIsLoading(true);
     setPreviewResult(null);
 
-    const opType = selectedEntity?.entity_type === 'feature' ? 'edit_feature' : activeTool;
+    const safeOpType: CADToolType | 'edit_feature' = (typeof overrideOpType === 'string' && overrideOpType.trim().length > 0)
+      ? overrideOpType
+      : (activeTool !== 'select' ? activeTool : (selectedEntity?.entity_type === 'feature' ? 'edit_feature' : activeTool));
+    const safeParams = (overrideParams && typeof overrideParams === 'object' && !('nativeEvent' in overrideParams) && !(overrideParams instanceof Event))
+      ? overrideParams
+      : undefined;
+    const effectiveParams = buildRequestParameters(safeParams, safeOpType);
 
     try {
       const res = await fetch('/api/cad/modify/preview', {
@@ -499,9 +535,9 @@ export function ManualCadWorkspace({
         body: JSON.stringify({
           session_id: sessionId,
           base_revision: activeRevision,
-          operation_type: opType,
+          operation_type: safeOpType,
           references: buildRequestReferences(),
-          parameters: buildRequestParameters(),
+          parameters: effectiveParams,
         }),
       });
 
@@ -624,6 +660,27 @@ export function ManualCadWorkspace({
         return;
       }
 
+      // Delete key shortcut for deleting selected face or feature
+      if (e.key === 'Delete' || e.key === 'Del' || (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey)) {
+        if (selectedEntity && (selectedEntity.entity_type === 'face' || selectedEntity.entity_type === 'feature')) {
+          e.preventDefault();
+          if (selectedEntity.entity_type === 'feature') {
+            handleCommit('delete_feature', { feature_id: selectedEntity.feature_id, face_ids: selectedEntity.face_ids });
+          } else {
+            const parentFeat = detectedFeatures?.find(df => df.face_ids?.includes(selectedEntity.transient_id));
+            if (parentFeat) {
+              handleCommit('delete_feature', { feature_id: parentFeat.feature_id, face_ids: parentFeat.face_ids });
+            } else {
+              const fids = selectedEntities.length > 1
+                ? selectedEntities.map(ent => ent.transient_id).filter(Boolean)
+                : [selectedEntity.transient_id];
+              handleCommit('delete_feature', { face_ids: fids });
+            }
+          }
+          return;
+        }
+      }
+
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) {
@@ -638,14 +695,23 @@ export function ManualCadWorkspace({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [contextMenu, activeTool, isPreviewActive, handleCancelPreview, canUndo, canRedo, activeIdx, history]);
+  }, [contextMenu, activeTool, isPreviewActive, handleCancelPreview, canUndo, canRedo, activeIdx, history, selectedEntity, selectedEntities, detectedFeatures]);
 
   // Commit Operation
-  const handleCommit = async () => {
+  const handleCommit = async (
+    overrideOpType?: CADToolType | 'edit_feature',
+    overrideParams?: Record<string, any>
+  ) => {
     if (!selectedEntity) return;
 
     setIsLoading(true);
-    const opType = selectedEntity?.entity_type === 'feature' ? 'edit_feature' : activeTool;
+    const safeOpType: CADToolType | 'edit_feature' = (typeof overrideOpType === 'string' && overrideOpType.trim().length > 0)
+      ? overrideOpType
+      : (activeTool !== 'select' ? activeTool : (selectedEntity?.entity_type === 'feature' ? 'edit_feature' : activeTool));
+    const safeParams = (overrideParams && typeof overrideParams === 'object' && !('nativeEvent' in overrideParams) && !(overrideParams instanceof Event))
+      ? overrideParams
+      : undefined;
+    const effectiveParams = buildRequestParameters(safeParams, safeOpType);
 
     try {
       const res = await fetch('/api/cad/modify/commit', {
@@ -654,9 +720,9 @@ export function ManualCadWorkspace({
         body: JSON.stringify({
           session_id: sessionId,
           base_revision: activeRevision,
-          operation_type: opType,
+          operation_type: safeOpType,
           references: buildRequestReferences(),
-          parameters: buildRequestParameters(),
+          parameters: effectiveParams,
         }),
       });
 
