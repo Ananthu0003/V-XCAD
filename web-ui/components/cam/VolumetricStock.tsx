@@ -91,19 +91,31 @@ export function VolumetricStock({
             const segment = segments[i];
             if (!segment) continue;
             
-            const moveType = segment.move_type || (segment as any).type;
-            // Check if segment is a cutting move
-            if (moveType === 'rapid') {
-                continue; // Rapid moves don't cut (ideally)
+            const moveType = segment.move_type || (segment as any).moveType || (segment as any).type || '';
+            const moveTypeStr = String(moveType).toLowerCase();
+            // Check if segment is a non-cutting move (rapid clearance, rapid XY, retract)
+            if (moveTypeStr.includes('rapid') || moveTypeStr.includes('retract')) {
+                continue; // Rapid and retract moves don't cut stock
             }
             
-            const toolId = segment.tool_id;
-            const tool = camTools.find(t => t.id === toolId || t.name === toolId || (t as any).tool_name === toolId);
+            const toolId = segment.tool_id || (segment as any).toolId;
+            const cleanId = (id: any) => String(id || '').trim().toLowerCase().replace(/^t0*/, 't');
+            const segToolClean = cleanId(toolId);
+            const tool = camTools.find(t => {
+                if (!t) return false;
+                const tId = cleanId(t.id);
+                const tName = cleanId(t.name);
+                const tToolName = cleanId((t as any).tool_name);
+                const tNum = (t as any).tool_number !== undefined ? `t${(t as any).tool_number}` : '';
+                return tId === segToolClean || tName === segToolClean || tToolName === segToolClean || (tNum && tNum === segToolClean);
+            }) || camTools[0];
             if (!tool) continue;
             
             const rawDiameter = tool.diameter || (tool as any).diameter_mm || 6;
             const toolDiameter = setupUnits === 'in' ? rawDiameter / 25.4 : rawDiameter;
             const toolRadius = toolDiameter / 2;
+            const toolRadiusSq = toolRadius * toolRadius;
+
             // Segment coordinates (in setup space)
             const startX = (segment as any).start?.x ?? segment.start_x ?? 0;
             const startY = (segment as any).start?.y ?? segment.start_y ?? 0;
@@ -123,46 +135,91 @@ export function VolumetricStock({
             const localEndY = endY - stockCenter[1];
             const localEndZ = endZ - stockCenter[2];
             
-            // Calculate 2D bounding box of the swept path to optimize vertex checking
-            const minX = Math.min(localStartX, localEndX) - toolRadius;
-            const maxX = Math.max(localStartX, localEndX) + toolRadius;
-            const minY = Math.min(localStartY, localEndY) - toolRadius;
-            const maxY = Math.max(localStartY, localEndY) + toolRadius;
-            
-            const gridWidth = stockDimensions[0];
-            const gridHeight = stockDimensions[1];
-            
-            // Iterate over the grid
-            for (let v = 0; v < positionAttr.count; v++) {
-                const vx = positionAttr.getX(v);
-                const vy = positionAttr.getY(v);
-                
-                // Broad phase check
-                if (vx < minX || vx > maxX || vy < minY || vy > maxY) continue;
-                
-                // Distance to line segment (swept circle)
-                const l2 = (localEndX - localStartX) ** 2 + (localEndY - localStartY) ** 2;
-                let t = 0;
-                if (l2 !== 0) {
-                    t = ((vx - localStartX) * (localEndX - localStartX) + (vy - localStartY) * (localEndY - localStartY)) / l2;
-                    t = Math.max(0, Math.min(1, t));
+            // Check if this is an arc move (arc_cw, arc_ccw)
+            const isArc = moveTypeStr.includes('arc') || (segment as any).center || (segment as any).center_x !== undefined;
+            const centerX = (segment as any).center?.x ?? (segment as any).center_x;
+            const centerY = (segment as any).center?.y ?? (segment as any).center_y;
+
+            type SubPath = { x1: number; y1: number; z1: number; x2: number; y2: number; z2: number };
+            const subPaths: SubPath[] = [];
+
+            if (isArc && centerX !== undefined && centerY !== undefined) {
+                const localCenterX = centerX - stockCenter[0];
+                const localCenterY = centerY - stockCenter[1];
+                const r = (segment as any).radius ?? Math.hypot(localStartX - localCenterX, localStartY - localCenterY);
+                if (r > 0.001) {
+                    const startAngle = Math.atan2(localStartY - localCenterY, localStartX - localCenterX);
+                    const endAngle = Math.atan2(localEndY - localCenterY, localEndX - localCenterX);
+                    const isCW = moveTypeStr === 'arc_cw' || (segment as any).clockwise === true;
+                    let sweep = endAngle - startAngle;
+                    if (isCW) {
+                        if (sweep >= -1e-6) sweep -= 2 * Math.PI;
+                    } else {
+                        if (sweep <= 1e-6) sweep += 2 * Math.PI;
+                    }
+
+                    const steps = Math.max(8, Math.min(32, Math.ceil(Math.abs(sweep) / (Math.PI / 8))));
+                    let prevX = localStartX;
+                    let prevY = localStartY;
+                    let prevZ = localStartZ;
+                    for (let s = 1; s <= steps; s++) {
+                        const frac = s / steps;
+                        const curAngle = startAngle + frac * sweep;
+                        const curX = s === steps ? localEndX : (localCenterX + r * Math.cos(curAngle));
+                        const curY = s === steps ? localEndY : (localCenterY + r * Math.sin(curAngle));
+                        const curZ = localStartZ + frac * (localEndZ - localStartZ);
+                        subPaths.push({ x1: prevX, y1: prevY, z1: prevZ, x2: curX, y2: curY, z2: curZ });
+                        prevX = curX;
+                        prevY = curY;
+                        prevZ = curZ;
+                    }
+                } else {
+                    subPaths.push({ x1: localStartX, y1: localStartY, z1: localStartZ, x2: localEndX, y2: localEndY, z2: localEndZ });
                 }
+            } else {
+                subPaths.push({ x1: localStartX, y1: localStartY, z1: localStartZ, x2: localEndX, y2: localEndY, z2: localEndZ });
+            }
+
+            // Carve each subpath
+            for (const sub of subPaths) {
+                const minX = Math.min(sub.x1, sub.x2) - toolRadius;
+                const maxX = Math.max(sub.x1, sub.x2) + toolRadius;
+                const minY = Math.min(sub.y1, sub.y2) - toolRadius;
+                const maxY = Math.max(sub.y1, sub.y2) + toolRadius;
                 
-                const projX = localStartX + t * (localEndX - localStartX);
-                const projY = localStartY + t * (localEndY - localStartY);
-                
-                const distSq = (vx - projX) ** 2 + (vy - projY) ** 2;
-                
-                if (distSq <= toolRadius * toolRadius) {
-                    // It's inside the tool sweep!
-                    // Interpolate Z depth along the segment
-                    const targetZ = localStartZ + t * (localEndZ - localStartZ);
+                const l2 = (sub.x2 - sub.x1) ** 2 + (sub.y2 - sub.y1) ** 2;
+
+                // Iterate over the grid
+                for (let v = 0; v < positionAttr.count; v++) {
+                    const vx = positionAttr.getX(v);
+                    const vy = positionAttr.getY(v);
                     
-                    // We only cut DOWN, so if the tool is lower than current stock, update it
-                    if (targetZ < heightMap.current[v]) {
-                        heightMap.current[v] = targetZ;
-                        positionAttr.setZ(v, targetZ);
-                        needsUpdate = true;
+                    // Broad phase check
+                    if (vx < minX || vx > maxX || vy < minY || vy > maxY) continue;
+                    
+                    // Distance to line segment (swept circle)
+                    let t = 0;
+                    if (l2 !== 0) {
+                        t = ((vx - sub.x1) * (sub.x2 - sub.x1) + (vy - sub.y1) * (sub.y2 - sub.y1)) / l2;
+                        t = Math.max(0, Math.min(1, t));
+                    }
+                    
+                    const projX = sub.x1 + t * (sub.x2 - sub.x1);
+                    const projY = sub.y1 + t * (sub.y2 - sub.y1);
+                    
+                    const distSq = (vx - projX) ** 2 + (vy - projY) ** 2;
+                    
+                    if (distSq <= toolRadiusSq) {
+                        // It's inside the tool sweep!
+                        // Interpolate Z depth along the segment
+                        const targetZ = sub.z1 + t * (sub.z2 - sub.z1);
+                        
+                        // We only cut DOWN, so if the tool is lower than current stock, update it
+                        if (targetZ < heightMap.current[v]) {
+                            heightMap.current[v] = targetZ;
+                            positionAttr.setZ(v, targetZ);
+                            needsUpdate = true;
+                        }
                     }
                 }
             }

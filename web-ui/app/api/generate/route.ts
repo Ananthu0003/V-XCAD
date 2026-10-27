@@ -91,7 +91,7 @@ function isSupportedUpload(upload: File): boolean {
 
 function getFastApiUrl(): string {
 	const value = process.env.FASTAPI_URL?.trim();
-	return (value || 'http://127.0.0.1:8001/api/v1').replace(/\/$/, '');
+	return (value || 'http://127.0.0.1:8000/api/v1').replace(/\/$/, '');
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -173,6 +173,16 @@ export async function POST(request: Request): Promise<Response> {
 		formData.set('session_id', sessionId);
 	} else {
 		sessionId = rawSessionId.trim();
+		const existingSession = await prisma.cadSession.findUnique({
+			where: { id: sessionId },
+			select: { userId: true },
+		});
+		if (existingSession && existingSession.userId && existingSession.userId !== validUserId) {
+			return NextResponse.json(
+				buildError('Forbidden', 'You do not own this session.'),
+				{ status: 403 }
+			);
+		}
 	}
 
 	// If no file was uploaded, remove the empty image field so FastAPI treats it as optional

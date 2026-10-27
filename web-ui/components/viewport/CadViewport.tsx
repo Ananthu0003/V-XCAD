@@ -6,13 +6,14 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, Stage, PerspectiveCamera, Line, GizmoHelper, GizmoViewcube, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { ViewportController } from '@/components/viewport/ViewportController';
-import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye, FileImage, Folder, Upload } from 'lucide-react';
+import { Loader2, Share2, Download, ChevronDown, Layers, Box, Activity, ChevronRight, CheckCircle2, Camera, Maximize, RotateCcw, Home, Eye, FileImage, Folder, Upload, AlertTriangle } from 'lucide-react';
 import { DimensionOverlay } from '@/components/viewport/DimensionOverlay';
 import { FeatureHighlight } from '@/components/viewport/FeatureHighlight';
 import { CameraRig } from '@/components/viewport/CameraRig';
 import { VolumetricStock } from '@/components/cam/VolumetricStock';
 import { BlueprintViewer } from '@/components/blueprint/BlueprintViewer';
 import { TargetPortion3DHighlight } from '@/components/viewport/TargetPortion3DHighlight';
+import { ThreeErrorBoundary, CanvasRootErrorBoundary } from '@/components/viewport/ThreeErrorBoundary';
 import type { TargetPortion } from '@/components/chat/ChatPanel';
 import type { StlGeometryInfo } from '@/components/viewport/StlMesh';
 
@@ -287,10 +288,46 @@ export function CadViewport({
 	const [exportOpen, setExportOpen] = useState(false);
 	const [viewMode, setViewMode] = useState<'both' | 'solid' | 'wireframe'>('both');
 	const [localShowPIP, setLocalShowPIP] = useState(false);
+	const [meshLoadError, setMeshLoadError] = useState<string | null>(null);
+	const [modelRotation, setModelRotation] = useState<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 });
+	const [isAutoRotating, setIsAutoRotating] = useState(false);
 	const isPIPOpen = showBlueprintPIP !== undefined ? showBlueprintPIP : localShowPIP;
 	const togglePIP = onToggleBlueprintPIP || (() => setLocalShowPIP(prev => !prev));
 
 	const [canvasKey, setCanvasKey] = useState(0);
+
+	useEffect(() => {
+		setMeshLoadError(null);
+		setModelRotation({ x: 0, y: 0, z: 0 });
+	}, [stlUrl]);
+
+	useEffect(() => {
+		const handleModelRotate = (e: CustomEvent<{ axis: 'x' | 'y' | 'z'; degrees: number }>) => {
+			const { axis, degrees } = e.detail;
+			const rad = (degrees * Math.PI) / 180;
+			setModelRotation((prev) => ({
+				...prev,
+				[axis]: (prev[axis] + rad) % (Math.PI * 2),
+			}));
+		};
+		const handleAction = (e: CustomEvent) => {
+			if (e.detail === 'reset' || e.detail === 'reset-model') {
+				setModelRotation({ x: 0, y: 0, z: 0 });
+			}
+			if (e.detail === 'auto-rotate' || e.detail === 'rotate') {
+				setIsAutoRotating((prev) => !prev);
+			}
+			if (e.detail === 'stop-auto-rotate') {
+				setIsAutoRotating(false);
+			}
+		};
+		window.addEventListener('model-rotate', handleModelRotate as EventListener);
+		window.addEventListener('viewport-action', handleAction as EventListener);
+		return () => {
+			window.removeEventListener('model-rotate', handleModelRotate as EventListener);
+			window.removeEventListener('viewport-action', handleAction as EventListener);
+		};
+	}, []);
 
 	const dispatchViewportAction = (action: string) => {
 		window.dispatchEvent(new CustomEvent('viewport-action', { detail: action }));
@@ -459,8 +496,8 @@ export function CadViewport({
 		const allowedSources = ['drill', 'drilling', 'contour', '2d_contour', 'pocket', 'pocket_milling', 'boss', 'boss_clearing', 'face', 'facing', 'turning', 'od_turning', 'facing_turning', 'slot_milling', 'chamfer_milling', 'tapping', 'strategy'];
 		const allowedMoveTypes = [
             'rapid_clearance', 'rapid_xy', 'approach_retract', 'retract_clearance',
-            'plunge', 'cut', 'arc_cw', 'arc_ccw', 'drill_cycle',
-            'rapid', 'feed', 'arc', 'retract', 'helix'
+            'plunge', 'cut', 'linear', 'feed', 'cutting', 'contour', 'arc_cw', 'arc_ccw', 'drill_cycle',
+            'rapid', 'arc', 'retract', 'helix'
         ];
 		let validCount = 0;
 		let droppedCount = 0;
@@ -512,7 +549,7 @@ export function CadViewport({
 
             if (['rapid', 'rapid_clearance', 'rapid_xy', 'retract_clearance'].includes(type)) {
 				targetGroupName = 'rapid';
-			} else if (['feed', 'cut', 'arc', 'arc_cw', 'arc_ccw'].includes(type)) {
+			} else if (['feed', 'cut', 'linear', 'cutting', 'contour', 'arc', 'arc_cw', 'arc_ccw'].includes(type)) {
 				if (isRoughing) targetGroupName = 'roughing';
 				else if (isSmoothing) targetGroupName = 'smoothing';
 				else targetGroupName = ['arc', 'arc_cw', 'arc_ccw'].includes(type) ? 'arc' : 'feed';
@@ -525,9 +562,57 @@ export function CadViewport({
 			}
 
 			const targetGroup = groups[targetGroupName] || groups.other;
-			if (seg.start && seg.end) {
-			    targetGroup.push(new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z));
-			    targetGroup.push(new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z));
+			const sx = seg.start?.x ?? seg.start_x;
+			const sy = seg.start?.y ?? seg.start_y;
+			const sz = seg.start?.z ?? seg.start_z;
+			const ex = seg.end?.x ?? seg.end_x;
+			const ey = seg.end?.y ?? seg.end_y;
+			const ez = seg.end?.z ?? seg.end_z;
+
+			if (sx !== undefined && ex !== undefined && sy !== undefined && ey !== undefined && sz !== undefined && ez !== undefined) {
+				const isArc = ['arc', 'arc_cw', 'arc_ccw'].includes(type) || seg.center || seg.center_x !== undefined;
+				const cx = seg.center?.x ?? seg.center_x;
+				const cy = seg.center?.y ?? seg.center_y;
+
+				if (isArc && cx !== undefined && cy !== undefined) {
+					const r = seg.radius ?? Math.hypot(sx - cx, sy - cy);
+					if (r > 0.0001) {
+						const startAngle = Math.atan2(sy - cy, sx - cx);
+						const endAngle = Math.atan2(ey - cy, ex - cx);
+						const isCW = type === 'arc_cw' || seg.clockwise === true;
+						let sweep = endAngle - startAngle;
+						if (isCW) {
+							if (sweep >= -1e-6) sweep -= 2 * Math.PI;
+						} else {
+							if (sweep <= 1e-6) sweep += 2 * Math.PI;
+						}
+
+						const steps = Math.max(16, Math.min(64, Math.ceil(Math.abs(sweep) / (Math.PI / 16))));
+						let prevX = sx;
+						let prevY = sy;
+						let prevZ = sz;
+						for (let s = 1; s <= steps; s++) {
+							const frac = s / steps;
+							const curAngle = startAngle + frac * sweep;
+							const curX = s === steps ? ex : (cx + r * Math.cos(curAngle));
+							const curY = s === steps ? ey : (cy + r * Math.sin(curAngle));
+							const curZ = sz + frac * (ez - sz);
+
+							targetGroup.push(new THREE.Vector3(prevX, prevY, prevZ));
+							targetGroup.push(new THREE.Vector3(curX, curY, curZ));
+
+							prevX = curX;
+							prevY = curY;
+							prevZ = curZ;
+						}
+					} else {
+						targetGroup.push(new THREE.Vector3(sx, sy, sz));
+						targetGroup.push(new THREE.Vector3(ex, ey, ez));
+					}
+				} else {
+					targetGroup.push(new THREE.Vector3(sx, sy, sz));
+					targetGroup.push(new THREE.Vector3(ex, ey, ez));
+				}
 			}
 		});
 
@@ -914,10 +999,16 @@ export function CadViewport({
 						<button onClick={() => { window.dispatchEvent(new CustomEvent('model-rotate', { detail: { axis: 'x', degrees: 90 } })); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Rotate X +90° <RotateCcw className="size-3 text-muted-foreground" /></button>
 						<button onClick={() => { window.dispatchEvent(new CustomEvent('model-rotate', { detail: { axis: 'y', degrees: 90 } })); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Rotate Y +90° <RotateCcw className="size-3 text-muted-foreground" /></button>
 						<button onClick={() => { window.dispatchEvent(new CustomEvent('model-rotate', { detail: { axis: 'z', degrees: 90 } })); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Rotate Z +90° <RotateCcw className="size-3 text-muted-foreground" /></button>
+						{(modelRotation.x !== 0 || modelRotation.y !== 0 || modelRotation.z !== 0) && (
+							<button onClick={() => { setModelRotation({ x: 0, y: 0, z: 0 }); window.dispatchEvent(new CustomEvent('viewport-action', { detail: 'reset-model' })); setContextMenu(null); }} className="px-4 py-1.5 text-left text-xs font-semibold text-amber-400 hover:bg-accent transition-colors flex items-center justify-between">Reset Model Rotation <RotateCcw className="size-3 text-amber-400" /></button>
+						)}
 						<div className="h-px bg-border/60 my-1.5 mx-3" />
 						<button onClick={() => { dispatchViewportAction('iso'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm font-bold text-primary hover:bg-accent hover:text-primary transition-colors flex items-center justify-between">Isometric <span className="text-[10px] opacity-70 font-mono font-normal">I</span></button>
 						<button onClick={() => { dispatchViewportAction('home'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Home View <span className="text-[10px] text-muted-foreground font-mono">H</span></button>
-						<button onClick={() => { dispatchViewportAction('auto-rotate'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors flex items-center justify-between">Auto Rotate <span className="text-[10px] text-muted-foreground font-mono">A</span></button>
+						<button onClick={() => { dispatchViewportAction('auto-rotate'); setContextMenu(null); }} className={`px-4 py-2 text-left text-sm hover:bg-accent transition-colors flex items-center justify-between ${isAutoRotating ? 'text-cyan-400 font-semibold' : 'text-foreground'}`}>
+							<span>Auto Rotate {isAutoRotating && <span className="text-[10px] text-cyan-400 font-mono ml-1.5">(Active)</span>}</span>
+							<span className="text-[10px] text-muted-foreground font-mono">A</span>
+						</button>
 						<button onClick={() => { dispatchViewportAction('fit'); setContextMenu(null); }} className="px-4 py-2 text-left text-sm text-foreground hover:bg-accent transition-colors">Fit to Screen</button>
 					</div>
 				)}
@@ -928,6 +1019,28 @@ export function CadViewport({
 							<Activity className="size-6 text-rose-500 mb-1" />
 							<p className="text-sm font-semibold text-rose-100">No valid machining toolpaths to display</p>
 							<p className="text-xs text-rose-300">Toolpaths may have been rejected by the engine.</p>
+						</div>
+					</div>
+				)}
+
+				{meshLoadError && (
+					<div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none p-4">
+						<div className="bg-slate-950/85 backdrop-blur-md px-6 py-5 rounded-2xl border border-amber-500/30 flex flex-col items-center gap-3 max-w-md text-center pointer-events-auto shadow-2xl">
+							<div className="p-3 bg-amber-500/10 rounded-full border border-amber-500/20 text-amber-400">
+								<AlertTriangle className="size-6" />
+							</div>
+							<div>
+								<p className="text-sm font-semibold text-slate-100">3D Model File Not Available</p>
+								<p className="text-xs text-slate-400 mt-1">
+									The CAD artifact for this session is not present on disk. Please create a new session or re-run CAD generation to create fresh geometry.
+								</p>
+							</div>
+							<button
+								onClick={() => setMeshLoadError(null)}
+								className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition-colors"
+							>
+								Dismiss
+							</button>
 						</div>
 					</div>
 				)}
@@ -949,15 +1062,15 @@ export function CadViewport({
 						className="relative z-10"
 						onPointerMissed={onClearSelection}
 					>
-					<CanvasBridge />
-					<ViewportController 
-						modelGroupRef={groupRef}
-						geometryInfo={geometryInfo} 
-						activeFeatureId={activeFeatureId} 
-						camFeatures={camFeatures} 
-						hasStl={hasStl} 
-						workflowStage={workflowStage}
-					/>
+						<CanvasBridge />
+						<ViewportController
+							modelGroupRef={groupRef}
+							geometryInfo={geometryInfo}
+							activeFeatureId={activeFeatureId}
+							camFeatures={camFeatures}
+							hasStl={hasStl}
+							workflowStage={workflowStage}
+						/>
 					
 					<CameraRig
 						activeParameter={activeParameter}
@@ -1001,44 +1114,60 @@ export function CadViewport({
 										const scale = new THREE.Vector3();
 										m.decompose(pos, quat, scale);
 
+										// Combine setup transformation with user model rotation around part center
+										const rotEuler = new THREE.Euler(modelRotation.x, modelRotation.y, modelRotation.z, 'XYZ');
+										const rotQuat = new THREE.Quaternion().setFromEuler(rotEuler);
+
+										const modelCenter = geometryInfo?.center
+											? new THREE.Vector3(geometryInfo.center[0], geometryInfo.center[1], geometryInfo.center[2])
+											: new THREE.Vector3(0, 0, 0);
+
 										const isCamStage = (workflowStage === 'cam' || workflowStage === 'gcode') && hasValidToolpaths;
-										
+
 										let simOffsetX = 0;
 										let simOffsetY = 0;
-										
+
 										const simOffset = new THREE.Vector3(simOffsetX, simOffsetY, 0);
 										const cadOffset = new THREE.Vector3(0, 0, 0);
 										const combinedPos = new THREE.Vector3().copy(pos).add(cadOffset);
-										
+
 										return (
 											<>
 												<group position={combinedPos} quaternion={quat} scale={scale}>
-													{isSolidVisible && children}
-													
-                                                    {/* Overlays - placed next to children so they inherit the exact same transforms */}
-                                                    {geometryInfo && annotations && (
-                                                        <DimensionOverlay
-                                                            annotations={annotations}
-                                                            activeParameter={(activeParameter || activeFeatureId) as string | null}
-                                                            hoveredParameter={hoveredParameter}
-                                                            targetPortion={targetPortion}
-                                                            geometryScale={geometryInfo.scale}
-                                                            geometryCenter={geometryInfo.center}
-                                                            onSelectParameter={onSelectParameter}
-                                                            onHoverParameter={onHoverParameter}
-                                                        />
-                                                    )}
+													<group position={modelCenter}>
+														<group quaternion={rotQuat}>
+															<group position={modelCenter.clone().negate()}>
+																<ThreeErrorBoundary resetKey={stlUrl} onError={(err) => setMeshLoadError(err.message)}>
+																	{isSolidVisible && children}
+																</ThreeErrorBoundary>
 
-                                                    {/* 3D Target Portion Highlight (Glowing halo + HUD Beacon) */}
-                                                    {targetPortion && geometryInfo && (
-                                                        <TargetPortion3DHighlight
-                                                            targetPortion={targetPortion}
-                                                            geometryInfo={geometryInfo}
-                                                            annotations={annotations}
-                                                            onClear={() => onSelectPortion?.(null)}
-                                                        />
-                                                    )}
-                                                </group>
+																{/* Overlays - placed next to children so they inherit the exact same transforms */}
+																{geometryInfo && annotations && (
+																	<DimensionOverlay
+																		annotations={annotations}
+																		activeParameter={(activeParameter || activeFeatureId) as string | null}
+																		hoveredParameter={hoveredParameter}
+																		targetPortion={targetPortion}
+																		geometryScale={geometryInfo.scale}
+																		geometryCenter={geometryInfo.center}
+																		onSelectParameter={onSelectParameter}
+																		onHoverParameter={onHoverParameter}
+																	/>
+																)}
+
+																{/* 3D Target Portion Highlight (Glowing halo + HUD Beacon) */}
+																{targetPortion && geometryInfo && (
+																	<TargetPortion3DHighlight
+																		targetPortion={targetPortion}
+																		geometryInfo={geometryInfo}
+																		annotations={annotations}
+																		onClear={() => onSelectPortion?.(null)}
+																	/>
+																)}
+															</group>
+														</group>
+													</group>
+												</group>
 
 												{isWireframeVisible && (
 													<group
@@ -1056,7 +1185,16 @@ export function CadViewport({
 																const activeSegment = simulationState.segments[simulationState.activeSegmentIndex];
 																if (!activeSegment) return null;
 																const toolId = activeSegment.toolId || activeSegment.tool_id;
-																const activeTool = camTools.find(t => t.id === toolId || t.tool_name === toolId);
+																const cleanId = (id: any) => String(id || '').trim().toLowerCase().replace(/^t0*/, 't');
+																const segToolClean = cleanId(toolId);
+																const activeTool = camTools.find(t => {
+																	if (!t) return false;
+																	const tId = cleanId(t.id);
+																	const tName = cleanId(t.name);
+																	const tToolName = cleanId((t as any).tool_name);
+																	const tNum = (t as any).tool_number !== undefined ? `t${(t as any).tool_number}` : '';
+																	return tId === segToolClean || tName === segToolClean || tToolName === segToolClean || (tNum && tNum === segToolClean);
+																}) || camTools[0];
 																if (!activeTool) return null;
 
 																const internalUnits = setupMetadata?.internalUnits || 'mm';

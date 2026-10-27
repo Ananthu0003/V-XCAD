@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
-import { useLoader } from '@react-three/fiber';
+import { useMemo, useState, useEffect } from 'react';
 import { STLLoader, mergeVertices } from 'three-stdlib';
 import { Box3, BufferGeometry, Color, DoubleSide, FrontSide, MeshPhysicalMaterial, Vector3 } from 'three';
+
+import { ThreeErrorBoundary } from '@/components/viewport/ThreeErrorBoundary';
 
 export type StlGeometryInfo = {
 	scale: number;
@@ -14,7 +15,7 @@ export type StlGeometryInfo = {
 	};
 };
 
-type StlMeshProps = {
+export type StlMeshProps = {
 	url: string;
 	expectedSize?: number;
 	workpieceMaterial?: string;
@@ -24,6 +25,7 @@ type StlMeshProps = {
 	onDirectClick?: (point: [number, number, number], normal?: [number, number, number]) => void;
 	onDirectDoubleClick?: (point: [number, number, number], normal?: [number, number, number]) => void;
 	onHover?: (isHovered: boolean) => void;
+	onError?: (error: Error) => void;
 };
 
 const MATERIAL_PRESETS: Record<string, any> = {
@@ -39,10 +41,49 @@ const MATERIAL_PRESETS: Record<string, any> = {
 	'acrylic': { color: '#ffffff', metalness: 0.1, roughness: 0.1, clearcoat: 1.0, transmission: 0.9, transparent: true },
 };
 
-export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false, onGeometryReady, onMeshClick, onDirectClick, onDirectDoubleClick, onHover }: StlMeshProps) {
-	const geometry = useLoader(STLLoader, url);
+function StlMeshContent({ url, expectedSize, workpieceMaterial, xRayMode = false, onGeometryReady, onMeshClick, onDirectClick, onDirectDoubleClick, onHover, onError }: StlMeshProps) {
+	const [geometry, setGeometry] = useState<BufferGeometry | null>(null);
+
+	useEffect(() => {
+		let isCancelled = false;
+		const controller = new AbortController();
+
+		async function loadStl() {
+			try {
+				const response = await fetch(url, { signal: controller.signal });
+				if (!response.ok) {
+					const msg = `Could not load ${url}: responded with ${response.status}`;
+					console.warn(msg);
+					onError?.(new Error(msg));
+					if (!isCancelled) setGeometry(null);
+					return;
+				}
+				const arrayBuffer = await response.arrayBuffer();
+				if (isCancelled) return;
+				const loader = new STLLoader();
+				const parsed = loader.parse(arrayBuffer);
+				if (!isCancelled) {
+					setGeometry(parsed);
+				}
+			} catch (err: any) {
+				if (err.name === 'AbortError') return;
+				console.warn('Failed to load/parse STL:', err);
+				onError?.(err instanceof Error ? err : new Error(String(err)));
+				if (!isCancelled) setGeometry(null);
+			}
+		}
+
+		loadStl();
+
+		return () => {
+			isCancelled = true;
+			controller.abort();
+		};
+	}, [url, onError]);
 
 	const { centeredGeometry, scale, center } = useMemo(() => {
+		if (!geometry) return { centeredGeometry: null, scale: 1.0, center: new Vector3() };
+
 		let cloned = geometry.clone() as BufferGeometry;
 		
 		try {
@@ -96,7 +137,7 @@ export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false
 			scale: 1.0, // Scale is baked into geometry
 			center: centerVec
 		};
-	}, [geometry, expectedSize]);
+	}, [geometry, expectedSize, onGeometryReady]);
 
 	const material = useMemo(() => {
 		const matKey = workpieceMaterial ? workpieceMaterial.toLowerCase().replace(/[^a-z0-9_]/g, '') : 'aluminum_6061';
@@ -129,6 +170,8 @@ export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false
 			side: FrontSide,
 		});
 	}, [workpieceMaterial, xRayMode]);
+
+	if (!centeredGeometry) return null;
 
 	return (
 		<mesh
@@ -174,5 +217,13 @@ export function StlMesh({ url, expectedSize, workpieceMaterial, xRayMode = false
 				onHover?.(false);
 			}}
 		/>
+	);
+}
+
+export function StlMesh(props: StlMeshProps) {
+	return (
+		<ThreeErrorBoundary resetKey={props.url} onError={props.onError}>
+			<StlMeshContent {...props} />
+		</ThreeErrorBoundary>
 	);
 }

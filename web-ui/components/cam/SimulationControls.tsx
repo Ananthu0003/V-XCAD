@@ -72,15 +72,15 @@ export function SimulationControls({ state, onChange, onGenerateToolpath, isGene
                             <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Live Machine Readout</span>
                         </div>
                         <span className="text-[10px] font-bold tracking-widest text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded">
-                            {activeSegment ? (activeSegment as any).type?.toUpperCase() || 'UNKNOWN' : 'IDLE'}
+                            {activeSegment ? String((activeSegment as any).moveType || (activeSegment as any).move_type || (activeSegment as any).type || 'UNKNOWN').toUpperCase() : 'IDLE'}
                         </span>
                     </div>
                     
                     <div className="grid grid-cols-3 gap-4 relative z-10">
                         {['X', 'Y', 'Z'].map((axis) => {
-                            const val = axis === 'X' ? ((activeSegment as any)?.end?.x || 0) 
-                                      : axis === 'Y' ? ((activeSegment as any)?.end?.y || 0)
-                                      : ((activeSegment as any)?.end?.z || 0);
+                            const val = axis === 'X' ? Number((activeSegment as any)?.end?.x ?? (activeSegment as any)?.end_x ?? 0) 
+                                      : axis === 'Y' ? Number((activeSegment as any)?.end?.y ?? (activeSegment as any)?.end_y ?? 0)
+                                      : Number((activeSegment as any)?.end?.z ?? (activeSegment as any)?.end_z ?? 0);
                             return (
                                 <div key={axis} className="flex flex-col bg-black/60 rounded-lg p-3 border border-border/30 shadow-inner">
                                     <span className="text-[9px] font-bold text-muted-foreground/70 uppercase tracking-widest mb-1">{axis} AXIS</span>
@@ -96,13 +96,13 @@ export function SimulationControls({ state, onChange, onGenerateToolpath, isGene
                         <div className="flex flex-col bg-black/60 rounded-lg p-3 border border-border/30 shadow-inner">
                             <span className="text-[9px] font-bold text-muted-foreground/70 uppercase tracking-widest mb-1">FEEDRATE (mm/min)</span>
                             <span className="font-mono text-base tracking-wider text-amber-400/90 font-medium">
-                                {((activeSegment as any)?.feedrate || (activeSegment as any)?.feed_rate || 0).toString().padStart(4, '0')}
+                                {Math.round(Number((activeSegment as any)?.feedrate ?? (activeSegment as any)?.feed_rate ?? 0)).toString().padStart(4, '0')}
                             </span>
                         </div>
                         <div className="flex flex-col bg-black/60 rounded-lg p-3 border border-border/30 shadow-inner">
                             <span className="text-[9px] font-bold text-muted-foreground/70 uppercase tracking-widest mb-1">SPINDLE SPEED (RPM)</span>
                             <span className="font-mono text-base tracking-wider text-green-400/90 font-medium">
-                                {((activeSegment as any)?.spindle || (activeSegment as any)?.rpm || 0).toString().padStart(4, '0')}
+                                {Math.round(Number((activeSegment as any)?.spindle ?? (activeSegment as any)?.rpm ?? 0)).toString().padStart(4, '0')}
                             </span>
                         </div>
                     </div>

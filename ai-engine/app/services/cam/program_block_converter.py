@@ -218,13 +218,17 @@ class ProgramBlockConverter:
             
             for i, seg in enumerate(toolpaths):
                 # We expect dict here, assuming pydantic dump
-                seg_type = seg.get("type", "LINEAR")
+                seg_type = seg.get("moveType") or seg.get("type", "LINEAR")
+                seg_type_upper = str(seg_type).upper()
                 
                 sp_dict = seg.get("start", {"x": 0, "y": 0, "z": 0})
                 ep_dict = seg.get("end", {"x": 0, "y": 0, "z": 0})
                 
+                seg_feed = seg.get("feedrate") if seg.get("feedrate") is not None else seg.get("feed_rate", feed)
+                seg_rpm = seg.get("spindle") if seg.get("spindle") is not None else seg.get("rpm", rpm)
+
                 # Check for DRILL_CYCLE
-                if seg_type == "DRILL_CYCLE":
+                if "DRILL" in seg_type_upper:
                     c_type = seg.get("parameters", {}).get("cycle_type", "G81")
                     p_depth = seg.get("parameters", {}).get("peckDepth", 5.0)
                     
@@ -234,43 +238,47 @@ class ProgramBlockConverter:
                         holes=[Position(**sp_dict)],
                         r_plane=sp_dict.get("z", 0.0) + 2.0,  # approximate
                         final_depth=ep_dict.get("z", -10.0),
-                        feed_rate=feed,
-                        spindle_rpm=rpm,
+                        feed_rate=seg_feed,
+                        spindle_rpm=seg_rpm,
                         tool_id=tool_id,
                         operation_id=op_id,
                         setup_id=setup_id,
                         peck_depth=p_depth,
-                        source_segment_id=seg.get("id")
+                        source_segment_id=seg.get("id") or seg.get("segmentId")
                     )
                     all_blocks.extend(interpreter.process_block(cb))
                     
                 else:
                     # RAPID, LINEAR, ARC
-                    m_type = "linear"
-                    if seg_type == "RAPID":
+                    if "RAPID" in seg_type_upper or "RETRACT" in seg_type_upper:
                         m_type = "rapid"
+                    elif "ARC_CW" in seg_type_upper:
+                        m_type = "arc_cw"
+                    elif "ARC_CCW" in seg_type_upper:
+                        m_type = "arc_ccw"
+                    else:
+                        m_type = "linear"
                         
                     mb = MotionBlock(
                         block_id=f"blk_tp_{i}_{uuid.uuid4().hex[:4]}",
                         motion_type=m_type,
                         start_position=Position(**sp_dict),
                         end_position=Position(**ep_dict),
-                        feed_rate=None if m_type == "rapid" else feed,
-                        spindle_rpm=rpm,
+                        feed_rate=None if m_type == "rapid" else seg_feed,
+                        spindle_rpm=seg_rpm,
                         tool_id=tool_id,
                         operation_id=op_id,
                         setup_id=setup_id,
-                        source_segment_id=seg.get("id")
+                        source_segment_id=seg.get("id") or seg.get("segmentId")
                     )
                     
                     # Add arc info if applicable
-                    if seg_type in ("ARC_CW", "ARC_CCW"):
-                        mb.motion_type = "arc_cw" if seg_type == "ARC_CW" else "arc_ccw"
+                    if m_type in ("arc_cw", "arc_ccw"):
                         c_dict = seg.get("center")
-                        if c_dict:
+                        if c_dict and isinstance(c_dict, dict):
                             mb.arc_center = Position(**c_dict)
-                        mb.arc_plane = seg.get("parameters", {}).get("plane", "XY")
-                        mb.arc_radius = seg.get("parameters", {}).get("radius")
+                        mb.arc_plane = seg.get("plane") or seg.get("parameters", {}).get("plane", "XY")
+                        mb.arc_radius = seg.get("radius") or seg.get("parameters", {}).get("radius")
                         
                     all_blocks.extend(interpreter.process_block(mb))
                     

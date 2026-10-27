@@ -47,6 +47,76 @@ interface ManualCadWorkspaceProps {
   onSwitchStage?: (stage: 'cad' | 'manual_cad' | 'cam') => void;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Status overlay (bottom-left of viewport)
+// ─────────────────────────────────────────────────────────────────────────────
+function ViewportStatus({
+  selectedEntity,
+  isLoading,
+  hasModel = true,
+}: {
+  selectedEntity: any | null;
+  isLoading: boolean;
+  hasModel?: boolean;
+}) {
+  let text = 'Nothing selected: click a face or 3D model, or press V';
+
+  if (!hasModel) {
+    text = 'No CAD model loaded';
+  } else if (isLoading) {
+    text = 'Computing geometry…';
+  } else if (selectedEntity) {
+    const e = selectedEntity;
+    const parts: string[] = [];
+    parts.push(e.transient_id);
+    if (e.entity_type === 'body') {
+      parts.push('3D Solid Model');
+      if (e.volume_mm3 != null) parts.push(`${e.volume_mm3.toFixed(1)} mm³`);
+      const bbox = e.bounding_box;
+      if (bbox?.min && bbox?.max) {
+        parts.push(`${(bbox.max[0] - bbox.min[0]).toFixed(1)}×${(bbox.max[1] - bbox.min[1]).toFixed(1)}×${(bbox.max[2] - bbox.min[2]).toFixed(1)} mm`);
+      }
+    } else {
+      if (e.surface_type) parts.push(e.surface_type);
+      if (e.curve_type) parts.push(e.curve_type);
+      if (e.area != null) parts.push(`${e.area.toFixed(1)} mm²`);
+      if (e.length != null) parts.push(`${e.length.toFixed(1)} mm`);
+      if (e.normal) {
+        const n = e.normal as number[];
+        const labels = ['+X','-X','+Y','-Y','+Z','-Z'];
+        const axes = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+        let best = 0, bestDot = -2;
+        axes.forEach(([ax,ay,az],i)=>{
+          const dot = ax*n[0]+ay*n[1]+az*n[2];
+          if(dot>bestDot){bestDot=dot;best=i;}
+        });
+        if(bestDot > 0.9) parts.push(`normal ${labels[best]}`);
+      }
+    }
+    text = parts.join(' · ');
+  }
+
+  return (
+    <div
+      style={{
+        position: 'absolute', bottom: 12, left: 12, zIndex: 15,
+        fontSize: 11, fontFamily: 'var(--font-mono)',
+        color: 'var(--mcad-text-muted)',
+        pointerEvents: 'none', userSelect: 'none',
+        maxWidth: 420, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      }}
+    >
+      {isLoading && (
+        <Loader2 size={11} className="inline mr-1 animate-spin" style={{ color: 'var(--mcad-teal)', verticalAlign: 'middle' }} />
+      )}
+      {text}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workspace
+// ─────────────────────────────────────────────────────────────────────────────
 export function ManualCadWorkspace({
   sessionId,
   initialStlUrl,
@@ -119,6 +189,15 @@ export function ManualCadWorkspace({
       setStlUrl(initialStlUrl);
     }
   }, [initialStlUrl, isPreviewActive]);
+
+  useEffect(() => {
+    if (initialStlUrl) {
+      setStlUrl(initialStlUrl);
+    }
+  }, [initialStlUrl]);
+
+  const hasValidSession = Boolean(sessionId && sessionId !== 'default_session');
+  const hasModel = Boolean(hasValidSession || initialStepUrl || initialStlUrl || stlUrl || topology);
 
   // Scoped workspace ref for keyboard shortcuts
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -245,6 +324,10 @@ export function ManualCadWorkspace({
     try {
       const stepParam = initialStepUrl ? `&source_step=${encodeURIComponent(initialStepUrl)}` : '';
       const res = await fetch(`/api/cad/modify/topology/${sessionId}?revision_id=${revId}${stepParam}`);
+      if (res.status === 404) {
+        setTopology(null);
+        return;
+      }
       if (!res.ok) throw new Error('Failed to load topology');
       const data = await res.json();
       setTopology(data);
@@ -256,7 +339,7 @@ export function ManualCadWorkspace({
         }
       }
     } catch (err: any) {
-      console.error('Error fetching topology:', err);
+      console.warn('Topology not available for session:', err?.message || err);
     }
   }, [sessionId, isPreviewActive, initialStepUrl, initialStlUrl]);
 
@@ -265,12 +348,16 @@ export function ManualCadWorkspace({
     if (!sessionId || sessionId === 'default_session') return;
     try {
       const res = await fetch(`/api/cad/modify/history/${sessionId}`);
+      if (res.status === 404) {
+        setHistory([]);
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setHistory(data);
       }
     } catch (err: any) {
-      console.error('Error fetching history:', err);
+      console.warn('History not available for session:', err?.message || err);
     }
   }, [sessionId]);
 
@@ -881,6 +968,67 @@ export function ManualCadWorkspace({
               detectedFeatures={detectedFeatures}
             />
           </CadViewport>
+
+          {/* Empty model prompt overlay */}
+          {!hasModel && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 10,
+                background: 'rgba(10, 14, 20, 0.78)',
+                backdropFilter: 'blur(6px)',
+                padding: 24,
+                textAlign: 'center',
+              }}
+            >
+              <div
+                style={{
+                  maxWidth: 420,
+                  padding: '28px 32px',
+                  borderRadius: 12,
+                  background: 'var(--mcad-panel, #121820)',
+                  border: '1px solid var(--mcad-border, #1f2937)',
+                  boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+                }}
+              >
+                <div style={{ fontSize: 16, fontWeight: 600, color: '#f3f4f6', marginBottom: 8 }}>
+                  No CAD Model Loaded
+                </div>
+                <p style={{ fontSize: 13, color: '#9ca3af', lineHeight: 1.5, marginBottom: 20 }}>
+                  Direct parametric editing requires an active 3D model. Generate a design from a prompt or import a STEP model to begin editing.
+                </p>
+                {onSwitchStage && (
+                  <button
+                    type="button"
+                    onClick={() => onSwitchStage('cad')}
+                    style={{
+                      padding: '9px 20px',
+                      background: 'var(--mcad-accent, #3b82f6)',
+                      color: '#fff',
+                      borderRadius: 6,
+                      border: 'none',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'opacity 0.2s',
+                    }}
+                    onMouseOver={(e) => (e.currentTarget.style.opacity = '0.9')}
+                    onMouseOut={(e) => (e.currentTarget.style.opacity = '1')}
+                  >
+                    Return to CAD Design
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Bottom-left status line */}
+          <ViewportStatus selectedEntity={selectedEntity} isLoading={isLoading} hasModel={hasModel} />
         </div>
 
         {/* 2. Floating Left Tool Rail */}

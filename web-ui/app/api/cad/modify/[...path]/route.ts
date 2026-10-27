@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSession } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
 import { aiEngineFetch } from '@/lib/aiEngine';
 
 export const runtime = 'nodejs';
@@ -8,6 +9,21 @@ export const dynamic = 'force-dynamic';
 function getFastApiUrl(): string {
   const value = process.env.FASTAPI_URL?.trim() || 'http://127.0.0.1:8000/api/v1';
   return value.replace(/\/$/, '');
+}
+
+async function verifySessionOwnership(sessionId: string, userId: string): Promise<boolean> {
+  if (!sessionId || sessionId === 'default_session') return true;
+  try {
+    const session = await prisma.cadSession.findUnique({
+      where: { id: sessionId },
+      select: { userId: true, isShared: true },
+    });
+    if (!session) return true; // Transient session not yet written to DB
+    if (session.userId === userId || session.isShared) return true;
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 export async function GET(
@@ -22,6 +38,24 @@ export async function GET(
 
     const { path } = await params;
     const subpath = path.join('/');
+
+    // Extract sessionId from known subpath structures:
+    // e.g. topology/{session_id}, history/{session_id}, context/{session_id}, file/{session_id}/...
+    let targetSessionId: string | null = null;
+    if (path.length >= 2 && ['topology', 'history', 'context', 'file'].includes(path[0])) {
+      targetSessionId = path[1];
+    }
+
+    if (targetSessionId) {
+      const isAuthorized = await verifySessionOwnership(targetSessionId, userId);
+      if (!isAuthorized) {
+        return NextResponse.json(
+          { error: { message: 'Forbidden. You do not have permission to access this CAD session.' } },
+          { status: 403 }
+        );
+      }
+    }
+
     const url = new URL(request.url);
     const queryString = url.search;
 
@@ -73,6 +107,17 @@ export async function POST(
     const { path } = await params;
     const subpath = path.join('/');
     const body = await request.json().catch(() => ({}));
+
+    const targetSessionId = body?.session_id;
+    if (targetSessionId && typeof targetSessionId === 'string') {
+      const isAuthorized = await verifySessionOwnership(targetSessionId, userId);
+      if (!isAuthorized) {
+        return NextResponse.json(
+          { error: { message: 'Forbidden. You do not have permission to modify this CAD session.' } },
+          { status: 403 }
+        );
+      }
+    }
 
     const fastApiBase = getFastApiUrl();
     const targetUrl = fastApiBase.endsWith('/api/v1')

@@ -65,8 +65,10 @@ export async function POST(request: Request): Promise<Response> {
 			cache: 'no-store',
 		});
 	} catch (error) {
+		console.error('[auto-plan] AI engine fetch failed:', error);
+		const detail = error instanceof Error ? error.message : String(error);
 		return NextResponse.json(
-			{ error: { message: 'Unable to connect to AI engine.' } },
+			{ error: { message: `Unable to connect to AI engine: ${detail}` } },
 			{ status: 502 }
 		);
 	}
