@@ -34,6 +34,32 @@ class PostOutputValidator:
         if "legacy_path" in gcode.lower():
             return {"valid": False, "reason": "Generated G-Code contains blocked legacy_path artifact."}
             
+        # Determine true minimum safe retract height from operations or toolpath segments
+        retracts = []
+        if operations:
+            for op in operations:
+                if not isinstance(op, dict):
+                    continue
+                sh = op.get('safe_heights') or op.get('parameters', {}).get('safe_heights')
+                if isinstance(sh, dict):
+                    if 'retract' in sh and sh['retract'] is not None:
+                        retracts.append(float(sh['retract']))
+                    if 'clearance' in sh and sh['clearance'] is not None:
+                        retracts.append(float(sh['clearance']))
+                params = op.get('parameters', {})
+                if 'retract_z' in params and params['retract_z'] is not None:
+                    retracts.append(float(params['retract_z']))
+                if 'clearance_z' in params and params['clearance_z'] is not None:
+                    retracts.append(float(params['clearance_z']))
+                # Inspect actual toolpath segments if present
+                for seg in op.get('toolpaths', []):
+                    if isinstance(seg, dict) and seg.get('moveType') in ('retract_clearance', 'rapid_clearance'):
+                        end_z = seg.get('end', {}).get('z')
+                        if end_z is not None:
+                            retracts.append(float(end_z))
+
+        min_retract = min(retracts) if retracts else 0.0
+
         for line in lines:
             line = line.strip().upper()
             
@@ -75,32 +101,6 @@ class PostOutputValidator:
                 z_match = re.search(r'Z([-\d\.]+)', line)
                 if z_match:
                     current_z = float(z_match.group(1))
-
-            # Determine true minimum safe retract height from operations or toolpath segments
-            retracts = []
-            if operations:
-                for op in operations:
-                    if not isinstance(op, dict):
-                        continue
-                    sh = op.get('safe_heights') or op.get('parameters', {}).get('safe_heights')
-                    if isinstance(sh, dict):
-                        if 'retract' in sh and sh['retract'] is not None:
-                            retracts.append(float(sh['retract']))
-                        if 'clearance' in sh and sh['clearance'] is not None:
-                            retracts.append(float(sh['clearance']))
-                    params = op.get('parameters', {})
-                    if 'retract_z' in params and params['retract_z'] is not None:
-                        retracts.append(float(params['retract_z']))
-                    if 'clearance_z' in params and params['clearance_z'] is not None:
-                        retracts.append(float(params['clearance_z']))
-                    # Inspect actual toolpath segments if present
-                    for seg in op.get('toolpaths', []):
-                        if isinstance(seg, dict) and seg.get('moveType') in ('retract_clearance', 'rapid_clearance'):
-                            end_z = seg.get('end', {}).get('z')
-                            if end_z is not None:
-                                retracts.append(float(end_z))
-
-            min_retract = min(retracts) if retracts else 0.0
 
             # Safe Z check for G0 moves (cannot rapid into solid workpiece or fixtures)
             if 'G00' in line or 'G0 ' in line or line.endswith('G0'):

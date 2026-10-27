@@ -122,20 +122,32 @@ export type FeatureMachiningInfo = {
 
 export type CamSetupPlan = {
     setupId: string;
-    setupName: string;
-    setupType: string;
+    setupName?: string;
+    name?: string;
+    setupType?: string;
     toolAxis: [number, number, number];
-    workCoordinateSystem: string;
+    rotation_deg?: [number, number, number];
+    workCoordinateSystem?: string;
+    wcs?: string;
+    fixtureType?: string;
+    isFlipSetup?: boolean;
+    reclampRequired?: boolean;
+    operations?: any[];
+    comments?: string[];
     modelToSetupTransform?: number[];
-    assignedFeatureIds: string[];
+    stockTopZ?: number;
+    stockBottomZ?: number;
+    estimated_time_s?: number;
+    tool_change_count?: number;
+    assignedFeatureIds?: string[];
     unassignedFeatureIds?: string[];
     allFeatureIds?: string[];
     requiredRotation?: [number, number, number];
-    requiresManualReclamp: boolean;
-    requires4AxisIndexing: boolean;
-    machinableFeatures: string[];
-    deferredFeatures: string[];
-    unsupportedFeatures: string[];
+    requiresManualReclamp?: boolean;
+    requires4AxisIndexing?: boolean;
+    machinableFeatures?: string[];
+    deferredFeatures?: string[];
+    unsupportedFeatures?: string[];
 };
 
 export type ToolType = 'flat_end_mill' | 'ball_nose' | 'face_mill' | 'drill' | 'chamfer_mill';

@@ -1122,7 +1122,7 @@ import uuid
 import json
 from pathlib import Path
 
-JOBS_DIR = Path("storage/jobs")
+JOBS_DIR = Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs"))
 
 @router.post("/upload")
 async def legacy_upload(file: UploadFile = File(...)):
@@ -1388,6 +1388,7 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
         # Persist artifacts to storage/jobs/{id}/cam for both job_id and session_id
         target_ids = {request.job_id, request.session_id} - {None, ""}
         storage_bases = [
+            Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs")),
             Path(__file__).resolve().parents[4] / "storage" / "jobs",
             Path(__file__).resolve().parents[3] / "storage" / "jobs",
         ]
@@ -1449,6 +1450,10 @@ async def cam_auto_plan(request: CamAutoPlanRequest):
             "toolpaths": flat_paths,
             "toolpath_schema_version": "semantic_v1",
             "gcode": result.get("gcode", ""),
+            "per_setup_gcode": result.get("per_setup_gcode", {}),
+            "setup_sheets": result.get("setup_sheets", {}),
+            "master_routing_sheet": result.get("master_routing_sheet", {}),
+            "export_package_available": result.get("export_package_available", True),
             "can_generate_gcode": result.get("can_generate_gcode", True),
             "cam_readiness_score": result.get("cam_readiness_score", 100),
             "planned_cycle_time_seconds": result.get("planned_cycle_time_seconds", 0),
@@ -1518,6 +1523,7 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
         # Persist artifacts to storage/jobs/{id}/cam for both job_id and session_id
         target_ids = {request.job_id, request.session_id} - {None, ""}
         storage_bases = [
+            Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs")),
             Path(__file__).resolve().parents[4] / "storage" / "jobs",
             Path(__file__).resolve().parents[3] / "storage" / "jobs",
         ]
@@ -1588,6 +1594,8 @@ async def cam_generate_gcode(request: CamGCodeRequest):
     _validate_id(request.session_id, "session_id")
     _validate_id(request.job_id, "job_id")
     storage_candidates = [
+        Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs")) / request.job_id / "cam",
+        Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs")) / request.session_id / "cam",
         Path(__file__).resolve().parents[4] / "storage" / "jobs" / request.job_id / "cam",
         Path(__file__).resolve().parents[4] / "storage" / "jobs" / request.session_id / "cam",
         Path(__file__).resolve().parents[3] / "storage" / "jobs" / request.job_id / "cam",
@@ -1725,7 +1733,14 @@ async def cam_generate_gcode(request: CamGCodeRequest):
         }
 
     setup = engine_setup
-    machine = {"id": machine_profile, "type": machine_type}
+    matrix = get_matrix()
+    matched_profile = next((p for p in matrix.get("machineProfiles", []) if p.get("id") == machine_profile), {})
+    machine = {
+        "id": machine_profile,
+        "type": machine_type,
+        "axes": matched_profile.get("axisCount", 3),
+        **matched_profile,
+    }
     
     # Load tools
     # Primary source: engine_input (cam_toolpath_engine_input.json)
@@ -1897,7 +1912,44 @@ async def cam_generate_gcode(request: CamGCodeRequest):
             for op in valid_operations:
                 final_toolpaths.extend(op.get("toolpaths", []))
 
-            return {"can_generate_gcode": True, "gcode": gcode, "errors": [], "status": "success", "toolpaths": final_toolpaths}
+            # Load cached per-setup gcodes and setup sheets if present
+            per_setup_gcode = {}
+            if job_dir.exists():
+                for nc_file in job_dir.glob("setup_*.nc"):
+                    s_id = nc_file.stem
+                    try:
+                        per_setup_gcode[s_id] = nc_file.read_text(encoding="utf-8")
+                    except Exception:
+                        pass
+
+            setup_sheets = {}
+            sheets_file = job_dir / "setup_sheets.json"
+            if sheets_file.exists():
+                try:
+                    with open(sheets_file, "r", encoding="utf-8") as f:
+                        setup_sheets = json.load(f)
+                except Exception:
+                    pass
+
+            master_routing_data = {}
+            routing_file = job_dir / "master_routing_sheet.txt"
+            if routing_file.exists():
+                try:
+                    master_routing_data = {"formatted_text": routing_file.read_text(encoding="utf-8")}
+                except Exception:
+                    pass
+
+            return {
+                "can_generate_gcode": True,
+                "gcode": gcode,
+                "per_setup_gcode": per_setup_gcode,
+                "setup_sheets": setup_sheets,
+                "master_routing_sheet": master_routing_data,
+                "export_package_available": (job_dir / "cam_package.zip").exists(),
+                "errors": [],
+                "status": "success",
+                "toolpaths": final_toolpaths,
+            }
     except Exception as exc:
         import traceback
         tb = traceback.format_exc()
@@ -2073,6 +2125,122 @@ async def recommend_machine(req: MachineRecommendationRequest) -> Dict[str, Any]
             status_code=500,
             detail={"error": {"message": f"Machine recommendation failed: {exc}"}}
         )
+
+
+
+class CamSetupSheetsRequest(BaseModel):
+    session_id: str
+    job_id: str = "default_job"
+
+@router.post("/cam/setup_sheets")
+async def cam_get_setup_sheets(request: CamSetupSheetsRequest):
+    """Retrieve shop-floor documentation: Setup Sheets per-setup and Master Routing Sheet."""
+    _validate_id(request.session_id, "session_id")
+    _validate_id(request.job_id, "job_id")
+    try:
+        storage_bases = [
+            Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs")),
+            Path(__file__).resolve().parents[4] / "storage" / "jobs",
+            Path(__file__).resolve().parents[3] / "storage" / "jobs",
+        ]
+        target_ids = [request.job_id, request.session_id]
+        job_dir = None
+        for tid in target_ids:
+            for sbase in storage_bases:
+                cand = sbase / tid / "cam"
+                if (cand / "setup_sheets.json").exists() or (cand / "master_routing_sheet.txt").exists():
+                    job_dir = cand
+                    break
+            if job_dir:
+                break
+
+        setup_sheets = {}
+        master_routing = {}
+        if job_dir:
+            sheets_file = job_dir / "setup_sheets.json"
+            if sheets_file.exists():
+                try:
+                    with open(sheets_file, "r", encoding="utf-8") as f:
+                        setup_sheets = json.load(f)
+                except Exception:
+                    pass
+            routing_file = job_dir / "master_routing_sheet.txt"
+            if routing_file.exists():
+                try:
+                    master_routing = {"formatted_text": routing_file.read_text(encoding="utf-8")}
+                except Exception:
+                    pass
+
+        return {
+            "status": "success",
+            "setup_sheets": setup_sheets,
+            "master_routing_sheet": master_routing,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"message": f"Get setup sheets failed: {exc}"}})
+
+
+class CamExportPackageRequest(BaseModel):
+    session_id: str
+    job_id: str = "default_job"
+
+@router.post("/cam/export_package")
+async def cam_export_package(request: CamExportPackageRequest):
+    """Download industrial CAM ZIP package containing master/per-setup NC files, setup sheets, and manifest."""
+    _validate_id(request.session_id, "session_id")
+    _validate_id(request.job_id, "job_id")
+    try:
+        from app.services.cam.cam_engine_adapter import CamEngineAdapter
+        storage_bases = [
+            Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs")),
+            Path(__file__).resolve().parents[4] / "storage" / "jobs",
+            Path(__file__).resolve().parents[3] / "storage" / "jobs",
+        ]
+        target_ids = [request.job_id, request.session_id]
+        zip_path = None
+        job_dir = None
+        for tid in target_ids:
+            for sbase in storage_bases:
+                cand = sbase / tid / "cam"
+                if (cand / "cam_package.zip").exists():
+                    zip_path = cand / "cam_package.zip"
+                    job_dir = cand
+                    break
+                elif (cand / "cam_operations.json").exists():
+                    job_dir = cand
+            if zip_path or job_dir:
+                break
+
+        if zip_path and zip_path.exists():
+            zip_bytes = zip_path.read_bytes()
+        elif job_dir:
+            step_path = CamEngineAdapter.resolve_step_path(request.session_id, request.job_id)
+            if not step_path:
+                step_path = Path(__file__).resolve().parents[3] / "outputs" / "sample_bracket.step"
+            payload = await asyncio.to_thread(
+                CamEngineAdapter.process_step_file,
+                step_path=step_path,
+                job_id=request.job_id,
+                session_id=request.session_id,
+                save_artifacts=True,
+            )
+            created_zip = job_dir / "cam_package.zip"
+            if created_zip.exists():
+                zip_bytes = created_zip.read_bytes()
+            else:
+                raise HTTPException(status_code=404, detail={"error": {"message": "Export package could not be assembled."}})
+        else:
+            raise HTTPException(status_code=404, detail={"error": {"message": "No CAM job data found for this session."}})
+
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=cam_package_{request.job_id}.zip"},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"message": f"Export package failed: {exc}"}})
 
 
 @router.post("/assistant/compare-and-prompt", response_model=CADPromptAssistantResponse)

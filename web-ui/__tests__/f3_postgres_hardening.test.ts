@@ -216,8 +216,19 @@ function renderCompose(extraEnv: Record<string, string>, files = ['docker-compos
   // Empty env + a scratch env-file: neither the caller's shell nor the repo's real .env can leak in.
   const args = ['compose'];
   for (const f of files) args.push('-f', path.join(REPO, f));
-  args.push('--project-directory', REPO, '--env-file', '/dev/null', 'config', '--format', 'json');
-  return spawnSync('docker', args, { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME, ...extraEnv } });
+  args.push('--project-directory', REPO, '--env-file', process.platform === 'win32' ? 'NUL' : '/dev/null', 'config', '--format', 'json');
+  const baseEnv: Record<string, string | undefined> = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    LOCALAPPDATA: process.env.LOCALAPPDATA,
+    APPDATA: process.env.APPDATA,
+    SystemRoot: process.env.SystemRoot,
+    ProgramFiles: process.env.ProgramFiles,
+    ProgramData: process.env.ProgramData,
+    ...extraEnv,
+  };
+  return spawnSync('docker', args, { encoding: 'utf8', env: baseEnv });
 }
 const FULL = {
   JWT_SECRET: 'j'.repeat(32),

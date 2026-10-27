@@ -97,6 +97,7 @@ services:
     volumes:
       # Persist generated CAD outputs (STL, STEP, G-code, etc.)
       - cad_outputs:/app/outputs
+      - cad_storage:/app/storage
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -119,6 +120,7 @@ services:
       - db
     volumes:
       - cad_outputs:/app/outputs
+      - cad_storage:/app/storage
     environment:
       # Point to the ai-engine service by its Compose service DNS name (Docker-internal only)
       FASTAPI_URL: http://ai-engine:8000/api/v1
@@ -151,3 +153,4 @@ networks:
 volumes:
   cad_postgres_data:
   cad_outputs:
+  cad_storage:

@@ -60,13 +60,14 @@ class CamPipelineManager:
         caps = MachineCapability()
         base_wcs = (setup or {}).get("wcs", "G54") if isinstance(setup, dict) else "G54"
 
-        # Generate setup plans
+        # Generate initial setup plan (Setup 1). Multi-setups are planned dynamically with operations.
         setup_plans = [
             {
                 "setupId": "setup_001",
                 "setupName": "Setup 1 - Primary Milling",
                 "setupType": "milling_3axis",
                 "toolAxis": [0.0, 0.0, 1.0],
+                "rotation_deg": [0.0, 0.0, 0.0],
                 "workCoordinateSystem": base_wcs,
                 "assignedFeatureIds": [f.get("id") for f in features if f.get("id")],
                 "machinableFeatures": [f.get("id") for f in features if f.get("id")],

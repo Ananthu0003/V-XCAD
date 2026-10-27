@@ -106,8 +106,19 @@ const describeDocker = dockerOk ? describe : describe.skip;
 function renderCompose(extraEnv: Record<string, string>, files = ['docker-compose.yml']) {
   const args = ['compose'];
   for (const f of files) args.push('-f', path.join(REPO, f));
-  args.push('--project-directory', REPO, '--env-file', '/dev/null', 'config', '--format', 'json');
-  return spawnSync('docker', args, { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME, ...extraEnv } });
+  args.push('--project-directory', REPO, '--env-file', process.platform === 'win32' ? 'NUL' : '/dev/null', 'config', '--format', 'json');
+  const baseEnv: Record<string, string | undefined> = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    LOCALAPPDATA: process.env.LOCALAPPDATA,
+    APPDATA: process.env.APPDATA,
+    SystemRoot: process.env.SystemRoot,
+    ProgramFiles: process.env.ProgramFiles,
+    ProgramData: process.env.ProgramData,
+    ...extraEnv,
+  };
+  return spawnSync('docker', args, { encoding: 'utf8', env: baseEnv });
 }
 
 const FULL = {
@@ -128,11 +139,24 @@ describeDocker('B. real `docker compose config`', () => {
   });
 
   it('D-1: two independently-named Compose projects resolve without any name collision', () => {
-    const a = renderCompose(FULL); // implicit project name from --project-directory
+    const a = renderCompose(FULL);
     const b = spawnSync(
       'docker',
-      ['compose', '-f', path.join(REPO, 'docker-compose.yml'), '-p', 'vxjest_d1_test', '--env-file', '/dev/null', 'config', '--format', 'json'],
-      { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME, ...FULL } },
+      ['compose', '-f', path.join(REPO, 'docker-compose.yml'), '-p', 'vxjest_d1_test', '--env-file', process.platform === 'win32' ? 'NUL' : '/dev/null', 'config', '--format', 'json'],
+      {
+        encoding: 'utf8',
+        env: {
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+          USERPROFILE: process.env.USERPROFILE,
+          LOCALAPPDATA: process.env.LOCALAPPDATA,
+          APPDATA: process.env.APPDATA,
+          SystemRoot: process.env.SystemRoot,
+          ProgramFiles: process.env.ProgramFiles,
+          ProgramData: process.env.ProgramData,
+          ...FULL,
+        },
+      },
     );
     expect(a.status).toBe(0);
     expect(b.status).toBe(0);

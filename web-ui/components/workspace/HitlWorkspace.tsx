@@ -481,6 +481,9 @@ export default function HitlWorkspace() {
 	const [camViewport, setCamViewport] = useState<ViewportSettings>({ showStock: false, showTool: true, showToolpath: true, showOrigin: true, showAxes: true });
 	const [gcodeContent, setGcodeContent] = useState<string | null>(null);
 	const [klartextContent, setKlartextContent] = useState<string | null>(null);
+	const [perSetupGcode, setPerSetupGcode] = useState<Record<string, string>>({});
+	const [setupSheets, setSetupSheets] = useState<Record<string, any>>({});
+	const [masterRoutingSheet, setMasterRoutingSheet] = useState<any>(null);
 	const [isGeneratingGcode, setIsGeneratingGcode] = useState(false);
 	const [gcodeErrors, setGcodeErrors] = useState<any[]>([]);
 	const [camReadinessScore, setCamReadinessScore] = useState<number | null>(null);
@@ -1507,6 +1510,15 @@ export default function HitlWorkspace() {
 			if (payload.can_generate_gcode) {
 				setGcodeContent(payload.gcode);
 				setKlartextContent(payload.klartext || null);
+				if (payload.per_setup_gcode) {
+					setPerSetupGcode(payload.per_setup_gcode);
+				}
+				if (payload.setup_sheets) {
+					setSetupSheets(payload.setup_sheets);
+				}
+				if (payload.master_routing_sheet) {
+					setMasterRoutingSheet(payload.master_routing_sheet);
+				}
 				setGcodeErrors([]);
 				setStatusText('G-Code generated successfully.');
 				toast.success('G-Code generated with full CAM configuration');
@@ -1731,6 +1743,12 @@ export default function HitlWorkspace() {
 			
 			const data = await res.json();
 			setCamFeatures(data.features || []);
+			if (data.setups && Array.isArray(data.setups) && data.setups.length > 0) {
+				setCamSetups(data.setups);
+				if (!activeSetupId || !data.setups.some((s: any) => s.setupId === activeSetupId)) {
+					setActiveSetupId(data.setups[0].setupId);
+				}
+			}
 			if (data.machine_recommendation) {
 				setCamRecommendation(data.machine_recommendation);
 				if (data.machine_recommendation.primaryRecommendation) {
@@ -1762,6 +1780,77 @@ export default function HitlWorkspace() {
 		} finally {
 			setIsGenerating(false);
 		}
+	}
+
+	function handleAddSetup(preset: string) {
+		const wcsCodes = ['G54', 'G55', 'G56', 'G57', 'G58', 'G59'];
+		const nextIndex = camSetups.length;
+		const nextWcs = wcsCodes[nextIndex] || `G54 P${nextIndex + 1}`;
+		const setupNum = nextIndex + 1;
+
+		let setupName = `Setup ${setupNum}`;
+		let toolAxis: [number, number, number] = [0, 0, 1];
+		let rotEuler: [number, number, number] = [0, 0, 0];
+		let fixtureType = 'vise';
+		let description = 'Manual setup';
+
+		switch (preset) {
+			case 'flip_180':
+				setupName = `Bottom Milling (180° Flip)`;
+				toolAxis = [0, 0, -1];
+				rotEuler = [180, 0, 0];
+				fixtureType = 'soft_jaws';
+				description = 'Flip part 180° to machine bottom features, pockets & back-face bores';
+				break;
+			case 'side_pos_x':
+				setupName = `Side Milling (+X Face)`;
+				toolAxis = [1, 0, 0];
+				rotEuler = [0, -90, 0];
+				fixtureType = 'angle_plate';
+				description = 'Orient +X side face upwards for cross-holes, slots & side pockets';
+				break;
+			case 'side_neg_x':
+				setupName = `Side Milling (-X Face)`;
+				toolAxis = [-1, 0, 0];
+				rotEuler = [0, 90, 0];
+				fixtureType = 'angle_plate';
+				description = 'Orient -X side face upwards for cross-holes, slots & side pockets';
+				break;
+			case 'end_pos_y':
+				setupName = `End Face (+Y Face)`;
+				toolAxis = [0, 1, 0];
+				rotEuler = [90, 0, 0];
+				fixtureType = 'tombstone';
+				description = 'Orient +Y end face upwards for end-drilling & side profiling';
+				break;
+			case 'end_neg_y':
+				setupName = `End Face (-Y Face)`;
+				toolAxis = [0, -1, 0];
+				rotEuler = [-90, 0, 0];
+				fixtureType = 'tombstone';
+				description = 'Orient -Y end face upwards for end-drilling & side profiling';
+				break;
+			default:
+				setupName = `Auxiliary Setup ${setupNum}`;
+				break;
+		}
+
+		const newSetup: CamSetupPlan = {
+			setupId: `setup_00${setupNum}`,
+			name: setupName,
+			wcs: nextWcs,
+			toolAxis,
+			rotation_deg: rotEuler,
+			fixtureType,
+			isFlipSetup: preset === 'flip_180',
+			reclampRequired: true,
+			operations: [],
+			comments: [description],
+		};
+
+		setCamSetups(prev => [...prev, newSetup]);
+		setActiveSetupId(newSetup.setupId);
+		toast.success(`Added ${setupName} (${nextWcs})`);
 	}
 
 	async function handleAutoGenerateOperations() {
@@ -1869,9 +1958,34 @@ export default function HitlWorkspace() {
 			const data = await res.json();
 			
 			if (data.features) setCamFeatures(data.features);
-			if (data.setups && data.setups.length > 0) {
-				setCamSetups(data.setups);
-				setActiveSetupId(data.setups[0].setupId);
+			
+			// Synchronize all setups from backend payload and operations
+			const rawSetups = (data.setups && Array.isArray(data.setups) && data.setups.length > 0)
+				? [...data.setups]
+				: [];
+			const knownSetupIds = new Set(rawSetups.map((s: any) => s.setupId || s.id));
+			(data.operations || []).forEach((op: any) => {
+				const sid = op.setup_id || op.setupId;
+				if (sid && !knownSetupIds.has(sid)) {
+					knownSetupIds.add(sid);
+					const isFlip = sid === 'setup_002' || String(sid).toLowerCase().includes('flip');
+					rawSetups.push({
+						setupId: sid,
+						setupName: op.setup_name || (isFlip ? `Setup ${rawSetups.length + 1} - Bottom Flip` : `Setup ${rawSetups.length + 1}`),
+						workCoordinateSystem: isFlip ? 'G55' : `G${54 + rawSetups.length}`,
+						wcs: isFlip ? 'G55' : `G${54 + rawSetups.length}`,
+						toolAxis: isFlip ? [0, 0, -1] : [0, 0, 1],
+						rotation_deg: isFlip ? [180, 0, 0] : [0, 0, 0],
+						requiresManualReclamp: isFlip,
+					});
+				}
+			});
+
+			if (rawSetups.length > 0) {
+				setCamSetups(rawSetups);
+				if (!activeSetupId || !rawSetups.some((s: any) => (s.setupId || s.id) === activeSetupId)) {
+					setActiveSetupId(rawSetups[0].setupId || rawSetups[0].id);
+				}
 			}
 			
 			if (data.planned_cycle_time_seconds !== undefined) {
@@ -2006,6 +2120,15 @@ export default function HitlWorkspace() {
 				if (data.gcode) {
 					setGcodeContent(data.gcode);
 					setGcodeErrors([]);
+				}
+				if (data.per_setup_gcode) {
+					setPerSetupGcode(data.per_setup_gcode);
+				}
+				if (data.setup_sheets) {
+					setSetupSheets(data.setup_sheets);
+				}
+				if (data.master_routing_sheet) {
+					setMasterRoutingSheet(data.master_routing_sheet);
 				}
 
 				toast.success(`Generated ${newOps.length} operations across ${data.setups?.length || 1} setup(s)`);
@@ -2753,6 +2876,11 @@ export default function HitlWorkspace() {
 											setIsCamDrawerOpen(false);
 											setActiveRightTab('cad');
 										}}
+										sessionId={sessionId || undefined}
+										perSetupGcode={perSetupGcode}
+										setupSheets={setupSheets}
+										masterRoutingSheet={masterRoutingSheet}
+										onAddSetup={handleAddSetup}
 										camSetup={camSetup}
 										camSetups={camSetups}
 										activeSetupId={activeSetupId}

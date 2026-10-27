@@ -10,8 +10,8 @@ class JobPersistenceService:
     Each generation session gets its own directory under storage/jobs/<session_id>/
     """
     
-    def __init__(self, base_dir: str = "storage/jobs"):
-        self.base_dir = Path(base_dir)
+    def __init__(self, base_dir: str | None = None):
+        self.base_dir = Path(base_dir or os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs"))
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_job_dir(self, session_id: str) -> Path:

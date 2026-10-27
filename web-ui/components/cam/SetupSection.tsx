@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import type { SetupSettings, StockType, MaterialType, WorkCoordinateSystem, OriginPosition, PostProcessor } from '@/types/cam';
+import type { SetupSettings, StockType, MaterialType, WorkCoordinateSystem, OriginPosition, PostProcessor, CamSetupPlan } from '@/types/cam';
 import { MACHINE_MATRIX, MachineType, ControllerId, PostProcessorId, MachineProfile, MachineRecommendationResponse } from '@/lib/cam/machineProfiles';
 import { getProfilesForMachineType, getCompatibleControllers, getCompatiblePostProcessors } from '@/lib/cam/machineValidation';
 import { MATERIAL_MATRIX, getMaterialProfile, getMaterialsByCategory } from '@/lib/cam/materialProfiles';
-import { AlertTriangle, Info, Box, Cylinder, Layers, Upload, FileCheck, Sparkles, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, Info, Box, Cylinder, Layers, Upload, FileCheck, Sparkles, CheckCircle2, Zap, Plus, RotateCcw, Compass, ArrowUpRight } from 'lucide-react';
 import { StockPreview } from './StockPreview';
 import { MachineSelectionModal } from './MachineSelectionModal';
 import { MaterialSelectionModal } from './MaterialSelectionModal';
@@ -44,6 +44,10 @@ type SetupSectionProps = {
     parameters?: Record<string, any>;
     setupMetadata?: any;
     recommendation?: MachineRecommendationResponse | null;
+    camSetups?: CamSetupPlan[];
+    activeSetupId?: string | null;
+    onSelectSetup?: (setupId: string) => void;
+    onAddSetup?: (preset: string) => void;
 };
 
 
@@ -75,7 +79,17 @@ function NumberInput({ value, onChange, step, className }: { value: number | str
     );
 }
 
-export function SetupSection({ setup, onChange, parameters, setupMetadata, recommendation }: SetupSectionProps) {
+export function SetupSection({
+    setup,
+    onChange,
+    parameters,
+    setupMetadata,
+    recommendation,
+    camSetups = [],
+    activeSetupId,
+    onSelectSetup,
+    onAddSetup,
+}: SetupSectionProps) {
     const update = (field: keyof SetupSettings, value: any) => {
 
         onChange({ ...setup, internalUnits: 'mm', [field]: value });
@@ -186,14 +200,16 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
         null;
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in duration-300">
-            {/* Left Column: Machine Configuration */}
-            <div className="flex flex-col gap-6 bg-muted/5 border border-border/40 rounded-2xl p-6 shadow-sm relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500/50 to-cyan-500/50 opacity-50" />
-                
-                <h3 className="text-[11px] font-bold uppercase tracking-widest text-primary border-b border-border/40 pb-3 flex items-center gap-2">
-                    Machine Configuration
-                </h3>
+        <div className="flex flex-col gap-6 animate-in fade-in duration-300">
+            {/* Main Machine & Stock Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Left Column: Machine Configuration */}
+                <div className="flex flex-col gap-6 bg-muted/5 border border-border/40 rounded-2xl p-6 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500/50 to-cyan-500/50 opacity-50" />
+                    
+                    <h3 className="text-[11px] font-bold uppercase tracking-widest text-primary border-b border-border/40 pb-3 flex items-center gap-2">
+                        Machine Configuration
+                    </h3>
                 
                 <div className="flex flex-col gap-5">
                     {/* AI Machine Recommendation Card */}
@@ -978,6 +994,7 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                     </div>
                 </div>
             </div>
+        </div>
         </div>
     );
 }

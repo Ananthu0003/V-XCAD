@@ -15,8 +15,11 @@ import os
 import shutil
 import uuid
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+import io
+import zipfile
 
 import numpy as np
 
@@ -24,6 +27,15 @@ import numpy as np
 from cam_engine.pipeline import run_cam_pipeline, PipelineResult
 from cam_engine.geometry.step_import import import_step, ImportedModel
 from cam_engine.geometry.voxel import VoxelStock
+from cam_engine.geometry.topology import Shape, SurfaceKind, Face
+from cam_engine.geometry.mesh import TriangleMesh
+from cam_engine.setup_sheet import (
+    generate_setup_sheet,
+    format_setup_sheet,
+    generate_master_routing_sheet,
+    format_master_routing_sheet,
+)
+from cam_engine.api.routes import _euler_to_matrix
 from cam_engine.features import (
     FeatureRecognizer,
     FeatureType,
@@ -418,6 +430,274 @@ class CamEngineAdapter:
         return None
 
     @staticmethod
+    def detect_setups_from_step(
+        step_path: Union[str, Path],
+        base_wcs: str = "G54",
+        controller: str = "fanuc",
+    ) -> List[Dict[str, Any]]:
+        """Analyze B-Rep topology of a STEP file to automatically detect all required manufacturing setups."""
+        path = Path(step_path)
+        if not path.exists():
+            return [
+                {
+                    "setupId": "setup_001",
+                    "setupName": "Setup 1 - Top Milling",
+                    "setupType": "milling_3axis",
+                    "toolAxis": [0.0, 0.0, 1.0],
+                    "workCoordinateSystem": base_wcs,
+                    "rotation_deg": [0.0, 0.0, 0.0],
+                    "requiresManualReclamp": False,
+                    "requires4AxisIndexing": False,
+                    "stockTopZ": 0.0,
+                    "stockBottomZ": -20.0,
+                    "setupOrigin": "top_center",
+                    "assignedFeatureIds": [],
+                    "machinableFeatures": [],
+                    "allFeatureIds": [],
+                    "machineType": "MILL_3X_VMC",
+                    "machineProfile": "haas_vf2" if "haas" in str(controller).lower() else "dmg_cmx1100v",
+                    "controller": "HAAS_NGC" if "haas" in str(controller).lower() else "FANUC_0I_MF",
+                    "postProcessor": "AUTO",
+                }
+            ]
+
+        imported = import_step(path)
+        return CamEngineAdapter.detect_setups_from_shape(imported.shape, base_wcs=base_wcs, controller=controller)
+
+    @staticmethod
+    def detect_setups_from_shape(
+        shape: Shape,
+        base_wcs: str = "G54",
+        controller: str = "fanuc",
+    ) -> List[Dict[str, Any]]:
+        """Analyze B-Rep topology of a Shape to detect all required manufacturing setups (Top, Bottom, and Side/End orientations)."""
+        ctrl = str(controller).lower()
+        mach_profile = "haas_vf2" if "haas" in ctrl else "dmg_cmx1100v"
+        ctrl_name = "HAAS_NGC" if "haas" in ctrl else ("FANUC_0I_MF" if "fanuc" in ctrl else "SIEMENS_840D_ONE")
+
+        bmin_orig, bmax_orig = shape.bounding_box()
+        bmin_orig = np.asarray(bmin_orig, dtype=float)
+        bmax_orig = np.asarray(bmax_orig, dtype=float)
+        faces = shape.faces()
+
+        offsets = ["G55", "G56", "G57", "G58", "G59", "G59.1", "G59.2", "G59.3"]
+        offset_idx = 0
+
+        # Recognize features in Top Setup
+        rec_top = FeatureRecognizer(shape, stock_top_z=float(bmax_orig[2]) + 1.0)
+        feats_top = rec_top.recognize()
+        top_feat_ids = [f.id for f in feats_top]
+
+        setups: List[Dict[str, Any]] = [
+            {
+                "setupId": "setup_001",
+                "setupName": "Setup 1 - Top Milling",
+                "setupType": "milling_3axis",
+                "toolAxis": [0.0, 0.0, 1.0],
+                "workCoordinateSystem": base_wcs,
+                "rotation_deg": [0.0, 0.0, 0.0],
+                "requiresManualReclamp": False,
+                "requires4AxisIndexing": False,
+                "stockTopZ": round(float(bmax_orig[2] + 1.0), 3),
+                "stockBottomZ": round(float(bmin_orig[2] - 3.0), 3),
+                "setupOrigin": "top_center",
+                "assignedFeatureIds": top_feat_ids,
+                "machinableFeatures": top_feat_ids,
+                "allFeatureIds": top_feat_ids,
+                "machineType": "MILL_3X_VMC",
+                "machineProfile": mach_profile,
+                "controller": ctrl_name,
+                "postProcessor": "AUTO",
+            }
+        ]
+
+        # Check Bottom Flip (G55)
+        M_bot = _euler_to_matrix(180.0, 0.0, 0.0)
+        s2_shape = shape.transformed(M_bot)
+        _, s2_bmax = s2_shape.bounding_box()
+        rec_bot = FeatureRecognizer(s2_shape, stock_top_z=float(s2_bmax[2]) + 1.0)
+        feats_bot = rec_bot.recognize()
+
+        s1_through_signatures = set()
+        for f in feats_top:
+            if f.type in (FeatureType.THROUGH_HOLE, FeatureType.THROUGH_BORE) or bool(f.notes.get("is_through")):
+                if f.center_xy is not None:
+                    s1_through_signatures.add((round(float(f.center_xy[0]), 1), round(float(f.center_xy[1]), 1)))
+
+        bot_feat_ids = []
+        for f in feats_bot:
+            if f.type in (FeatureType.THROUGH_HOLE, FeatureType.THROUGH_BORE) or bool(f.notes.get("is_through")):
+                sig = (round(float(f.center_xy[0]), 1), round(-float(f.center_xy[1]), 1))
+                if sig in s1_through_signatures:
+                    continue
+            bot_feat_ids.append(f"setup_002_{f.id}")
+
+        if bot_feat_ids or len(feats_bot) > 0:
+            setups.append({
+                "setupId": "setup_002",
+                "setupName": "Setup 2 - Bottom Flip",
+                "setupType": "milling_3axis",
+                "toolAxis": [0.0, 0.0, -1.0],
+                "workCoordinateSystem": offsets[offset_idx] if offset_idx < len(offsets) else "G55",
+                "rotation_deg": [180.0, 0.0, 0.0],
+                "requiresManualReclamp": True,
+                "requires4AxisIndexing": False,
+                "stockTopZ": round(float(s2_bmax[2] + 1.0), 3),
+                "stockBottomZ": round(float(bmin_orig[2] - 3.0), 3),
+                "setupOrigin": "top_center",
+                "assignedFeatureIds": bot_feat_ids,
+                "machinableFeatures": bot_feat_ids,
+                "allFeatureIds": bot_feat_ids,
+                "machineType": "MILL_3X_VMC",
+                "machineProfile": mach_profile,
+                "controller": ctrl_name,
+                "postProcessor": "AUTO",
+            })
+            offset_idx += 1
+
+        # Side / Transverse candidates (+X, -X, +Y, -Y)
+        side_candidates = [
+            {
+                "name": "Side Milling (+X)",
+                "rot": [0.0, -90.0, 0.0],
+                "dir": np.array([1.0, 0.0, 0.0]),
+                "axis_idx": 0,
+                "sign": 1.0,
+            },
+            {
+                "name": "Side Milling (-X)",
+                "rot": [0.0, 90.0, 0.0],
+                "dir": np.array([-1.0, 0.0, 0.0]),
+                "axis_idx": 0,
+                "sign": -1.0,
+            },
+            {
+                "name": "End Face (+Y)",
+                "rot": [90.0, 0.0, 0.0],
+                "dir": np.array([0.0, 1.0, 0.0]),
+                "axis_idx": 1,
+                "sign": 1.0,
+            },
+            {
+                "name": "End Face (-Y)",
+                "rot": [-90.0, 0.0, 0.0],
+                "dir": np.array([0.0, -1.0, 0.0]),
+                "axis_idx": 1,
+                "sign": -1.0,
+            },
+        ]
+
+        for cand in side_candidates:
+            has_feature = False
+            dir_vec = cand["dir"]
+            ax_idx = cand["axis_idx"]
+            sign = cand["sign"]
+            outer_coord = bmax_orig[ax_idx] if sign > 0 else bmin_orig[ax_idx]
+
+            # 1. Check for true horizontal cylinders (holes / bores) along this approach direction
+            for f in faces:
+                if f.surface.kind is SurfaceKind.CYLINDER and f.surface.axis is not None:
+                    axis = f.surface.axis / max(float(np.linalg.norm(f.surface.axis)), 1e-12)
+                    if abs(float(axis @ dir_vec)) > 0.85:
+                        if f.surface.point_on is not None:
+                            p_coord = float(f.surface.point_on[ax_idx])
+                            mid_coord = 0.5 * (bmin_orig[ax_idx] + bmax_orig[ax_idx])
+                            if (sign > 0 and p_coord >= mid_coord - 1.0) or (sign < 0 and p_coord <= mid_coord + 1.0):
+                                has_feature = True
+                                break
+                        else:
+                            has_feature = True
+                            break
+
+            if has_feature and offset_idx < len(offsets):
+                s_id = f"setup_{len(setups)+1:03d}"
+                wcs = offsets[offset_idx]
+                offset_idx += 1
+
+                M_side = _euler_to_matrix(cand["rot"][0], cand["rot"][1], cand["rot"][2])
+                side_shape = shape.transformed(M_side)
+                _, side_bmax = side_shape.bounding_box()
+                rec_side = FeatureRecognizer(side_shape, stock_top_z=float(side_bmax[2]) + 1.0)
+                feats_side = rec_side.recognize()
+                side_feat_ids = [f"{s_id}_{f.id}" for f in feats_side]
+
+                setups.append({
+                    "setupId": s_id,
+                    "setupName": f"Setup {len(setups)+1} - {cand['name']}",
+                    "setupType": "milling_3axis",
+                    "toolAxis": [float(dir_vec[0]), float(dir_vec[1]), float(dir_vec[2])],
+                    "workCoordinateSystem": wcs,
+                    "rotation_deg": cand["rot"],
+                    "requiresManualReclamp": True,
+                    "requires4AxisIndexing": False,
+                    "stockTopZ": round(float(side_bmax[2] + 1.0), 3),
+                    "stockBottomZ": round(float(bmin_orig[2] - 3.0), 3),
+                    "setupOrigin": "top_center",
+                    "assignedFeatureIds": side_feat_ids,
+                    "machinableFeatures": side_feat_ids,
+                    "allFeatureIds": side_feat_ids,
+                    "machineType": "MILL_3X_VMC",
+                    "machineProfile": mach_profile,
+                    "controller": ctrl_name,
+                    "postProcessor": "AUTO",
+                })
+
+        # Consolidate allFeatureIds
+        all_ids = []
+        for s in setups:
+            all_ids.extend(s.get("assignedFeatureIds", []))
+        for s in setups:
+            s["allFeatureIds"] = all_ids
+
+        return setups
+
+    @staticmethod
+    def generate_export_package(
+        job_id: str,
+        session_id: Optional[str] = None,
+        controller: str = "fanuc",
+        work_offset: str = "G54",
+    ) -> bytes:
+        """Return ZIP archive bytes containing complete CAM package (NC programs, setup sheets, manifest)."""
+        target_ids = {session_id, job_id} - {None, ""}
+        storage_bases = [
+            Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs")),
+            Path(__file__).resolve().parents[4] / "storage" / "jobs",
+            Path(__file__).resolve().parents[3] / "storage" / "jobs",
+            Path("/app/storage/jobs"),
+        ]
+        for tid in target_ids:
+            for sbase in storage_bases:
+                zip_path = sbase / tid / "cam" / "cam_package.zip"
+                if zip_path.exists() and zip_path.stat().st_size > 0:
+                    with open(zip_path, "rb") as f:
+                        return f.read()
+
+        step_path = CamEngineAdapter.resolve_step_path(session_id, job_id)
+        if step_path and step_path.exists():
+            CamEngineAdapter.process_step_file(
+                step_path=step_path,
+                controller=controller,
+                work_offset=work_offset,
+                job_id=job_id,
+                session_id=session_id,
+                save_artifacts=True,
+            )
+            for tid in target_ids:
+                for sbase in storage_bases:
+                    zip_path = sbase / tid / "cam" / "cam_package.zip"
+                    if zip_path.exists() and zip_path.stat().st_size > 0:
+                        with open(zip_path, "rb") as f:
+                            return f.read()
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("NC_Programs/README.txt", "No CAM toolpaths generated yet.")
+            zf.writestr("Setup_Sheets/README.txt", "No CAM setup sheets generated yet.")
+        buf.seek(0)
+        return buf.read()
+
+    @staticmethod
     def process_step_file(
         step_path: Union[str, Path],
         controller: str = "fanuc",
@@ -514,180 +794,325 @@ class CamEngineAdapter:
             "machineProfile": "haas_vf2" if "haas" in ctrl else "dmg_cmx1100v",
             "controller": "HAAS_NGC" if "haas" in ctrl else ("FANUC_0I_MF" if "fanuc" in ctrl else "SIEMENS_840D_ONE"),
             "postProcessor": "AUTO",
+            "rotation_deg": [0.0, 0.0, 0.0],
         }
 
         setups_list = [setup_dict]
         final_gcode = pipeline_result.gcode
+        per_setup_gcode: Dict[str, str] = {"setup_001": pipeline_result.gcode}
+        setup_sheets: Dict[str, Any] = {}
 
-        # Evaluate Multi-Setup (Setup 2 - Bottom Flip OP20)
+        # 1. Generate Setup 1 SetupSheet
+        s1_setup_obj = pipeline_result.context.setups[0] if (pipeline_result.context and pipeline_result.context.setups) else Setup(
+            id="setup_001",
+            name="Setup 1 - Top Milling",
+            model_to_setup=np.eye(4),
+            work_offset=WorkOffset(work_offset) if work_offset in WorkOffset._value2member_map_ else WorkOffset.G54,
+            stock=Stock(
+                kind=StockKind.BOX,
+                bounds_min=bmin - np.array([5.0, 5.0, 3.0]),
+                bounds_max=bmax + np.array([5.0, 5.0, 1.0]),
+            ),
+        )
+        s1_ctx = pipeline_result.context or PlanningContext(
+            model=pipeline_result.model,
+            setups=[s1_setup_obj],
+            machine=get_default_machine(),
+            tools=get_default_tools(),
+            material=get_material(material),
+        )
+
+        all_ctx_setups = [s1_setup_obj]
+        all_planned_features = list(pipeline_result.features)
+        all_planned_ops = list(pipeline_result.operations)
+        all_planned_tps = list(pipeline_result.toolpaths)
+
+        prog_name = f"PROG_{effective_job_id}"
+        part_name = Path(step_path).stem
+
         try:
-            from cam_engine.api.routes import _euler_to_matrix
-            from cam_engine.geometry.mesh import TriangleMesh
-            
+            s1_sheet = generate_setup_sheet(
+                program_name=prog_name,
+                part_name=part_name,
+                planning_ctx=s1_ctx,
+                setup=s1_setup_obj,
+                features=pipeline_result.features,
+                operations=pipeline_result.operations,
+                toolpaths=pipeline_result.toolpaths,
+                post_result=PostResult(
+                    gcode=pipeline_result.gcode,
+                    line_count=len(pipeline_result.gcode.splitlines()),
+                    total_time_seconds=sum(op.get("estimated_time_s", 0.0) for op in operations),
+                ),
+            )
+            s1_sheet_text = format_setup_sheet(s1_sheet)
+            setup_sheets["setup_001"] = {
+                "sheet": asdict(s1_sheet),
+                "formatted_text": s1_sheet_text,
+            }
+        except Exception:
+            pass
+
+        # 2. Evaluate Multi-Setup (Auto-Detect candidate setups from 3D geometry)
+        try:
             imported = pipeline_result.model
             shape = imported.shape
-            M2 = _euler_to_matrix(180.0, 0.0, 0.0)
-            shape_s2 = shape.transformed(M2)
-            bmin2, bmax2 = shape_s2.bounding_box()
-            stock_top2 = float(bmax2[2] + 1.0)
-            rec2 = FeatureRecognizer(shape_s2, stock_top_z=stock_top2)
-            feats2_raw = rec2.recognize()
 
-            # Identify features in Setup 2 that are NOT already machined in Setup 1
             s1_through_signatures = set()
             for f in pipeline_result.features:
                 if f.type in (FeatureType.THROUGH_HOLE, FeatureType.THROUGH_BORE) or bool(f.notes.get("is_through")):
                     if f.center_xy is not None:
                         s1_through_signatures.add((round(float(f.center_xy[0]), 1), round(float(f.center_xy[1]), 1)))
 
-            s2_features_to_plan: list[MachiningFeature] = []
-            for f in feats2_raw:
-                if f.type in (FeatureType.THROUGH_HOLE, FeatureType.THROUGH_BORE) or bool(f.notes.get("is_through")):
-                    sig = (round(float(f.center_xy[0]), 1), round(-float(f.center_xy[1]), 1))
-                    if sig in s1_through_signatures:
-                        continue  # Already drilled in Setup 1
-                f.id = f"setup_002_{f.id}"
-                f.notes["setup_id"] = "setup_002"
-                f.notes["setup_name"] = "Setup 2 - Bottom Flip"
-                f.notes["work_offset"] = "G55"
-                s2_features_to_plan.append(f)
+            detected_candidates = CamEngineAdapter.detect_setups_from_shape(shape, base_wcs=work_offset, controller=ctrl)
 
-            if len(s2_features_to_plan) > 0:
-                s1_setup_obj = Setup(
-                    id="setup_001",
-                    name="Setup 1 - Top Milling",
-                    model_to_setup=np.eye(4),
-                    work_offset=WorkOffset.G54,
-                    stock=Stock(
-                        kind=StockKind.BOX,
-                        bounds_min=bmin - np.array([5.0, 5.0, 3.0]),
-                        bounds_max=bmax + np.array([5.0, 5.0, 1.0]),
-                    ),
-                )
-                s2_setup_obj = Setup(
-                    id="setup_002",
-                    name="Setup 2 - Bottom Flip",
-                    model_to_setup=M2,
-                    work_offset=WorkOffset.G55,
-                    stock=Stock(
-                        kind=StockKind.BOX,
-                        bounds_min=bmin2 - np.array([5.0, 5.0, 3.0]),
-                        bounds_max=bmax2 + np.array([5.0, 5.0, 1.0]),
-                    ),
-                )
-                s2_ctx = PlanningContext(
-                    model=imported,
-                    setups=[s1_setup_obj, s2_setup_obj],
-                    machine=get_default_machine(),
-                    tools=get_default_tools(),
-                    material=get_material(material),
-                )
+            # Iterate through candidate setups beyond setup_001
+            for cand in detected_candidates[1:]:
+                s_id = cand.get("setupId", f"setup_{len(setups_list)+1:03d}")
+                s_name = cand.get("setupName", f"Setup {len(setups_list)+1}")
+                s_wcs = cand.get("workCoordinateSystem", "G55")
+                rot = cand.get("rotation_deg", [0.0, 0.0, 0.0])
+                try:
+                    M_k = _euler_to_matrix(float(rot[0]), float(rot[1]), float(rot[2]))
+                    shape_k = shape.transformed(M_k)
+                    bmin_k, bmax_k = shape_k.bounding_box()
+                    stock_top_k = float(bmax_k[2] + 1.0)
+                    rec_k = FeatureRecognizer(shape_k, stock_top_z=stock_top_k)
+                    feats_k_raw = rec_k.recognize()
 
-                planner2 = OperationPlanner(s2_ctx, s2_setup_obj, s2_features_to_plan)
-                ops2 = planner2.plan()
-                clearance_z2 = max(5.0, float(bmax2[2] + 2.0))
-                for op in ops2:
-                    if not op.id.startswith("setup_002_"):
-                        op.id = f"setup_002_{op.id}"
-                    op.notes["setup_id"] = "setup_002"
-                    op.notes["setup_name"] = "Setup 2 - Bottom Flip"
-                    op.notes["work_offset"] = "G55"
+                    k_features_to_plan: list[MachiningFeature] = []
+                    for f in feats_k_raw:
+                        if f.type in (FeatureType.THROUGH_HOLE, FeatureType.THROUGH_BORE) or bool(f.notes.get("is_through")):
+                            if f.center_xy is not None:
+                                try:
+                                    pt_k = np.array([float(f.center_xy[0]), float(f.center_xy[1]), 0.0, 1.0])
+                                    pt_orig = np.linalg.inv(M_k) @ pt_k
+                                    sig = (round(float(pt_orig[0]), 1), round(float(pt_orig[1]), 1))
+                                    if sig in s1_through_signatures:
+                                        continue  # Already drilled in previous setup
+                                except Exception:
+                                    pass
+                        f.id = f"{s_id}_{f.id}"
+                        f.notes["setup_id"] = s_id
+                        f.notes["setup_name"] = s_name
+                        f.notes["work_offset"] = s_wcs
+                        k_features_to_plan.append(f)
 
-                if ops2:
+                    if not k_features_to_plan:
+                        continue
+
+                    wo_enum_k = WorkOffset.G55
+                    for wo_val in WorkOffset:
+                        if wo_val.value == s_wcs:
+                            wo_enum_k = wo_val
+                            break
+
+                    s_k_setup_obj = Setup(
+                        id=s_id,
+                        name=s_name,
+                        model_to_setup=M_k,
+                        work_offset=wo_enum_k,
+                        stock=Stock(
+                            kind=StockKind.BOX,
+                            bounds_min=bmin_k - np.array([5.0, 5.0, 3.0]),
+                            bounds_max=bmax_k + np.array([5.0, 5.0, 1.0]),
+                        ),
+                    )
+
+                    s_k_ctx = PlanningContext(
+                        model=imported,
+                        setups=all_ctx_setups + [s_k_setup_obj],
+                        machine=get_default_machine(),
+                        tools=get_default_tools(),
+                        material=get_material(material),
+                    )
+
+                    planner_k = OperationPlanner(s_k_ctx, s_k_setup_obj, k_features_to_plan)
+                    ops_k = planner_k.plan()
+                    clearance_z_k = max(5.0, float(bmax_k[2] + 2.0))
+                    for op in ops_k:
+                        if not op.id.startswith(f"{s_id}_"):
+                            op.id = f"{s_id}_{op.id}"
+                        op.notes["setup_id"] = s_id
+                        op.notes["setup_name"] = s_name
+                        op.notes["work_offset"] = s_wcs
+
+                    if not ops_k:
+                        continue
+
                     dims1 = s1_setup_obj.stock.bounds_max - s1_setup_obj.stock.bounds_min
                     res_vox = max(0.5, min(dims1) / 50.0)
                     stock_voxels1 = VoxelStock.from_bounds(s1_setup_obj.stock.bounds_min, s1_setup_obj.stock.bounds_max, res_vox)
-                    stock_voxels2 = stock_voxels1.transformed(M2, s2_setup_obj.stock.bounds_min, s2_setup_obj.stock.bounds_max, res_vox)
+                    stock_voxels_k = stock_voxels1.transformed(M_k, s_k_setup_obj.stock.bounds_min, s_k_setup_obj.stock.bounds_max, res_vox)
 
-                    mesh2 = TriangleMesh.from_faces(shape_s2.faces())
-                    strat_ctx2 = StrategyContext(
-                        context=s2_ctx,
-                        setup=s2_setup_obj,
-                        mesh=mesh2,
-                        stock_voxels=stock_voxels2,
-                        clearance_z=clearance_z2,
+                    mesh_k = TriangleMesh.from_faces(shape_k.faces())
+                    strat_ctx_k = StrategyContext(
+                        context=s_k_ctx,
+                        setup=s_k_setup_obj,
+                        mesh=mesh_k,
+                        stock_voxels=stock_voxels_k,
+                        clearance_z=clearance_z_k,
                         finish_allowance_wall=0.3,
                         finish_allowance_floor=0.3,
                     )
-                    engine2 = StrategyEngine(strat_ctx2)
+                    engine_k = StrategyEngine(strat_ctx_k)
 
-                    tps2 = []
-                    for op in ops2:
-                        tp = engine2.generate(op)
+                    tps_k = []
+                    cand_ops = []
+                    cand_tps_flat = []
+                    cand_tools = []
+                    for op in ops_k:
+                        tp = engine_k.generate(op)
                         tp.operation_id = op.id
                         for s in tp.segments:
                             s.operation_id = op.id
-                        tp.metadata["setup_id"] = "setup_002"
-                        tp.metadata["work_offset"] = "G55"
-                        tps2.append(tp)
+                        tp.metadata["setup_id"] = s_id
+                        tp.metadata["work_offset"] = s_wcs
+                        tps_k.append(tp)
 
                         op_dict = planned_operation_to_vexcad_dict(
-                            op, tp, setup_id="setup_002", clearance_z=clearance_z2
+                            op, tp, setup_id=s_id, clearance_z=clearance_z_k
                         )
-                        operations.append(op_dict)
-                        all_toolpaths.extend(op_dict.get("toolpaths", []))
+                        cand_ops.append(op_dict)
+                        cand_tps_flat.extend(op_dict.get("toolpaths", []))
 
                         t = op_dict.get("tool")
                         if t and t.get("id") not in seen_tools:
                             seen_tools.add(t.get("id"))
-                            tools_list.append(t)
+                            cand_tools.append(t)
 
-                    for f in s2_features_to_plan:
-                        features.append(machining_feature_to_vexcad_dict(f))
-
-                    post2 = get_post_processor(ctrl, work_offset="G55")
-                    res2 = post2.post_process(
-                        tps2,
-                        program_name="PROG_SETUP2",
-                        setup_id="setup_002",
-                        setup_index=2,
+                    # Post-process with machine dialect
+                    post_k = get_post_processor(ctrl, work_offset=s_wcs)
+                    res_k = post_k.post_process(
+                        tps_k,
+                        program_name=f"PROG_{s_id.upper()}",
+                        setup_id=s_id,
+                        setup_index=len(setups_list) + 1,
                         validate_geometry=False,
                         validate_syntax=False,
                     )
 
+                    # Commit staged setup and operations ONLY after successful post-processing
+                    all_ctx_setups.append(s_k_setup_obj)
+                    operations.extend(cand_ops)
+                    all_toolpaths.extend(cand_tps_flat)
+                    tools_list.extend(cand_tools)
+                    for f in k_features_to_plan:
+                        features.append(machining_feature_to_vexcad_dict(f))
+
+                    all_planned_features.extend(k_features_to_plan)
+                    all_planned_ops.extend(ops_k)
+                    all_planned_tps.extend(tps_k)
+                    per_setup_gcode[s_id] = res_k.gcode
+
                     retract_cmd = "G53 G00 Z0." if ctrl in ("fanuc", "haas") else "G28 G91 Z0.\nG90"
-                    msg_cmd = "(MSG, FLIP PART - LOAD SETUP 2 - BOTTOM FLIP [G55])" if ctrl == "haas" else "(SETUP 2 - BOTTOM FLIP - OPERATOR FLIP/RECLAMP)"
+                    msg_cmd = f"(MSG, FLIP PART - LOAD {s_id.upper()} - {s_name} [{s_wcs}])" if ctrl == "haas" else f"({s_id.upper()} - {s_name} - OPERATOR FLIP/RECLAMP)"
                     flip_seq = (
                         f"\n; ==========================================\n"
-                        f"; (--- SETUP 2 - FLIP / RE-FIXTURE PART ---)\n"
+                        f"; (--- {s_id.upper()} - FLIP / RE-FIXTURE PART ---)\n"
                         f"; ==========================================\n"
                         f"M05 (Spindle Stop)\n"
                         f"M09 (Coolant Off)\n"
                         f"{retract_cmd}\n"
                         f"{msg_cmd}\n"
                         f"M00 (Program Stop - Operator Flip/Reclamp)\n"
-                        f"G55 (Activate Setup Work Offset)\n"
+                        f"{s_wcs} (Activate Setup Work Offset)\n"
                     )
-                    final_gcode = pipeline_result.gcode + flip_seq + res2.gcode
+                    final_gcode = final_gcode + flip_seq + res_k.gcode
 
-                    s2_feat_ids = [f.id for f in s2_features_to_plan]
-                    setup_dict_2 = {
-                        "setupId": "setup_002",
-                        "setupName": "Setup 2 - Bottom Flip",
-                        "setupType": "milling_3axis",
-                        "toolAxis": [0.0, 0.0, -1.0],
-                        "workCoordinateSystem": "G55",
-                        "stockTopZ": round(float(bmax2[2] + 1.0), 3),
-                        "stockBottomZ": round(float(bmin2[2] - 3.0), 3),
-                        "setupOrigin": "top_center",
-                        "allFeatureIds": s2_feat_ids,
-                        "assignedFeatureIds": s2_feat_ids,
-                        "machinableFeatures": s2_feat_ids,
-                        "unassignedFeatureIds": [],
-                        "deferredFeatures": [],
-                        "unsupportedFeatures": [],
-                        "requiresManualReclamp": True,
-                        "requires4AxisIndexing": False,
-                        "estimated_time_s": sum(op.get("estimated_time_s", 0.0) for op in operations if op.get("setup_id") == "setup_002"),
-                        "tool_change_count": max(0, len(tps2) - 1),
-                        "machineType": "MILL_3X_VMC",
-                        "machineProfile": "haas_vf2" if "haas" in ctrl else "dmg_cmx1100v",
-                        "controller": "HAAS_NGC" if "haas" in ctrl else ("FANUC_0I_MF" if "fanuc" in ctrl else "SIEMENS_840D_ONE"),
-                        "postProcessor": "AUTO",
-                    }
-                    setups_list.append(setup_dict_2)
+                    try:
+                        sheet_k = generate_setup_sheet(
+                            program_name=f"PROG_{s_id.upper()}",
+                            part_name=part_name,
+                            planning_ctx=s_k_ctx,
+                            setup=s_k_setup_obj,
+                            features=k_features_to_plan,
+                            operations=ops_k,
+                            toolpaths=tps_k,
+                            post_result=res_k,
+                        )
+                        sheet_k_text = format_setup_sheet(sheet_k)
+                        setup_sheets[s_id] = {
+                            "sheet": asdict(sheet_k),
+                            "formatted_text": sheet_k_text,
+                        }
+                    except Exception:
+                        pass
+
+                    k_feat_ids = [f.id for f in k_features_to_plan]
+                    cand["allFeatureIds"] = k_feat_ids
+                    cand["assignedFeatureIds"] = k_feat_ids
+                    cand["machinableFeatures"] = k_feat_ids
+                    cand["estimated_time_s"] = sum(op.get("estimated_time_s", 0.0) for op in cand_ops)
+                    cand["tool_change_count"] = max(0, len(tps_k) - 1)
+                    cand["stockTopZ"] = round(float(bmax_k[2] + 1.0), 3)
+                    cand["stockBottomZ"] = round(float(bmin_k[2] - 3.0), 3)
+                    setups_list.append(cand)
+                except Exception as cand_err:
+                    # If this setup candidate fails validation or post-processing on this machine profile, skip cleanly
+                    continue
         except Exception as multi_err:
             pass
+
+        # 3. Master Routing Sheet
+        master_routing_data = {}
+        master_routing_text = ""
+        try:
+            master_sheet = generate_master_routing_sheet(
+                program_name=f"MASTER_{effective_job_id}",
+                part_name=part_name,
+                planning_ctx=s1_ctx,
+                setups=all_ctx_setups,
+                all_features=all_planned_features,
+                all_operations=all_planned_ops,
+                all_toolpaths=all_planned_tps,
+            )
+            master_routing_text = format_master_routing_sheet(master_sheet)
+            master_routing_data = {
+                "sheet": asdict(master_sheet),
+                "formatted_text": master_routing_text,
+            }
+        except Exception:
+            pass
+
+        # Guarantee synchronization: ensure every setup referenced by an operation exists in setups_list
+        known_setup_ids = {s.get("setupId") or s.get("id") for s in setups_list}
+        cand_map = {c.get("setupId"): c for c in detected_candidates}
+        for op in operations:
+            s_id = op.get("setup_id") or op.get("setupId")
+            if s_id and s_id not in known_setup_ids:
+                known_setup_ids.add(s_id)
+                cand_info = cand_map.get(s_id, {})
+                op_notes = op.get("notes") or {}
+                s_name = cand_info.get("setupName") or op.get("setup_name") or op_notes.get("setup_name") or f"Setup {len(setups_list)+1}"
+                s_wcs = cand_info.get("workCoordinateSystem") or op.get("work_offset") or op_notes.get("work_offset") or f"G{54+len(setups_list)}"
+                rot = cand_info.get("rotation_deg") or ([180.0, 0.0, 0.0] if "002" in s_id or "flip" in s_name.lower() else [0.0, 0.0, 0.0])
+                t_axis = cand_info.get("toolAxis") or ([0.0, 0.0, -1.0] if "002" in s_id or "flip" in s_name.lower() else [0.0, 0.0, 1.0])
+                is_flip = bool(cand_info.get("requiresManualReclamp") or ("002" in s_id or "flip" in s_name.lower()))
+                setups_list.append({
+                    "setupId": s_id,
+                    "setupName": s_name,
+                    "setupType": "milling_3axis",
+                    "toolAxis": t_axis,
+                    "workCoordinateSystem": s_wcs,
+                    "rotation_deg": rot,
+                    "requiresManualReclamp": is_flip,
+                    "requires4AxisIndexing": False,
+                    "stockTopZ": round(float(bmax[2] + 1.0), 3),
+                    "stockBottomZ": round(float(bmin[2] - 3.0), 3),
+                    "setupOrigin": "top_center",
+                    "assignedFeatureIds": [op.get("feature_id") or op.get("featureId")],
+                    "machinableFeatures": [op.get("feature_id") or op.get("featureId")],
+                    "allFeatureIds": [op.get("feature_id") or op.get("featureId")],
+                    "machineType": "MILL_3X_VMC",
+                    "machineProfile": "haas_vf2" if "haas" in ctrl else "dmg_cmx1100v",
+                    "controller": "HAAS_NGC" if "haas" in ctrl else ("FANUC_0I_MF" if "fanuc" in ctrl else "SIEMENS_840D_ONE"),
+                    "postProcessor": "AUTO",
+                })
+
+        # Prune any setup that has zero operations (only keep setups with real machining operations)
+        active_sids = {op.get("setup_id") or op.get("setupId") for op in operations if (op.get("setup_id") or op.get("setupId"))}
+        setups_list = [s for s in setups_list if (s.get("setupId") in active_sids or s.get("setupId") == "setup_001")]
 
         total_cycle_time = sum(op.get("estimated_time_s", 0.0) for op in operations)
 
@@ -704,6 +1129,10 @@ class CamEngineAdapter:
             "toolpaths": all_toolpaths,
             "toolpath_schema_version": "semantic_v1",
             "gcode": final_gcode,
+            "per_setup_gcode": per_setup_gcode,
+            "setup_sheets": setup_sheets,
+            "master_routing_sheet": master_routing_data,
+            "export_package_available": True,
             "can_generate_gcode": True,
             "cam_readiness_score": 100,
             "planned_cycle_time_seconds": round(total_cycle_time, 2),
@@ -756,8 +1185,31 @@ class CamEngineAdapter:
                             }, f)
 
                         with open(storage_dir / "generated_gcode.nc", "w", encoding="utf-8") as f:
-                            f.write(pipeline_result.gcode)
-                    except Exception as e:
+                            f.write(final_gcode)
+
+                        for s_id, s_gc in per_setup_gcode.items():
+                            with open(storage_dir / f"{s_id}.nc", "w", encoding="utf-8") as f:
+                                f.write(s_gc)
+
+                        with open(storage_dir / "setup_sheets.json", "w", encoding="utf-8") as f:
+                            json.dump(setup_sheets, f, indent=2)
+
+                        if master_routing_text:
+                            with open(storage_dir / "master_routing_sheet.txt", "w", encoding="utf-8") as f:
+                                f.write(master_routing_text)
+
+                        CamEngineAdapter.generate_export_package(
+                            job_id=effective_job_id,
+                            per_setup_gcode=per_setup_gcode,
+                            master_gcode=final_gcode,
+                            setup_sheets=setup_sheets,
+                            master_routing_sheet=master_routing_text,
+                            operations=operations,
+                            features=features,
+                            setups=setups_list,
+                            storage_dir=storage_dir,
+                        )
+                    except Exception:
                         pass
 
         return payload
@@ -983,4 +1435,112 @@ class CamEngineAdapter:
 
         post_res = post.post_process(tps, program_name=program_name, require_validity=False)
         return post_res.gcode
+
+    @staticmethod
+    def detect_setups_from_step(
+        step_path: Union[str, Path],
+        base_wcs: str = "G54",
+        controller: str = "fanuc",
+    ) -> List[Dict[str, Any]]:
+        """Automatically detect required setups from a STEP file."""
+        path = Path(step_path)
+        if not path.exists():
+            return []
+        imported = import_step(path)
+        return CamEngineAdapter.detect_setups_from_shape(imported.shape, base_wcs=base_wcs, controller=controller)
+
+    @staticmethod
+    def generate_export_package(
+        job_id: str,
+        per_setup_gcode: Dict[str, str],
+        master_gcode: str,
+        setup_sheets: Dict[str, Any],
+        master_routing_sheet: Union[str, Dict[str, Any]],
+        operations: List[Dict[str, Any]],
+        features: List[Dict[str, Any]],
+        setups: List[Dict[str, Any]],
+        storage_dir: Optional[Path] = None,
+    ) -> bytes:
+        """Generate industrial CAM ZIP export package containing:
+        1. NC_Programs/
+           - MASTER_{job_id}.nc (full program with M00 stops)
+           - {setup_id}_{wcs}.nc (per-setup individual programs)
+        2. Setup_Sheets/
+           - MASTER_ROUTING_SHEET.txt
+           - {setup_id}_SETUP_SHEET.txt
+        3. Manifest/
+           - cam_manifest.json
+        """
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # 1. Master NC program
+            zf.writestr(f"NC_Programs/MASTER_{job_id}.nc", master_gcode)
+
+            # Per-setup NC programs
+            for s in setups:
+                s_id = s.get("setupId", "setup_001")
+                wcs = s.get("workCoordinateSystem", "G54")
+                gc = per_setup_gcode.get(s_id)
+                if gc:
+                    zf.writestr(f"NC_Programs/{s_id}_{wcs}.nc", gc)
+
+            # 2. Master Routing Sheet
+            if isinstance(master_routing_sheet, str):
+                master_text = master_routing_sheet
+            elif isinstance(master_routing_sheet, dict):
+                master_text = master_routing_sheet.get("formatted_text", "")
+            else:
+                master_text = str(master_routing_sheet)
+            zf.writestr("Setup_Sheets/MASTER_ROUTING_SHEET.txt", master_text)
+
+            # Per-setup Setup Sheets
+            for s_id, s_data in setup_sheets.items():
+                if isinstance(s_data, str):
+                    s_text = s_data
+                elif isinstance(s_data, dict):
+                    s_text = s_data.get("formatted_text", "")
+                else:
+                    s_text = str(s_data)
+                zf.writestr(f"Setup_Sheets/{s_id}_SETUP_SHEET.txt", s_text)
+
+            # 3. Manifest
+            manifest = {
+                "job_id": job_id,
+                "exported_at": datetime.now().isoformat(),
+                "total_setups": len(setups),
+                "setups": [
+                    {
+                        "setup_id": s.get("setupId"),
+                        "name": s.get("setupName"),
+                        "wcs": s.get("workCoordinateSystem"),
+                        "rotation_deg": s.get("rotation_deg"),
+                        "estimated_time_s": s.get("estimated_time_s", 0.0),
+                    }
+                    for s in setups
+                ],
+                "total_operations": len(operations),
+                "total_features": len(features),
+                "files": {
+                    "master_nc": f"NC_Programs/MASTER_{job_id}.nc",
+                    "per_setup_nc": [
+                        f"NC_Programs/{s.get('setupId')}_{s.get('workCoordinateSystem')}.nc"
+                        for s in setups
+                        if s.get("setupId") in per_setup_gcode
+                    ],
+                    "master_routing_sheet": "Setup_Sheets/MASTER_ROUTING_SHEET.txt",
+                    "setup_sheets": [f"Setup_Sheets/{s_id}_SETUP_SHEET.txt" for s_id in setup_sheets],
+                },
+            }
+            zf.writestr("Manifest/cam_manifest.json", json.dumps(manifest, indent=2))
+
+        zip_bytes = buf.getvalue()
+        if storage_dir is not None:
+            try:
+                storage_dir.mkdir(parents=True, exist_ok=True)
+                with open(storage_dir / "cam_package.zip", "wb") as f:
+                    f.write(zip_bytes)
+            except Exception:
+                pass
+
+        return zip_bytes
 

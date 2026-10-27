@@ -132,6 +132,7 @@ export async function GET(
 				join(process.cwd(), 'outputs', filePath),
 				join(process.cwd(), '../outputs', filePath),
 				join(process.cwd(), '../ai-engine/storage/jobs', sessionId, 'revisions', filePath.endsWith('.stl') ? 'rev_000.stl' : 'rev_000.step'),
+				join('/app/storage/jobs', sessionId, 'revisions', filePath.endsWith('.stl') ? 'rev_000.stl' : 'rev_000.step'),
 			];
 			let foundData: Buffer | null = null;
 			for (const devPath of devPaths) {

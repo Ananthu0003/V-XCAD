@@ -48,6 +48,7 @@ class PipelineResult:
     reconstructed_segments: list[MotionSegment] = field(default_factory=list)
     deviation_map: Optional[DeviationMap] = None
     errors: list[CamError] = field(default_factory=list)
+    context: Optional[PlanningContext] = None
 
 
 def run_cam_pipeline(
@@ -525,6 +526,7 @@ def run_cam_pipeline(
         reconstructed_segments=reconstructed_segs,
         deviation_map=dev_map,
         errors=all_errors,
+        context=ctx,
     )
 
 

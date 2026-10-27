@@ -1657,68 +1657,73 @@ def export_cam_package(
     base_name = program_name or sess.model_name.replace(" ", "_")
 
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        per_setup_results = {}
-        pkg_prog_registry: set[int] = set()
-        for idx, s in enumerate(setups):
-            setup_tps = [tp for tp in sess.toolpaths if tp.metadata.get("setup_id") == s.id]
-            post = get_post_processor(
-                controller=controller,
-                work_offset=s.work_offset.value,
-                used_program_numbers=pkg_prog_registry,
-            )
-            s_prog_name = f"{base_name}_OP{(idx+1)*10}_{s.work_offset.value}"
-            res = post.post_process(
-                setup_tps,
-                program_name=s_prog_name,
-                setup_id=s.id,
-                setup_index=idx + 1,
-                job_id=base_name,
-            )
-            per_setup_results[s.id] = {
-                "cycle_time_seconds": res.total_time_seconds,
-                "gcode": res.gcode,
-            }
+    try:
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            per_setup_results = {}
+            pkg_prog_registry: set[int] = set()
+            for idx, s in enumerate(setups):
+                setup_tps = [tp for tp in sess.toolpaths if tp.metadata.get("setup_id") == s.id]
+                post = get_post_processor(
+                    controller=controller,
+                    work_offset=s.work_offset.value,
+                    used_program_numbers=pkg_prog_registry,
+                )
+                s_prog_name = f"{base_name}_OP{(idx+1)*10}_{s.work_offset.value}"
+                res = post.post_process(
+                    setup_tps,
+                    program_name=s_prog_name,
+                    setup_id=s.id,
+                    setup_index=idx + 1,
+                    job_id=base_name,
+                )
+                per_setup_results[s.id] = {
+                    "cycle_time_seconds": res.total_time_seconds,
+                    "gcode": res.gcode,
+                }
 
-            nc_filename = f"{s_prog_name}.nc"
-            zip_file.writestr(f"NC_Programs/{nc_filename}", res.gcode)
+                nc_filename = f"{s_prog_name}.nc"
+                zip_file.writestr(f"NC_Programs/{nc_filename}", res.gcode)
 
-            # Per-setup sheet
-            from ..setup_sheet import generate_setup_sheet, format_setup_sheet
-            s_ops = [op for op in sess.planned_ops if op.notes.get("setup_id") == s.id]
-            s_feats = [f for f in sess.features if f.notes.get("setup_id") == s.id]
-            sheet = generate_setup_sheet(
-                program_name=s_prog_name,
+                # Per-setup sheet
+                from ..setup_sheet import generate_setup_sheet, format_setup_sheet
+                s_ops = [op for op in sess.planned_ops if op.notes.get("setup_id") == s.id]
+                s_feats = [f for f in sess.features if f.notes.get("setup_id") == s.id]
+                sheet = generate_setup_sheet(
+                    program_name=s_prog_name,
+                    part_name=sess.model_name,
+                    planning_ctx=ctx,
+                    setup=s,
+                    features=s_feats,
+                    operations=s_ops,
+                    toolpaths=setup_tps,
+                    post_result=res,
+                )
+                sheet_txt = format_setup_sheet(sheet)
+                zip_file.writestr(f"Setup_Sheets/SETUP_SHEET_{s.id}_{s.work_offset.value}.txt", sheet_txt)
+
+            # Master Combined NC program
+            combined_req = PostProcessRequest(controller=controller, program_name=base_name, separate_files=False)
+            combined_res = generate_gcode(request, combined_req)
+            if isinstance(combined_res, Response):
+                return combined_res
+            zip_file.writestr(f"NC_Programs/{base_name}_MASTER_ALL_SETUPS.nc", combined_res.gcode)
+
+            # Master Routing Sheet
+            from ..setup_sheet import generate_master_routing_sheet, format_master_routing_sheet
+            master_sheet = generate_master_routing_sheet(
+                program_name=f"{base_name}_MASTER",
                 part_name=sess.model_name,
                 planning_ctx=ctx,
-                setup=s,
-                features=s_feats,
-                operations=s_ops,
-                toolpaths=setup_tps,
-                post_result=res,
+                setups=setups,
+                all_features=sess.features,
+                all_operations=sess.planned_ops,
+                all_toolpaths=sess.toolpaths,
+                per_setup_results=per_setup_results,
             )
-            sheet_txt = format_setup_sheet(sheet)
-            zip_file.writestr(f"Setup_Sheets/SETUP_SHEET_{s.id}_{s.work_offset.value}.txt", sheet_txt)
-
-        # Master Combined NC program
-        combined_req = PostProcessRequest(controller=controller, program_name=base_name, separate_files=False)
-        combined_res = generate_gcode(request, combined_req)
-        zip_file.writestr(f"NC_Programs/{base_name}_MASTER_ALL_SETUPS.nc", combined_res.gcode)
-
-        # Master Routing Sheet
-        from ..setup_sheet import generate_master_routing_sheet, format_master_routing_sheet
-        master_sheet = generate_master_routing_sheet(
-            program_name=f"{base_name}_MASTER",
-            part_name=sess.model_name,
-            planning_ctx=ctx,
-            setups=setups,
-            all_features=sess.features,
-            all_operations=sess.planned_ops,
-            all_toolpaths=sess.toolpaths,
-            per_setup_results=per_setup_results,
-        )
-        master_txt = format_master_routing_sheet(master_sheet)
-        zip_file.writestr("MASTER_ROUTING_SHEET.txt", master_txt)
+            master_txt = format_master_routing_sheet(master_sheet)
+            zip_file.writestr("MASTER_ROUTING_SHEET.txt", master_txt)
+    except CamError as e:
+        return cam_error_response(e)
 
     zip_buffer.seek(0)
     zip_bytes = zip_buffer.getvalue()

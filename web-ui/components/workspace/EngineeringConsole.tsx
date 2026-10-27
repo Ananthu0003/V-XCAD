@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Settings, Cpu, PenTool, Sliders, PlaySquare, Code2, Activity, Database, ChevronDown } from 'lucide-react';
+import { Settings, Cpu, PenTool, Sliders, PlaySquare, Code2, Activity, Database, ChevronDown, Layers, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SetupSection } from '../cam/SetupSection';
 import { ToolLibrarySection } from '../cam/ToolLibrarySection';
@@ -13,6 +13,7 @@ import { SimulationControls } from '../cam/SimulationControls';
 import { GCodeViewer } from '../cam/GCodeViewer';
 import { OperationPlanningTable } from '../cam/OperationPlanningTable';
 import { ManageHoldersTab } from '../cam/ManageHoldersTab';
+import { MultiSetupManager } from '../cam/MultiSetupManager';
 import type { SetupSettings, Tool, CamOperation, SimulationState, CamFeature, PostProcessor, OperationType } from '@/types/cam';
 import type { MachineRecommendationResponse } from '@/lib/cam/machineProfiles';
 
@@ -27,6 +28,11 @@ interface EngineeringConsoleProps {
   camSetups?: any[];
   activeSetupId?: string | null;
   setActiveSetupId?: (v: string | null) => void;
+  sessionId?: string;
+  perSetupGcode?: Record<string, string>;
+  setupSheets?: Record<string, any>;
+  masterRoutingSheet?: any;
+  onAddSetup?: (preset: string) => void;
   // Tools
   camTools: Tool[];
   setCamTools: (v: Tool[]) => void;
@@ -67,16 +73,18 @@ interface EngineeringConsoleProps {
 }
 
 
-type TabType = 'setup' | 'features' | 'tools' | 'holders' | 'params' | 'simulation' | 'gcode';
+type TabType = 'setup' | 'features' | 'operations' | 'tools' | 'holders' | 'params' | 'simulation' | 'gcode';
 
 export function EngineeringConsole(props: EngineeringConsoleProps) {
   const [activeTab, setActiveTab] = useState<TabType>('setup');
   const [gcodeViewMode, setGcodeViewMode] = useState<'iso' | 'klartext'>('klartext');
   const [opsViewMode, setOpsViewMode] = useState<'table' | 'tree'>('table');
+  const [opsSetupFilter, setOpsSetupFilter] = useState<string>('all');
 
   const tabs = [
     { id: 'setup', label: 'SETUP', icon: <Settings /> },
-    { id: 'features', label: 'FEATURES & AI', icon: <Cpu /> },
+    { id: 'features', label: 'FEATURES', icon: <Cpu /> },
+    { id: 'operations', label: 'OPERATIONS', icon: <Layers /> },
     { id: 'tools', label: 'JOB TOOLS', icon: <PenTool /> },
     { id: 'holders', label: 'JOB HOLDERS', icon: <Database /> },
     { id: 'simulation', label: 'SIMULATION', icon: <PlaySquare /> },
@@ -149,6 +157,157 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
 
   const readiness = calcReadiness();
 
+  const filteredOps = opsSetupFilter === 'all' 
+    ? props.camOperations 
+    : props.camOperations.filter(op => {
+        const sid = op.setup_id || (op as any).setupId || 'setup_001';
+        return sid === opsSetupFilter;
+      });
+
+  const handleToggleOperation = (opId: string) => {
+    if (props.selectedOperationIds && props.setSelectedOperationIds) {
+      const newSet = new Set(props.selectedOperationIds);
+      if (newSet.has(opId)) newSet.delete(opId);
+      else newSet.add(opId);
+      props.setSelectedOperationIds(newSet);
+    }
+  };
+
+  const handleToggleAll = (selectAll: boolean) => {
+    if (props.setSelectedOperationIds) {
+      if (selectAll) {
+        props.setSelectedOperationIds(new Set(props.camOperations.map(o => o.id)));
+      } else {
+        props.setSelectedOperationIds(new Set());
+      }
+    }
+  };
+
+  const handleOperationChange = (opId: string, updates: Partial<CamOperation>) => {
+    const newOps = [...props.camOperations];
+    const idx = newOps.findIndex(o => o.id === opId);
+    if (idx >= 0) {
+      let opUpdates = { ...updates };
+      if (opUpdates.toolId) {
+        const tool = props.camTools.find(t => t.id === opUpdates.toolId || (t as any).dbId === opUpdates.toolId) || (opUpdates as any).tool;
+        if (tool && tool.diameter) {
+          const currentParams = newOps[idx].parameters || {} as any;
+          const cd = tool.cuttingData || {};
+          opUpdates.parameters = {
+            ...currentParams,
+            maxStepdown: cd.optimalStepdown ?? (Math.round(tool.diameter * 0.5 * 100) / 100),
+            finishStepdown: cd.optimalStepdown ?? tool.diameter, 
+            finishCuts: 1,
+            stepoverPercentage: cd.optimalStepoverPercentage ?? 40,
+            ...(cd.optimalStepover ? { stepover: cd.optimalStepover } : {})
+          };
+          if (newOps[idx].status === 'blocked') {
+            opUpdates.status = 'generated';
+            opUpdates.errorReason = '';
+            if (opUpdates.parameters) {
+              opUpdates.parameters.error = '';
+              opUpdates.parameters.errorReason = '';
+            }
+          }
+        }
+      }
+      newOps[idx] = { ...newOps[idx], ...opUpdates };
+      props.setCamOperations(newOps);
+    }
+  };
+
+  const handleAddOperation = (type: OperationType, setupId?: string) => {
+    const id = `op_${Date.now()}`;
+    const targetSetupId = setupId || (opsSetupFilter !== 'all' ? opsSetupFilter : null) || props.activeSetupId || props.camSetups?.[0]?.setupId || 'setup_001';
+    const firstTool = props.camTools[0];
+    const newOp: CamOperation = {
+      id,
+      name: `New ${type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}`,
+      type,
+      toolId: firstTool?.id || 'T1',
+      tool: firstTool,
+      setup_id: targetSetupId,
+      status: 'generated',
+      parameters: {
+        feedRate: 800,
+        plungeRate: 200,
+        maxStepdown: 1.0,
+        totalDepth: 5.0,
+        spindleSpeed: 10000,
+        stepoverPercentage: 40,
+        tolerance: 0.01,
+        coolant: 'flood'
+      }
+    };
+    props.setCamOperations([...props.camOperations, newOp]);
+    props.setActiveOperationId(id);
+    if (props.setSelectedOperationIds) {
+      props.setSelectedOperationIds(new Set([...props.selectedOperationIds, id]));
+    }
+  };
+
+  const handleDeleteOperation = (id: string) => {
+    const newOps = props.camOperations.filter(op => op.id !== id);
+    props.setCamOperations(newOps);
+    if (props.activeOperationId === id) {
+      props.setActiveOperationId(newOps[0]?.id || null);
+    }
+  };
+
+  const handleDuplicateOperation = (id: string) => {
+    const op = props.camOperations.find(o => o.id === id);
+    if (!op) return;
+    const newId = `op_${Date.now()}`;
+    const duplicated: CamOperation = {
+      ...op,
+      id: newId,
+      name: `${op.name} (Copy)`,
+    };
+    const idx = props.camOperations.findIndex(o => o.id === id);
+    const newOps = [...props.camOperations];
+    newOps.splice(idx + 1, 0, duplicated);
+    props.setCamOperations(newOps);
+    props.setActiveOperationId(newId);
+  };
+
+  const handleMoveOperation = (id: string, direction: 'up' | 'down') => {
+    const idx = props.camOperations.findIndex(o => o.id === id);
+    if (idx === -1) return;
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= props.camOperations.length) return;
+    const newOps = [...props.camOperations];
+    const [moved] = newOps.splice(idx, 1);
+    newOps.splice(targetIdx, 0, moved);
+    props.setCamOperations(newOps);
+  };
+
+  const handleToggleEnableOperation = (id: string) => {
+    const newOps = props.camOperations.map(op => {
+      if (op.id === id) {
+        return { ...op, enabled: op.enabled === false ? true : false };
+      }
+      return op;
+    });
+    props.setCamOperations(newOps);
+  };
+
+  const handleReorderOperations = (sourceIndex: number, destIndex: number, setupId?: string) => {
+    if (setupId) {
+      const setupOps = props.camOperations.filter(op => (op.setup_id || (op as any).setupId || 'setup_001') === setupId);
+      const otherOps = props.camOperations.filter(op => (op.setup_id || (op as any).setupId || 'setup_001') !== setupId);
+      if (sourceIndex >= 0 && sourceIndex < setupOps.length && destIndex >= 0 && destIndex < setupOps.length) {
+        const [moved] = setupOps.splice(sourceIndex, 1);
+        setupOps.splice(destIndex, 0, moved);
+        props.setCamOperations([...setupOps, ...otherOps]);
+      }
+    } else {
+      const newOps = [...props.camOperations];
+      const [moved] = newOps.splice(sourceIndex, 1);
+      newOps.splice(destIndex, 0, moved);
+      props.setCamOperations(newOps);
+    }
+  };
+
   return (
     <div className="flex h-full w-full flex-col bg-transparent font-sans relative">
       {/* Tabs Header */}
@@ -201,221 +360,109 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                 parameters={props.parameters}
                 setupMetadata={props.setupMetadata}
                 recommendation={props.recommendation}
+                camSetups={props.camSetups}
+                activeSetupId={props.activeSetupId}
+                onSelectSetup={(setupId) => props.setActiveSetupId?.(setupId)}
+                onAddSetup={props.onAddSetup}
               />
 
             </div>
           )}
 
           {activeTab === 'features' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="flex flex-col gap-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Features</h3>
-                </div>
-                <FeatureOverviewSection
-                  features={props.camFeatures}
-                  activeFeatureId={props.activeFeatureId}
-                  onFeatureSelect={props.setActiveFeatureId}
-                  onAutoGenerate={props.onAutoGenerateOperations}
-                  workflowStage={props.workflowStage}
-                  setWorkflowStage={props.setWorkflowStage}
-                  onRunFeatureRecognition={props.onRunFeatureRecognition}
-                  isAutoGenerateDisabled={props.camFeatures.length === 0}
-                />
-              </div>
-              <div className="flex flex-col gap-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Operations Plan</h3>
-                  <div className="flex items-center gap-1 bg-white/5 rounded-lg p-0.5 border border-white/10">
-                    <button
-                      type="button"
-                      onClick={() => setOpsViewMode('table')}
-                      className={cn(
-                        "px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all",
-                        opsViewMode === 'table' ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-white"
-                      )}
-                    >
-                      Table View
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOpsViewMode('tree')}
-                      className={cn(
-                        "px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all",
-                        opsViewMode === 'tree' ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-white"
-                      )}
-                    >
-                      Tree View
-                    </button>
+            <div className="flex flex-col gap-4 animate-in fade-in duration-300">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-border/40">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                    <Cpu className="size-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                      Machining Feature Recognition &amp; Topology
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      3D B-Rep extracted machining features (holes, slots, pockets, planar faces)
+                    </p>
                   </div>
                 </div>
 
-                {opsViewMode === 'table' ? (
-                  <OperationPlanningTable 
-                    operations={props.camOperations} 
-                    camValidation={props.camValidation} 
-                    camSetups={props.camSetups} 
-                    tools={props.camTools}
-                    selectedOperationIds={props.selectedOperationIds}
-                    features={props.camFeatures}
-                    onToggleOperation={(opId) => {
-                      if (props.selectedOperationIds && props.setSelectedOperationIds) {
-                        const newSet = new Set(props.selectedOperationIds);
-                        if (newSet.has(opId)) newSet.delete(opId);
-                        else newSet.add(opId);
-                        props.setSelectedOperationIds(newSet);
-                      }
-                    }}
-                    onToggleAll={(selectAll) => {
-                      if (props.setSelectedOperationIds) {
-                        if (selectAll) {
-                          props.setSelectedOperationIds(new Set(props.camOperations.map(o => o.id)));
-                        } else {
-                          props.setSelectedOperationIds(new Set());
-                        }
-                      }
-                    }}
-                    onChange={(opId, updates) => {
-                      const newOps = [...props.camOperations];
-                      const idx = newOps.findIndex(o => o.id === opId);
-                      if (idx >= 0) {
-                        let opUpdates = { ...updates };
-                        
-                        // Auto-populate depth cut params on tool change
-                        if (opUpdates.toolId) {
-                            const tool = props.camTools.find(t => t.id === opUpdates.toolId || (t as any).dbId === opUpdates.toolId) || (opUpdates as any).tool;
-                            if (tool && tool.diameter) {
-                                const currentParams = newOps[idx].parameters || {} as any;
-                                const cd = tool.cuttingData || {};
-                                opUpdates.parameters = {
-                                    ...currentParams,
-                                    // Use exact manufacturer data if available, else fallback to safe baseline
-                                    maxStepdown: cd.optimalStepdown ?? (Math.round(tool.diameter * 0.5 * 100) / 100),
-                                    finishStepdown: cd.optimalStepdown ?? tool.diameter, 
-                                    finishCuts: 1,
-                                    stepoverPercentage: cd.optimalStepoverPercentage ?? 40,
-                                    ...(cd.optimalStepover ? { stepover: cd.optimalStepover } : {})
-                                };
-                                
-                                // Clear blocked status if it was blocked due to missing tool
-                                if (newOps[idx].status === 'blocked') {
-                                    opUpdates.status = 'generated';
-                                    opUpdates.errorReason = '';
-                                    if (opUpdates.parameters) {
-                                        opUpdates.parameters.error = '';
-                                        opUpdates.parameters.errorReason = '';
-                                    }
-                                }
-                            }
-                        }
-                        
-                        newOps[idx] = { ...newOps[idx], ...opUpdates };
-                        props.setCamOperations(newOps);
-                      }
-                    }}
-                  />
-                ) : (
-                  <div className="h-[460px]">
-                    <OperationTreeSection
-                      operations={props.camOperations}
-                      activeOperationId={props.activeOperationId}
-                      setups={props.camSetups}
-                      activeSetupId={props.activeSetupId}
-                      onSelectSetup={(setupId) => props.setActiveSetupId?.(setupId)}
-                      onSelect={(id) => props.setActiveOperationId(id)}
-                      onAdd={(type, setupId) => {
-                        const id = `op_${Date.now()}`;
-                        const targetSetupId = setupId || props.activeSetupId || props.camSetups?.[0]?.setupId || 'setup_001';
-                        const firstTool = props.camTools[0];
-                        const newOp: CamOperation = {
-                          id,
-                          name: `New ${type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}`,
-                          type,
-                          toolId: firstTool?.id || 'T1',
-                          tool: firstTool,
-                          setup_id: targetSetupId,
-                          status: 'generated',
-                          parameters: {
-                            feedRate: 800,
-                            plungeRate: 200,
-                            maxStepdown: 1.0,
-                            totalDepth: 5.0,
-                            spindleSpeed: 10000,
-                            stepoverPercentage: 40,
-                            tolerance: 0.01,
-                            coolant: 'flood'
-                          }
-                        };
-                        props.setCamOperations([...props.camOperations, newOp]);
-                        props.setActiveOperationId(id);
-                        if (props.setSelectedOperationIds) {
-                          props.setSelectedOperationIds(new Set([...props.selectedOperationIds, id]));
-                        }
-                      }}
-                      onDelete={(id) => {
-                        const newOps = props.camOperations.filter(op => op.id !== id);
-                        props.setCamOperations(newOps);
-                        if (props.activeOperationId === id) {
-                          props.setActiveOperationId(newOps[0]?.id || null);
-                        }
-                      }}
-                      onDuplicate={(id) => {
-                        const op = props.camOperations.find(o => o.id === id);
-                        if (!op) return;
-                        const newId = `op_${Date.now()}`;
-                        const duplicated: CamOperation = {
-                          ...op,
-                          id: newId,
-                          name: `${op.name} (Copy)`,
-                        };
-                        const idx = props.camOperations.findIndex(o => o.id === id);
-                        const newOps = [...props.camOperations];
-                        newOps.splice(idx + 1, 0, duplicated);
-                        props.setCamOperations(newOps);
-                        props.setActiveOperationId(newId);
-                      }}
-                      onMove={(id, direction) => {
-                        const idx = props.camOperations.findIndex(o => o.id === id);
-                        if (idx === -1) return;
-                        const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-                        if (targetIdx < 0 || targetIdx >= props.camOperations.length) return;
-                        const newOps = [...props.camOperations];
-                        const [moved] = newOps.splice(idx, 1);
-                        newOps.splice(targetIdx, 0, moved);
-                        props.setCamOperations(newOps);
-                      }}
-                      onToggleEnable={(id) => {
-                        const newOps = props.camOperations.map(op => {
-                          if (op.id === id) {
-                            return { ...op, enabled: op.enabled === false ? true : false };
-                          }
-                          return op;
-                        });
-                        props.setCamOperations(newOps);
-                      }}
-                      onRegenerate={() => {
-                        props.onGenerateToolpaths();
-                      }}
-                      onReorder={(sourceIndex, destIndex, setupId) => {
-                        if (setupId) {
-                          const setupOps = props.camOperations.filter(op => (op.setup_id || (op as any).setupId || 'setup_001') === setupId);
-                          const otherOps = props.camOperations.filter(op => (op.setup_id || (op as any).setupId || 'setup_001') !== setupId);
-                          if (sourceIndex >= 0 && sourceIndex < setupOps.length && destIndex >= 0 && destIndex < setupOps.length) {
-                            const [moved] = setupOps.splice(sourceIndex, 1);
-                            setupOps.splice(destIndex, 0, moved);
-                            props.setCamOperations([...setupOps, ...otherOps]);
-                          }
-                        } else {
-                          const newOps = [...props.camOperations];
-                          const [moved] = newOps.splice(sourceIndex, 1);
-                          newOps.splice(destIndex, 0, moved);
-                          props.setCamOperations(newOps);
-                        }
-                      }}
-                    />
-                  </div>
+                {props.camOperations.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('operations')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-xs font-semibold transition-all cursor-pointer"
+                  >
+                    <span>Go to Operations Plan ({props.camOperations.length})</span>
+                    <ArrowRight className="size-3.5" />
+                  </button>
                 )}
               </div>
+
+              <FeatureOverviewSection
+                features={props.camFeatures}
+                activeFeatureId={props.activeFeatureId}
+                onFeatureSelect={props.setActiveFeatureId}
+                onAutoGenerate={() => {
+                  props.onAutoGenerateOperations();
+                  setActiveTab('operations');
+                }}
+                workflowStage={props.workflowStage}
+                setWorkflowStage={props.setWorkflowStage}
+                onRunFeatureRecognition={props.onRunFeatureRecognition}
+                isAutoGenerateDisabled={props.camFeatures.length === 0}
+              />
+            </div>
+          )}
+
+          {activeTab === 'operations' && (
+            <div className="flex flex-col gap-4 animate-in fade-in duration-300">
+              {/* Unified Operations Planning & Multi-Setup Toolbar */}
+              <MultiSetupManager
+                camSetups={props.camSetups}
+                activeSetupId={props.activeSetupId}
+                onSelectSetup={(setupId) => {
+                  props.setActiveSetupId?.(setupId);
+                  setOpsSetupFilter(setupId);
+                }}
+                onAddSetup={props.onAddSetup}
+                operations={props.camOperations}
+                activeFilter={opsSetupFilter}
+                onFilterChange={setOpsSetupFilter}
+                viewMode={opsViewMode}
+                onViewModeChange={setOpsViewMode}
+              />
+
+              {opsViewMode === 'table' ? (
+                <OperationPlanningTable 
+                  operations={filteredOps} 
+                  camValidation={props.camValidation} 
+                  camSetups={props.camSetups} 
+                  tools={props.camTools}
+                  selectedOperationIds={props.selectedOperationIds}
+                  features={props.camFeatures}
+                  onToggleOperation={handleToggleOperation}
+                  onToggleAll={handleToggleAll}
+                  onChange={handleOperationChange}
+                />
+              ) : (
+                <div className="min-h-[500px]">
+                  <OperationTreeSection
+                    operations={props.camOperations}
+                    activeOperationId={props.activeOperationId}
+                    setups={props.camSetups}
+                    activeSetupId={props.activeSetupId}
+                    onSelectSetup={(setupId) => props.setActiveSetupId?.(setupId)}
+                    onSelect={(id) => props.setActiveOperationId(id)}
+                    onAdd={handleAddOperation}
+                    onDelete={handleDeleteOperation}
+                    onDuplicate={handleDuplicateOperation}
+                    onMove={handleMoveOperation}
+                    onToggleEnable={handleToggleEnableOperation}
+                    onRegenerate={() => props.onGenerateToolpaths()}
+                    onReorder={handleReorderOperations}
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -563,6 +610,13 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                       <GCodeViewer
                         content={props.gcodeContent}
                         setupName={displaySetupName}
+                        sessionId={props.sessionId}
+                        perSetupGcode={props.perSetupGcode}
+                        setupSheets={props.setupSheets}
+                        masterRoutingSheet={props.masterRoutingSheet}
+                        setups={props.camSetups}
+                        activeSetupId={props.activeSetupId}
+                        onSelectSetup={(setupId) => props.setActiveSetupId?.(setupId)}
                         onDownload={() => {
                         const blob = new Blob([props.gcodeContent!], { type: 'text/plain' });
                         const url = URL.createObjectURL(blob);
@@ -589,6 +643,13 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
                       <GCodeViewer
                         content={props.klartextContent}
                         setupName={displaySetupName}
+                        sessionId={props.sessionId}
+                        perSetupGcode={props.perSetupGcode}
+                        setupSheets={props.setupSheets}
+                        masterRoutingSheet={props.masterRoutingSheet}
+                        setups={props.camSetups}
+                        activeSetupId={props.activeSetupId}
+                        onSelectSetup={(setupId) => props.setActiveSetupId?.(setupId)}
                         onDownload={() => {
                         const blob = new Blob([props.klartextContent!], { type: 'text/plain' });
                         const url = URL.createObjectURL(blob);

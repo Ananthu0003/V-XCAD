@@ -27,7 +27,7 @@ class ManufacturingCapabilityValidator:
             return {"valid": False, "reason": "No tool selected for operation."}
             
         # 3. Setup orientation validation (e.g. side holes on 3-axis)
-        axes = machine.get('axes', 3)
+        axes = machine.get('axes') or machine.get('axisCount') or (3 if "3X" in machine.get("type", "") else 4 if "4X" in machine.get("type", "") else 5 if "5X" in machine.get("type", "") else 3)
         if axes == 3:
             # Simple check: if feature orientation isn't Z, it's a side hole
             tool_axis = operation.get('tool_axis', [0, 0, 1])
