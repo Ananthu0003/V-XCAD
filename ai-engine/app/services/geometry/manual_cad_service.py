@@ -199,7 +199,6 @@ class ManualCADService(BodyOperationsMixin):
                 and matching_steps[0].exists()
                 and (
                     matching_steps[0].stat().st_mtime > rev0_step.stat().st_mtime
-                    or rev0_step.stat().st_size < 20000
                 )
             )
         )
@@ -279,6 +278,13 @@ class ManualCADService(BodyOperationsMixin):
         faces_meta: Dict[str, GeometricReference] = {}
         edges_meta: Dict[str, GeometricReference] = {}
 
+        # Conformal high-precision meshing across the entire solid B-Rep shape
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
+        try:
+            BRepMesh_IncrementalMesh(shape.wrapped, 0.05, False, 0.2, True)
+        except Exception:
+            pass
+
         for idx, f in enumerate(shape.faces()):
             tid = f"face_{idx}"
             faces_meta[tid] = ReferenceResolver.extract_face_reference(f, tid)
@@ -325,11 +331,9 @@ class ManualCADService(BodyOperationsMixin):
         return data
 
     def get_topology(self, session_id: str, revision_id: str) -> TopologyDataResponse:
-        """Retrieve cached topology or recompute on the fly."""
+        """Retrieve cached topology or recompute on the fly for the exact revision."""
         sdir = self._get_session_dir(session_id)
         topo_path = sdir / "topology" / f"{revision_id}.json"
-        if not topo_path.exists():
-            topo_path = sdir / "topology" / "rev_000.json"
         if topo_path.exists():
             try:
                 data_dict = json.loads(topo_path.read_text())

@@ -122,7 +122,7 @@ class ReferenceResolver:
             loc = TopLoc_Location()
             tri = BRep_Tool.Triangulation_s(occ_face, loc)
             if tri is None or tri.NbTriangles() == 0:
-                BRepMesh_IncrementalMesh(occ_face, 0.5)
+                BRepMesh_IncrementalMesh(occ_face, 0.05, False, 0.2, True)
                 tri = BRep_Tool.Triangulation_s(occ_face, loc)
 
             if tri is not None and tri.NbTriangles() > 0:
@@ -135,6 +135,7 @@ class ReferenceResolver:
                     p_t = p.Transformed(trsf)
                     nodes.append([round(float(p_t.X()), 4), round(float(p_t.Y()), 4), round(float(p_t.Z()), 4)])
 
+                is_reversed = (occ_face.Orientation() == TopAbs_REVERSED)
                 tri_coords: List[float] = []
                 for i in range(1, nb_tri + 1):
                     t = tri.Triangle(i)
@@ -142,7 +143,10 @@ class ReferenceResolver:
                     p1 = nodes[n1 - 1]
                     p2 = nodes[n2 - 1]
                     p3 = nodes[n3 - 1]
-                    tri_coords.extend([p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2]])
+                    if is_reversed:
+                        tri_coords.extend([p2[0], p2[1], p2[2], p1[0], p1[1], p1[2], p3[0], p3[1], p3[2]])
+                    else:
+                        tri_coords.extend([p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2]])
                 triangles = tri_coords
         except Exception:
             triangles = None
@@ -151,8 +155,20 @@ class ReferenceResolver:
             if hasattr(face, "wires"):
                 for wire in face.wires():
                     for edge in wire.edges():
-                        for v in edge.vertices():
-                            boundary_points.append([round(float(v.X), 4), round(float(v.Y), 4), round(float(v.Z), 4)])
+                        occ_e = edge.wrapped if hasattr(edge, "wrapped") else edge
+                        adaptor_e = BRepAdaptor_Curve(occ_e)
+                        ct = adaptor_e.GetType()
+                        if ct == GeomAbs_Line:
+                            for v in edge.vertices():
+                                boundary_points.append([round(float(v.X), 4), round(float(v.Y), 4), round(float(v.Z), 4)])
+                        else:
+                            f_param = adaptor_e.FirstParameter()
+                            l_param = adaptor_e.LastParameter()
+                            num_pts = 16
+                            for s_i in range(num_pts + 1):
+                                t_val = f_param + (l_param - f_param) * (s_i / float(num_pts))
+                                pt_val = adaptor_e.Value(t_val)
+                                boundary_points.append([round(float(pt_val.X()), 4), round(float(pt_val.Y()), 4), round(float(pt_val.Z()), 4)])
         except Exception:
             pass
 

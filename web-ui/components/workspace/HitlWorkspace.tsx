@@ -2651,6 +2651,7 @@ export default function HitlWorkspace() {
 													highlightedFaceIds={highlightedFaceIds}
 													onHighlightFaces={setHighlightedFaceIds}
 													detectedFeatures={topology?.features}
+													geometryScale={geometryInfo?.scale}
 												/>
 											)}
 											{selectionContext && (

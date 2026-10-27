@@ -7,7 +7,7 @@ import { TopologyPropertiesPanel } from './TopologyPropertiesPanel';
 import type { HistoryOperation } from './HistoryTimelineBar';
 import { CadViewport } from '@/components/viewport/CadViewport';
 import { SubShapeRaycaster, findFaceFromHit } from './SubShapeRaycaster';
-import { StlMesh } from '@/components/viewport/StlMesh';
+import { StlMesh, StlGeometryInfo } from '@/components/viewport/StlMesh';
 import { ContextMenu } from './operations/ContextMenu';
 import { getDefaultParams, getOperationDefinition } from './operations/registry';
 import { isOperationApplicable } from './operations/capabilities';
@@ -140,6 +140,7 @@ export function ManualCadWorkspace({
   const [isPreviewActive, setIsPreviewActive] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [stlUrl, setStlUrl] = useState<string | null>(initialStlUrl || null);
+  const [geometryInfo, setGeometryInfo] = useState<StlGeometryInfo | null>(null);
   const [hoveredEntity, setHoveredEntity] = useState<any | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entity: any } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -913,6 +914,7 @@ export function ManualCadWorkspace({
         >
           <CadViewport
             stlUrl={stlUrl}
+            geometryInfo={geometryInfo}
             statusText={isLoading ? 'Computing geometry...' : 'Ready'}
             isRecompiling={isLoading}
             hasStl={!!stlUrl}
@@ -951,6 +953,7 @@ export function ManualCadWorkspace({
             {stlUrl && (
               <StlMesh
                 url={stlUrl}
+                onGeometryReady={setGeometryInfo}
                 onDirectClick={handleDirectMeshClick}
                 onDirectDoubleClick={handleDirectMeshDoubleClick}
               />
@@ -966,6 +969,7 @@ export function ManualCadWorkspace({
               highlightedFaceIds={highlightedFaceIds}
               onHighlightFaces={setHighlightedFaceIds}
               detectedFeatures={detectedFeatures}
+              geometryScale={geometryInfo?.scale}
             />
           </CadViewport>
 

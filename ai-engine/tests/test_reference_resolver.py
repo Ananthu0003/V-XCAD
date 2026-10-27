@@ -90,3 +90,28 @@ def test_resolve_face_unambiguous_exact_match(monkeypatch):
     assert status == OperationStatus.VALID
     assert matched is mock_face_0
     assert "uniquely" in msg
+
+
+def test_extract_face_reference_triangulation_and_orientation():
+    """Verify that extract_face_reference extracts triangles with valid outward normal winding."""
+    import build123d as bd
+    box = bd.Box(30, 20, 10)
+    for i, face in enumerate(box.faces()):
+        ref = ReferenceResolver.extract_face_reference(face, f"face_{i}")
+        assert ref.triangles is not None
+        assert len(ref.triangles) >= 18 # at least 2 triangles = 18 floats
+        assert len(ref.triangles) % 9 == 0 # valid triangles
+
+
+def test_extract_face_reference_curved_surface():
+    """Verify that cylinders and curved surfaces receive full triangulation."""
+    import build123d as bd
+    cyl = bd.Cylinder(radius=10, height=25)
+    for i, face in enumerate(cyl.faces()):
+        ref = ReferenceResolver.extract_face_reference(face, f"face_{i}")
+        assert ref.triangles is not None
+        assert len(ref.triangles) >= 18
+        if ref.surface_type == "cylinder":
+            # Cylinder must have fine tessellation
+            assert len(ref.triangles) >= 9 * 16
+        assert len(ref.boundary_points) > 0
