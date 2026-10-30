@@ -23,10 +23,15 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
-      const data = await res.json();
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        // Safe fallback if server returns non-JSON error
+      }
       
       if (!res.ok) {
-        throw new Error(data.error || 'Login failed');
+        throw new Error(data?.error || `Request failed (${res.status}: ${res.statusText || 'Server Error'})`);
       }
       
       router.push('/workspace');

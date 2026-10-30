@@ -507,13 +507,19 @@ export default function HitlWorkspace() {
 			const stepParam = stepUrl ? `&source_step=${encodeURIComponent(stepUrl)}` : '';
 			const syncParam = forceSync ? `&force_sync=true` : '';
 			const res = await fetch(`/api/cad/modify/topology/${sId}?revision_id=${revId}${stepParam}${syncParam}`);
-			if (!res.ok) return;
+			if (!res.ok) {
+				setTopology(null);
+				return;
+			}
 			const data = await res.json();
-			if (data && data.faces) {
+			if (data && data.faces && (!data.session_id || data.session_id === sId)) {
 				setTopology(data);
+			} else {
+				setTopology(null);
 			}
 		} catch (err) {
 			console.error('Failed to fetch CAD B-Rep topology:', err);
+			setTopology(null);
 		}
 	}, [sessionId, stepUrl]);
 
@@ -805,7 +811,16 @@ export default function HitlWorkspace() {
 		const localUrl = URL.createObjectURL(file);
 		const newSessionId = `step-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
 
+		// Immediately clear stale model topology, selections, and hover states
+		setTopology(null);
+		setSelectedEntity(null);
+		setSelectedEntities([]);
+		setHoveredEntity(null);
+		setHighlightedFaceIds(null);
+		setSelectionContext(null);
+
 		setSessionId(newSessionId);
+		setStlUrl(null);
 		setIsGenerating(true);
 		setStepUrl(localUrl);
 		setDxfUrl(null);
@@ -1400,6 +1415,11 @@ export default function HitlWorkspace() {
 			let setupMeta: any = undefined;
 
 			if (payload.artifacts?.stl_url) {
+				setTopology(null);
+				setSelectedEntity(null);
+				setSelectedEntities([]);
+				setHoveredEntity(null);
+				setHighlightedFaceIds(null);
 				finalStlUrl = resolveModelUrl(payload.artifacts.stl_url, Date.now().toString());
 				setStlUrl(finalStlUrl);
 				setWorkflowStage(prev => (prev === 'blueprint' || prev === 'extraction' ? 'cad' : prev));
@@ -2151,6 +2171,14 @@ export default function HitlWorkspace() {
 	}
 
 	const handleRestoreSession = async (session: any) => {
+		// Immediately clear stale model topology, selections, and hover states
+		setTopology(null);
+		setSelectedEntity(null);
+		setSelectedEntities([]);
+		setHoveredEntity(null);
+		setHighlightedFaceIds(null);
+		setSelectionContext(null);
+
 		setSessionId(session.id);
 		if (typeof window !== 'undefined') {
 			window.history.replaceState(null, '', `/workspace?session=${session.id}`);
@@ -2279,6 +2307,12 @@ export default function HitlWorkspace() {
 
 	const handleClear = () => {
 		// 1. Reset CAD State
+		setTopology(null);
+		setSelectedEntity(null);
+		setSelectedEntities([]);
+		setHoveredEntity(null);
+		setHighlightedFaceIds(null);
+		setSelectionContext(null);
 		setRevisions([]);
 		setActiveRevisionIndex(-1);
 		setMessages([]);
@@ -2642,6 +2676,8 @@ export default function HitlWorkspace() {
 											{topology && (
 												<SubShapeRaycaster
 													topology={topology}
+													activeSessionId={sessionId}
+													activeRevisionId={activeRevisionId || 'rev_000'}
 													selectedEntity={selectedEntity}
 													selectedEntities={selectedEntities}
 													onSelectEntity={handleSelectTopologyEntity}

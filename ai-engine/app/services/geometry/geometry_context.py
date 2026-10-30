@@ -284,6 +284,15 @@ def get_planar_face_frame(face: bd.Face) -> Tuple[List[float], List[float], List
     if occ_face.Orientation() == TopAbs_REVERSED:
         norm = -norm
 
+    # Validate against true outward normal from solid context
+    try:
+        if hasattr(face, 'normal_at') and hasattr(face, 'center'):
+            outward_norm = face.normal_at(face.center())
+            if norm.dot(outward_norm) < 0:
+                norm = -norm
+    except Exception:
+        pass
+
     z_world = bd.Vector(0, 0, 1)
     if abs(norm.dot(z_world)) > 0.99:
         if norm.dot(z_world) > 0:

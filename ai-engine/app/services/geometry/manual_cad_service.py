@@ -60,6 +60,17 @@ from app.services.geometry.reference_resolver import ReferenceResolver
 from app.services.geometry.feature_service import FeatureService
 from app.services.geometry.topology_extractor import TopologyExtractor
 from app.services.geometry.geometry_context import get_planar_face_frame
+from app.services.geometry.manual_cad.dispatcher import dispatch_operation
+from app.services.geometry.manual_cad.operations import (
+    apply_hole,
+    apply_plug_hole,
+    apply_pocket,
+    apply_pad,
+    apply_fillet,
+    apply_chamfer,
+    apply_offset_face,
+    apply_snap_to_plane,
+)
 
 BASE_STORAGE_DIR = Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs"))
 
@@ -204,6 +215,23 @@ class ManualCADService(BodyOperationsMixin):
         )
 
         if should_reinit:
+            # Purge stale topology and feature caches for this session
+            topo_dir = sdir / "topology"
+            if topo_dir.exists():
+                for f in topo_dir.glob("*.json"):
+                    try:
+                        f.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+            feat_dir = sdir / "features"
+            if feat_dir.exists():
+                for f in feat_dir.glob("*.json"):
+                    try:
+                        f.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
             if base_shape is not None:
                 export_step(base_shape, str(rev0_step))
             elif base_step_path and base_step_path.exists():
@@ -334,7 +362,18 @@ class ManualCADService(BodyOperationsMixin):
         """Retrieve cached topology or recompute on the fly for the exact revision."""
         sdir = self._get_session_dir(session_id)
         topo_path = sdir / "topology" / f"{revision_id}.json"
-        if topo_path.exists():
+        step_path = sdir / "revisions" / f"{revision_id}.step"
+
+        # Invalidate cache if STEP file is newer than cached topology JSON
+        is_cache_stale = False
+        if topo_path.exists() and step_path.exists():
+            try:
+                if step_path.stat().st_mtime > topo_path.stat().st_mtime:
+                    is_cache_stale = True
+            except Exception:
+                pass
+
+        if topo_path.exists() and not is_cache_stale:
             try:
                 data_dict = json.loads(topo_path.read_text())
                 faces_dict = data_dict.get("faces", {})
@@ -867,13 +906,7 @@ class ManualCADService(BodyOperationsMixin):
         parameters: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
         """Dispatch operation to specific geometry builder."""
-        handler = self._operation_registry.get(op_type)
-        if not handler:
-            return None, OperationStatus.INVALID_REFERENCE, f"Unsupported operation type: {op_type}", [], []
-        try:
-            return handler(base_shape, references, parameters)
-        except Exception as exc:
-            return None, OperationStatus.GEOMETRY_FAILURE, str(exc), [], []
+        return dispatch_operation(base_shape, op_type, references, parameters)
 
     def _apply_fillet(
         self,
@@ -881,40 +914,7 @@ class ManualCADService(BodyOperationsMixin):
         refs: List[GeometricReference],
         params: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
-        radius = float(params.get("radius", 2.0))
-        if radius <= 0.0:
-            return None, OperationStatus.GEOMETRY_FAILURE, "Fillet radius must be strictly positive.", [], []
-
-        resolved_edges: List[bd.Edge] = []
-        mod_edges: List[str] = []
-
-        for r in refs:
-            edge, status, msg = ReferenceResolver.resolve_edge(shape, r)
-            if status != OperationStatus.VALID or edge is None:
-                return None, status, msg, [], []
-
-            resolved_edges.append(edge)
-            mod_edges.append(r.transient_id)
-
-        if not resolved_edges:
-            return None, OperationStatus.INVALID_REFERENCE, "No valid edges found for fillet operation.", [], []
-
-        try:
-            new_shape = bd.fillet(resolved_edges, radius=radius)
-            return new_shape, OperationStatus.VALID, f"Fillet (R{radius:.2f}mm) applied successfully on {len(resolved_edges)} edge(s).", [], mod_edges
-        except Exception as e:
-            try:
-                from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
-                mf = BRepFilletAPI_MakeFillet(shape.wrapped)
-                for ed in resolved_edges:
-                    mf.Add(radius, ed.wrapped)
-                mf.Build()
-                if mf.IsDone():
-                    return bd.Solid(mf.Shape()), OperationStatus.VALID, f"Fillet (R{radius:.2f}mm) applied successfully on {len(resolved_edges)} edge(s).", [], mod_edges
-            except Exception:
-                pass
-            diag = f"Fillet blending failed: radius {radius:.2f}mm creates non-manifold self-intersection or topology clash: {e}"
-            return None, OperationStatus.GEOMETRY_FAILURE, diag, [], []
+        return apply_fillet(shape, refs, params)
 
     def _apply_chamfer(
         self,
@@ -922,45 +922,7 @@ class ManualCADService(BodyOperationsMixin):
         refs: List[GeometricReference],
         params: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
-        distance = float(params.get("distance", 1.0))
-        if distance <= 0.0:
-            return None, OperationStatus.GEOMETRY_FAILURE, "Chamfer distance must be strictly positive.", [], []
-
-        resolved_edges: List[bd.Edge] = []
-        mod_edges: List[str] = []
-
-        for r in refs:
-            edge, status, msg = ReferenceResolver.resolve_edge(shape, r)
-            if status != OperationStatus.VALID or edge is None:
-                return None, status, msg, [], []
-
-            resolved_edges.append(edge)
-            mod_edges.append(r.transient_id)
-
-        if not resolved_edges:
-            return None, OperationStatus.INVALID_REFERENCE, "No valid edges found for chamfer operation.", [], []
-
-        dist2 = params.get("distance2")
-        use_asym = dist2 is not None and float(dist2) > 0 and float(dist2) != distance
-        try:
-            if use_asym:
-                new_shape = bd.chamfer(resolved_edges, length=distance, length2=float(dist2))
-            else:
-                new_shape = bd.chamfer(resolved_edges, length=distance)
-            return new_shape, OperationStatus.VALID, f"Chamfer ({distance:.2f}mm) applied successfully on {len(resolved_edges)} edge(s).", [], mod_edges
-        except Exception as e:
-            try:
-                from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer
-                mc = BRepFilletAPI_MakeChamfer(shape.wrapped)
-                for ed in resolved_edges:
-                    mc.Add(distance, ed.wrapped)
-                mc.Build()
-                if mc.IsDone():
-                    return bd.Solid(mc.Shape()), OperationStatus.VALID, f"Chamfer ({distance:.2f}mm) applied successfully on {len(resolved_edges)} edge(s).", [], mod_edges
-            except Exception:
-                pass
-            diag = f"Chamfer bevel failed: distance {distance:.2f}mm creates topology conflict: {e}"
-            return None, OperationStatus.GEOMETRY_FAILURE, diag, [], []
+        return apply_chamfer(shape, refs, params)
 
     def _apply_hole(
         self,
@@ -968,76 +930,7 @@ class ManualCADService(BodyOperationsMixin):
         refs: List[GeometricReference],
         params: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
-        """Data-driven Hole Wizard (Blind, Through, Counterbore, Countersink)."""
-        import math
-        if not refs or refs[0].entity_type != "face":
-            return None, OperationStatus.INVALID_REFERENCE, "Hole operation requires a planar target face reference.", [], []
-
-        face, status, msg = ReferenceResolver.resolve_face(shape, refs[0])
-        if status != OperationStatus.VALID or face is None:
-            return None, status, msg, [], []
-
-        diameter = max(0.1, float(params.get("diameter", 6.0)))
-        depth = max(0.1, float(params.get("depth", 10.0)))
-        hole_type = str(params.get("hole_type", "blind")).lower()
-        
-        pos_x = float(params.get("pos_x", params.get("position", [0.0, 0.0])[0]))
-        pos_y = float(params.get("pos_y", params.get("position", [0.0, 0.0])[1] if len(params.get("position", [0.0, 0.0])) > 1 else 0.0))
-
-        # Deterministic workplane based on selected face frame
-        origin_l, u_l, v_l, n_l = get_planar_face_frame(face)
-        workplane = bd.Plane(
-            origin=bd.Vector(*origin_l),
-            x_dir=bd.Vector(*u_l),
-            z_dir=bd.Vector(*n_l),
-        )
-
-        # Part bounding box for through hole depth calculation
-        bnd = Bnd_Box()
-        BRepBndLib.Add_s(shape.wrapped, bnd)
-        xmin, ymin, zmin, xmax, ymax, zmax = bnd.Get()
-        max_dim = max(xmax - xmin, ymax - ymin, zmax - zmin) * 1.5
-
-        if hole_type == "through":
-            cutter_depth = max_dim
-            c_main = bd.Cylinder(radius=diameter / 2.0, height=cutter_depth)
-            loc = workplane.location * bd.Location(bd.Vector(pos_x, pos_y, -cutter_depth / 2.0))
-            cutter = c_main.located(loc)
-
-        elif hole_type == "counterbore":
-            cbore_dia = max(diameter + 0.5, float(params.get("cbore_diameter", diameter * 1.8)))
-            cbore_depth = max(0.1, float(params.get("cbore_depth", 4.0)))
-            
-            c_body = bd.Cylinder(radius=diameter / 2.0, height=depth)
-            c_cbore = bd.Cylinder(radius=cbore_dia / 2.0, height=cbore_depth)
-            
-            loc_body = workplane.location * bd.Location(bd.Vector(pos_x, pos_y, -depth / 2.0))
-            loc_cbore = workplane.location * bd.Location(bd.Vector(pos_x, pos_y, -cbore_depth / 2.0))
-            cutter = c_body.located(loc_body) + c_cbore.located(loc_cbore)
-
-        elif hole_type == "countersink":
-            csink_dia = max(diameter + 0.5, float(params.get("csink_diameter", diameter * 1.8)))
-            csink_angle = float(params.get("csink_angle", 90.0))
-            half_angle_rad = math.radians(max(10.0, min(160.0, csink_angle)) / 2.0)
-            cs_depth = max(0.1, (csink_dia - diameter) / 2.0 / math.tan(half_angle_rad))
-
-            c_body = bd.Cylinder(radius=diameter / 2.0, height=depth)
-            c_cone = bd.Cone(bottom_radius=diameter / 2.0, top_radius=csink_dia / 2.0, height=cs_depth)
-
-            loc_body = workplane.location * bd.Location(bd.Vector(pos_x, pos_y, -depth / 2.0))
-            loc_cone = workplane.location * bd.Location(bd.Vector(pos_x, pos_y, -cs_depth / 2.0))
-            cutter = c_body.located(loc_body) + c_cone.located(loc_cone)
-
-        else: # Standard blind hole
-            c_main = bd.Cylinder(radius=diameter / 2.0, height=depth)
-            loc = workplane.location * bd.Location(bd.Vector(pos_x, pos_y, -depth / 2.0))
-            cutter = c_main.located(loc)
-
-        try:
-            new_shape = shape - cutter
-            return new_shape, OperationStatus.VALID, f"Hole ({hole_type.capitalize()}, Dia {diameter:.2f}mm) created successfully.", ["face_new_hole"], []
-        except Exception as e:
-            return None, OperationStatus.GEOMETRY_FAILURE, f"Hole boolean subtraction failed: {e}", [], []
+        return apply_hole(shape, refs, params)
 
     def _apply_pocket(
         self,
@@ -1045,75 +938,7 @@ class ManualCADService(BodyOperationsMixin):
         refs: List[GeometricReference],
         params: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
-        """Subtractive 2D profile extrusion (Rectangular, Circular, Slot)."""
-        if not refs or refs[0].entity_type != "face":
-            return None, OperationStatus.INVALID_REFERENCE, "Pocket requires a planar face reference.", [], []
-
-        face, status, msg = ReferenceResolver.resolve_face(shape, refs[0])
-        if status != OperationStatus.VALID or face is None:
-            return None, status, msg, [], []
-
-        depth = max(0.1, float(params.get("depth", 5.0)))
-        profile_shape = str(params.get("profile", "rectangle")).lower()
-        pos_x = float(params.get("pos_x", 0.0))
-        pos_y = float(params.get("pos_y", 0.0))
-        rot_deg = float(params.get("rotation_deg", 0.0))
-
-        # Deterministic workplane based on selected face frame
-        origin_l, u_l, v_l, n_l = get_planar_face_frame(face)
-        workplane = bd.Plane(
-            origin=bd.Vector(*origin_l),
-            x_dir=bd.Vector(*u_l),
-            z_dir=bd.Vector(*n_l),
-        )
-
-        # Part bounding box for through-all pocket depth calculation
-        bnd = Bnd_Box()
-        BRepBndLib.Add_s(shape.wrapped, bnd)
-        xmin, ymin, zmin, xmax, ymax, zmax = bnd.Get()
-        max_dim = max(xmax - xmin, ymax - ymin, zmax - zmin) * 1.5
-        if params.get("through_all") or params.get("pocket_type") == "through":
-            depth = max_dim
-        draft_deg = float(params.get("draft_deg", 0.0))
-
-        try:
-            if profile_shape == "circle":
-                diameter = max(0.5, float(params.get("diameter", params.get("width", 20.0))))
-                cutter_prism = bd.Cylinder(radius=diameter / 2.0, height=depth)
-                loc = workplane.location * bd.Location(bd.Vector(pos_x, pos_y, -depth / 2.0))
-                cutter_prism = cutter_prism.located(loc)
-
-            elif profile_shape == "slot":
-                length = max(1.0, float(params.get("length", params.get("width", 30.0))))
-                width = max(0.5, float(params.get("width", params.get("height", 12.0))))
-                if length < width:
-                    length, width = width, length
-                
-                with bd.BuildSketch(workplane) as s:
-                    with bd.Locations(bd.Location(bd.Vector(pos_x, pos_y), rot_deg)):
-                        bd.SlotOverall(length, width)
-                cutter_prism = bd.extrude(s.sketch, amount=-depth)
-
-            else: # Rectangular (with optional internal corner fillet)
-                width = max(1.0, float(params.get("width", 20.0)))
-                height = max(1.0, float(params.get("height", 15.0)))
-                corner_radius = float(params.get("corner_radius", 0.0))
-
-                max_r = min(width, height) / 2.0 - 0.01
-                corner_radius = max(0.0, min(corner_radius, max_r))
-
-                with bd.BuildSketch(workplane) as s:
-                    with bd.Locations(bd.Location(bd.Vector(pos_x, pos_y), rot_deg)):
-                        if corner_radius > 0.1:
-                            bd.RectangleRounded(width, height, radius=corner_radius)
-                        else:
-                            bd.Rectangle(width, height)
-                cutter_prism = bd.extrude(s.sketch, amount=-depth)
-
-            new_shape = shape - cutter_prism
-            return new_shape, OperationStatus.VALID, f"Pocket ({profile_shape.capitalize()}, depth {depth:.1f}mm) cut succeeded.", ["face_new_pocket"], []
-        except Exception as e:
-            return None, OperationStatus.GEOMETRY_FAILURE, f"Pocket boolean cut failed: {e}", [], []
+        return apply_pocket(shape, refs, params)
 
     def _apply_pad(
         self,
@@ -1121,61 +946,7 @@ class ManualCADService(BodyOperationsMixin):
         refs: List[GeometricReference],
         params: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
-        """Additive 2D profile extrusion (Rectangular, Circular)."""
-        if not refs or refs[0].entity_type != "face":
-            return None, OperationStatus.INVALID_REFERENCE, "Pad requires a planar face reference.", [], []
-
-        face, status, msg = ReferenceResolver.resolve_face(shape, refs[0])
-        if status != OperationStatus.VALID or face is None:
-            return None, status, msg, [], []
-
-        height_val = max(0.1, float(params.get("height", 5.0)))
-        profile_shape = str(params.get("profile", "rectangle")).lower()
-        pos_x = float(params.get("pos_x", 0.0))
-        pos_y = float(params.get("pos_y", 0.0))
-        rot_deg = float(params.get("rotation_deg", 0.0))
-
-        # Deterministic workplane based on selected face frame
-        origin_l, u_l, v_l, n_l = get_planar_face_frame(face)
-        workplane = bd.Plane(
-            origin=bd.Vector(*origin_l),
-            x_dir=bd.Vector(*u_l),
-            z_dir=bd.Vector(*n_l),
-        )
-
-        try:
-            if profile_shape == "circle":
-                diameter = max(0.5, float(params.get("diameter", params.get("width", 20.0))))
-                boss_prism = bd.Cylinder(radius=diameter / 2.0, height=height_val)
-                loc = workplane.location * bd.Location(bd.Vector(pos_x, pos_y, height_val / 2.0))
-                boss_prism = boss_prism.located(loc)
-
-            else:
-                width = max(1.0, float(params.get("width", 20.0)))
-                length = max(1.0, float(params.get("length", 20.0)))
-                corner_radius = float(params.get("corner_radius", 0.0))
-
-                max_r = min(width, length) / 2.0 - 0.01
-                corner_radius = max(0.0, min(corner_radius, max_r))
-
-                with bd.BuildSketch(workplane) as s:
-                    with bd.Locations(bd.Location(bd.Vector(pos_x, pos_y), rot_deg)):
-                        if corner_radius > 0.1:
-                            bd.RectangleRounded(width, length, radius=corner_radius)
-                        else:
-                            bd.Rectangle(width, length)
-                boss_prism = bd.extrude(s.sketch, amount=height_val)
-
-            new_shape = shape + boss_prism
-            return new_shape, OperationStatus.VALID, f"Pad boss ({profile_shape.capitalize()}, height {height_val:.1f}mm) union succeeded.", ["face_new_pad"], []
-        except Exception as e:
-            return None, OperationStatus.GEOMETRY_FAILURE, f"Pad boolean union failed: {e}", [], []
-
-    # (Inherits _apply_edit_feature from BodyOperationsMixin)
-
-    # --------------------------------------------------------------------------
-    # New direct-edit operations
-    # --------------------------------------------------------------------------
+        return apply_pad(shape, refs, params)
 
     def _apply_offset_face(
         self,
@@ -1183,54 +954,7 @@ class ManualCADService(BodyOperationsMixin):
         refs: List[GeometricReference],
         params: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
-        """
-        Push-Pull face offset along its normal direction.
-        Uses BRepOffsetAPI_MakeOffsetShape for true B-Rep offset.
-        Positive distance = outward (along normal), negative = inward.
-        """
-        from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
-        from OCP.BRepAdaptor import BRepAdaptor_Surface
-        from OCP.GeomAbs import GeomAbs_Plane
-
-        if not refs or refs[0].entity_type != "face":
-            return None, OperationStatus.INVALID_REFERENCE, "offset_face requires a planar face reference.", [], []
-
-        face_ref = refs[0]
-        if face_ref.surface_type and face_ref.surface_type.lower() != "plane":
-            return None, OperationStatus.INVALID_REFERENCE, "offset_face is supported on planar faces only.", [], []
-
-        distance = float(params.get("distance", 1.0))
-        if distance == 0.0:
-            return None, OperationStatus.GEOMETRY_FAILURE, "Offset distance must be non-zero.", [], []
-
-        # Resolve the target face to verify it exists on this shape
-        face, status, msg = ReferenceResolver.resolve_face(shape, face_ref)
-        if status != OperationStatus.VALID or face is None:
-            return None, status, msg, [], []
-
-        surf = BRepAdaptor_Surface(face.wrapped)
-        if surf.GetType() != GeomAbs_Plane:
-            return None, OperationStatus.INVALID_REFERENCE, "offset_face: resolved face is not planar.", [], []
-
-        # True CAD Push / Pull (Extrude):
-        # - Outward pull (distance > 0): Extrudes face outward along its normal into a solid prism and fuses with the body (Pad / Boss)
-        # - Inward push (distance < 0): Extrudes face inward along -normal into a cutter prism and cuts from the body (Pocket / Cut)
-        try:
-            face_normal = face.normal_at(face.center())
-            face_to_extrude = bd.Face(face.wrapped)
-
-            if distance > 0:
-                extruded = bd.extrude(face_to_extrude, amount=distance, dir=face_normal)
-                result = shape + extruded
-                op_desc = f"Extruded face +{distance:.2f}mm outward (Pad / Boss)."
-            else:
-                cutter = bd.extrude(face_to_extrude, amount=abs(distance), dir=-face_normal)
-                result = shape - cutter
-                op_desc = f"Extruded face {distance:.2f}mm inward (Cut / Pocket)."
-
-            return result, OperationStatus.VALID, op_desc, ["face_extrude"], []
-        except Exception as exc:
-            return None, OperationStatus.GEOMETRY_FAILURE, f"Push/Pull extrude failed: {exc}", [], []
+        return apply_offset_face(shape, refs, params)
 
     def _apply_snap_to_plane(
         self,
@@ -1238,64 +962,7 @@ class ManualCADService(BodyOperationsMixin):
         refs: List[GeometricReference],
         params: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
-        """
-        Translate the entire solid so that the selected face lies on a reference global plane.
-        Supported planes: XY (Z=target_z), XZ (Y=target_y), YZ (X=target_x).
-        Does NOT rotate — only translates.
-        """
-        from OCP.gp import gp_Vec, gp_Trsf
-        from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
-        from OCP.BRepAdaptor import BRepAdaptor_Surface
-        from OCP.GeomAbs import GeomAbs_Plane
-
-        if not refs or refs[0].entity_type != "face":
-            return None, OperationStatus.INVALID_REFERENCE, "snap_to_plane requires a planar face reference.", [], []
-
-        face_ref = refs[0]
-        face, status, msg = ReferenceResolver.resolve_face(shape, face_ref)
-        if status != OperationStatus.VALID or face is None:
-            return None, status, msg, [], []
-
-        surf = BRepAdaptor_Surface(face.wrapped)
-        if surf.GetType() != GeomAbs_Plane:
-            return None, OperationStatus.INVALID_REFERENCE, "snap_to_plane: selected face is not planar.", [], []
-
-        plane = surf.Plane()
-        face_origin = plane.Location()
-        face_normal_gp = plane.Axis().Direction()
-
-        target_plane = str(params.get("plane", "XY")).upper()
-        target_coord = float(params.get("target_coordinate", 0.0))
-
-        # Compute translation offset
-        if target_plane == "XY":
-            # Move face so its Z = target_coord
-            delta_z = target_coord - face_origin.Z()
-            trsf = gp_Trsf()
-            trsf.SetTranslation(gp_Vec(0.0, 0.0, delta_z))
-            desc = f"Snapped to Z={target_coord:.2f}"
-        elif target_plane == "XZ":
-            delta_y = target_coord - face_origin.Y()
-            trsf = gp_Trsf()
-            trsf.SetTranslation(gp_Vec(0.0, delta_y, 0.0))
-            desc = f"Snapped to Y={target_coord:.2f}"
-        elif target_plane == "YZ":
-            delta_x = target_coord - face_origin.X()
-            trsf = gp_Trsf()
-            trsf.SetTranslation(gp_Vec(delta_x, 0.0, 0.0))
-            desc = f"Snapped to X={target_coord:.2f}"
-        else:
-            return None, OperationStatus.INVALID_REFERENCE, f"Unknown plane '{target_plane}'. Use XY, XZ, or YZ.", [], []
-
-        try:
-            builder = BRepBuilderAPI_Transform(shape.wrapped, trsf, True)
-            builder.Build()
-            if not builder.IsDone():
-                return None, OperationStatus.GEOMETRY_FAILURE, "snap_to_plane transform failed.", [], []
-            new_shape = bd.Shape(builder.Shape())
-            return new_shape, OperationStatus.VALID, desc, [], []
-        except Exception as exc:
-            return None, OperationStatus.GEOMETRY_FAILURE, f"snap_to_plane failed: {exc}", [], []
+        return apply_snap_to_plane(shape, refs, params)
 
     def _apply_plug_hole(
         self,
@@ -1303,70 +970,7 @@ class ManualCADService(BodyOperationsMixin):
         refs: List[GeometricReference],
         params: Dict[str, Any]
     ) -> Tuple[Optional[bd.Shape], OperationStatus, str, List[str], List[str]]:
-        """
-        Bore defeaturing: remove a cylindrical bore and reconstruct the parent surface.
-        Uses boolean union with a cylinder matching the bore geometry.
-        Supports simple blind and through bores only.
-        Rejects intersecting bores and unsupported surface types.
-        """
-        from OCP.BRepAdaptor import BRepAdaptor_Surface
-        from OCP.GeomAbs import GeomAbs_Cylinder
-        from OCP.GeomLProp import GeomLProp_SLProps
-        from OCP.TopAbs import TopAbs_FACE
-        from OCP.gp import gp_Dir
-        import itertools
-
-        if not refs or refs[0].entity_type != "face":
-            return None, OperationStatus.INVALID_REFERENCE, "plug_hole requires a cylindrical face reference.", [], []
-
-        face, status, msg = ReferenceResolver.resolve_face(shape, refs[0])
-        if status != OperationStatus.VALID or face is None:
-            return None, status, msg, [], []
-
-        surf = BRepAdaptor_Surface(face.wrapped)
-        if surf.GetType() != GeomAbs_Cylinder:
-            return None, OperationStatus.INVALID_REFERENCE, "plug_hole only works on cylindrical bore faces.", [], []
-
-        cyl = surf.Cylinder()
-        radius = cyl.Radius()
-        loc = cyl.Location()
-        axis = cyl.Axis().Direction()
-
-        # Determine bore extent from UV bounds (no axis-aligned bbox or ±0.2mm extension)
-        try:
-            from OCP.BRepTools import BRepTools
-            _, _, vmin, vmax = BRepTools.UVBounds_s(face.wrapped)
-            bore_len = abs(vmax - vmin)
-            v_mid = (vmin + vmax) / 2.0
-            plug_origin = bd.Vector(loc.X(), loc.Y(), loc.Z()) + bd.Vector(axis.X(), axis.Y(), axis.Z()) * v_mid
-        except Exception:
-            bnd = Bnd_Box()
-            BRepBndLib.Add_s(face.wrapped, bnd)
-            xmin, ymin, zmin, xmax, ymax, zmax = bnd.Get()
-            bore_len = max(xmax - xmin, ymax - ymin, zmax - zmin)
-            plug_origin = face.center()
-
-        z_dir = bd.Vector(axis.X(), axis.Y(), axis.Z())
-        workplane = bd.Plane(origin=plug_origin, z_dir=z_dir)
-
-        try:
-            # Create a solid cylinder matching the bore exactly
-            plug = bd.Cylinder(radius=radius + 1e-4, height=bore_len)
-            plug = plug.located(workplane.location)
-
-            # Union to fill the bore
-            result = shape + plug
-
-            # Validate — result must not have more volume than reasonable
-            props = GProp_GProps()
-            BRepGProp.VolumeProperties_s(result.wrapped, props)
-            new_vol = float(props.Mass())
-            if new_vol <= 0:
-                return None, OperationStatus.GEOMETRY_FAILURE, "plug_hole produced zero-volume solid — bore may be through complex topology.", [], []
-
-            return result, OperationStatus.VALID, f"Bore plugged (R={radius:.2f}mm, length={bore_len:.1f}mm).", [], ["edge_bore_rim"]
-        except Exception as exc:
-            return None, OperationStatus.GEOMETRY_FAILURE, f"plug_hole boolean union failed: {exc}", [], []
+        return apply_plug_hole(shape, refs, params)
 
     # --------------------------------------------------------------------------
     # Non-mutating geometry query methods

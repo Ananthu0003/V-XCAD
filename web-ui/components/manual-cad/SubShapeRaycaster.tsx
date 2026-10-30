@@ -16,6 +16,8 @@ export interface SubShapeRaycasterProps {
   detectedFeatures?: any[];
   selectedEntities?: any[];
   geometryScale?: number;
+  activeSessionId?: string | null;
+  activeRevisionId?: string | null;
 }
 
 /**
@@ -354,18 +356,18 @@ function FaceSurfaceMesh({
         }}
       >
         <meshStandardMaterial
-          // FreeCAD-style electric cyan/blue: Solid, bright, and vibrant
+          // FreeCAD-style electric cyan/blue: Translucent tint preserving hole openings
           color={isSelected ? '#00d2ff' : isHovered ? '#38bdf8' : '#ffffff'}
           emissive={isSelected ? '#0077b6' : isHovered ? '#0284c7' : '#000000'}
-          emissiveIntensity={isSelected ? 0.65 : isHovered ? 0.35 : 0.0}
+          emissiveIntensity={isSelected ? 0.35 : isHovered ? 0.2 : 0.0}
           transparent={true}
-          opacity={isSelected ? 0.88 : isHovered ? 0.45 : 0.0001}
+          opacity={isSelected ? 0.45 : isHovered ? 0.25 : 0.0001}
           depthTest={true}
           depthWrite={false}
           side={THREE.DoubleSide}
           polygonOffset={true}
-          polygonOffsetFactor={isSelected ? -4 : isHovered ? -2 : 0}
-          polygonOffsetUnits={isSelected ? -4 : isHovered ? -2 : 0}
+          polygonOffsetFactor={isSelected ? -1 : isHovered ? -1 : 0}
+          polygonOffsetUnits={isSelected ? -1 : isHovered ? -1 : 0}
           roughness={0.15}
           metalness={0.1}
         />
@@ -398,7 +400,18 @@ export function SubShapeRaycaster({
   detectedFeatures,
   selectedEntities,
   geometryScale = 1.0,
+  activeSessionId,
+  activeRevisionId,
 }: SubShapeRaycasterProps) {
+  // Prevent ghost highlights from stale or previous projects/sessions
+  if (!topology) return null;
+  if (activeSessionId && topology.session_id && topology.session_id !== activeSessionId) {
+    return null;
+  }
+  if (activeRevisionId && topology.revision_id && topology.revision_id !== activeRevisionId) {
+    return null;
+  }
+
   const [localHovered, setLocalHovered] = useState<string | null>(null);
 
   const activeHover = hoveredEntity?.transient_id || localHovered;

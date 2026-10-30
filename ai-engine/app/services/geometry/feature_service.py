@@ -307,7 +307,7 @@ class FeatureService:
                     axis = list(cyl_axis)
                     height = cls._calc_projected_depth(f_obj, axis, f_meta.get("bbox", {}))
 
-                    # Check for top planar face (convex transition with the cylinder cap, not concave base)
+                    # Check for top planar face (MUST have convex transition with the cylinder wall, not concave base)
                     top_fid = None
                     for a in extractor.adjacency.get(fid, []):
                         afid = a["adjacent_face"]
@@ -316,10 +316,9 @@ class FeatureService:
                             anormal = ameta.get("normal", (0, 0, 0))
                             if abs(sum(x * y for x, y in zip(axis, anormal))) > 0.99:
                                 # Top cap has convex edge with the cylinder wall, whereas base is concave
-                                if a.get("transition") == "convex" or top_fid is None:
+                                if a.get("transition") == "convex":
                                     top_fid = afid
-                                    if a.get("transition") == "convex":
-                                        break
+                                    break
 
                     feat_faces = [fid]
                     if top_fid:
@@ -359,8 +358,12 @@ class FeatureService:
             if fid in claimed_faces or f_meta.get("type") != "plane":
                 continue
 
-            # A pocket floor must be surrounded by concave transition walls
+            # A pocket floor must be interior (cavity) and cannot have outer convex transitions to the workpiece body
             adj = extractor.adjacency.get(fid, [])
+            convex_transitions = [a for a in adj if a.get("transition") == "convex"]
+            if convex_transitions:
+                continue
+
             concave_walls = [
                 a["adjacent_face"] for a in adj if a.get("transition") == "concave" and a["adjacent_face"] not in claimed_faces
             ]

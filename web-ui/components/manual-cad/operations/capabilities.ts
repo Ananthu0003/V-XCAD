@@ -167,6 +167,7 @@ export const CAPABILITY_MATRIX: Record<CADToolType | 'edit_feature', EntityClass
   push_pull: ['face.planar'],
   round_face_edges: ['face.planar'],
   delete_feature: [
+    'body',
     'face.planar',
     'face.cylindrical',
     'face.conical',
@@ -223,7 +224,7 @@ export const OPERATION_REQUIREMENTS: Record<CADToolType | 'edit_feature', string
   transform: 'Select the 3D model, face, or feature to transform',
   push_pull: 'Select a planar face',
   round_face_edges: 'Select a planar face',
-  delete_feature: 'Select a face or feature to delete',
+  delete_feature: 'Select a face, subpart, or feature to delete',
   move_feature: 'Select a feature or cylindrical face',
   pattern_feature: 'Select a feature or cylindrical face',
   move: 'Select the 3D model',
@@ -281,7 +282,7 @@ export function getApplicableOperations(
   if (classification === 'body') {
     return [
       'move', 'rotate', 'scale', 'transform', 'edit_feature', 'mirror', 'align', 'primitive',
-      'shell', 'offset', 'split', 'linear_pattern', 'polar_pattern', 'heal', 'measure',
+      'shell', 'offset', 'split', 'linear_pattern', 'polar_pattern', 'heal', 'delete_feature', 'measure',
     ];
   }
   return [];
