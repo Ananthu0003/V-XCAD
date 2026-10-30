@@ -13,6 +13,7 @@ interface WorkspaceSettingsProps {
   camSetup: SetupSettings;
   setCamSetup: React.Dispatch<React.SetStateAction<SetupSettings>>;
   pythonScript: string;
+  onSwitchToManualCad?: () => void;
 }
 
 export function WorkspaceSettings({
@@ -25,6 +26,7 @@ export function WorkspaceSettings({
   camSetup,
   setCamSetup,
   pythonScript,
+  onSwitchToManualCad,
 }: WorkspaceSettingsProps) {
   const [copied, setCopied] = useState(false);
   const [copiedScript, setCopiedScript] = useState(false);
@@ -109,16 +111,25 @@ export function WorkspaceSettings({
             )}
           </div>
           {!pythonScript ? (
-            <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-input)] p-6 text-center space-y-2">
+            <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-input)] p-6 text-center space-y-2.5">
               <div className="size-8 rounded-lg bg-[var(--ui-panel)] border border-[var(--ui-border-ctrl)] flex items-center justify-center mx-auto text-[var(--ui-accent)]">
                 <Code2 className="size-4" />
               </div>
               <div className="text-[10.5px] font-bold text-[var(--ui-text-primary)] font-mono uppercase tracking-wider">
-                No Script Generated
+                Direct B-Rep Solid Model
               </div>
-              <p className="text-[10.5px] text-[var(--ui-text-muted)] max-w-[220px] mx-auto leading-relaxed">
-                Python CAD build script will be generated dynamically upon synthesis.
+              <p className="text-[10.5px] text-[var(--ui-text-muted)] max-w-[240px] mx-auto leading-relaxed">
+                Imported STEP models do not contain Python build scripts. Use the Manual CAD tab for direct 3D face &amp; edge editing, or prompt the AI Copilot to synthesize a Build123d script.
               </p>
+              {onSwitchToManualCad && (
+                <button
+                  type="button"
+                  onClick={onSwitchToManualCad}
+                  className="ui-btn ui-btn--primary !h-7 !px-3 text-[10.5px] font-mono mx-auto mt-1 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>Open Manual CAD</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-bg)] overflow-hidden shadow-sm">

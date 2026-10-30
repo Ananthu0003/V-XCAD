@@ -430,23 +430,73 @@ def get_default_tools() -> list[Tool]:
     ]
 
 
-def get_default_machine() -> MachineConfig:
-    """Returns a default 3-axis CNC vertical machining center."""
+# Known machine travel envelopes (X, Y, Z travel in mm)
+KNOWN_MACHINE_TRAVEL: dict[str, tuple[float, float, float]] = {
+    "haas_vf2": (762.0, 406.0, 508.0),
+    "haas_vf4ss": (1270.0, 508.0, 635.0),
+    "mazak_vcn530c": (1050.0, 530.0, 510.0),
+    "dmg_cmx1100v": (1100.0, 560.0, 630.0),
+    "okuma_genos_m560v": (1050.0, 560.0, 460.0),
+    "brother_speedio_s700x2": (700.0, 400.0, 300.0),
+    "haas_umc750": (762.0, 508.0, 508.0),
+    "dmg_dmu50": (650.0, 520.0, 475.0),
+    "mazak_variaxis_c600": (600.0, 600.0, 500.0),
+    "haas_st20": (330.0, 330.0, 572.0),
+    "mazak_quick_turn_250": (380.0, 380.0, 500.0),
+    "dmg_nlx2500": (366.0, 366.0, 705.0),
+    "haas_st20y": (300.0, 100.0, 572.0),
+    "mazak_integrex_i200": (658.0, 658.0, 1011.0),
+    "mazak_integrex_t200": (658.0, 658.0, 1011.0),
+}
+
+
+def get_default_machine(
+    machine_id: Optional[str] = None,
+    travel_envelope: Optional[tuple[float, float, float]] = None,
+) -> MachineConfig:
+    """Returns a default 3-axis CNC vertical machining center with standard industrial travel limits."""
+    # Standard industrial VMC travel limits:
+    # X: -500..+500 (1000mm span)
+    # Y: -300..+300 (600mm span)
+    # Z: -500..+500 (1000mm span, allowing clearances for tall parts up to 500mm above setup origin)
+    x_min, x_max = -500.0, 500.0
+    y_min, y_max = -300.0, 300.0
+    z_min, z_max = -500.0, 500.0
+
+    m_id_clean = (machine_id or "").lower().replace("-", "_").replace(" ", "_")
+    if travel_envelope is not None and len(travel_envelope) == 3:
+        tx, ty, tz = float(travel_envelope[0]), float(travel_envelope[1]), float(travel_envelope[2])
+        x_min, x_max = -tx / 2.0, tx / 2.0
+        y_min, y_max = -ty / 2.0, ty / 2.0
+        z_min, z_max = -tz / 2.0, tz
+    elif m_id_clean in KNOWN_MACHINE_TRAVEL:
+        tx, ty, tz = KNOWN_MACHINE_TRAVEL[m_id_clean]
+        x_min, x_max = -tx / 2.0, tx / 2.0
+        y_min, y_max = -ty / 2.0, ty / 2.0
+        z_min, z_max = -tz / 2.0, tz
+    elif m_id_clean:
+        for key, (tx, ty, tz) in KNOWN_MACHINE_TRAVEL.items():
+            if key in m_id_clean or m_id_clean in key:
+                x_min, x_max = -tx / 2.0, tx / 2.0
+                y_min, y_max = -ty / 2.0, ty / 2.0
+                z_min, z_max = -tz / 2.0, tz
+                break
+
     return MachineConfig(
-        id="vmc-3axis",
-        name="Precision 3-Axis VMC (Standard ISO)",
+        id=machine_id or "vmc-3axis",
+        name=f"Precision VMC ({machine_id})" if machine_id else "Precision 3-Axis VMC (Standard ISO)",
         machine_type=MachineType.THREE_AXIS_VERTICAL,
         axes={
-            "X": MachineAxis(name="X", travel_min=-500.0, travel_max=500.0, rapid_rate=15000.0, max_feed=5000.0),
-            "Y": MachineAxis(name="Y", travel_min=-300.0, travel_max=300.0, rapid_rate=15000.0, max_feed=5000.0),
-            "Z": MachineAxis(name="Z", travel_min=-400.0, travel_max=50.0, rapid_rate=10000.0, max_feed=3000.0),
+            "X": MachineAxis(name="X", travel_min=x_min, travel_max=x_max, rapid_rate=15000.0, max_feed=5000.0),
+            "Y": MachineAxis(name="Y", travel_min=y_min, travel_max=y_max, rapid_rate=15000.0, max_feed=5000.0),
+            "Z": MachineAxis(name="Z", travel_min=z_min, travel_max=z_max, rapid_rate=10000.0, max_feed=3000.0),
         },
         spindle_min_rpm=100.0,
         spindle_max_rpm=15000.0,
         max_spindle_power_kw=7.5,
         controller="grbl",
         units=Units.MM,
-        tool_change_position=np.array([0.0, 0.0, 40.0]),
+        tool_change_position=np.array([0.0, 0.0, min(100.0, z_max)]),
         work_offsets={
             "G54": np.array([0.0, 0.0, 0.0]),
             "G55": np.array([0.0, 0.0, 0.0]),
@@ -457,3 +507,4 @@ def get_default_machine() -> MachineConfig:
         },
         safe_retract_height=10.0,
     )
+

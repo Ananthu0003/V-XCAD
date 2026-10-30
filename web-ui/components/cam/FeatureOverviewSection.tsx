@@ -102,23 +102,25 @@ export function FeatureOverviewSection({
             </div>
 
             <div className="space-y-2 overflow-y-auto flex-1 pb-20 custom-scrollbar pr-2">
-                {features.map((feat) => {
-                    const isActive = activeFeatureId === feat.id;
+                {features.map((feat, fIdx) => {
+                    const featId = feat.id || (feat as any).feature_id || `feat_${fIdx}`;
+                    const isActive = activeFeatureId === featId || activeFeatureId === feat.id;
+                    const featName = feat.name || (feat as any).part_name || (feat.type ? feat.type.replace(/_/g, ' ') : (feat as any).feature_type) || `Feature ${fIdx + 1}`;
                     return (
                         <div 
-                            key={feat.id}
+                            key={featId}
                             className={`p-3.5 rounded-xl cursor-pointer transition-all border ${
                                 isActive 
                                     ? 'bg-primary/10 border-primary/50 shadow-sm ring-1 ring-primary/20' 
                                     : 'bg-background/40 hover:bg-muted/30 border-border/50 hover:border-border'
                             }`}
-                            onClick={() => onFeatureSelect(isActive ? null : feat.id)}
+                            onClick={() => onFeatureSelect(isActive ? null : featId)}
                         >
                             <div className="flex justify-between items-start mb-2">
                                 <div className="flex items-center gap-2 font-medium">
                                     <Target className={`size-4 ${isActive ? 'text-primary' : 'text-muted-foreground/50'}`} />
                                     <span className={`text-[12px] ${isActive ? 'text-primary font-bold' : 'text-foreground/90 font-semibold'}`}>
-                                        {feat.name || feat.type.replace(/_/g, ' ')}
+                                        {featName}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-1.5">

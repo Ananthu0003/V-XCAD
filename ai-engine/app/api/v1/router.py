@@ -1498,6 +1498,7 @@ async def cam_generate_toolpaths(request: CamGenerateToolpathsRequest):
             operations=request.operations,
             tools=request.tools,
             setup=setup_dict,
+            setups=request.setups,
             features=request.features,
         )
 
@@ -1672,7 +1673,7 @@ async def cam_generate_gcode(request: CamGCodeRequest):
             "operation_statuses": readiness["operation_statuses"]
         }
 
-    from app.services.cam.machine_validation import validate_full_setup, validate_post_capabilities_for_operations
+    from app.services.cam.machine_validation import validate_full_setup, validate_post_capabilities_for_operations, get_matrix
     
     engine_setup = engine_input.get("setup", {})
     

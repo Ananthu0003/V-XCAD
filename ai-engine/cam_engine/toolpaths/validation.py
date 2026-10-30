@@ -489,6 +489,17 @@ class ToolpathValidator:
             ToolType.TAP, ToolType.REAMER, ToolType.COUNTERSINK_TOOL
         }
 
+        chain = self.context.chain(self.setup)
+        T_setup_to_machine = chain.transform(CoordSpace.SETUP, CoordSpace.MACHINE)
+        ax_x = self.context.machine.axis_for("X")
+        ax_y = self.context.machine.axis_for("Y")
+        ax_z = self.context.machine.axis_for("Z")
+        travel_axes = (
+            ("X", ax_x.travel_min, ax_x.travel_max, 0),
+            ("Y", ax_y.travel_min, ax_y.travel_max, 1),
+            ("Z", ax_z.travel_min, ax_z.travel_max, 2),
+        )
+
         for i, seg in enumerate(tp.segments):
             if seg.start is None or seg.end is None:
                 errors.append(CamError(INVALID_TOOLPATH,
@@ -501,12 +512,9 @@ class ToolpathValidator:
                                        stage="validation", operation_id=tp.operation_id))
                 continue
 
-            chain = self.context.chain(self.setup)
-            pts = transform_points(np.array([seg.start, seg.end]), chain.transform(
-                CoordSpace.SETUP, CoordSpace.MACHINE))
-            for ax_name, vals in (("X", pts[:, 0]), ("Y", pts[:, 1]), ("Z", pts[:, 2])):
-                ax = self.context.machine.axis_for(ax_name)
-                lo, hi = ax.travel_min, ax.travel_max
+            pts = transform_points(np.array([seg.start, seg.end]), T_setup_to_machine)
+            for ax_name, lo, hi, col in travel_axes:
+                vals = pts[:, col]
                 if np.any(vals < lo - 1e-6) or np.any(vals > hi + 1e-6):
                     sev = ErrorSeverity.WARNING if seg.motion_type in (
                         MotionType.RAPID, MotionType.LINK, MotionType.RETRACT) else ErrorSeverity.ERROR
@@ -961,13 +969,15 @@ class ToolpathValidator:
         tool_bottom_z = p[2] - tool_bottom_offset
         test_z = tool_bottom_z + 0.10
 
-        # 1. Check if tool center is inside protected CAD solid
-        if self.mesh.is_point_inside(np.array([p[0], p[1], test_z])):
+        # Check heights directly beneath tool center
+        hs = self.mesh.heights_above(p[0], p[1])
+        # 1. Check if tool center is inside protected CAD solid (odd parity of surfaces above)
+        hits_above = sum(1 for h in hs if h > test_z + 1e-9)
+        if hits_above % 2 == 1:
             return r
 
         # 2. Check if tool bottom plunges below CAD floor directly beneath tool center
         best = 0.0
-        hs = self.mesh.heights_above(p[0], p[1])
         for h in hs:
             if h > tool_bottom_z + 1e-4:
                 best = max(best, h - tool_bottom_z)

@@ -67,11 +67,28 @@ class TriangleMesh:
             return None
         d = d / n
 
-        t_hit = max_dist
+        # Ray-AABB intersection: clip marching interval to mesh bounding box
+        t_near = 0.0
+        t_far = float(max_dist)
+        for i in range(3):
+            if abs(d[i]) < 1e-12:
+                if o[i] < bmin[i] - 1e-4 or o[i] > bmax[i] + 1e-4:
+                    return None
+            else:
+                inv_d = 1.0 / d[i]
+                t1 = (bmin[i] - o[i]) * inv_d
+                t2 = (bmax[i] - o[i]) * inv_d
+                t_near = max(t_near, min(t1, t2))
+                t_far = min(t_far, max(t1, t2))
+                if t_near > t_far:
+                    return None
+
+        t_limit = min(t_far, float(max_dist))
+        t_hit = float(max_dist)
         step = max(1e-9, cell)
-        # march along the ray through the grid
-        t = 0.0
-        while t <= min(max_dist, t_hit):
+        # march along the ray only within bounding box intersection
+        t = t_near
+        while t <= min(t_limit, t_hit):
             p = o + d * t
             c = np.clip(((p - bmin) / cell).astype(int), 0, dims - 1)
             key = (int(c[0]), int(c[1]), int(c[2]))

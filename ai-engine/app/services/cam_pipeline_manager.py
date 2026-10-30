@@ -140,6 +140,7 @@ class CamPipelineManager:
                 job_id=job_id,
                 session_id=session_id,
                 save_artifacts=True,
+                machine_config=machine_config,
             )
             return payload
 
@@ -186,6 +187,7 @@ class CamPipelineManager:
             operations=operations,
             tools=tools,
             setup=setup,
+            setups=setups,
         )
         return {
             "operations": updated_ops,

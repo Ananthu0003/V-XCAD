@@ -106,12 +106,18 @@ class VoxelStock:
         c = np.asarray(center, dtype=float)
         d = np.array(self.voxels.shape)
         r_idx = int(np.ceil(radius / self.voxel_size))
-        lo = np.maximum(self.world_to_index(c) - r_idx, 0)
-        hi = np.minimum(self.world_to_index(c) + r_idx + 1, d)
+        c_idx = self.world_to_index(c)
+        lo = np.maximum(c_idx - r_idx, 0)
+        hi = np.minimum(c_idx + r_idx + 1, d)
         if np.any(lo >= hi):
             return 0
         lo_i, lo_j, lo_k = lo
         hi_i, hi_j, hi_k = hi
+
+        sub_grid = self.voxels[lo_i:hi_i, lo_j:hi_j, lo_k:hi_k]
+        if not np.any(sub_grid):
+            return 0
+
         # Coordinate grid for bounding box
         i_idx = np.arange(lo_i, hi_i)
         j_idx = np.arange(lo_j, hi_j)
@@ -126,7 +132,6 @@ class VoxelStock:
         dist2_3d = ci[:, None, None] ** 2 + cj[None, :, None] ** 2 + ck[None, None, :] ** 2
         sphere_mask = dist2_3d <= (radius * radius)
         
-        sub_grid = self.voxels[lo_i:hi_i, lo_j:hi_j, lo_k:hi_k]
         to_remove = sub_grid & sphere_mask
         removed = int(np.count_nonzero(to_remove))
         sub_grid[sphere_mask] = False
@@ -137,14 +142,48 @@ class VoxelStock:
         p0 = np.asarray(p0, dtype=float)
         p1 = np.asarray(p1, dtype=float)
         seg = p1 - p0
-        length = float(np.linalg.norm(seg))
-        if length < 1e-9:
+        seg_len2 = float(np.dot(seg, seg))
+        if seg_len2 < 1e-12:
             return self.remove_sphere(p0, radius)
-        n_steps = max(1, int(np.ceil(length / (self.voxel_size * 0.5))))
-        removed = 0
-        for i in range(n_steps + 1):
-            t = i / n_steps
-            removed += self.remove_sphere(p0 + seg * t, radius)
+
+        p_min = np.minimum(p0, p1) - radius
+        p_max = np.maximum(p0, p1) + radius
+        lo = np.maximum(self.world_to_index(p_min), 0)
+        hi = np.minimum(self.world_to_index(p_max) + 1, self.voxels.shape)
+        if np.any(lo >= hi):
+            return 0
+
+        lo_i, lo_j, lo_k = lo
+        hi_i, hi_j, hi_k = hi
+        sub_grid = self.voxels[lo_i:hi_i, lo_j:hi_j, lo_k:hi_k]
+        if not np.any(sub_grid):
+            return 0
+
+        # World coordinates along each grid axis in bounding box
+        i_idx = np.arange(lo_i, hi_i)
+        j_idx = np.arange(lo_j, hi_j)
+        k_idx = np.arange(lo_k, hi_k)
+        X = self.origin[0] + i_idx * self.voxel_size
+        Y = self.origin[1] + j_idx * self.voxel_size
+        Z = self.origin[2] + k_idx * self.voxel_size
+
+        dx = (X - p0[0])[:, None, None]
+        dy = (Y - p0[1])[None, :, None]
+        dz = (Z - p0[2])[None, None, :]
+
+        # Project voxel centers onto segment [p0, p1]
+        dot_p = dx * seg[0] + dy * seg[1] + dz * seg[2]
+        t = np.clip(dot_p / seg_len2, 0.0, 1.0)
+
+        rx = dx - t * seg[0]
+        ry = dy - t * seg[1]
+        rz = dz - t * seg[2]
+        dist2 = rx * rx + ry * ry + rz * rz
+        capsule_mask = dist2 <= (radius * radius)
+
+        to_remove = sub_grid & capsule_mask
+        removed = int(np.count_nonzero(to_remove))
+        sub_grid[capsule_mask] = False
         return removed
 
     def diff(self, other: "VoxelStock") -> np.ndarray:

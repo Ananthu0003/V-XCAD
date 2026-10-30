@@ -150,6 +150,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         fileName: fileName,
         stepUrl: stepUrl,
         stlUrl: stlUrl || `/api/outputs/cad_${sessionId}.stl`,
+        parameters: extractedParams,
       },
       create: {
         id: sessionId,

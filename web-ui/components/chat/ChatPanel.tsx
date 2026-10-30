@@ -4,7 +4,7 @@ import { FormEvent, useRef, useEffect, useState, useMemo } from 'react';
 import { 
 	Bot, LogOut, Loader2, SendHorizontal, Zap, Upload, FileImage, 
 	Settings, BrainCircuit, Cuboid, Trash2, Crosshair, Sparkles, 
-	ChevronDown, ChevronRight, Check, SlidersHorizontal, Wrench, Layers, Tag, X,
+	ChevronDown, ChevronRight, ChevronLeft, Check, SlidersHorizontal, Wrench, Layers, Tag, X,
 	Target, PlusCircle, RefreshCw, Paperclip, Send, Plus, Ruler
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -227,6 +227,14 @@ export function ChatPanel({
 								<LogOut className="size-3.5" />
 							)}
 						</button>
+						<button
+							type="button"
+							onClick={() => setIsOpen(false)}
+							className="ui-btn ui-btn--ghost !h-7 !w-7 !p-0 ml-1 text-[var(--ui-text-muted)] hover:text-[var(--ui-accent)] cursor-pointer"
+							title="Push Left Panel (Collapse)"
+						>
+							<ChevronLeft className="size-4" />
+						</button>
 					</div>
 				</div>
 
@@ -249,7 +257,7 @@ export function ChatPanel({
 									Parametric CAD Copilot
 								</h3>
 								<p className="text-[11px] text-[var(--ui-text-muted)] leading-relaxed">
-									Describe your mechanical part in natural language or attach a 3D STEP solid model to modify.
+									Describe your mechanical part in natural language, attach a 2D blueprint drawing, or import a 3D STEP solid model.
 								</p>
 							</div>
 
@@ -509,21 +517,21 @@ export function ChatPanel({
 									className={`ui-btn ui-btn--ghost !h-7 !w-7 !p-0 cursor-pointer flex items-center justify-center ${
 										selectedFile ? 'border-[var(--ui-accent)] text-[var(--ui-accent)]' : ''
 									}`}
-									title="Attach 3D CAD solid model (.STEP, .STP)"
+									title="Attach blueprint (PDF/PNG/JPG) or 3D solid model (.STEP, .STP)"
 								>
 									<Paperclip className="size-3.5" />
 									<input
 										ref={fileInputRef}
 										type="file"
-										accept=".step,.stp"
+										accept="image/png,image/jpeg,image/webp,application/pdf,.step,.stp"
 										className="hidden"
 										onChange={(e) => {
 											const file = e.target.files?.[0] || null;
 											if (file) {
 												const isStep = file.name.toLowerCase().endsWith('.step') || file.name.toLowerCase().endsWith('.stp');
-												const maxLimit = 50 * 1024 * 1024;
+												const maxLimit = isStep ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
 												if (file.size > maxLimit) {
-													alert('File size exceeds the 50MB limit.');
+													alert(`File size exceeds the ${isStep ? '50MB' : '10MB'} limit.`);
 													e.target.value = '';
 													return;
 												}

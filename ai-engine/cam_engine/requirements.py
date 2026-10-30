@@ -482,6 +482,14 @@ def evaluate_feature_requirement(feature: MachiningFeature, setup: Setup,
     stock.finish_allowance_mm = _finish_allowance_of(feature, context)
     precision, tolerance, precision_reason = _precision_of(feature, context)
     accessible = feature.accessibility is not Accessibility.INACCESSIBLE
+    if feature.accessibility is Accessibility.NEEDS_TILTED_TOOL:
+        machine = getattr(context, "machine", None) if context else None
+        axes = getattr(machine, "axes", {}) or {}
+        machine_type = getattr(machine, "machine_type", None)
+        is_three_axis = len(axes) <= 3 or "three_axis" in str(
+            getattr(machine_type, "value", machine_type)).lower()
+        if is_three_axis:
+            accessible = False
     strategy = _strategy_for(feature, surface)
 
     evidence: dict[str, str] = {

@@ -165,6 +165,20 @@ class OperationPlanner:
             self.requirements[feature.id] = req
         return req
 
+    def _is_accessible(self, feature: MachiningFeature) -> bool:
+        """Check if feature is accessible along setup tool axis on current machine."""
+        if getattr(feature, "accessibility", None) is Accessibility.INACCESSIBLE:
+            return False
+        if getattr(feature, "accessibility", None) is Accessibility.NEEDS_TILTED_TOOL:
+            machine = getattr(self.context, "machine", None)
+            axes = getattr(machine, "axes", {}) or {}
+            machine_type = getattr(machine, "machine_type", None)
+            is_three_axis = len(axes) <= 3 or "three_axis" in str(
+                getattr(machine_type, "value", machine_type)).lower()
+            if is_three_axis:
+                return False
+        return True
+
     def plan(self) -> list[PlannedOperation]:
         """Plan the operations this setup actually requires.
 
@@ -718,6 +732,8 @@ class OperationPlanner:
         for f in self.features:
             if not f.is_concave or f.type not in (FeatureType.POCKET, FeatureType.OPEN_POCKET, FeatureType.SLOT, FeatureType.OPEN_SLOT):
                 continue
+            if not self._is_accessible(f):
+                continue
             if self._is_machined_in_prior_setup(f):
                 continue
             corners = f.notes.get("corner_details")
@@ -761,24 +777,34 @@ class OperationPlanner:
         if res.success and res.selected_tool is not None:
             return res.selected_tool
 
-        # Fallback: find any drill or endmill with diameter <= 2 * min_corner_r + 0.05
+        # Fallback: find any drill or endmill with diameter <= 2 * min_corner_r + 0.05,
+        # capped by the feature channel/slot width and diameter
         max_dia = 2.0 * min_corner_r + 0.05
+        extent = f.xy_extent
+        if len(extent) and float(min(extent)) > 1e-4:
+            max_dia = min(max_dia, float(min(extent)))
+        if f.diameter is not None and f.diameter > 1e-4:
+            max_dia = min(max_dia, float(f.diameter))
+
         candidate_tools = [
             t for t in self.context.tools
             if getattr(t, "can_plunge", True) and t.type in (ToolType.DRILL, ToolType.FLAT_ENDMILL, ToolType.SPOT_DRILL)
-            and t.diameter <= max_dia
+            and t.diameter <= max_dia + 1e-4
         ]
         if candidate_tools:
             # Pick the largest tool that fits within the smallest corner
             candidate_tools.sort(key=lambda t: t.diameter, reverse=True)
             return candidate_tools[0]
 
+        sugg_dia = round(min(2.0 * min_corner_r, max_dia), 2)
+        if sugg_dia <= 0.0:
+            sugg_dia = round(max_dia, 2)
         self.warnings.append({
             "code": "MISSING_CORNER_DRILL",
             "feature_id": f.id,
             "feature_type": f.type.value if hasattr(f.type, "value") else str(f.type),
             "message": f"No tool found for corner relief drilling (min corner R={min_corner_r:.2f}mm, max drill dia={max_dia:.2f}mm)",
-            "suggested_tool": {"type": "drill", "diameter": round(2.0 * min_corner_r, 2)},
+            "suggested_tool": {"type": "drill", "diameter": sugg_dia},
         })
         return None
 
@@ -790,13 +816,14 @@ class OperationPlanner:
             if self._is_machined_in_prior_setup(f):
                 continue
             req = self._req(f)
-            if f.accessibility is Accessibility.INACCESSIBLE:
-                self.warnings.append({
-                    "code": "FEATURE_INACCESSIBLE",
-                    "feature_id": f.id,
-                    "feature_type": f.type.value if hasattr(f.type, "value") else str(f.type),
-                    "message": f"feature {f.id} ({f.type.value}) inaccessible along tool axis",
-                })
+            if not self._is_accessible(f):
+                if f.accessibility is Accessibility.INACCESSIBLE:
+                    self.warnings.append({
+                        "code": "FEATURE_INACCESSIBLE",
+                        "feature_id": f.id,
+                        "feature_type": f.type.value if hasattr(f.type, "value") else str(f.type),
+                        "message": f"feature {f.id} ({f.type.value}) inaccessible along tool axis",
+                    })
                 continue
             # Stock condition: only material that is really there gets removed.
             demanded, reason = req.stock.demands_roughing()
@@ -917,7 +944,7 @@ class OperationPlanner:
         for f in self.features:
             if f.type not in FINISHABLE_TYPES:
                 continue
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             if self._is_machined_in_prior_setup(f):
                 continue
@@ -974,7 +1001,7 @@ class OperationPlanner:
         for f in self.features:
             if f.type not in hole_types or f.diameter is None:
                 continue
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             if self._is_machined_in_prior_setup(f):
                 continue
@@ -1013,7 +1040,7 @@ class OperationPlanner:
         for f in self.features:
             if f.type not in hole_types or f.diameter is None:
                 continue
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             if self._is_machined_in_prior_setup(f):
                 continue
@@ -1116,7 +1143,7 @@ class OperationPlanner:
         for f in self.features:
             if f.type not in BORE_TYPES or f.diameter is None:
                 continue
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             if self._is_machined_in_prior_setup(f):
                 continue
@@ -1147,7 +1174,7 @@ class OperationPlanner:
         for f in self.features:
             if f.type not in REAMABLE_TYPES or f.diameter is None:
                 continue
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             # Required surface: reaming is demanded by a precision bore only.
             req = self._req(f)
@@ -1180,7 +1207,7 @@ class OperationPlanner:
                 continue
             if f.diameter is None:
                 continue
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             req = self._req(f)
             demanded, reason = req.demands_hole_work()
@@ -1209,7 +1236,7 @@ class OperationPlanner:
                 continue
             if f.diameter is None:
                 continue
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             req = self._req(f)
             demanded, reason = req.demands_hole_work()
@@ -1237,7 +1264,7 @@ class OperationPlanner:
     def _plan_grooving(self) -> list[PlannedOperation]:
         ops: list[PlannedOperation] = []
         for f in self.features:
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             is_groove = (
                 f.type is FeatureType.GROOVE or
@@ -1266,7 +1293,7 @@ class OperationPlanner:
         for f in self.features:
             if f.type is not FeatureType.CHAMFER:
                 continue
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             req = self._req(f)
             demanded, reason = req.demands_surface_pass(OpPurpose.CHAMFERING.value)
@@ -1360,7 +1387,7 @@ class OperationPlanner:
         for f in self.features:
             if f.type is not FeatureType.FILLET:
                 continue
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             fillet_r = f.fillet_radius if (f.fillet_radius is not None and f.fillet_radius > 0.0) else f.radius
             if fillet_r is None or fillet_r <= 0.0:
@@ -1408,7 +1435,7 @@ class OperationPlanner:
                 continue
             if f.diameter is None:
                 continue
-            if f.accessibility is Accessibility.INACCESSIBLE:
+            if not self._is_accessible(f):
                 continue
             # Deduplicate concentric countersinks at same location & depth
             center_key = (

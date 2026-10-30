@@ -58,7 +58,11 @@ from cam_engine.context import (
     Units,
     WorkOffset,
 )
+from cam_engine.machinability import CuttingParameters
 from cam_engine.demo_models import get_default_tools, get_default_machine
+import logging
+
+logger = logging.getLogger(__name__)
 
 # VexCAD models
 from app.models.schemas import (
@@ -95,9 +99,14 @@ def map_motion_type_to_semantic_v1(
     if is_drill_op and m_str in ("cut", "plunge", "canned_cycle"):
         return "drill_cycle"
 
+    dz = abs(end[2] - start[2])
+
     if m_str == "rapid":
-        if abs(end[2] - start[2]) > 0.001 and (end[2] >= clearance_z or start[2] >= clearance_z):
-            return "rapid_clearance"
+        if dz > 0.001:
+            if end[2] > start[2]:
+                return "retract_clearance" if end[2] >= clearance_z - 0.001 else "approach_retract"
+            else:
+                return "rapid_clearance" if end[2] >= clearance_z - 0.001 else "approach_retract"
         return "rapid_xy"
     elif m_str == "cut":
         return "cut"
@@ -110,12 +119,14 @@ def map_motion_type_to_semantic_v1(
     elif m_str == "helix":
         return "cut"
     elif m_str == "retract":
-        return "retract_clearance"
+        return "retract_clearance" if end[2] >= clearance_z - 0.001 else "approach_retract"
     elif m_str in ("entry", "exit"):
         return "approach_retract"
     elif m_str in ("dwell",):
         return "dwell"
     elif m_str in ("link",):
+        if dz > 0.001:
+            return "retract_clearance" if (end[2] > start[2] and end[2] >= clearance_z - 0.001) else "approach_retract"
         return "rapid_xy"
     elif m_str in ("tool_change", "spindle_start", "spindle_stop", "coolant_on", "coolant_off"):
         return "rapid_clearance"
@@ -353,6 +364,279 @@ def planned_operation_to_vexcad_dict(
         "estimated_time_s": estimated_time_s,
         "toolpaths": toolpath_segments,
     }
+
+
+def parse_op_purpose(purpose_str: str) -> OpPurpose:
+    """Parse any operation type or purpose string from VEXCAD into a standard OpPurpose enum."""
+    p = str(purpose_str or "roughing").lower().strip()
+    if "face" in p or "facing" in p:
+        return OpPurpose.FACING
+    elif "rest" in p:
+        return OpPurpose.REST_MACHINING
+    elif "semi" in p:
+        return OpPurpose.SEMI_FINISHING
+    elif "finish" in p or "contour" in p or "profile" in p or "wall" in p:
+        return OpPurpose.FINISHING
+    elif "spot" in p:
+        return OpPurpose.SPOT_DRILLING
+    elif "drill" in p:
+        return OpPurpose.DRILLING
+    elif "bore" in p or "boring" in p:
+        return OpPurpose.BORING
+    elif "ream" in p:
+        return OpPurpose.REAMING
+    elif "tap" in p:
+        return OpPurpose.TAPPING
+    elif "countersink" in p:
+        return OpPurpose.COUNTERSINKING
+    elif "chamfer" in p:
+        return OpPurpose.CHAMFERING
+    elif "fillet" in p:
+        return OpPurpose.FILLETING
+    elif "thread" in p:
+        return OpPurpose.THREAD_MILLING
+    elif "groove" in p:
+        return OpPurpose.GROOVING
+    else:
+        return OpPurpose.ROUGHING
+
+
+def parse_tool(tool_data: Union[Dict[str, Any], Tool], default_id: str = "T01") -> Tool:
+    """Convert a tool dict from VEXCAD schemas or client payloads into a cam_engine Tool dataclass."""
+    if isinstance(tool_data, Tool):
+        return tool_data
+
+    t_dict = tool_data if isinstance(tool_data, dict) else {}
+    t_id = t_dict.get("id") or t_dict.get("tool_id") or default_id
+
+    t_type_str = str(t_dict.get("type", "flat_end_mill")).lower()
+    if "drill" in t_type_str:
+        t_type = ToolType.DRILL
+    elif "face" in t_type_str:
+        t_type = ToolType.FACE_MILL
+    elif "ball" in t_type_str:
+        t_type = ToolType.BALL_ENDMILL
+    elif "bull" in t_type_str:
+        t_type = ToolType.BULL_NOSE
+    elif "chamfer" in t_type_str:
+        t_type = ToolType.CHAMFER_MILL
+    elif "tap" in t_type_str:
+        t_type = ToolType.TAP
+    elif "ream" in t_type_str:
+        t_type = ToolType.REAMER
+    elif "spot" in t_type_str:
+        t_type = ToolType.SPOT_DRILL
+    else:
+        t_type = ToolType.FLAT_ENDMILL
+
+    t_dia = float(t_dict.get("diameter", 10.0) or 10.0)
+    t_flute_len = float(t_dict.get("cutting_length") or t_dict.get("flute_length") or 30.0)
+    t_overall_len = float(t_dict.get("stickout") or t_dict.get("overall_length") or 50.0)
+    t_flutes = int(t_dict.get("flute_count") or t_dict.get("flutes") or 2)
+
+    t_num_val = t_dict.get("tool_number") or t_dict.get("number")
+    if t_num_val and isinstance(t_num_val, int):
+        t_num = t_num_val
+    else:
+        t_str = str(t_id).upper().replace("TOOL_", "").replace("T", "")
+        t_num = int(t_str) if (t_str.isdigit() and int(t_str) > 0) else 1
+
+    return Tool(
+        id=t_id,
+        tool_number=t_num,
+        type=t_type,
+        diameter=t_dia,
+        flute_length=t_flute_len,
+        overall_length=t_overall_len,
+        flutes=t_flutes,
+        corner_radius=float(t_dict.get("corner_radius", 0.0) or 0.0),
+    )
+
+
+def parse_cutting_parameters(op: Dict[str, Any], tool: Tool, material: Optional[Material] = None) -> CuttingParameters:
+    """Derive validated CuttingParameters strictly from the planned operation and tool."""
+    params = op.get("parameters") or {}
+
+    stepdown = float(
+        params.get("maxStepdown")
+        or params.get("stepdown_mm")
+        or params.get("stepdown")
+        or op.get("stepdown_mm")
+        or 2.0
+    )
+
+    stepover_val = params.get("stepover_mm") or params.get("stepover") or op.get("stepover_mm")
+    if stepover_val is not None and float(stepover_val) > 0:
+        stepover = float(stepover_val)
+    else:
+        pct = float(params.get("stepoverPercentage") or 40.0)
+        stepover = float(tool.diameter * (pct / 100.0))
+
+    feed = float(
+        params.get("feedRate")
+        or params.get("feed_rate")
+        or params.get("feedrate")
+        or op.get("feed_rate")
+        or 800.0
+    )
+    spindle = float(
+        params.get("spindleSpeed")
+        or params.get("spindle_rpm")
+        or params.get("spindle_speed")
+        or op.get("spindle_rpm")
+        or 5000.0
+    )
+    plunge = float(
+        params.get("plungeRate")
+        or params.get("plunge_feed")
+        or (feed * 0.3)
+    )
+    ramp = float(
+        params.get("rampRate")
+        or params.get("ramp_feed")
+        or (feed * 0.5)
+    )
+
+    coolant = bool(
+        str(params.get("coolant", "flood")).lower() != "off"
+    )
+
+    flutes = max(1, getattr(tool, "flutes", 2))
+    feed_per_tooth = float(feed / (max(spindle, 1.0) * flutes))
+
+    return CuttingParameters(
+        spindle_rpm=spindle,
+        feed_rate=feed,
+        plunge_feed=plunge,
+        ramp_feed=ramp,
+        feed_per_tooth_mm=feed_per_tooth,
+        depth_of_cut_mm=stepdown,
+        stepover_mm=stepover,
+        coolant=coolant,
+        effective_diameter_mm=float(tool.diameter),
+        engagement_angle_deg=90.0,
+        power_kw=1.5,
+        torque_nm=2.4,
+    )
+
+
+def vexcad_dict_to_machining_feature(
+    feat: Dict[str, Any],
+    default_top_z: float = 0.0,
+    model_bmin: Optional[np.ndarray] = None,
+    model_bmax: Optional[np.ndarray] = None,
+) -> MachiningFeature:
+    """Reconstruct a cam_engine MachiningFeature from a VEXCAD feature dictionary."""
+    f_id = feat.get("id") or f"feat_{uuid.uuid4().hex[:6]}"
+    f_type_str = str(feat.get("type") or feat.get("subtype") or "pocket").lower()
+
+    if "face" in f_type_str:
+        f_type = FeatureType.FACING_REGION
+    elif "contour" in f_type_str or "wall" in f_type_str or "profile" in f_type_str:
+        f_type = FeatureType.CONTOUR
+    elif "through_hole" in f_type_str:
+        f_type = FeatureType.THROUGH_HOLE
+    elif "hole" in f_type_str:
+        f_type = FeatureType.HOLE
+    elif "through_bore" in f_type_str:
+        f_type = FeatureType.THROUGH_BORE
+    elif "bore" in f_type_str:
+        f_type = FeatureType.BORE
+    elif "slot" in f_type_str:
+        f_type = FeatureType.SLOT
+    elif "step" in f_type_str or "shoulder" in f_type_str:
+        f_type = FeatureType.STEP
+    elif "boss" in f_type_str:
+        f_type = FeatureType.BOSS
+    elif "chamfer" in f_type_str:
+        f_type = FeatureType.CHAMFER
+    elif "fillet" in f_type_str:
+        f_type = FeatureType.FILLET
+    else:
+        f_type = FeatureType.POCKET
+
+    dims = feat.get("dimensions") or {}
+    m_region = feat.get("machiningRegion") or {}
+
+    depth = float(
+        feat.get("depth")
+        or dims.get("depth")
+        or m_region.get("depth")
+        or 10.0
+    )
+    top_z = float(
+        dims.get("z_top")
+        or m_region.get("topZ")
+        or feat.get("top_z")
+        or default_top_z
+    )
+    floor_z = float(
+        dims.get("z_bottom")
+        or m_region.get("bottomZ")
+        or feat.get("floor_z")
+        or (top_z - depth)
+    )
+
+    bmin_val = dims.get("bounds_min") or feat.get("bounds_min")
+    bmax_val = dims.get("bounds_max") or feat.get("bounds_max")
+    if bmin_val and bmax_val and len(bmin_val) >= 3 and len(bmax_val) >= 3:
+        bmin = np.array([float(bmin_val[0]), float(bmin_val[1]), float(bmin_val[2])])
+        bmax = np.array([float(bmax_val[0]), float(bmax_val[1]), float(bmax_val[2])])
+    elif model_bmin is not None and model_bmax is not None:
+        bmin = np.array([float(model_bmin[0]), float(model_bmin[1]), floor_z])
+        bmax = np.array([float(model_bmax[0]), float(model_bmax[1]), top_z])
+    else:
+        bmin = np.array([-50.0, -50.0, floor_z])
+        bmax = np.array([50.0, 50.0, top_z])
+
+    boundary_pts = m_region.get("boundary") or feat.get("boundary_loop")
+    if boundary_pts and len(boundary_pts) >= 3:
+        boundary_loop = [np.array([float(pt[0]), float(pt[1]), top_z]) for pt in boundary_pts]
+    else:
+        boundary_loop = [
+            np.array([bmin[0], bmin[1], top_z]),
+            np.array([bmax[0], bmin[1], top_z]),
+            np.array([bmax[0], bmax[1], top_z]),
+            np.array([bmin[0], bmax[1], top_z]),
+        ]
+
+    islands_raw = m_region.get("islands") or feat.get("island_loops") or []
+    island_loops = []
+    for isl in islands_raw:
+        if isl and len(isl) >= 3:
+            island_loops.append([np.array([float(pt[0]), float(pt[1]), top_z]) for pt in isl])
+
+    center_raw = feat.get("center") or m_region.get("center")
+    if center_raw and len(center_raw) >= 3:
+        center = np.array([float(center_raw[0]), float(center_raw[1]), float(center_raw[2])])
+    else:
+        center = 0.5 * (bmin + bmax)
+
+    axis_raw = feat.get("axis") or m_region.get("axis")
+    if axis_raw and len(axis_raw) >= 3:
+        axis = np.array([float(axis_raw[0]), float(axis_raw[1]), float(axis_raw[2])])
+    else:
+        axis = np.array([0.0, 0.0, 1.0])
+
+    dia = dims.get("diameter") or feat.get("diameter")
+    diameter = float(dia) if dia is not None else None
+
+    return MachiningFeature(
+        id=f_id,
+        type=f_type,
+        face_indices=[1],
+        bounds_min=bmin,
+        bounds_max=bmax,
+        depth=depth,
+        top_z=top_z,
+        floor_z=floor_z,
+        axis=axis,
+        diameter=diameter,
+        boundary_loop=boundary_loop,
+        island_loops=island_loops,
+        center=center,
+        notes=dict(feat.get("notes") or {})
+    )
 
 
 class CamEngineAdapter:
@@ -652,52 +936,6 @@ class CamEngineAdapter:
         return setups
 
     @staticmethod
-    def generate_export_package(
-        job_id: str,
-        session_id: Optional[str] = None,
-        controller: str = "fanuc",
-        work_offset: str = "G54",
-    ) -> bytes:
-        """Return ZIP archive bytes containing complete CAM package (NC programs, setup sheets, manifest)."""
-        target_ids = {session_id, job_id} - {None, ""}
-        storage_bases = [
-            Path(os.getenv("VEXCAD_STORAGE_DIR", "storage/jobs")),
-            Path(__file__).resolve().parents[4] / "storage" / "jobs",
-            Path(__file__).resolve().parents[3] / "storage" / "jobs",
-            Path("/app/storage/jobs"),
-        ]
-        for tid in target_ids:
-            for sbase in storage_bases:
-                zip_path = sbase / tid / "cam" / "cam_package.zip"
-                if zip_path.exists() and zip_path.stat().st_size > 0:
-                    with open(zip_path, "rb") as f:
-                        return f.read()
-
-        step_path = CamEngineAdapter.resolve_step_path(session_id, job_id)
-        if step_path and step_path.exists():
-            CamEngineAdapter.process_step_file(
-                step_path=step_path,
-                controller=controller,
-                work_offset=work_offset,
-                job_id=job_id,
-                session_id=session_id,
-                save_artifacts=True,
-            )
-            for tid in target_ids:
-                for sbase in storage_bases:
-                    zip_path = sbase / tid / "cam" / "cam_package.zip"
-                    if zip_path.exists() and zip_path.stat().st_size > 0:
-                        with open(zip_path, "rb") as f:
-                            return f.read()
-
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("NC_Programs/README.txt", "No CAM toolpaths generated yet.")
-            zf.writestr("Setup_Sheets/README.txt", "No CAM setup sheets generated yet.")
-        buf.seek(0)
-        return buf.read()
-
-    @staticmethod
     def process_step_file(
         step_path: Union[str, Path],
         controller: str = "fanuc",
@@ -710,6 +948,8 @@ class CamEngineAdapter:
         fixed_size: Optional[Tuple[float, float, float]] = None,
         cylinder_diameter: Optional[float] = None,
         cylinder_length: Optional[float] = None,
+        machine_config: Optional[Dict[str, Any]] = None,
+        machine_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute end-to-end CAM pipeline on a STEP file and return a VEXCAD API payload."""
         path = Path(step_path)
@@ -729,6 +969,12 @@ class CamEngineAdapter:
             ctrl = "fanuc"
 
         effective_job_id = session_id or job_id or "job_1"
+        effective_mid = (
+            machine_id
+            or (machine_config.get("machine_id") if machine_config else None)
+            or ((machine_config.get("setup") or {}).get("machine") if machine_config else None)
+            or ((machine_config.get("setup") or {}).get("machineProfile") if machine_config else None)
+        )
 
         pipeline_result: PipelineResult = run_cam_pipeline(
             step_path=path,
@@ -739,6 +985,7 @@ class CamEngineAdapter:
             fixed_size=fixed_size,
             cylinder_diameter=cylinder_diameter,
             cylinder_length=cylinder_length,
+            machine_id=effective_mid,
         )
 
         features = [machining_feature_to_vexcad_dict(f) for f in pipeline_result.features]
@@ -814,10 +1061,15 @@ class CamEngineAdapter:
                 bounds_max=bmax + np.array([5.0, 5.0, 1.0]),
             ),
         )
+        active_machine = (
+            pipeline_result.context.machine
+            if (pipeline_result.context and pipeline_result.context.machine)
+            else get_default_machine(machine_id=effective_mid)
+        )
         s1_ctx = pipeline_result.context or PlanningContext(
             model=pipeline_result.model,
             setups=[s1_setup_obj],
-            machine=get_default_machine(),
+            machine=active_machine,
             tools=get_default_tools(),
             material=get_material(material),
         )
@@ -922,7 +1174,7 @@ class CamEngineAdapter:
                     s_k_ctx = PlanningContext(
                         model=imported,
                         setups=all_ctx_setups + [s_k_setup_obj],
-                        machine=get_default_machine(),
+                        machine=active_machine,
                         tools=get_default_tools(),
                         material=get_material(material),
                     )
@@ -1246,108 +1498,350 @@ class CamEngineAdapter:
         tools: List[Dict[str, Any]],
         setup: Dict[str, Any],
         features: Optional[List[Dict[str, Any]]] = None,
+        setups: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Generate strategy toolpaths for operations using cam_engine."""
+        """Generate strategy toolpaths faithfully for planned operations using cam_engine."""
         ctrl = setup.get("controller", "fanuc")
+        mat_id = setup.get("material") or setup.get("workpieceMaterialId") or "aluminum_6061"
+        try:
+            material = get_material(str(mat_id))
+        except Exception:
+            material = get_material("aluminum_6061")
+
+        # 1. Resolve STEP model if available
         resolved_path = None
         if step_path and Path(step_path).exists():
             resolved_path = Path(step_path)
         else:
             resolved_path = CamEngineAdapter.resolve_step_path(setup.get("session_id"), setup.get("job_id"))
-            if not resolved_path:
-                fallback = Path(__file__).resolve().parents[3] / "outputs" / "sample_bracket.step"
-                if fallback.exists():
-                    resolved_path = fallback
 
-        if resolved_path and resolved_path.exists():
-            mat = setup.get("material") or setup.get("workpieceMaterialId") or "aluminum_6061"
-            res = CamEngineAdapter.process_step_file(
-                resolved_path,
-                controller=ctrl,
-                material=str(mat),
-                save_artifacts=False
-            )
-            return res.get("operations", []), res.get("toolpaths", [])
+        # If caller provided no operations, fallback to full auto-planning on STEP
+        if not operations:
+            if resolved_path and resolved_path.exists():
+                res = CamEngineAdapter.process_step_file(
+                    resolved_path,
+                    controller=ctrl,
+                    material=str(mat_id),
+                    save_artifacts=False,
+                )
+                return res.get("operations", []), res.get("toolpaths", [])
+            return [], []
 
-        # Fallback if no STEP file is present: produce valid semantic_v1 paths
-        flat_paths: List[Dict[str, Any]] = []
-        updated_ops: List[Dict[str, Any]] = []
-        clearance_z = float(setup.get("clearanceHeight", 5.0) or 5.0)
+        # 2. Build Tool Library
+        tool_cache: Dict[str, Tool] = {}
+        for dt in get_default_tools():
+            tool_cache[dt.id] = dt
 
-        tool_map = {t.get("id"): t for t in tools}
+        for t_dict in tools:
+            if isinstance(t_dict, dict):
+                t_obj = parse_tool(t_dict)
+                tool_cache[t_obj.id] = t_obj
 
         for op in operations:
-            op_id = op.get("id", f"op_{uuid.uuid4().hex[:6]}")
-            fid = op.get("feature_id") or op.get("featureId")
-            tool_id = op.get("tool_id") or op.get("toolId")
-            tool = tool_map.get(tool_id, {})
-            t_dia = float(tool.get("diameter", 10.0) or 10.0)
+            if isinstance(op.get("tool"), dict):
+                t_obj = parse_tool(op["tool"])
+                tool_cache[t_obj.id] = t_obj
+            elif op.get("tool_id") and op["tool_id"] not in tool_cache:
+                t_obj = parse_tool({"id": op["tool_id"]})
+                tool_cache[t_obj.id] = t_obj
 
-            depth = float(op.get("parameters", {}).get("depth", 10.0) or 10.0)
-            op_paths: List[Dict[str, Any]] = []
+        # 3. Import model if step file exists
+        imported_model: Optional[ImportedModel] = None
+        if resolved_path and resolved_path.exists():
+            try:
+                imported_model = import_step(resolved_path)
+            except Exception as e:
+                logger.warning(f"Failed to import STEP model from {resolved_path}: {e}")
 
-            # 1. Approach rapid
-            op_paths.append({
-                "segmentId": f"{op_id}_rapid_0",
-                "moveType": "rapid_clearance",
-                "start": {"x": 0.0, "y": 0.0, "z": clearance_z + 10.0},
-                "end": {"x": 0.0, "y": 0.0, "z": clearance_z},
-                "feedrate": None,
-                "toolId": tool_id or "",
-                "operationId": op_id,
-                "featureId": fid or "",
-                "setupId": setup.get("setupId", "setup_001"),
-                "source": "strategy",
-            })
+        # 4. Map known setups
+        setups_list = list(setups) if setups else [setup]
+        known_setups: Dict[str, Dict[str, Any]] = {}
+        for s in setups_list:
+            sid = s.get("setupId") or s.get("id") or "setup_001"
+            known_setups[sid] = s
 
-            # 2. Plunge
-            op_paths.append({
-                "segmentId": f"{op_id}_plunge_0",
-                "moveType": "plunge",
-                "start": {"x": 0.0, "y": 0.0, "z": clearance_z},
-                "end": {"x": 0.0, "y": 0.0, "z": 0.0},
-                "feedrate": 150.0,
-                "toolId": tool_id or "",
-                "operationId": op_id,
-                "featureId": fid or "",
-                "setupId": setup.get("setupId", "setup_001"),
-                "source": "strategy",
-            })
+        # Ensure every setup referenced by operations is registered
+        for op in operations:
+            sid = op.get("setup_id") or op.get("setupId") or "setup_001"
+            if sid not in known_setups:
+                is_flip = "002" in sid or "flip" in str(sid).lower()
+                known_setups[sid] = {
+                    "setupId": sid,
+                    "setupName": f"Setup {len(known_setups)+1}" + (" - Bottom Flip" if is_flip else ""),
+                    "rotation_deg": [180.0, 0.0, 0.0] if is_flip else [0.0, 0.0, 0.0],
+                    "workCoordinateSystem": "G55" if is_flip else f"G{54 + len(known_setups)}",
+                    "wcs": "G55" if is_flip else f"G{54 + len(known_setups)}",
+                }
 
-            # 3. Cutting pass
-            op_paths.append({
-                "segmentId": f"{op_id}_cut_0",
-                "moveType": "cut",
-                "start": {"x": 0.0, "y": 0.0, "z": -depth},
-                "end": {"x": 20.0, "y": 0.0, "z": -depth},
-                "feedrate": 800.0,
-                "toolId": tool_id or "",
-                "operationId": op_id,
-                "featureId": fid or "",
-                "setupId": setup.get("setupId", "setup_001"),
-                "source": "strategy",
-            })
+        # 5. Extract or reconstruct features
+        features_cache: Dict[str, MachiningFeature] = {}
+        if features:
+            for f in features:
+                if isinstance(f, dict):
+                    mf = vexcad_dict_to_machining_feature(f)
+                    features_cache[mf.id] = mf
 
-            # 4. Retract
-            op_paths.append({
-                "segmentId": f"{op_id}_retract_0",
-                "moveType": "retract_clearance",
-                "start": {"x": 20.0, "y": 0.0, "z": -depth},
-                "end": {"x": 20.0, "y": 0.0, "z": clearance_z},
-                "feedrate": 500.0,
-                "toolId": tool_id or "",
-                "operationId": op_id,
-                "featureId": fid or "",
-                "setupId": setup.get("setupId", "setup_001"),
-                "source": "strategy",
-            })
+        updated_ops: List[Dict[str, Any]] = []
+        flat_paths: List[Dict[str, Any]] = []
 
-            op_copy = dict(op)
-            op_copy["toolpaths"] = op_paths
-            op_copy["status"] = "generated"
-            op_copy["toolpath_schema_version"] = "semantic_v1"
-            updated_ops.append(op_copy)
-            flat_paths.extend(op_paths)
+        prev_remaining_stock: Optional[VoxelStock] = None
+        prev_setup_obj: Optional[Setup] = None
+
+        # Process setup by setup
+        for sid, s_dict in known_setups.items():
+            setup_ops = [
+                op for op in operations
+                if (op.get("setup_id") or op.get("setupId") or "setup_001") == sid
+            ]
+            if not setup_ops:
+                continue
+
+            rot = s_dict.get("rotation_deg") or ([180.0, 0.0, 0.0] if "002" in sid or "flip" in str(s_dict.get("setupName", "")).lower() else [0.0, 0.0, 0.0])
+            M_setup = _euler_to_matrix(float(rot[0]), float(rot[1]), float(rot[2]))
+            wcs_str = s_dict.get("workCoordinateSystem") or s_dict.get("wcs") or ("G55" if "002" in sid else "G54")
+
+            wo_enum = WorkOffset.G54
+            for w_val in WorkOffset:
+                if w_val.value == wcs_str:
+                    wo_enum = w_val
+                    break
+
+            shape_in_setup = None
+            if imported_model:
+                try:
+                    shape_in_setup = imported_model.shape.transformed(M_setup)
+                    bmin_s, bmax_s = shape_in_setup.bounding_box()
+                    mesh_s = TriangleMesh.from_faces(shape_in_setup.faces())
+                except Exception:
+                    shape_in_setup = None
+
+            if shape_in_setup is None:
+                stock_dims = s_dict.get("stockDimensions") or [100.0, 60.0, 25.0]
+                sx, sy, sz = float(stock_dims[0]), float(stock_dims[1]), float(stock_dims[2])
+                bmin_s = np.array([-sx / 2.0, -sy / 2.0, -sz])
+                bmax_s = np.array([sx / 2.0, sy / 2.0, 0.0])
+                mesh_s = TriangleMesh(triangles=np.array([
+                    [[bmin_s[0], bmin_s[1], 0.0], [bmax_s[0], bmin_s[1], 0.0], [bmax_s[0], bmax_s[1], 0.0]],
+                    [[bmin_s[0], bmin_s[1], 0.0], [bmax_s[0], bmax_s[1], 0.0], [bmin_s[0], bmax_s[1], 0.0]]
+                ]))
+
+            # Stock definition
+            stock_min = bmin_s - np.array([5.0, 5.0, 3.0])
+            stock_max = bmax_s + np.array([5.0, 5.0, 1.0])
+            dims = stock_max - stock_min
+            resolution = max(0.5, min(dims) / 50.0)
+
+            setup_obj = Setup(
+                id=sid,
+                name=s_dict.get("setupName") or f"Setup {sid}",
+                model_to_setup=M_setup,
+                work_offset=wo_enum,
+                stock=Stock(
+                    kind=StockKind.BOX,
+                    bounds_min=stock_min,
+                    bounds_max=stock_max,
+                ),
+            )
+
+            # Stock voxels
+            if prev_remaining_stock is not None and prev_setup_obj is not None:
+                M_curr = setup_obj.model_to_setup
+                M_prev = prev_setup_obj.model_to_setup
+                try:
+                    T_prev_to_curr = M_curr @ np.linalg.inv(M_prev)
+                except np.linalg.LinAlgError:
+                    T_prev_to_curr = np.eye(4)
+                stock_voxels = prev_remaining_stock.transformed(
+                    T_prev_to_curr, stock_min, stock_max, resolution
+                )
+            else:
+                stock_voxels = VoxelStock.from_bounds(stock_min, stock_max, resolution)
+
+            mid_for_setup = (
+                s_dict.get("machine")
+                or s_dict.get("machineProfile")
+                or setup.get("machine")
+                or setup.get("machineProfile")
+                or setup.get("machine_id")
+            )
+            active_machine = get_default_machine(machine_id=mid_for_setup)
+            if shape_in_setup is not None:
+                _, s_bmax = shape_in_setup.bounding_box()
+                if "Z" in active_machine.axes and float(s_bmax[2]) + 30.0 > active_machine.axes["Z"].travel_max:
+                    needed_z = float(s_bmax[2] + 100.0)
+                    active_machine.axes["Z"] = MachineAxis(
+                        name="Z",
+                        travel_min=min(active_machine.axes["Z"].travel_min, -needed_z),
+                        travel_max=max(active_machine.axes["Z"].travel_max, needed_z),
+                        rapid_rate=active_machine.axes["Z"].rapid_rate,
+                        max_feed=active_machine.axes["Z"].max_feed,
+                    )
+
+            clearance_info = setup_obj.compute_clearance(
+                mesh=mesh_s,
+                machine=active_machine,
+                tools=list(tool_cache.values()),
+                model_shape=shape_in_setup,
+            )
+            clearance_z = max(float(s_dict.get("clearanceHeight", 0.0) or 0.0), float(clearance_info.clearance_z), 5.0)
+
+            planning_ctx = PlanningContext(
+                model=imported_model,
+                setups=[setup_obj],
+                machine=active_machine,
+                tools=list(tool_cache.values()),
+                material=material,
+            )
+
+            strat_ctx = StrategyContext(
+                context=planning_ctx,
+                setup=setup_obj,
+                mesh=mesh_s,
+                stock_voxels=stock_voxels,
+                clearance_z=clearance_z,
+                finish_allowance_wall=0.3,
+                finish_allowance_floor=0.3,
+                clearance_info=clearance_info,
+            )
+            engine = StrategyEngine(strat_ctx)
+
+            # B-Rep recognized features for this setup
+            setup_brep_features: Dict[str, MachiningFeature] = {}
+            if shape_in_setup:
+                try:
+                    rec = FeatureRecognizer(shape_in_setup, stock_top_z=float(bmax_s[2] + 1.0))
+                    for f in rec.recognize():
+                        setup_brep_features[f.id] = f
+                        setup_brep_features[f"{sid}_{f.id}"] = f
+                        if f.id.startswith(f"{sid}_"):
+                            setup_brep_features[f.id.replace(f"{sid}_", "")] = f
+                except Exception as e:
+                    logger.warning(f"Feature recognition in setup {sid} failed: {e}")
+
+            # Generate toolpath for each operation in this setup
+            for op in setup_ops:
+                op_id = op.get("id") or f"op_{uuid.uuid4().hex[:6]}"
+                fid = op.get("feature_id") or op.get("featureId") or ""
+                t_id = op.get("tool_id") or op.get("toolId") or ""
+
+                tool = tool_cache.get(t_id)
+                if not tool:
+                    tool = parse_tool(op.get("tool", {}), default_id=t_id or "T01")
+                    tool_cache[tool.id] = tool
+
+                # Locate or synthesize MachiningFeature
+                feat = (
+                    setup_brep_features.get(fid)
+                    or features_cache.get(fid)
+                    or (setup_brep_features.get(f"{sid}_{fid}"))
+                )
+
+                if not feat:
+                    op_feat_dict = op.get("feature") if isinstance(op.get("feature"), dict) else {}
+                    if not op_feat_dict:
+                        op_feat_dict = {
+                            "id": fid or f"feat_{op_id}",
+                            "type": op.get("type", "pocket"),
+                            "depth": float(op.get("parameters", {}).get("depth", 10.0) or 10.0),
+                        }
+                    feat = vexcad_dict_to_machining_feature(
+                        op_feat_dict,
+                        default_top_z=float(bmax_s[2]),
+                        model_bmin=bmin_s,
+                        model_bmax=bmax_s,
+                    )
+                    features_cache[feat.id] = feat
+
+                purpose = parse_op_purpose(op.get("purpose") or op.get("type", "roughing"))
+                params = parse_cutting_parameters(op, tool, material)
+
+                planned_op = PlannedOperation(
+                    id=op_id,
+                    purpose=purpose,
+                    feature=feat,
+                    tool=tool,
+                    params=params,
+                    notes={"setup_id": sid, "work_offset": wcs_str},
+                )
+
+                try:
+                    tp = engine.generate(planned_op)
+                    tp.operation_id = op_id
+                    tp.metadata["setup_id"] = sid
+                    tp.metadata["work_offset"] = wcs_str
+
+                    # Carve remaining stock voxels with toolpath
+                    tool_radius = tool.diameter / 2.0
+                    for seg in tp.segments:
+                        if seg.motion_type in (
+                            MotionType.CUT, MotionType.PLUNGE, MotionType.RAMP,
+                            MotionType.ARC_CW, MotionType.ARC_CCW,
+                        ):
+                            if seg.motion_type in (MotionType.ARC_CW, MotionType.ARC_CCW):
+                                center = seg.arc_center if seg.arc_center is not None else None
+                                if center is not None:
+                                    r_start = seg.start[:2] - center[:2]
+                                    r_end = seg.end[:2] - center[:2]
+                                    angle_start = math.atan2(r_start[1], r_start[0])
+                                    angle_end = math.atan2(r_end[1], r_end[0])
+                                    if seg.motion_type == MotionType.ARC_CCW:
+                                        if angle_end < angle_start:
+                                            angle_end += 2 * math.pi
+                                    else:
+                                        if angle_end > angle_start:
+                                            angle_end -= 2 * math.pi
+                                    arc_radius = float(np.linalg.norm(r_start))
+                                    n_samples = max(4, int(math.ceil(arc_radius * abs(angle_end - angle_start) / 1.0)))
+                                    for k in range(n_samples):
+                                        t0 = k / n_samples
+                                        t1 = (k + 1) / n_samples
+                                        a0 = angle_start + t0 * (angle_end - angle_start)
+                                        a1 = angle_start + t1 * (angle_end - angle_start)
+                                        z0 = seg.start[2] + t0 * (seg.end[2] - seg.start[2])
+                                        z1 = seg.start[2] + t1 * (seg.end[2] - seg.start[2])
+                                        p0 = np.array([center[0] + arc_radius * math.cos(a0), center[1] + arc_radius * math.sin(a0), z0])
+                                        p1 = np.array([center[0] + arc_radius * math.cos(a1), center[1] + arc_radius * math.sin(a1), z1])
+                                        stock_voxels.remove_capsule(p0, p1, tool_radius)
+                                else:
+                                    stock_voxels.remove_capsule(seg.start, seg.end, tool_radius)
+                            else:
+                                stock_voxels.remove_capsule(seg.start, seg.end, tool_radius)
+                        elif seg.motion_type == MotionType.HELIX:
+                            stock_voxels.remove_capsule(seg.start, seg.end, tool_radius)
+
+                    op_dict = planned_operation_to_vexcad_dict(
+                        planned_op, tp, setup_id=sid, clearance_z=clearance_z
+                    )
+                    for k, v in op.items():
+                        if k not in ("toolpaths", "status", "safe_heights"):
+                            op_dict[k] = v
+                    op_dict["status"] = "generated"
+                    op_dict["toolpath_schema_version"] = "semantic_v1"
+                    op_dict["toolpaths"] = [
+                        motion_segment_to_toolpath_dict(
+                            seg, setup_id=sid, clearance_z=clearance_z,
+                            is_drill_op=(purpose is OpPurpose.DRILLING), index=idx
+                        )
+                        for idx, seg in enumerate(tp.segments)
+                    ]
+                    for s in op_dict["toolpaths"]:
+                        s["operationId"] = op_id
+                        s["featureId"] = fid
+                        s["setupId"] = sid
+
+                    updated_ops.append(op_dict)
+                    flat_paths.extend(op_dict["toolpaths"])
+
+                except Exception as op_err:
+                    logger.warning(f"Toolpath generation error for op {op_id}: {op_err}")
+                    op_copy = dict(op)
+                    op_copy["status"] = "blocked"
+                    op_copy["error"] = str(op_err)
+                    op_copy["toolpaths"] = []
+                    updated_ops.append(op_copy)
+
+            prev_remaining_stock = stock_voxels
+            prev_setup_obj = setup_obj
 
         return updated_ops, flat_paths
 
@@ -1377,13 +1871,41 @@ class CamEngineAdapter:
             ctrl = "fanuc"
             post_kwargs["program_end_command"] = "M30"
 
-        post = get_post_processor(ctrl, **post_kwargs)
+        wcs = setup.get("wcs") or setup.get("workCoordinateSystem") or "G54"
+
+        # Build consistent tool map across operations
+        job_tool_map: dict[str, int] = {}
+        for op in operations:
+            t_id = op.get("tool_id") or op.get("toolId")
+            if t_id and t_id not in job_tool_map:
+                t_obj = op.get("tool") if isinstance(op.get("tool"), dict) else {}
+                t_num = t_obj.get("tool_number") or t_obj.get("number")
+                if t_num and isinstance(t_num, int):
+                    job_tool_map[t_id] = t_num
+                else:
+                    t_str = str(t_id).upper().replace("TOOL_", "").replace("T", "")
+                    if t_str.isdigit() and int(t_str) > 0:
+                        job_tool_map[t_id] = int(t_str)
+                    else:
+                        job_tool_map[t_id] = len(job_tool_map) + 1
+
+        prog_num = setup.get("program_number") or setup.get("programNumber")
+
+        post = get_post_processor(
+            ctrl,
+            work_offset=wcs,
+            renumber_tools=True,
+            tool_map=job_tool_map,
+            program_number=prog_num,
+            **post_kwargs
+        )
         tps = []
         for op in operations:
             op_id = op.get("id", "op_1")
             feat_id = op.get("feature_id") or op.get("featureId") or "feat_1"
             tool_id = op.get("tool_id") or op.get("toolId") or "T01"
             purpose = op.get("purpose") or op.get("type", "cut")
+            op_spindle = op.get("spindle_speed") or op.get("spindleSpeed") or op.get("parameters", {}).get("spindle_speed")
 
             tp = Toolpath(
                 operation_id=op_id,
@@ -1391,6 +1913,11 @@ class CamEngineAdapter:
                 tool_id=tool_id,
                 purpose=purpose,
             )
+            if op_spindle:
+                try:
+                    tp.metadata["cutting_parameters"] = {"spindle_rpm": float(op_spindle)}
+                except (ValueError, TypeError):
+                    pass
             for seg in op.get("toolpaths", []):
                 start = seg.get("start", {})
                 end = seg.get("end", {})
@@ -1418,12 +1945,13 @@ class CamEngineAdapter:
                     c_arr = np.array([float(center.get("x", 0.0)), float(center.get("y", 0.0)), float(center.get("z", 0.0))])
 
                 metadata = dict(seg.get("metadata") or {})
+                seg_spindle = seg.get("spindle") or op_spindle
                 tp.add(MotionSegment(
                     motion_type=m_type,
                     start=st,
                     end=en,
                     feed=seg.get("feedrate"),
-                    spindle=seg.get("spindle"),
+                    spindle=seg_spindle,
                     arc_center=c_arr,
                     arc_ccw=(m_type_str == "arc_ccw"),
                     tool_id=tool_id,
@@ -1433,21 +1961,9 @@ class CamEngineAdapter:
                 ))
             tps.append(tp)
 
-        post_res = post.post_process(tps, program_name=program_name, require_validity=False)
+        s_id = setup.get("setupId") or setup.get("id") or "setup_001"
+        post_res = post.post_process(tps, program_name=program_name, setup_id=s_id, require_validity=False)
         return post_res.gcode
-
-    @staticmethod
-    def detect_setups_from_step(
-        step_path: Union[str, Path],
-        base_wcs: str = "G54",
-        controller: str = "fanuc",
-    ) -> List[Dict[str, Any]]:
-        """Automatically detect required setups from a STEP file."""
-        path = Path(step_path)
-        if not path.exists():
-            return []
-        imported = import_step(path)
-        return CamEngineAdapter.detect_setups_from_shape(imported.shape, base_wcs=base_wcs, controller=controller)
 
     @staticmethod
     def generate_export_package(

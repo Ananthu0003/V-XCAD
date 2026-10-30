@@ -228,12 +228,7 @@ class GeometryDrivenToolSelector:
         # Base ceiling: default to large capacity unless constrained by geometry
         max_allowed_dia = 100.0
 
-        if purpose_lower in ("corner_drilling", "pre_drilling"):
-            # Corner drilling tool must fit the smallest corner radius (diameter <= 2 * R_min)
-            min_c_r = float(feature.notes.get("min_corner_radius") or corner_r or 1.0)
-            max_allowed_dia = 2.0 * min_c_r + 0.05
-
-        elif ftype in (FeatureType.HOLE, FeatureType.BLIND_HOLE, FeatureType.THROUGH_HOLE, FeatureType.TAPPED_HOLE, FeatureType.THREADED_HOLE):
+        if ftype in (FeatureType.HOLE, FeatureType.BLIND_HOLE, FeatureType.THROUGH_HOLE, FeatureType.TAPPED_HOLE, FeatureType.THREADED_HOLE):
             if purpose_lower in ("drilling", "tapping", "reaming"):
                 max_allowed_dia = feat_dia or 100.0
             elif purpose_lower in ("spot_drilling", "countersinking"):
@@ -262,6 +257,16 @@ class GeometryDrivenToolSelector:
         elif ftype is FeatureType.FILLET and is_internal:
             if corner_r is not None:
                 max_allowed_dia = 2.0 * corner_r
+
+        # Corner / pre-drilling constraint: must fit smallest corner radius and cavity opening
+        if purpose_lower in ("corner_drilling", "pre_drilling"):
+            min_c_r = float(feature.notes.get("min_corner_radius") or corner_r or 1.0)
+            corner_drill_limit = 2.0 * min_c_r + 0.05
+            if min_span < 1e6:
+                corner_drill_limit = min(corner_drill_limit, min_span)
+            if feat_dia:
+                corner_drill_limit = min(corner_drill_limit, feat_dia)
+            max_allowed_dia = min(max_allowed_dia, corner_drill_limit)
 
         # Apply internal corner radius restriction for finishing operations
         if requires_corner_fit and corner_r is not None and purpose_lower not in ("roughing",):

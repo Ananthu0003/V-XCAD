@@ -23,7 +23,7 @@ import { ManualCadWorkspace } from '@/components/manual-cad/ManualCadWorkspace';
 import { StageSwitcher } from '@/components/workspace/StageSwitcher';
 import { ThemeToggle } from '@/components/shared/theme-toggle';
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { History, Cuboid, RotateCcw, Plus, FolderKanban, Sparkles, ChevronRight, Ruler, Wrench, Settings } from 'lucide-react';
+import { History, Cuboid, RotateCcw, Plus, FolderKanban, Sparkles, ChevronRight, ChevronLeft, Maximize2, Minimize2, Ruler, Wrench, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SetupSettings, Tool, CamOperation, SimulationState, ViewportSettings, CamFeature, PostProcessor, OperationType, ToolType, ToolMaterial, CoolantType, CamSetupPlan } from '@/types/cam';
 
@@ -422,6 +422,7 @@ export default function HitlWorkspace() {
 	const [viewportContextMenu, setViewportContextMenu] = useState<{ x: number, y: number } | null>(null);
 	const isResizing = useRef(false);
 	const fileUploadRef = useRef<HTMLInputElement>(null);
+	const blueprintUploadRef = useRef<HTMLInputElement>(null);
 	const stepUploadRef = useRef<HTMLInputElement>(null);
 	const stlUploadRef = stepUploadRef;
 
@@ -504,6 +505,7 @@ export default function HitlWorkspace() {
 
 	const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 	const [isChatOpen, setIsChatOpen] = useState(true);
+	const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
 
 	// CAD Revision History & Rollback Stack
 	const [revisions, setRevisions] = useState<CadRevision[]>([]);
@@ -812,12 +814,37 @@ export default function HitlWorkspace() {
 				setStlUrl(effectiveStl);
 				setStatusText(`Loaded: ${file.name}`);
 
+				const extractedParameters = (data.parameters && typeof data.parameters === 'object') ? data.parameters : {};
+				const extractedMetadata = (data.parameterMetadata && typeof data.parameterMetadata === 'object') ? data.parameterMetadata : {};
+				const rawFeatures = Array.isArray(data.features) ? data.features : [];
+				const extractedFeatures = rawFeatures.map((f: any, idx: number) => ({
+					id: f.id || f.feature_id || `feat_${idx + 1}`,
+					name: f.name || f.part_name || (f.type ? f.type.replace(/_/g, ' ') : (f.feature_type ? f.feature_type.replace(/_/g, ' ') : `Feature ${idx + 1}`)),
+					type: f.type || f.feature_type || 'feature',
+					dimensions: f.dimensions || f.parameters || {},
+					location: f.location || f.center || [0, 0, 0],
+					status: f.status || 'machinable',
+					...f,
+				}));
+
+				if (Object.keys(extractedParameters).length > 0) {
+					setParameters(extractedParameters);
+				}
+				if (Object.keys(extractedMetadata).length > 0) {
+					setParameterMetadata(extractedMetadata);
+				}
+				if (extractedFeatures.length > 0) {
+					setCamFeatures(extractedFeatures);
+				}
+
 				// Create a CAD revision for the imported STEP solid model with the tessellated STL
 				recordRevision({
 					title: `Imported STEP (${file.name})`,
 					description: `Direct 3D STEP B-Rep solid model (${(file.size / (1024 * 1024)).toFixed(2)} MB)`,
 					script: '',
-					params: {},
+					params: extractedParameters,
+					parameterMetadata: extractedMetadata,
+					camFeatures: extractedFeatures,
 					step: effectiveStep,
 					stl: effectiveStl,
 				});
@@ -861,6 +888,9 @@ export default function HitlWorkspace() {
 			return;
 		}
 		setSelectedFile(file);
+		if (file) {
+			setPrompt((current) => current.trim() || 'Generate a 3D CAD model of the attached file.');
+		}
 	}, [handleImportStep]);
 
 	const canUndo = activeRevisionIndex > 0;
@@ -1050,9 +1080,9 @@ export default function HitlWorkspace() {
 
 	async function handleGenerate(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
-		const submittedPrompt = prompt.trim();
+		const submittedPrompt = prompt.trim() || (selectedFile ? 'Generate a 3D CAD model of the attached file.' : '');
 		if (!submittedPrompt) {
-			setStatusText('Please provide a prompt.');
+			setStatusText('Please provide a prompt or attach a blueprint drawing.');
 			return;
 		}
 
@@ -2278,6 +2308,35 @@ export default function HitlWorkspace() {
 		if (activeStep) setStepUrl(activeStep);
 		if (activeDxf) setDxfUrl(activeDxf);
 
+		// Hydrate parameter metadata, extracted parameters, and CAM features from topology cache
+		if (session.id) {
+			fetch(`/api/cad/modify/topology/${session.id}?revision_id=rev_000`)
+				.then((res) => (res.ok ? res.json() : null))
+				.then((topo) => {
+					if (topo) {
+						if (topo.parameters && Object.keys(topo.parameters).length > 0) {
+							setParameters((prev) => (Object.keys(prev).length > 0 ? prev : topo.parameters));
+						}
+						if (topo.parameter_metadata && Object.keys(topo.parameter_metadata).length > 0) {
+							setParameterMetadata(topo.parameter_metadata);
+						}
+						if (topo.features && Array.isArray(topo.features) && topo.features.length > 0) {
+							const normalized = topo.features.map((f: any, idx: number) => ({
+								id: f.id || f.feature_id || `feat_${idx + 1}`,
+								name: f.name || f.part_name || (f.type ? f.type.replace(/_/g, ' ') : (f.feature_type ? f.feature_type.replace(/_/g, ' ') : `Feature ${idx + 1}`)),
+								type: f.type || f.feature_type || 'feature',
+								dimensions: f.dimensions || f.parameters || {},
+								location: f.location || f.center || [0, 0, 0],
+								status: f.status || 'machinable',
+								...f,
+							}));
+							setCamFeatures(normalized);
+						}
+					}
+				})
+				.catch(() => null);
+		}
+
 		setRevisions(initialRevisions);
 		setActiveRevisionIndex(initialRevisions.length - 1);
 
@@ -2410,6 +2469,40 @@ export default function HitlWorkspace() {
 
 	const showChat = workflowStage !== 'manual_cad' && workflowStage !== 'cam' && workflowStage !== 'gcode';
 
+	// Keyboard shortcuts for quick panel push & pull:
+	// Ctrl+[ (Left Panel / Copilot), Ctrl+] (Right Panel / Inspector), Alt+Z (Zen Full 3D Canvas)
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			const target = e.target as HTMLElement | null;
+			if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+				return;
+			}
+
+			if ((e.ctrlKey || e.metaKey) && e.key === '[') {
+				e.preventDefault();
+				if (showChat) {
+					setIsChatOpen((prev) => !prev);
+				}
+			} else if ((e.ctrlKey || e.metaKey) && e.key === ']') {
+				e.preventDefault();
+				setIsRightPanelOpen((prev) => !prev);
+			} else if (e.altKey && (e.key === 'z' || e.key === 'Z')) {
+				e.preventDefault();
+				const isZen = (!isChatOpen || !showChat) && !isRightPanelOpen;
+				if (isZen) {
+					setIsChatOpen(true);
+					setIsRightPanelOpen(true);
+				} else {
+					setIsChatOpen(false);
+					setIsRightPanelOpen(false);
+				}
+			}
+		};
+
+		window.addEventListener('keydown', handleKeyDown);
+		return () => window.removeEventListener('keydown', handleKeyDown);
+	}, [showChat, isChatOpen, isRightPanelOpen]);
+
 	return (
 		<div className="h-screen w-full bg-[var(--ui-bg)] text-foreground overflow-hidden flex flex-col ui-root">
 			<main className="flex-1 flex overflow-hidden w-full gap-0 relative">
@@ -2471,6 +2564,43 @@ export default function HitlWorkspace() {
 													</span>
 												</div>
 												<div className="flex items-center gap-2">
+													{/* Zen Mode Button in Blueprint Stage Header */}
+													<button
+														type="button"
+														onClick={() => {
+															const isZen = (!isChatOpen || !showChat) && !isRightPanelOpen;
+															if (isZen) {
+																setIsChatOpen(true);
+																setIsRightPanelOpen(true);
+															} else {
+																setIsChatOpen(false);
+																setIsRightPanelOpen(false);
+															}
+														}}
+														className={cn(
+															"ui-btn !h-7 px-2.5 rounded-lg border transition-all text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer shadow-sm",
+															(!isChatOpen || !showChat) && !isRightPanelOpen
+																? "bg-[var(--ui-accent)] text-[var(--ui-accent-foreground)] border-[var(--ui-accent)]"
+																: "ui-btn--ghost text-[var(--ui-text-muted)] hover:text-[var(--ui-text-primary)]"
+														)}
+														title={
+															(!isChatOpen || !showChat) && !isRightPanelOpen
+																? "Exit Zen Mode (Alt+Z)"
+																: "Zen Canvas Mode (Alt+Z)"
+														}
+													>
+														{(!isChatOpen || !showChat) && !isRightPanelOpen ? (
+															<>
+																<Minimize2 className="size-3" />
+																<span className="hidden sm:inline">Exit Zen</span>
+															</>
+														) : (
+															<>
+																<Maximize2 className="size-3" />
+																<span className="hidden sm:inline">Zen View</span>
+															</>
+														)}
+													</button>
 													<button
 														type="button"
 														onClick={() => setIsSessionBrowserOpen(true)}
@@ -2501,7 +2631,7 @@ export default function HitlWorkspace() {
 														<button
 															onClick={() => {
 																setIsChatOpen(true);
-																setTimeout(() => fileUploadRef.current?.click(), 100);
+																blueprintUploadRef.current?.click();
 															}}
 															className="group relative flex items-center gap-3.5 p-3.5 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-panel)] hover:border-[var(--ui-accent)] hover:shadow-md transition-all text-left cursor-pointer"
 														>
@@ -2634,6 +2764,44 @@ export default function HitlWorkspace() {
 														onRedo={handleRedo}
 													/>
 
+													{/* 100% Fullscreen 3D Canvas / Zen Mode Toggle */}
+													<button
+														type="button"
+														onClick={() => {
+															const isZen = (!isChatOpen || !showChat) && !isRightPanelOpen;
+															if (isZen) {
+																setIsChatOpen(true);
+																setIsRightPanelOpen(true);
+															} else {
+																setIsChatOpen(false);
+																setIsRightPanelOpen(false);
+															}
+														}}
+														className={cn(
+															"ui-btn !h-8 px-2.5 rounded-xl border transition-all text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer shadow-sm",
+															(!isChatOpen || !showChat) && !isRightPanelOpen
+																? "bg-[var(--ui-accent)] text-[var(--ui-accent-foreground)] border-[var(--ui-accent)] shadow-[0_0_12px_rgba(59,130,246,0.3)]"
+																: "ui-btn--ghost text-[var(--ui-text-muted)] hover:text-[var(--ui-text-primary)]"
+														)}
+														title={
+															(!isChatOpen || !showChat) && !isRightPanelOpen
+																? "Exit Full 3D Canvas (Alt+Z)"
+																: "100% Full 3D Canvas / Zen Mode (Alt+Z)"
+														}
+													>
+														{(!isChatOpen || !showChat) && !isRightPanelOpen ? (
+															<>
+																<Minimize2 className="size-3.5" />
+																<span className="hidden sm:inline">Exit Zen</span>
+															</>
+														) : (
+															<>
+																<Maximize2 className="size-3.5" />
+																<span className="hidden sm:inline">Zen View</span>
+															</>
+														)}
+													</button>
+
 													{/* Setup Selector (CAM Mode) */}
 													{camSetups.length > 1 && (
 														<Select value={activeSetupId || ''} onValueChange={(val: string | null) => val && setActiveSetupId(val)}>
@@ -2709,7 +2877,10 @@ export default function HitlWorkspace() {
 								{/* 2. Floating Left Card: Chat Panel (when showChat is true) */}
 								{showChat && (
 									<div
-										className="ui-float"
+										className={cn(
+											"ui-float transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+											!isChatOpen && "opacity-0 pointer-events-none -translate-x-[calc(100%+24px)]"
+										)}
 										style={{
 											position: 'absolute',
 											left: 12,
@@ -2758,9 +2929,25 @@ export default function HitlWorkspace() {
 									</div>
 								)}
 
+								{/* Left Floating Pull Tab when Copilot is collapsed */}
+								{showChat && !isChatOpen && (
+									<button
+										type="button"
+										onClick={() => setIsChatOpen(true)}
+										className="absolute left-3 top-14 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-panel)]/95 backdrop-blur-md text-[var(--ui-text-primary)] hover:text-[var(--ui-accent)] hover:border-[var(--ui-accent)] shadow-lg hover:shadow-xl transition-all group cursor-pointer animate-in fade-in slide-in-from-left-4 duration-300"
+										title="Pull Left Panel (Expand Copilot · Ctrl+[)"
+									>
+										<ChevronRight className="size-4 group-hover:translate-x-0.5 transition-transform text-[var(--ui-accent)]" />
+										<span className="text-[11px] font-mono font-bold tracking-wider">COPILOT</span>
+									</button>
+								)}
+
 								{/* 3. Floating Right Card: Settings / CAM Summary with StageSwitcher */}
 								<div
-									className="ui-float"
+									className={cn(
+										"ui-float transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+										!isRightPanelOpen && "opacity-0 pointer-events-none translate-x-[calc(100%+24px)]"
+									)}
 									style={{
 										position: 'absolute',
 										right: 12,
@@ -2774,16 +2961,19 @@ export default function HitlWorkspace() {
 										overflow: 'hidden',
 									}}
 								>
-									{/* Header: Shared Stage Switcher */}
+									{/* Header: Shared Stage Switcher & Push Button */}
 									<div
 										style={{
-											padding: 14,
+											padding: '10px 14px',
 											borderBottom: '1px solid var(--ui-border)',
 											display: 'flex',
 											alignItems: 'center',
+											justifyContent: 'space-between',
+											gap: 8,
 										}}
 									>
-										<StageSwitcher
+										<div className="flex-1 min-w-0">
+											<StageSwitcher
 											value={workflowStage === 'cam' || workflowStage === 'gcode' ? 'cam' : 'cad'}
 											onChange={async (newStage) => {
 												if (newStage === 'cam') {
@@ -2811,6 +3001,15 @@ export default function HitlWorkspace() {
 											}}
 										/>
 									</div>
+									<button
+										type="button"
+										onClick={() => setIsRightPanelOpen(false)}
+										className="ui-btn ui-btn--ghost !h-7 !w-7 !p-0 shrink-0 text-[var(--ui-text-muted)] hover:text-[var(--ui-accent)] cursor-pointer"
+										title="Push Right Panel (Collapse · Ctrl+])"
+									>
+										<ChevronRight className="size-4" />
+									</button>
+								</div>
 
 									{/* Tab Content */}
 									<div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
@@ -2831,6 +3030,10 @@ export default function HitlWorkspace() {
 												camSetup={camSetup}
 												setCamSetup={setCamSetup}
 												pythonScript={pythonScript}
+												onSwitchToManualCad={() => {
+													setWorkflowStage('manual_cad');
+													setActiveRightTab('manual_cad');
+												}}
 											/>
 										)}
 
@@ -2850,6 +3053,21 @@ export default function HitlWorkspace() {
 										)}
 									</div>
 								</div>
+
+								{/* Right Floating Pull Tab when Inspector is collapsed */}
+								{!isRightPanelOpen && (
+									<button
+										type="button"
+										onClick={() => setIsRightPanelOpen(true)}
+										className="absolute right-3 top-14 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-panel)]/95 backdrop-blur-md text-[var(--ui-text-primary)] hover:text-[var(--ui-accent)] hover:border-[var(--ui-accent)] shadow-lg hover:shadow-xl transition-all group cursor-pointer animate-in fade-in slide-in-from-right-4 duration-300"
+										title="Pull Right Panel (Expand Inspector · Ctrl+])"
+									>
+										<span className="text-[11px] font-mono font-bold tracking-wider">
+											{workflowStage === 'cam' || workflowStage === 'gcode' ? 'CAM SETUP' : 'INSPECTOR'}
+										</span>
+										<ChevronLeft className="size-4 group-hover:-translate-x-0.5 transition-transform text-[var(--ui-accent)]" />
+									</button>
+								)}
 							</div>
 						)}
 					</Panel>
@@ -2954,7 +3172,10 @@ export default function HitlWorkspace() {
 
 			{/* Unified Floating Action Dock (Animated Robot + Theme Toggle) */}
 			<div
-				className="fixed bottom-6 right-[348px] z-50 flex flex-col items-center gap-3 transition-all duration-200"
+				className={cn(
+					"fixed bottom-6 z-50 flex flex-col items-center gap-3 transition-all duration-300",
+					isRightPanelOpen ? "right-[348px]" : "right-6"
+				)}
 			>
 				<PromptAssistantWidget
 					blueprintUrl={blueprintUrl}
@@ -2966,6 +3187,27 @@ export default function HitlWorkspace() {
 				/>
 				<ThemeToggle />
 			</div>
+
+			{/* Hidden file input for direct Blueprint Drawing upload */}
+			<input
+				ref={blueprintUploadRef}
+				type="file"
+				accept="image/png,image/jpeg,image/webp,application/pdf"
+				className="hidden"
+				onChange={(e) => {
+					const file = e.target.files?.[0];
+					if (file) {
+						if (file.size > 10 * 1024 * 1024) {
+							alert('File size exceeds the 10MB limit. Please upload a smaller blueprint drawing.');
+							e.target.value = '';
+							return;
+						}
+						setIsChatOpen(true);
+						handleFileChangeWithStep(file);
+						e.target.value = '';
+					}
+				}}
+			/>
 
 			{/* Hidden file input for direct STEP solid model import */}
 			<input

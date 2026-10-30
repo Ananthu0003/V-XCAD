@@ -279,20 +279,26 @@ class FinalValidationGate:
         warnings: list[str] = []
 
         used_gcode = set()
+        g_ends = np.asarray([g["end"] for g in gcode_segments], dtype=float) if gcode_segments else np.empty((0, 3))
+        pos_tol_sq = self.position_tolerance_mm * self.position_tolerance_mm
 
         for i, planned in enumerate(planned_segments):
             best_match = None
             best_dist = float("inf")
             best_idx = -1
 
-            for j, gcode in enumerate(gcode_segments):
-                if j in used_gcode:
-                    continue
-                dist = self._segment_distance(planned, gcode)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_match = gcode
-                    best_idx = j
+            if len(g_ends) > 0:
+                p_end = np.asarray(planned["end"], dtype=float)
+                diff = g_ends - p_end
+                dists2 = np.sum(diff * diff, axis=1)
+                if used_gcode:
+                    dists2[list(used_gcode)] = np.inf
+                min_idx = int(np.argmin(dists2))
+                min_dist2 = dists2[min_idx]
+                if min_dist2 <= pos_tol_sq:
+                    best_idx = min_idx
+                    best_dist = float(np.sqrt(min_dist2))
+                    best_match = gcode_segments[best_idx]
 
             if best_match and best_dist <= self.position_tolerance_mm:
                 matched += 1

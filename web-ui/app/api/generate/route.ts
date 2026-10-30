@@ -9,6 +9,7 @@ import { getModelById } from '@/lib/models-registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 600;
 
 type ErrorPayload = {
 	error: {

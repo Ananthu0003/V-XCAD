@@ -1,3 +1,5 @@
+import { Agent, setGlobalDispatcher } from 'undici';
+
 /**
  * Server-side client for the internal ai-engine service.
  *
@@ -52,6 +54,19 @@ function toPlainHeaders(init: HeadersInit | undefined): Record<string, string> {
     for (const [k, v] of Object.entries(init as Record<string, string>)) put(k, v);
   }
   return out;
+}
+
+// Configure Undici to prevent premature body timeouts (UND_ERR_BODY_TIMEOUT)
+// during long-running streaming CAD generation, vision audits, and metrology verification.
+try {
+  setGlobalDispatcher(
+    new Agent({
+      bodyTimeout: 0,
+      headersTimeout: 0,
+    })
+  );
+} catch {
+  // Gracefully ignored in test / non-Node environments
 }
 
 /**

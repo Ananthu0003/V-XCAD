@@ -189,7 +189,7 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                 {setups.length > 0 ? setups.map((s, idx) => {
                     const assignedIds: string[] = s.assignedFeatureIds || (s as any).assigned_feature_ids || [];
                     const setupFeatures = (assignedIds.length > 0)
-                        ? features.filter(f => assignedIds.includes(f.id))
+                        ? features.filter(f => assignedIds.includes(f.id || (f as any).feature_id))
                         : (setups.length === 1 ? features : []);
                     const currentSetupId = s.setupId || (s as any).setup_id || `setup_${idx + 1}`;
                     const setupOps = operations.filter(op => {
@@ -221,16 +221,18 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                         <Target className="size-3.5" /> Setup Features ({setupFeatures.length})
                                     </div>
                                     <div className="flex flex-col gap-1 mt-1">
-                                        {setupFeatures.map(f => {
+                                        {setupFeatures.map((f, fIdx) => {
                                             const status = f.machining_info?.status || 'machinable_in_active_setup';
                                             const isBlocked = status === 'unsupported' || (status !== 'machinable_in_active_setup' && status !== 'machinable_in_secondary_setup' && status !== 'requires_turning' && status !== 'requires_4axis_indexing');
+                                            const featKey = f.id || (f as any).feature_id || `setup_${idx}_feat_${fIdx}`;
+                                            const featName = f.name || (f as any).part_name || (f.type ? f.type.replace(/_/g, ' ') : (f as any).feature_type) || `Feature ${fIdx + 1}`;
 
                                             return (
-                                                <div key={f.id} className="text-[11px] flex flex-col gap-0.5 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
+                                                <div key={featKey} className="text-[11px] flex flex-col gap-0.5 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
                                                     <div className="flex justify-between items-start">
-                                                        <span className="text-foreground font-medium capitalize">{f.name || f.type?.replace('_', ' ')}</span>
+                                                        <span className="text-foreground font-medium capitalize">{featName}</span>
                                                         <span className="text-[10px] whitespace-nowrap">
-                                                            {renderFeatureStatus(status)}
+                                                             {renderFeatureStatus(status)}
                                                         </span>
                                                     </div>
                                                     {isBlocked && f.machining_info?.reason && (
@@ -251,11 +253,13 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                         <Layers className="size-3.5" /> Setup Operations ({setupOps.length})
                                     </div>
                                     <div className="flex flex-col gap-1 mt-1">
-                                        {setupOps.map(op => {
+                                        {setupOps.map((op, opIdx) => {
+                                            const opKey = op.id || (op as any).operation_id || `setup_${idx}_op_${opIdx}`;
+                                            const opName = op.name || (op.type ? op.type.replace(/_/g, ' ') : `Operation ${opIdx + 1}`);
                                             return (
-                                                <div key={op.id} className="text-[11px] flex flex-col gap-1 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
+                                                <div key={opKey} className="text-[11px] flex flex-col gap-1 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
                                                     <div className="flex justify-between items-start">
-                                                        <span className="text-foreground font-medium capitalize">{op.name || op.type?.replace('_', ' ')}</span>
+                                                        <span className="text-foreground font-medium capitalize">{opName}</span>
                                                         <span className="text-[10px] whitespace-nowrap">
                                                             {renderOperationStatus(op.status)}
                                                         </span>
@@ -328,21 +332,25 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                 {features.length === 0 ? (
                                     <span className="text-[11px] text-muted-foreground">No features detected</span>
                                 ) : (
-                                    features.map(f => {
+                                    features.map((f, fIdx) => {
                                         const status = f.machining_info?.status || 'machinable_in_active_setup';
                                         const isBlocked = status === 'unsupported' || (status !== 'machinable_in_active_setup' && status !== 'machinable_in_secondary_setup' && status !== 'requires_turning' && status !== 'requires_4axis_indexing');
+                                        const featKey = f.id || (f as any).feature_id || `feat_${fIdx}`;
+                                        const featName = f.name || (f as any).part_name || (f.type ? f.type.replace(/_/g, ' ') : (f as any).feature_type) || `Feature ${fIdx + 1}`;
+                                        const featIdDisplay = f.id || (f as any).feature_id || `feat_${fIdx + 1}`;
+                                        const featTypeDisplay = f.type || (f as any).feature_type || '—';
 
                                         return (
-                                            <div key={f.id} className="text-[11px] flex flex-col gap-0.5 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
+                                            <div key={featKey} className="text-[11px] flex flex-col gap-0.5 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
                                                 <div className="flex justify-between items-start">
-                                                    <span className="text-foreground font-medium capitalize">{f.name || f.type?.replace('_', ' ')}</span>
+                                                    <span className="text-foreground font-medium capitalize">{featName}</span>
                                                     <span className="text-[10px] whitespace-nowrap">
                                                         {renderFeatureStatus(status)}
                                                     </span>
                                                 </div>
                                                 <div className="flex flex-col gap-0.5 text-[9px] text-muted-foreground font-mono ml-1 border-l border-border/50 pl-2">
-                                                    <div><span className="text-foreground/60">ID:</span> {f.id}</div>
-                                                    <div><span className="text-foreground/60">Type:</span> {f.type} / {(f as any).subtype || '—'}</div>
+                                                    <div><span className="text-foreground/60">ID:</span> {featIdDisplay}</div>
+                                                    <div><span className="text-foreground/60">Type:</span> {featTypeDisplay} / {(f as any).subtype || '—'}</div>
                                                     {f.axis && <div><span className="text-foreground/60">Axis:</span> [{f.axis.map(v => v.toFixed(2)).join(', ')}]</div>}
                                                     {f.machining_region && <div><span className="text-foreground/60">Region:</span> {f.machining_region}</div>}
                                                     {isBlocked && f.machining_info?.reason && (
@@ -370,15 +378,17 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                 {operations.length === 0 ? (
                                     <span className="text-[11px] text-muted-foreground">No operations</span>
                                 ) : (
-                                    operations.map(op => {
+                                    operations.map((op, opIdx) => {
                                         const numSegments = op.toolpaths ? op.toolpaths.length : 0;
                                         const isOutdated = op.toolpaths && op.toolpaths.length > 0 && op.toolpath_schema_version !== 'semantic_v1';
                                         const displayStatus = isOutdated ? 'outdated' : op.status;
+                                        const opKey = op.id || (op as any).operation_id || `op_${opIdx}`;
+                                        const opName = op.name || (op.type ? op.type.replace(/_/g, ' ') : `Operation ${opIdx + 1}`);
                                         
                                         return (
-                                            <div key={op.id} className="text-[11px] flex flex-col gap-1 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
+                                            <div key={opKey} className="text-[11px] flex flex-col gap-1 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
                                                 <div className="flex justify-between items-start">
-                                                    <span className="text-foreground font-medium capitalize">{op.name || op.type?.replace('_', ' ')}</span>
+                                                    <span className="text-foreground font-medium capitalize">{opName}</span>
                                                     <span className="text-[10px] whitespace-nowrap">
                                                         {renderOperationStatus(displayStatus)}
                                                     </span>

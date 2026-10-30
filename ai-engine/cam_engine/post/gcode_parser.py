@@ -597,26 +597,47 @@ class GCodeGeometryValidator:
         ]
 
         if planned_cut_endpoints and reconstructed_cut_endpoints:
-            # Forward check: planned points -> nearest reconstructed NC point
-            for p_pt in planned_cut_endpoints:
-                dists = [np.linalg.norm(p_pt - r_pt) for r_pt in reconstructed_cut_endpoints]
-                min_d = min(dists) if dists else 0.0
-                if min_d > max_dev:
-                    max_dev = min_d
-                inspected += 1
-                if min_d > self.tolerance_mm:
-                    errors.append(f"Geometric deviation {min_d:.3f}mm at planned point ({p_pt[0]:.2f}, {p_pt[1]:.2f}, {p_pt[2]:.2f}) exceeds tolerance {self.tolerance_mm:.3f}mm.")
-                    xyz_matches = False
+            P = np.asarray(planned_cut_endpoints, dtype=float)
+            R = np.asarray(reconstructed_cut_endpoints, dtype=float)
+            try:
+                from scipy.spatial import cKDTree
+                tree_R = cKDTree(R)
+                tree_P = cKDTree(P)
+                fwd_dists, _ = tree_R.query(P)
+                rev_dists, _ = tree_P.query(R)
+            except ImportError:
+                chunk_size = 500
+                fwd_dists = np.empty(len(P), dtype=float)
+                for start_i in range(0, len(P), chunk_size):
+                    end_i = min(start_i + chunk_size, len(P))
+                    diff = P[start_i:end_i, None, :] - R[None, :, :]
+                    fwd_dists[start_i:end_i] = np.sqrt(np.min(np.sum(diff * diff, axis=2), axis=1))
+                rev_dists = np.empty(len(R), dtype=float)
+                for start_i in range(0, len(R), chunk_size):
+                    end_i = min(start_i + chunk_size, len(R))
+                    diff = R[start_i:end_i, None, :] - P[None, :, :]
+                    rev_dists[start_i:end_i] = np.sqrt(np.min(np.sum(diff * diff, axis=2), axis=1))
 
-            # Reverse check: reconstructed NC points -> nearest planned point
-            for r_pt in reconstructed_cut_endpoints:
-                dists = [np.linalg.norm(r_pt - p_pt) for p_pt in planned_cut_endpoints]
-                min_d = min(dists) if dists else 0.0
-                if min_d > max_dev:
-                    max_dev = min_d
-                if min_d > self.tolerance_mm:
+            inspected += len(P)
+            max_fwd = float(np.max(fwd_dists)) if len(fwd_dists) else 0.0
+            max_rev = float(np.max(rev_dists)) if len(rev_dists) else 0.0
+            max_dev = max(max_dev, max_fwd, max_rev)
+
+            bad_fwd_indices = np.nonzero(fwd_dists > self.tolerance_mm)[0]
+            if len(bad_fwd_indices):
+                xyz_matches = False
+                for idx in bad_fwd_indices:
+                    p_pt = P[idx]
+                    min_d = float(fwd_dists[idx])
+                    errors.append(f"Geometric deviation {min_d:.3f}mm at planned point ({p_pt[0]:.2f}, {p_pt[1]:.2f}, {p_pt[2]:.2f}) exceeds tolerance {self.tolerance_mm:.3f}mm.")
+
+            bad_rev_indices = np.nonzero(rev_dists > self.tolerance_mm)[0]
+            if len(bad_rev_indices):
+                xyz_matches = False
+                for idx in bad_rev_indices:
+                    r_pt = R[idx]
+                    min_d = float(rev_dists[idx])
                     errors.append(f"Unplanned NC motion deviation {min_d:.3f}mm at NC coordinate ({r_pt[0]:.2f}, {r_pt[1]:.2f}, {r_pt[2]:.2f}) exceeds tolerance {self.tolerance_mm:.3f}mm.")
-                    xyz_matches = False
 
         # 9. Arc Fidelity Verification (Arc centers, radii, directions)
         max_arc_dev = 0.0

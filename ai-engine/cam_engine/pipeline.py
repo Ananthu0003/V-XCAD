@@ -75,6 +75,8 @@ def run_cam_pipeline(
     tool_change_mode: Optional[str] = None,
     tool_change_format: Optional[str] = None,
     stage_next_tool: bool = False,
+    machine: Optional[MachineConfig] = None,
+    machine_id: Optional[str] = None,
 ) -> PipelineResult:
     """Execute the full CAM pipeline on an input STEP file."""
     path = Path(step_path)
@@ -139,7 +141,18 @@ def run_cam_pipeline(
         stock=stock,
     )
 
-    machine = get_default_machine()
+    if machine is None:
+        machine = get_default_machine(machine_id=machine_id)
+        part_top_z = float(bmax[2])
+        if "Z" in machine.axes and part_top_z + 30.0 > machine.axes["Z"].travel_max:
+            needed_z = float(part_top_z + 100.0)
+            machine.axes["Z"] = MachineAxis(
+                name="Z",
+                travel_min=min(machine.axes["Z"].travel_min, -needed_z),
+                travel_max=max(machine.axes["Z"].travel_max, needed_z),
+                rapid_rate=machine.axes["Z"].rapid_rate,
+                max_feed=machine.axes["Z"].max_feed,
+            )
     tools = get_default_tools()
     try:
         material = get_material(material_name)

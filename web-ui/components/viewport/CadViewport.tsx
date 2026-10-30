@@ -88,6 +88,12 @@ function CanvasBridge() {
 		if (gl?.domElement) {
 			(window as any).__VEXCAD_CANVAS__ = gl.domElement;
 		}
+		return () => {
+			if ((window as any).__VEXCAD_CANVAS__ === gl?.domElement) {
+				delete (window as any).__VEXCAD_CANVAS__;
+			}
+			gl?.dispose?.();
+		};
 	}, [gl]);
 	return null;
 }
@@ -1057,7 +1063,12 @@ export function CadViewport({
 								e.preventDefault();
 								console.warn('CadViewport: WebGL Context Lost event intercepted.');
 							};
+							const handleContextRestored = () => {
+								console.info('CadViewport: WebGL Context Restored.');
+								setCanvasKey((prev) => prev + 1);
+							};
 							gl.domElement.addEventListener('webglcontextlost', handleContextLost, false);
+							gl.domElement.addEventListener('webglcontextrestored', handleContextRestored, false);
 						}}
 						className="relative z-10"
 						onPointerMissed={onClearSelection}

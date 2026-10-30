@@ -8,6 +8,7 @@ import { RATE_LIMITS, enforce, rateLimitedResponse, renderSlots } from '@/lib/ra
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 600;
 
 type ErrorPayload = {
 	error: {
