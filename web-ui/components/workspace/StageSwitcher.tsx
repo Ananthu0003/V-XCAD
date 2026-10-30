@@ -27,6 +27,8 @@ export function StageSwitcher({ value, onChange, className = '', style }: StageS
         padding: 3,
         borderRadius: 10,
         background: 'var(--ui-input)',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
         ...style,
       }}
     >
@@ -35,30 +37,30 @@ export function StageSwitcher({ value, onChange, className = '', style }: StageS
         data-on={currentStage === 'cad'}
         onClick={() => onChange('cad')}
         title="Switch to AI CAD stage"
-        className="flex-1"
+        className="flex-1 min-w-0"
       >
-        <Ruler size={13} strokeWidth={1.8} />
-        <span>AI CAD</span>
+        <Ruler size={12} strokeWidth={1.8} className="shrink-0" />
+        <span className="truncate">AI CAD</span>
       </button>
       <button
         type="button"
         data-on={currentStage === 'manual_cad'}
         onClick={() => onChange('manual_cad')}
         title="Switch to Manual CAD stage"
-        className="flex-1"
+        className="flex-1 min-w-0"
       >
-        <Wrench size={13} strokeWidth={1.8} />
-        <span>Manual CAD</span>
+        <Wrench size={12} strokeWidth={1.8} className="shrink-0" />
+        <span className="truncate">Manual CAD</span>
       </button>
       <button
         type="button"
         data-on={currentStage === 'cam'}
         onClick={() => onChange('cam')}
         title="Switch to CAM Setup stage"
-        className="flex-1"
+        className="flex-1 min-w-0"
       >
-        <Settings size={13} strokeWidth={1.8} />
-        <span>CAM Setup</span>
+        <Settings size={12} strokeWidth={1.8} className="shrink-0" />
+        <span className="truncate">CAM Setup</span>
       </button>
     </div>
   );

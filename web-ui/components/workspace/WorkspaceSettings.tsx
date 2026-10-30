@@ -53,12 +53,12 @@ export function WorkspaceSettings({
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pb-6">
         {/* Extracted Parameters */}
         <div className="ui-section">
-          <div className="ui-section-title">
-            <span>Extracted Parameters</span>
+          <div className="ui-section-title flex items-center justify-between gap-2">
+            <span className="truncate">Extracted Parameters</span>
             {Object.keys(parameters).length > 0 && (
               <button
                 onClick={handleCopyParameters}
-                className="ui-btn ui-btn--ghost !h-6 !px-2 text-[10px]"
+                className="ui-btn ui-btn--ghost !h-6 !px-2 text-[10px] ml-auto shrink-0 cursor-pointer"
                 title="Copy all parameters"
               >
                 {copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
@@ -97,12 +97,12 @@ export function WorkspaceSettings({
 
         {/* CAD Script */}
         <div className="ui-section">
-          <div className="ui-section-title">
-            <span>CAD Script (Build123d)</span>
+          <div className="ui-section-title flex items-center justify-between gap-2">
+            <span className="truncate">CAD Script (Build123d)</span>
             {pythonScript && (
               <button
                 onClick={handleCopyScript}
-                className="ui-btn ui-btn--ghost !h-6 !px-2 text-[10px]"
+                className="ui-btn ui-btn--ghost !h-6 !px-2 text-[10px] ml-auto shrink-0 cursor-pointer"
                 title="Copy script"
               >
                 {copiedScript ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}

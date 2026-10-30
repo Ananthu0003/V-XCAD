@@ -3,6 +3,7 @@
 import { useEffect, useState, use, Suspense, Component } from 'react';
 import type { ReactNode } from 'react';
 import { Loader2, Layers, AlertCircle, Cuboid } from 'lucide-react';
+import { ProjectLogo } from '@/components/shared/ProjectLogo';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stage, PerspectiveCamera } from '@react-three/drei';
 import { StlMesh, type StlGeometryInfo } from '@/components/viewport/StlMesh';
@@ -145,9 +146,8 @@ export default function SharedModelPage({ params }: { params: Promise<{ id: stri
 				<div className="flex items-start justify-between w-full">
 					{/* Brand & Prompt Floating Card */}
 					<div className="pointer-events-auto flex items-center gap-5 rounded-[24px] border border-white/10 bg-black/40 backdrop-blur-2xl p-3 shadow-[0_8px_32px_rgba(0,0,0,0.5)] max-w-xl transition-all hover:bg-black/50 hover:border-white/20 animate-in fade-in slide-in-from-top-4 duration-700">
-						<div className="relative size-14 flex items-center justify-center shrink-0 rounded-[18px] bg-gradient-to-br from-blue-500/20 to-blue-600/10 border border-blue-500/30 overflow-hidden group cursor-pointer">
-							<div className="absolute inset-0 bg-blue-500 opacity-0 group-hover:opacity-20 transition-opacity duration-500" />
-							<Cuboid className="size-6 text-blue-400 relative z-10 drop-shadow-[0_0_10px_rgba(96,165,250,0.8)]" />
+						<div className="relative size-14 flex items-center justify-center shrink-0 rounded-[18px] bg-gradient-to-br from-blue-500/20 to-blue-600/10 border border-blue-500/30 overflow-hidden group cursor-pointer p-1">
+							<ProjectLogo size={44} showGlow priority />
 						</div>
 						<div className="min-w-0 pr-4">
 							<div className="flex items-center gap-3 mb-1">

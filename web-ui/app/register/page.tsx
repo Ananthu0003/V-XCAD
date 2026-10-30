@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Cuboid, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { ProjectLogo } from '@/components/shared/ProjectLogo';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -58,10 +59,7 @@ export default function RegisterPage() {
       <div className="relative z-10 w-full max-w-md mt-10 mb-10">
         <div className="flex flex-col items-center mb-10">
           <Link href="/" className="flex items-center gap-2 group mb-8">
-            <div className="relative w-12 h-12 flex items-center justify-center">
-              <div className="absolute inset-0 bg-blue-500 rounded-xl transform rotate-45 opacity-20 group-hover:opacity-30 transition-opacity"></div>
-              <Cuboid className="w-7 h-7 text-blue-400 relative z-10" />
-            </div>
+            <ProjectLogo size={48} showGlow priority />
             <span className="text-3xl font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-500 dark:from-gray-100 dark:to-gray-500">
               VΞXCAD
             </span>

@@ -53,6 +53,8 @@ export type ChatMessage = {
 interface PromptAssistantWidgetProps {
 	blueprintUrl?: string | null;
 	sessionId?: string | null;
+	isRightPanelOpen?: boolean;
+	isCamDrawerOpen?: boolean;
 	onApplyPrompt?: (prompt: string) => void;
 }
 
@@ -73,6 +75,8 @@ const INITIAL_ASSISTANT_MESSAGE: ChatMessage = {
 export function PromptAssistantWidget({
 	blueprintUrl,
 	sessionId,
+	isRightPanelOpen = false,
+	isCamDrawerOpen = false,
 	onApplyPrompt,
 }: PromptAssistantWidgetProps) {
 	const [isOpen, setIsOpen] = useState(false);
@@ -497,7 +501,13 @@ export function PromptAssistantWidget({
 			{/* Floating Chatbox Panel */}
 			{isOpen && (
 				<div
-					className="fixed bottom-20 right-6 z-50 w-[450px] max-w-[calc(100vw-32px)] h-[620px] max-h-[calc(100vh-100px)] flex flex-col rounded-2xl border border-border dark:border-cyan-500/25 bg-card/95 dark:bg-[#090d16]/95 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] dark:shadow-[0_25px_70px_rgba(0,0,0,0.85),0_0_40px_rgba(34,211,238,0.12)] overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200"
+					className="fixed z-50 w-[450px] max-w-[calc(100vw-32px)] flex flex-col rounded-2xl border border-border dark:border-cyan-500/25 bg-card/95 dark:bg-[#090d16]/95 backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] dark:shadow-[0_25px_70px_rgba(0,0,0,0.85),0_0_40px_rgba(34,211,238,0.12)] overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200 transition-all"
+					style={{
+						right: isRightPanelOpen ? 408 : 24,
+						bottom: isCamDrawerOpen ? 'calc(30% + 24px)' : 80,
+						height: isCamDrawerOpen ? 'calc(70vh - 48px)' : 620,
+						maxHeight: isCamDrawerOpen ? 'calc(70vh - 48px)' : 'calc(100vh - 100px)',
+					}}
 				>
 					{/* Top Ambient Glow Line */}
 					<div className="h-[2px] w-full bg-gradient-to-r from-transparent via-primary/80 dark:via-cyan-400/80 to-transparent" />

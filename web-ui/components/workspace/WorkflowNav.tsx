@@ -1,6 +1,7 @@
-import { Cuboid, Layers, CheckCircle2 } from 'lucide-react';
+import { Layers, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { ProjectLogo } from '@/components/shared/ProjectLogo';
 
 export type WorkflowStage = 'blueprint' | 'extraction' | 'cad' | 'manual_cad' | 'cam' | 'gcode';
 
@@ -32,9 +33,7 @@ export function WorkflowNav({ workflowStage, setWorkflowStage }: WorkflowNavProp
       {/* Header / Logo */}
       <div className="flex h-[64px] shrink-0 items-center px-5 border-b border-border">
         <Link href="/" className="flex items-center gap-3 group transition-opacity hover:opacity-90">
-          <div className="relative flex size-9 items-center justify-center rounded-lg bg-primary/10 border border-primary/30 shadow-[0_0_12px_rgba(6,182,212,0.2)]">
-            <Cuboid className="size-4.5 text-primary relative z-10" />
-          </div>
+          <ProjectLogo size={32} showGlow />
           <div className="flex items-baseline gap-2">
             <span className="text-lg font-bold tracking-[0.22em] text-foreground uppercase font-sans">
               VEXCAD

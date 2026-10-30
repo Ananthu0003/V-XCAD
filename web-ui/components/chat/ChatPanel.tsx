@@ -12,6 +12,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ChatBubble } from '@/components/chat/ChatBubble';
 import { SettingsPanel } from '@/components/workspace/SettingsPanel';
+import { ProjectLogo } from '@/components/shared/ProjectLogo';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
 	deriveTargetPortions, 
@@ -177,9 +178,7 @@ export function ChatPanel({
 				{/* Header */}
 				<div className="flex h-12 shrink-0 items-center justify-between px-4 border-b border-[var(--ui-border)] bg-[var(--ui-panel)]">
 					<div className="flex items-center gap-2.5">
-						<div className="flex size-7 items-center justify-center rounded-lg bg-[var(--ui-input)] border border-[var(--ui-border-ctrl)] text-[var(--ui-accent)]">
-							<Cuboid className="size-4" />
-						</div>
+						<ProjectLogo size={26} showGlow />
 						<div className="flex items-center gap-2">
 							<span className="text-sm font-bold tracking-wider text-[var(--ui-text-primary)] font-mono">
 								VEXCAD
@@ -248,8 +247,8 @@ export function ChatPanel({
 				<div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3.5 no-scrollbar">
 					{messages.length === 0 ? (
 						<div className="flex flex-col items-center justify-center h-full text-center px-4 space-y-5 max-w-xs mx-auto animate-in fade-in duration-300">
-							<div className="flex size-12 items-center justify-center rounded-2xl bg-[var(--ui-input)] border border-[var(--ui-border-ctrl)] text-[var(--ui-accent)] shadow-sm">
-								<Cuboid className="size-6" />
+							<div className="flex size-14 items-center justify-center rounded-2xl bg-[var(--ui-input)] border border-[var(--ui-border-ctrl)] shadow-sm p-1">
+								<ProjectLogo size={42} showGlow />
 							</div>
 
 							<div className="space-y-1">

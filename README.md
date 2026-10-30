@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="VEXCAD Logo" width="160" />
+</p>
+
 # V-XCAD
 
 An AI-assisted CAD/CAM system: a Next.js web application (`web-ui`) backed by a Python/FastAPI

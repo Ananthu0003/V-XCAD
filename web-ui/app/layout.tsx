@@ -21,6 +21,11 @@ const ibmPlexSans = IBM_Plex_Sans({
 export const metadata: Metadata = {
 	title: 'VΞXCAD Tactical Workspace',
 	description: 'Generate and refine CAD from documents with HITL controls.',
+	icons: {
+		icon: '/icon.png',
+		shortcut: '/icon.png',
+		apple: '/apple-touch-icon.png',
+	},
 };
 
 // Finding 2 (P3): nonce-based CSP requires dynamic rendering (see proxy.ts) —

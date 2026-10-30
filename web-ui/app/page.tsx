@@ -11,6 +11,7 @@ import { WorkflowStep } from '@/components/workspace/WorkflowStep';
 import { LandingClient } from '@/components/landing/LandingClient';
 import { BackToTop } from '@/components/landing/BackToTop';
 import { ValueGrid } from '@/components/landing/ValueGrid';
+import { ProjectLogo } from '@/components/shared/ProjectLogo';
 
 export default async function LandingPage() {
   // Signature-only on purpose: the landing page must not depend on the database,
@@ -32,10 +33,8 @@ export default async function LandingPage() {
         <div className="flex items-center justify-between px-6 py-4 max-w-7xl mx-auto w-full">
           
           {/* Targets #home at the top of your page content wrapper */}
-          <Link href="/" className="flex items-center gap-2 group">
-            <div className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-primary/10 border border-primary/30 shadow-[0_0_12px_rgba(6,182,212,0.25)]">
-              <Cuboid className="w-5 h-5 text-primary relative z-10" />
-            </div>
+          <Link href="/" className="flex items-center gap-3 group">
+            <ProjectLogo size={38} showGlow priority />
             <span className="text-2xl font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-500 dark:from-white dark:to-gray-400">
               VΞXCAD
             </span>
@@ -392,11 +391,8 @@ export default async function LandingPage() {
       <footer className="relative z-10 py-10 border-t border-black/10 dark:border-white/5 bg-zinc-50 dark:bg-[#080c10]">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-2">
-            <Link href="/" className="flex items-center gap-2 group">
-              <div className="relative w-8 h-8 flex items-center justify-center">
-                <div className="absolute inset-0 bg-blue-500 rounded-xl transform rotate-45 opacity-20 group-hover:opacity-30 transition-opacity"/>
-                <Cuboid className="w-4 h-4 text-blue-400 relative z-10" />
-              </div>
+            <Link href="/" className="flex items-center gap-2.5 group">
+              <ProjectLogo size={28} showGlow />
               <span className="text-base font-bold tracking-widest text-zinc-900 dark:text-white">VΞXCAD</span>
             </Link>
             <span className="text-zinc-500 dark:text-gray-400 text-sm">by</span>

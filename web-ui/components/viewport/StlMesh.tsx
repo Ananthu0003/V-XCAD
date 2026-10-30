@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useEffect } from 'react';
+import { useLoader } from '@react-three/fiber';
 import { STLLoader, mergeVertices } from 'three-stdlib';
-import { Box3, BufferGeometry, Color, DoubleSide, FrontSide, MeshPhysicalMaterial, Vector3 } from 'three';
+import { Box3, BufferGeometry, DoubleSide, MeshPhysicalMaterial, Vector3 } from 'three';
 
 import { ThreeErrorBoundary } from '@/components/viewport/ThreeErrorBoundary';
 
@@ -40,57 +41,34 @@ const MATERIAL_PRESETS: Record<string, any> = {
 	'acrylic': { color: '#ffffff', metalness: 0.1, roughness: 0.1, clearcoat: 1.0, transmission: 0.9, transparent: true },
 };
 
-function StlMeshContent({ url, expectedSize, workpieceMaterial, xRayMode = false, onGeometryReady, onMeshClick, onDirectClick, onHover, onError }: StlMeshProps) {
-	const [geometry, setGeometry] = useState<BufferGeometry | null>(null);
+export function preloadStl(url: string) {
+	try {
+		useLoader.preload(STLLoader, url);
+	} catch {
+		// Ignore preload errors
+	}
+}
 
-	useEffect(() => {
-		let isCancelled = false;
-		const controller = new AbortController();
+function StlMeshContent({
+	url,
+	expectedSize,
+	workpieceMaterial,
+	xRayMode = false,
+	onGeometryReady,
+	onMeshClick,
+	onDirectClick,
+	onHover,
+}: StlMeshProps) {
+	const rawGeometry = useLoader(STLLoader, url);
 
-		async function loadStl() {
-			try {
-				const response = await fetch(url, { signal: controller.signal });
-				if (!response.ok) {
-					const msg = `Could not load ${url}: responded with ${response.status}`;
-					console.warn(msg);
-					onError?.(new Error(msg));
-					if (!isCancelled) setGeometry(null);
-					return;
-				}
-				const arrayBuffer = await response.arrayBuffer();
-				if (isCancelled) return;
-				const loader = new STLLoader();
-				const parsed = loader.parse(arrayBuffer);
-				if (!isCancelled) {
-					setGeometry(parsed);
-				}
-			} catch (err: any) {
-				if (err.name === 'AbortError') return;
-				console.warn('Failed to load/parse STL:', err);
-				onError?.(err instanceof Error ? err : new Error(String(err)));
-				if (!isCancelled) setGeometry(null);
-			}
-		}
-
-		loadStl();
-
-		return () => {
-			isCancelled = true;
-			controller.abort();
-		};
-	}, [url, onError]);
-
-	const { centeredGeometry, scale, center } = useMemo(() => {
-		if (!geometry) return { centeredGeometry: null, scale: 1.0, center: new Vector3() };
-
-		let cloned = geometry.clone() as BufferGeometry;
-		
+	const { centeredGeometry, scale, geometryInfo } = useMemo(() => {
+		let cloned = rawGeometry.clone() as BufferGeometry;
 		try {
 			cloned = mergeVertices(cloned);
 		} catch (e) {
-			console.warn("Could not merge vertices for smooth shading", e);
+			console.warn('Could not merge vertices for smooth shading', e);
 		}
-		
+
 		cloned.computeVertexNormals();
 		cloned.computeBoundingBox();
 		cloned.computeBoundingSphere();
@@ -121,27 +99,34 @@ function StlMeshContent({ url, expectedSize, workpieceMaterial, xRayMode = false
 		const centerVec = new Vector3();
 		scaledBox.getCenter(centerVec);
 
-		// Notify parent of the computed geometry metrics
-		onGeometryReady?.({
+		const info: StlGeometryInfo = {
 			scale: safeScale,
 			center: [centerVec.x, centerVec.y, centerVec.z],
-			bounding_box: cloned.boundingBox ? {
-				min: [cloned.boundingBox.min.x, cloned.boundingBox.min.y, cloned.boundingBox.min.z],
-				max: [cloned.boundingBox.max.x, cloned.boundingBox.max.y, cloned.boundingBox.max.z]
-			} : undefined
-		});
+			bounding_box: cloned.boundingBox
+				? {
+						min: [cloned.boundingBox.min.x, cloned.boundingBox.min.y, cloned.boundingBox.min.z],
+						max: [cloned.boundingBox.max.x, cloned.boundingBox.max.y, cloned.boundingBox.max.z],
+				  }
+				: undefined,
+		};
 
 		return {
 			centeredGeometry: cloned,
-			scale: 1.0, // Scale is baked into geometry
-			center: centerVec
+			scale: 1.0,
+			geometryInfo: info,
 		};
-	}, [geometry, expectedSize, onGeometryReady]);
+	}, [rawGeometry, expectedSize]);
+
+	useEffect(() => {
+		if (geometryInfo) {
+			onGeometryReady?.(geometryInfo);
+		}
+	}, [geometryInfo, onGeometryReady]);
 
 	const material = useMemo(() => {
 		const matKey = workpieceMaterial ? workpieceMaterial.toLowerCase().replace(/[^a-z0-9_]/g, '') : 'aluminum_6061';
 		let preset = MATERIAL_PRESETS['aluminum_6061'];
-		
+
 		for (const key of Object.keys(MATERIAL_PRESETS)) {
 			if (matKey.includes(key)) {
 				preset = MATERIAL_PRESETS[key];
@@ -166,11 +151,9 @@ function StlMeshContent({ url, expectedSize, workpieceMaterial, xRayMode = false
 		return new MeshPhysicalMaterial({
 			...preset,
 			flatShading: false,
-			side: FrontSide,
+			side: DoubleSide, // Ensure bidirectional visibility regardless of CAD facet normal orientation
 		});
 	}, [workpieceMaterial, xRayMode]);
-
-	if (!centeredGeometry) return null;
 
 	return (
 		<mesh
@@ -190,8 +173,8 @@ function StlMeshContent({ url, expectedSize, workpieceMaterial, xRayMode = false
 				if (onDirectClick) {
 					e.stopPropagation();
 					const localPoint = e.object.worldToLocal(e.point.clone());
-					const normal = e.face?.normal 
-						? [e.face.normal.x, e.face.normal.y, e.face.normal.z] as [number, number, number] 
+					const normal = e.face?.normal
+						? ([e.face.normal.x, e.face.normal.y, e.face.normal.z] as [number, number, number])
 						: undefined;
 					onDirectClick([localPoint.x, localPoint.y, localPoint.z], normal);
 				}

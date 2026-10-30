@@ -438,6 +438,7 @@ export default function HitlWorkspace() {
 	const [pythonScript, setPythonScript] = useState('');
 	const [activeDrawerTab, setActiveDrawerTab] = useState<DrawerTab>('parameters');
 	const [activeRightTab, setActiveRightTab] = useState<'cad' | 'manual_cad' | 'cam'>('cad');
+
 	const [parameters, setParameters] = useState<Record<string, unknown>>({});
 	const [stlUrl, setStlUrl] = useState<string | null>(null);
 	const [stepUrl, setStepUrl] = useState<string | null>(null);
@@ -514,6 +515,13 @@ export default function HitlWorkspace() {
 
 	const [statusText, setStatusText] = useState<string>('Ready');
 	const [workflowStage, setWorkflowStage] = useState<'blueprint' | 'extraction' | 'cad' | 'manual_cad' | 'cam' | 'gcode'>('blueprint');
+	const [hasVisitedManualCad, setHasVisitedManualCad] = useState(false);
+
+	useEffect(() => {
+		if (workflowStage === 'manual_cad') {
+			setHasVisitedManualCad(true);
+		}
+	}, [workflowStage]);
 	const [annotations, setAnnotations] = useState<Record<string, { p1: [number, number, number]; p2: [number, number, number] }>>({});
 	const [parameterMetadata, setParameterMetadata] = useState<Record<string, any>>({});
 	const [geometryInfo, setGeometryInfo] = useState<StlGeometryInfo | null>(null);
@@ -1348,8 +1356,9 @@ export default function HitlWorkspace() {
 			let finalDxfUrl: string | null = null;
 			let setupMeta: any = undefined;
 
-			if (payload.artifacts?.stl_url) {
-				finalStlUrl = resolveModelUrl(payload.artifacts.stl_url, Date.now().toString());
+			const rawStl = payload.artifacts?.stl_url || (payload as any)?.stl_url;
+			if (rawStl) {
+				finalStlUrl = resolveModelUrl(rawStl, Date.now().toString());
 				setStlUrl(finalStlUrl);
 				setWorkflowStage(prev => (prev === 'blueprint' || prev === 'extraction' ? 'cad' : prev));
 				
@@ -2513,44 +2522,14 @@ export default function HitlWorkspace() {
 				>
 					{/* Top: Navigation + Viewport + Settings */}
 					<Panel id="top-workspace-panel" defaultSize="70%" minSize="20%">
-						{workflowStage === 'manual_cad' ? (
-							<ManualCadErrorBoundary onReturnToCad={() => {
-								setWorkflowStage('cad');
-								setActiveRightTab('cad');
-							}}>
-								<ManualCadWorkspace
-									sessionId={sessionId || ''}
-									initialStlUrl={stlUrl}
-									initialStepUrl={stepUrl}
-									onSwitchStage={async (st) => {
-										if (st === 'cam') {
-											try {
-												if (sessionId) {
-													const res = await fetch(`/api/cad/modify/history/${sessionId}`);
-													if (res.ok) {
-														const ops = await res.json();
-														if (ops && ops.length > 0) {
-															const lastOp = ops[ops.length - 1];
-															const activeRev = lastOp.output_revision || lastOp.input_revision || 'rev_000';
-															setStlUrl(`/api/cad/modify/file/${sessionId}/revisions/${activeRev}.stl`);
-														}
-													}
-												}
-											} catch (e) {
-												console.error('Failed to sync active revision for CAM:', e);
-											}
-											setIsCamDrawerOpen(true);
-											toast.success('Loaded Refined CAD Model into VexCAM');
-										} else {
-											setIsCamDrawerOpen(false);
-										}
-										setWorkflowStage(st);
-										setActiveRightTab(st);
-									}}
-								/>
-							</ManualCadErrorBoundary>
-						) : (
-							<div className="relative w-full h-full overflow-hidden bg-[var(--ui-bg)]">
+						<div className="h-full w-full relative overflow-hidden">
+							{/* 1. Main CAD / Blueprint / CAM Viewport Container */}
+							<div 
+								className={cn(
+									"absolute inset-0 w-full h-full overflow-hidden bg-[var(--ui-bg)] transition-opacity duration-150",
+									workflowStage === 'manual_cad' ? "opacity-0 pointer-events-none z-0 invisible" : "opacity-100 pointer-events-auto z-10"
+								)}
+							>
 								{/* 1. Full-bleed 3D / Blueprint Viewport */}
 								<div className="absolute inset-0 w-full h-full overflow-hidden">
 									{workflowStage === 'blueprint' ? (
@@ -2692,6 +2671,8 @@ export default function HitlWorkspace() {
 										</div>
 									) : (
 										<CadViewport
+											isActive={workflowStage !== 'manual_cad'}
+											isRightPanelOpen={isRightPanelOpen}
 											hoveredFeatureId={hoveredFeatureId}
 											onHoverFeature={setHoveredFeatureId}
 											workpieceMaterial={camSetup.material}
@@ -2827,7 +2808,7 @@ export default function HitlWorkspace() {
 												if (!parameters) return undefined;
 												const vals = Object.values(parameters).filter(v => typeof v === 'number') as number[];
 												return vals.length > 0 ? Math.max(...vals) : undefined;
-											})()} onGeometryReady={setGeometryInfo} onMeshClick={(p) => setSelectionContext(p)} /> : null}
+											})()} onGeometryReady={handleGeometryReady} onMeshClick={(p) => setSelectionContext(p)} /> : null}
 											{selectionContext && (
 												<group position={selectionContext}>
 													{/* Core dot */}
@@ -2954,7 +2935,7 @@ export default function HitlWorkspace() {
 										top: 52,
 										bottom: 12,
 										maxHeight: 'calc(100% - 64px)',
-										width: 324,
+										width: 380,
 										zIndex: 20,
 										display: 'flex',
 										flexDirection: 'column',
@@ -2964,7 +2945,7 @@ export default function HitlWorkspace() {
 									{/* Header: Shared Stage Switcher & Push Button */}
 									<div
 										style={{
-											padding: '10px 14px',
+											padding: '10px 12px',
 											borderBottom: '1px solid var(--ui-border)',
 											display: 'flex',
 											alignItems: 'center',
@@ -2974,9 +2955,9 @@ export default function HitlWorkspace() {
 									>
 										<div className="flex-1 min-w-0">
 											<StageSwitcher
-											value={workflowStage === 'cam' || workflowStage === 'gcode' ? 'cam' : 'cad'}
+											value={workflowStage === 'manual_cad' ? 'manual_cad' : (workflowStage === 'cam' || workflowStage === 'gcode' ? 'cam' : 'cad')}
 											onChange={async (newStage) => {
-												if (newStage === 'cam') {
+												if (newStage === 'cam' || newStage === 'cad') {
 													try {
 														if (sessionId) {
 															const res = await fetch(`/api/cad/modify/history/${sessionId}`);
@@ -2990,9 +2971,13 @@ export default function HitlWorkspace() {
 															}
 														}
 													} catch (e) {
-														console.error('Failed to sync active revision for CAM:', e);
+														console.error('Failed to sync active revision for stage:', e);
 													}
-													setIsCamDrawerOpen(true);
+													if (newStage === 'cam') {
+														setIsCamDrawerOpen(true);
+													} else {
+														setIsCamDrawerOpen(false);
+													}
 												} else {
 													setIsCamDrawerOpen(false);
 												}
@@ -3069,7 +3054,78 @@ export default function HitlWorkspace() {
 									</button>
 								)}
 							</div>
-						)}
+
+							{/* 2. Manual CAD Workspace Container (lazily mounted on first visit, then preserved for zero-latency instant switching) */}
+							{hasVisitedManualCad && (
+								<div 
+									className={cn(
+										"absolute inset-0 w-full h-full transition-opacity duration-150",
+										workflowStage === 'manual_cad' ? "opacity-100 pointer-events-auto z-10" : "opacity-0 pointer-events-none z-0 invisible"
+									)}
+								>
+									<ManualCadErrorBoundary onReturnToCad={() => {
+										setWorkflowStage('cad');
+										setActiveRightTab('cad');
+									}}>
+										<ManualCadWorkspace
+											isActive={workflowStage === 'manual_cad'}
+											sessionId={sessionId || ''}
+											initialStlUrl={stlUrl}
+											initialStepUrl={stepUrl}
+											onSwitchStage={async (st) => {
+												if (st === 'cam' || st === 'cad') {
+													try {
+														if (sessionId) {
+															const res = await fetch(`/api/cad/modify/history/${sessionId}`);
+															if (res.ok) {
+																const ops = await res.json();
+																if (ops && ops.length > 0) {
+																	const lastOp = ops[ops.length - 1];
+																	const activeRev = lastOp.output_revision || lastOp.input_revision || 'rev_000';
+																	setStlUrl(`/api/cad/modify/file/${sessionId}/revisions/${activeRev}.stl`);
+																}
+															}
+														}
+													} catch (e) {
+														console.error('Failed to sync active revision for stage:', e);
+													}
+													if (st === 'cam') {
+														setIsCamDrawerOpen(true);
+														toast.success('Loaded Refined CAD Model into VexCAM');
+													} else {
+														setIsCamDrawerOpen(false);
+													}
+												} else {
+													setIsCamDrawerOpen(false);
+												}
+												setWorkflowStage(st);
+												setActiveRightTab(st);
+											}}
+										/>
+									</ManualCadErrorBoundary>
+								</div>
+							)}
+
+							{/* Unified Floating Action Dock (Animated Robot + Theme Toggle) */}
+							<div
+								className="absolute bottom-6 z-40 flex flex-col items-center gap-3 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+								style={{
+									right: (isRightPanelOpen || workflowStage === 'manual_cad') ? 408 : 24,
+								}}
+							>
+								<PromptAssistantWidget
+									blueprintUrl={blueprintUrl}
+									sessionId={sessionId}
+									isRightPanelOpen={isRightPanelOpen || workflowStage === 'manual_cad'}
+									isCamDrawerOpen={isCamDrawerOpen}
+									onApplyPrompt={(newPrompt) => {
+										setPrompt(newPrompt);
+										if (showChat) setIsChatOpen(true);
+									}}
+								/>
+								<ThemeToggle />
+							</div>
+						</div>
 					</Panel>
 
 					{isCamDrawerOpen && (
@@ -3168,25 +3224,6 @@ export default function HitlWorkspace() {
 					onRestore={handleRestoreSession}
 				/>
 			</main>
-
-
-			{/* Unified Floating Action Dock (Animated Robot + Theme Toggle) */}
-			<div
-				className={cn(
-					"fixed bottom-6 z-50 flex flex-col items-center gap-3 transition-all duration-300",
-					isRightPanelOpen ? "right-[348px]" : "right-6"
-				)}
-			>
-				<PromptAssistantWidget
-					blueprintUrl={blueprintUrl}
-					sessionId={sessionId}
-					onApplyPrompt={(newPrompt) => {
-						setPrompt(newPrompt);
-						if (showChat) setIsChatOpen(true);
-					}}
-				/>
-				<ThemeToggle />
-			</div>
 
 			{/* Hidden file input for direct Blueprint Drawing upload */}
 			<input

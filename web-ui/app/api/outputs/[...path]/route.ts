@@ -129,6 +129,7 @@ export async function GET(
 			// Host-side local development fallback (when running directly on host outside Docker)
 			const devPaths = [
 				join(process.cwd(), '../ai-engine/outputs', filePath),
+				join(process.cwd(), 'ai-engine/outputs', filePath),
 				join(process.cwd(), 'outputs', filePath),
 				join(process.cwd(), '../outputs', filePath),
 				join(process.cwd(), '../ai-engine/storage/jobs', sessionId, 'revisions', filePath.endsWith('.stl') ? 'rev_000.stl' : 'rev_000.step'),

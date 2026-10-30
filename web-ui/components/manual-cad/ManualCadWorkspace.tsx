@@ -40,6 +40,7 @@ interface ManualCadWorkspaceProps {
   initialStepUrl?: string | null;
   onProceedToCam?: () => void;
   onSwitchStage?: (stage: 'cad' | 'manual_cad' | 'cam') => void;
+  isActive?: boolean;
 }
 
 export function ManualCadWorkspace({
@@ -48,6 +49,7 @@ export function ManualCadWorkspace({
   initialStepUrl,
   onProceedToCam,
   onSwitchStage,
+  isActive = true,
 }: ManualCadWorkspaceProps) {
   const [activeRevision, setActiveRevision] = useState<string>('rev_000');
   const [activeTool, setActiveTool] = useState<CADToolType>('select');
@@ -70,6 +72,7 @@ export function ManualCadWorkspace({
   const exportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (isActive === false) return;
     const handleClick = (e: MouseEvent) => {
       if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
         setExportOpen(false);
@@ -77,7 +80,7 @@ export function ManualCadWorkspace({
     };
     window.addEventListener('mousedown', handleClick);
     return () => window.removeEventListener('mousedown', handleClick);
-  }, []);
+  }, [isActive]);
 
   const handleDownloadStl = () => {
     if (stlUrl) {
@@ -99,15 +102,9 @@ export function ManualCadWorkspace({
   // Sync stlUrl when initialStlUrl prop arrives or updates
   useEffect(() => {
     if (initialStlUrl && !isPreviewActive) {
-      setStlUrl(initialStlUrl);
+      setStlUrl((prev) => (prev !== initialStlUrl ? initialStlUrl : prev));
     }
   }, [initialStlUrl, isPreviewActive]);
-
-  useEffect(() => {
-    if (initialStlUrl) {
-      setStlUrl(initialStlUrl);
-    }
-  }, [initialStlUrl]);
 
   const hasValidSession = Boolean(sessionId && sessionId !== 'default_session');
   const hasModel = Boolean(hasValidSession || initialStepUrl || initialStlUrl || stlUrl || topology);
@@ -197,9 +194,10 @@ export function ManualCadWorkspace({
       setTopology(data);
       if (!isPreviewActive) {
         if (revId !== 'rev_000' || !initialStlUrl) {
-          setStlUrl(`/api/cad/modify/file/${sessionId}/revisions/${revId}.stl`);
+          const revStl = `/api/cad/modify/file/${sessionId}/revisions/${revId}.stl`;
+          setStlUrl((prev) => (prev !== revStl ? revStl : prev));
         } else if (initialStlUrl) {
-          setStlUrl(initialStlUrl);
+          setStlUrl((prev) => (prev !== initialStlUrl ? initialStlUrl : prev));
         }
       }
     } catch (err: any) {
@@ -464,6 +462,7 @@ export function ManualCadWorkspace({
 
   // Keyboard shortcuts (Escape to cancel/close, Ctrl+Z / Ctrl+Y for Undo / Redo)
   useEffect(() => {
+    if (isActive === false) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
@@ -498,7 +497,7 @@ export function ManualCadWorkspace({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [contextMenu, activeTool, isPreviewActive, handleCancelPreview, canUndo, canRedo, activeIdx, history]);
+  }, [isActive, contextMenu, activeTool, isPreviewActive, handleCancelPreview, canUndo, canRedo, activeIdx, history]);
 
   // Commit Operation
   const handleCommit = async () => {
@@ -612,6 +611,8 @@ export function ManualCadWorkspace({
           }}
         >
           <CadViewport
+            isRightPanelOpen={true}
+            isActive={isActive}
             stlUrl={stlUrl}
             statusText={isLoading ? 'Computing geometry...' : 'Ready'}
             isRecompiling={isLoading}
@@ -746,13 +747,13 @@ export function ManualCadWorkspace({
           />
         </div>
 
-        {/* 3. Floating Top Selection Bar (centred pill) */}
+        {/* 3. Floating Top Selection Bar (centred over active 3D workspace) */}
         <div
           className="mcad-float"
           style={{
             position: 'absolute',
             top: 12,
-            left: '50%',
+            left: 'calc((100% - 328px) / 2)',
             transform: 'translateX(-50%)',
             padding: 6,
             zIndex: 30,
@@ -760,6 +761,7 @@ export function ManualCadWorkspace({
             alignItems: 'center',
             gap: 8,
             overflow: 'visible',
+            maxWidth: 'calc(100% - 540px)',
           }}
         >
           {/* Undo / Redo */}
@@ -844,12 +846,12 @@ export function ManualCadWorkspace({
 
           <div style={{ width: 1, height: 18, background: 'var(--mcad-border)' }} />
 
-          {/* Hint */}
-          <span style={{ fontSize: 11, color: 'var(--mcad-text-muted)' }}>
+          {/* Hint (hidden on narrow screens to prevent overlap) */}
+          <span className="hidden xl:inline text-[11px] text-[var(--mcad-text-muted)] select-none">
             Shift: multi-select
           </span>
 
-          <div style={{ width: 1, height: 18, background: 'var(--mcad-border)' }} />
+          <div className="hidden xl:block" style={{ width: 1, height: 18, background: 'var(--mcad-border)' }} />
 
           {/* Fit camera view */}
           <button
@@ -1010,7 +1012,7 @@ export function ManualCadWorkspace({
             top: 12,
             bottom: 12,
             maxHeight: 'calc(100% - 24px)',
-            width: 324,
+            width: 380,
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
@@ -1020,7 +1022,7 @@ export function ManualCadWorkspace({
           {/* Header: Stage switcher */}
           <div
             style={{
-              padding: 14,
+              padding: '10px 12px',
               borderBottom: '1px solid var(--mcad-border)',
               display: 'flex',
               alignItems: 'center',

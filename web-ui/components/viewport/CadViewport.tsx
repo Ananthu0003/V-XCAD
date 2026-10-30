@@ -199,6 +199,8 @@ type CadViewportProps = {
 	onAttachBlueprint?: (file: File) => void;
 	onImportStep?: (file: File) => void;
 	onImportStl?: (file: File) => void;
+	isRightPanelOpen?: boolean;
+	isActive?: boolean;
 };
 
 function AnimatedSetupGroup({ setupToolAxis, children, isSetup, hasToolpaths }: { setupToolAxis?: [number, number, number], children: React.ReactNode, isSetup?: boolean, hasToolpaths?: boolean }) {
@@ -283,6 +285,8 @@ export function CadViewport({
 	onAttachBlueprint,
 	onImportStep,
 	onImportStl,
+	isRightPanelOpen = true,
+	isActive = true,
 }: CadViewportProps) {
 	const { resolvedTheme } = useTheme();
 	const isDark = resolvedTheme !== 'light';
@@ -308,6 +312,7 @@ export function CadViewport({
 	}, [stlUrl]);
 
 	useEffect(() => {
+		if (!isActive) return;
 		const handleModelRotate = (e: CustomEvent<{ axis: 'x' | 'y' | 'z'; degrees: number }>) => {
 			const { axis, degrees } = e.detail;
 			const rad = (degrees * Math.PI) / 180;
@@ -333,13 +338,14 @@ export function CadViewport({
 			window.removeEventListener('model-rotate', handleModelRotate as EventListener);
 			window.removeEventListener('viewport-action', handleAction as EventListener);
 		};
-	}, []);
+	}, [isActive]);
 
 	const dispatchViewportAction = (action: string) => {
 		window.dispatchEvent(new CustomEvent('viewport-action', { detail: action }));
 	};
 
 	useEffect(() => {
+		if (!isActive) return;
 		const handleKeyUp = (e: KeyboardEvent) => {
 			// Don't trigger shortcuts when typing in inputs
 			if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target as HTMLElement).isContentEditable) return;
@@ -383,7 +389,7 @@ export function CadViewport({
 		};
 		window.addEventListener('keyup', handleKeyUp, { capture: true });
 		return () => window.removeEventListener('keyup', handleKeyUp, { capture: true });
-	}, [workflowStage]);
+	}, [workflowStage, isActive]);
 
 	useEffect(() => {
 		const handleClickOutside = (e: MouseEvent) => {
@@ -907,9 +913,9 @@ export function CadViewport({
 						style={{
 							left:
 								workflowStage === 'manual_cad'
-									? 'calc((100% - 280px) / 2)'
+									? 'calc((100% - 328px) / 2)'
 									: workflowStage === 'cam' || workflowStage === 'gcode'
-									? 'calc((100% - 336px) / 2)'
+									? 'calc((100% - 380px) / 2)'
 									: 'calc((100% + 36px) / 2)',
 							transform: 'translateX(-50%)',
 						}}
@@ -917,7 +923,7 @@ export function CadViewport({
 							workflowStage === 'manual_cad'
 								? 'bottom-6'
 								: workflowStage === 'cam' || workflowStage === 'gcode'
-								? 'bottom-28'
+								? 'bottom-6'
 								: 'bottom-16'
 						}`}
 					>
@@ -1055,6 +1061,7 @@ export function CadViewport({
 					<Canvas
 						key={canvasKey}
 						id={workflowStage === 'manual_cad' ? 'cad-three-canvas-mcad' : 'cad-three-canvas'}
+						frameloop={isActive ? 'always' : 'never'}
 						shadows
 						dpr={[1, 2]}
 						gl={{ preserveDrawingBuffer: true, powerPreference: 'high-performance' }}
@@ -1376,7 +1383,17 @@ export function CadViewport({
 								</group>
 						</AnimatedSetupGroup>
 
-						<GizmoHelper alignment="top-right" margin={[60, 60]}>
+						<GizmoHelper 
+							key={`${workflowStage}-${isRightPanelOpen ? 'open' : 'closed'}`}
+							alignment="top-right" 
+							margin={
+								workflowStage === 'manual_cad'
+									? [465, 80]
+									: isRightPanelOpen
+									? [450, 60]
+									: [60, 125]
+							}
+						>
 							<GizmoViewcube 
 								color={isDark ? "#121720" : "#ffffff"} 
 								strokeColor={isDark ? "#273144" : "#cbd5e1"} 
