@@ -152,26 +152,26 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
   return (
     <div className="flex h-full w-full flex-col bg-transparent font-sans relative">
       {/* Tabs Header */}
-      <div className="flex h-14 shrink-0 items-center justify-between px-4 bg-transparent border-b border-white/5 gap-2">
-        <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar py-1">
+      <div className="flex h-13 shrink-0 items-center justify-between px-4 bg-card/40 backdrop-blur-md border-b border-border gap-2">
+        <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar py-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as TabType)}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 group whitespace-nowrap",
+                "flex items-center gap-2 px-3.5 py-1.5 rounded-lg transition-all duration-150 group whitespace-nowrap cursor-pointer text-[10px] font-bold uppercase tracking-wider",
                 activeTab === tab.id
-                  ? "bg-gradient-primary text-white shadow-[0_0_15px_rgba(59,130,246,0.4)]"
-                  : "text-muted-foreground/60 hover:text-white hover:bg-white/5"
+                  ? "bg-primary text-primary-foreground shadow-[0_0_12px_rgba(6,182,212,0.3)] font-bold"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-transparent hover:border-border/60"
               )}
             >
               <div className={cn(
                 "[&>svg]:size-3.5 transition-colors",
-                activeTab === tab.id ? "text-white" : "text-muted-foreground/60 group-hover:text-white"
+                activeTab === tab.id ? "text-primary-foreground" : "text-muted-foreground group-hover:text-foreground"
               )}>
                 {tab.icon}
               </div>
-              <span className="text-[10px] font-bold uppercase tracking-[0.1em]">
+              <span>
                 {tab.label}
               </span>
             </button>
@@ -181,7 +181,7 @@ export function EngineeringConsole(props: EngineeringConsoleProps) {
         {props.onMinimize && (
           <button
             onClick={props.onMinimize}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-muted-foreground hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-all shrink-0 cursor-pointer shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-semibold text-muted-foreground hover:text-foreground bg-muted/40 hover:bg-muted/80 border border-border/80 transition-all shrink-0 cursor-pointer shadow-sm"
             title="Minimize CAM Studio"
           >
             <ChevronDown className="size-3.5" />

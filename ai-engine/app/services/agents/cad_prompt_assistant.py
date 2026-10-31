@@ -351,12 +351,20 @@ class CADPromptAssistantService:
         )
 
         raw_reply = ""
-        # 1. Try Google Gemini directly if key available
-        if self.google_api_key:
+        is_openrouter_or_claude = (
+            model.startswith("anthropic/")
+            or "/" in model
+            or "claude" in model.lower()
+            or "deepseek" in model.lower()
+        )
+
+        # 1. Try Google Gemini directly if model is Gemini and Google API key is configured
+        if self.google_api_key and not is_openrouter_or_claude:
             try:
+                target_gemini_model = model if model in ALLOWED_GEMINI_MODELS else DEFAULT_GEMINI_MODEL
                 raw_reply = await self._call_gemini(
                     api_key=self.google_api_key,
-                    model=model if model in ALLOWED_GEMINI_MODELS else DEFAULT_GEMINI_MODEL,
+                    model=target_gemini_model,
                     system_prompt=system_instruction,
                     user_text=prompt_text,
                     images=images,
@@ -365,12 +373,15 @@ class CADPromptAssistantService:
             except Exception as e:
                 print(f"[CADPromptAssistant] Gemini call error: {e}")
 
-        # 2. Fallback to OpenRouter if Gemini failed or no Google Key
+        # 2. Fallback to OpenRouter or call OpenRouter directly if a non-Gemini model was selected
         if not raw_reply and self.openrouter_api_key:
             try:
+                openrouter_model = model
+                if not ("/" in openrouter_model or "claude" in openrouter_model.lower()):
+                    openrouter_model = f"google/{openrouter_model}"
                 raw_reply = await self._call_openrouter(
                     api_key=self.openrouter_api_key,
-                    model="google/gemini-3.5-flash",
+                    model=openrouter_model,
                     system_prompt=system_instruction,
                     user_text=prompt_text,
                     images=images,

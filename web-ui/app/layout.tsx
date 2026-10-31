@@ -13,7 +13,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 const ibmPlexSans = IBM_Plex_Sans({
-	weight: ['300', '400', '500', '600', '700'],
+	weight: ['400', '600'],
 	variable: '--font-ibm-plex-sans',
 	subsets: ['latin'],
 });

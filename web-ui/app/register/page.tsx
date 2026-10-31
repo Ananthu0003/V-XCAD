@@ -33,10 +33,15 @@ export default function RegisterPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: formData.name, email: formData.email, password: formData.password }),
       });
-      const data = await res.json();
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        // Safe fallback if server returns non-JSON error
+      }
       
       if (!res.ok) {
-        throw new Error(data.error || 'Registration failed');
+        throw new Error(data?.error || `Request failed (${res.status}: ${res.statusText || 'Server Error'})`);
       }
       
       router.push('/workspace');

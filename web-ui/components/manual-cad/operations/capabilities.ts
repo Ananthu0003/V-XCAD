@@ -9,10 +9,17 @@ export type EntityClassification =
   | 'face.other'
   | 'edge.linear'
   | 'edge.circular'
-  | 'edge.other';
+  | 'edge.other'
+  | 'feature.hole'
+  | 'feature.boss'
+  | 'feature.pocket'
+  | 'feature.slot'
+  | 'feature.fillet'
+  | 'feature.chamfer'
+  | 'feature.other';
 
 export interface TopologyEntity {
-  entity_type?: 'body' | 'face' | 'edge' | 'vertex' | string;
+  entity_type?: 'body' | 'face' | 'edge' | 'vertex' | 'feature' | string;
   surface_type?: string;
   curve_type?: string;
   transient_id?: string;
@@ -32,6 +39,17 @@ export interface TopologyEntity {
   diameter?: number;
   normal?: number[];
   centroid?: number[];
+  // Feature fields
+  feature_id?: string;
+  kind?: string;
+  subtype?: string;
+  params?: any[];
+  face_ids?: string[];
+  edge_ids?: string[];
+  center?: number[];
+  axis?: number[] | null;
+  editable?: boolean;
+  not_editable_reason?: string | null;
   [key: string]: unknown;
 }
 
@@ -47,6 +65,17 @@ export function classifyEntity(
   }
 
   if (!entity) return null;
+
+  if (entity.entity_type === 'feature') {
+    const k = (entity.kind || '').toLowerCase();
+    if (k === 'hole') return 'feature.hole';
+    if (k === 'boss') return 'feature.boss';
+    if (k === 'pocket') return 'feature.pocket';
+    if (k === 'slot') return 'feature.slot';
+    if (k === 'fillet') return 'feature.fillet';
+    if (k === 'chamfer') return 'feature.chamfer';
+    return 'feature.other';
+  }
 
   if (entity.entity_type === 'body') {
     return 'body';
@@ -80,13 +109,91 @@ export const CAPABILITY_MATRIX: Record<CADToolType | 'edit_feature', EntityClass
     'edge.linear',
     'edge.circular',
     'edge.other',
+    'feature.hole',
+    'feature.boss',
+    'feature.pocket',
+    'feature.slot',
+    'feature.fillet',
+    'feature.chamfer',
+    'feature.other',
   ],
   hole: ['face.planar'],
   pocket: ['face.planar'],
   pad: ['face.planar'],
   fillet: ['edge.linear', 'edge.circular', 'edge.other'],
   chamfer: ['edge.linear', 'edge.circular', 'edge.other'],
-  edit_feature: ['face.cylindrical'],
+  edit_feature: [
+    'body',
+    'face.planar',
+    'face.cylindrical',
+    'edge.circular',
+    'feature.hole',
+    'feature.boss',
+    'feature.pocket',
+    'feature.slot',
+    'feature.fillet',
+    'feature.chamfer',
+    'feature.other',
+  ],
+  transform: [
+    'body',
+    'face.planar',
+    'face.cylindrical',
+    'edge.linear',
+    'edge.circular',
+    'edge.other',
+    'feature.hole',
+    'feature.boss',
+    'feature.pocket',
+    'feature.slot',
+    'feature.fillet',
+    'feature.chamfer',
+    'feature.other',
+  ],
+  // Whole-body tools (no face/edge needed)
+  move: ['body'],
+  rotate: ['body'],
+  scale: ['body'],
+  offset: ['body', 'face.other'],
+  heal: ['body'],
+  linear_pattern: ['body'],
+  polar_pattern: ['body'],
+  // Whole-body tools that can optionally use a selected planar face as the plane / target
+  mirror: ['body', 'face.planar'],
+  split: ['body', 'face.planar'],
+  align: ['body', 'face.planar'],
+  shell: ['body', 'face.planar'],
+  primitive: ['body', 'face.planar'],
+  push_pull: ['face.planar'],
+  round_face_edges: ['face.planar'],
+  delete_feature: [
+    'body',
+    'face.planar',
+    'face.cylindrical',
+    'face.conical',
+    'face.other',
+    'feature.hole',
+    'feature.boss',
+    'feature.pocket',
+    'feature.slot',
+    'feature.fillet',
+    'feature.chamfer',
+    'feature.other',
+  ],
+  move_feature: [
+    'face.cylindrical',
+    'feature.hole',
+    'feature.boss',
+    'feature.pocket',
+    'feature.slot',
+  ],
+  pattern_feature: [
+    'face.cylindrical',
+    'feature.hole',
+    'feature.boss',
+    'feature.pocket',
+    'feature.slot',
+  ],
   measure: [
     'body',
     'face.planar',
@@ -96,6 +203,13 @@ export const CAPABILITY_MATRIX: Record<CADToolType | 'edit_feature', EntityClass
     'edge.linear',
     'edge.circular',
     'edge.other',
+    'feature.hole',
+    'feature.boss',
+    'feature.pocket',
+    'feature.slot',
+    'feature.fillet',
+    'feature.chamfer',
+    'feature.other',
   ],
 };
 
@@ -106,7 +220,25 @@ export const OPERATION_REQUIREMENTS: Record<CADToolType | 'edit_feature', string
   pad: 'Select a planar face',
   fillet: 'Select an edge',
   chamfer: 'Select an edge',
-  edit_feature: 'Select a cylindrical face',
+  edit_feature: 'Select a face, feature, or the 3D model to edit dimensions',
+  transform: 'Select the 3D model, face, or feature to transform',
+  push_pull: 'Select a planar face',
+  round_face_edges: 'Select a planar face',
+  delete_feature: 'Select a face, subpart, or feature to delete',
+  move_feature: 'Select a feature or cylindrical face',
+  pattern_feature: 'Select a feature or cylindrical face',
+  move: 'Select the 3D model',
+  rotate: 'Select the 3D model',
+  scale: 'Select the 3D model',
+  offset: 'Select the 3D model',
+  heal: 'Select the 3D model',
+  linear_pattern: 'Select the 3D model',
+  polar_pattern: 'Select the 3D model',
+  mirror: 'Select the model, or a planar face as the mirror plane',
+  split: 'Select the model, or a planar face as the cut plane',
+  align: 'Select the model, or a planar face to lay face-down',
+  shell: 'Select the model, or a planar face to leave open',
+  primitive: 'Select the model, or a planar face to place on',
   measure: 'Select a face or edge',
 };
 
@@ -130,22 +262,86 @@ export function getApplicableOperations(
   const classification = classifyEntity(entity, ctx);
   if (!classification) return [];
   if (classification === 'face.planar') {
-    return ['hole', 'pocket', 'pad'];
+    return ['hole', 'pocket', 'pad', 'edit_feature', 'push_pull', 'round_face_edges', 'shell', 'split', 'mirror', 'align', 'primitive', 'delete_feature', 'measure'];
   }
   if (classification === 'face.cylindrical') {
-    if (ctx?.features && Object.keys(ctx.features).length > 0) {
-      return ['edit_feature', 'measure'];
-    }
-    return ['measure'];
+    return ['edit_feature', 'delete_feature', 'measure'];
+  }
+  if (classification === 'face.conical') {
+    return ['edit_feature', 'delete_feature', 'measure'];
   }
   if (classification.startsWith('edge.')) {
     return ['fillet', 'chamfer', 'measure'];
   }
+  if (classification.startsWith('feature.')) {
+    return ['edit_feature', 'delete_feature', 'move_feature', 'pattern_feature', 'measure'];
+  }
   if (classification.startsWith('face.')) {
-    return ['measure'];
+    return ['offset', 'delete_feature', 'measure'];
   }
   if (classification === 'body') {
-    return ['measure'];
+    return [
+      'move', 'rotate', 'scale', 'transform', 'edit_feature', 'mirror', 'align', 'primitive',
+      'shell', 'offset', 'split', 'linear_pattern', 'polar_pattern', 'heal', 'delete_feature', 'measure',
+    ];
+  }
+  return [];
+}
+
+export interface SelectionHelper {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export function getSelectionHelpers(
+  entity: TopologyEntity | null | undefined,
+  ctx?: GeometryContext | null
+): SelectionHelper[] {
+  const classification = classifyEntity(entity, ctx);
+  if (!classification) return [];
+
+  if (classification === 'face.planar') {
+    return [
+      { id: 'adjacent', label: 'Adjacent faces' },
+      { id: 'coplanar', label: 'Coplanar faces' },
+      { id: 'same_area', label: 'Faces of same area' },
+    ];
+  }
+  if (classification === 'face.cylindrical') {
+    return [
+      { id: 'same_diameter', label: 'Same-diameter features' },
+      { id: 'coaxial', label: 'Coaxial faces' },
+    ];
+  }
+  if (classification === 'face.conical') {
+    return [
+      { id: 'coaxial', label: 'Coaxial faces' },
+    ];
+  }
+  if (classification.startsWith('face.')) {
+    return [
+      { id: 'adjacent', label: 'Adjacent faces' },
+    ];
+  }
+  if (classification === 'edge.linear') {
+    return [
+      { id: 'tangent_chain', label: 'Tangent chain' },
+      { id: 'edge_loop', label: 'Edge loop of face' },
+      { id: 'parallel', label: 'Parallel edges' },
+    ];
+  }
+  if (classification === 'edge.circular') {
+    return [
+      { id: 'edge_loop', label: 'Edge loop' },
+      { id: 'same_radius', label: 'Same-radius edges' },
+    ];
+  }
+  if (classification.startsWith('feature.')) {
+    return [
+      { id: 'same_kind', label: 'Same kind' },
+      { id: 'same_size', label: 'Same size' },
+    ];
   }
   return [];
 }
@@ -178,6 +374,18 @@ export function humanEntityLabel(entity: TopologyEntity | null | undefined): str
       const ct = entity?.curve_type;
       return ct ? `${ct.charAt(0).toUpperCase() + ct.slice(1)} edge` : 'Edge';
     }
+    case 'feature.hole':
+      return (entity?.name as string) || 'Hole feature';
+    case 'feature.boss':
+      return (entity?.name as string) || 'Boss feature';
+    case 'feature.pocket':
+      return (entity?.name as string) || 'Pocket feature';
+    case 'feature.slot':
+      return (entity?.name as string) || 'Slot feature';
+    case 'feature.fillet':
+      return (entity?.name as string) || 'Fillet blend';
+    case 'feature.chamfer':
+      return (entity?.name as string) || 'Chamfer bevel';
     default:
       return 'Entity';
   }
@@ -221,6 +429,21 @@ export function getSelectionReadout(entity: TopologyEntity | null | undefined): 
 
   const props: ReadoutProp[] = [];
 
+  if (classification.startsWith('feature.')) {
+    if (entity.kind) {
+      props.push({ label: 'Kind', value: String(entity.kind).charAt(0).toUpperCase() + String(entity.kind).slice(1) });
+    }
+    if (entity.subtype) {
+      props.push({ label: 'Subtype', value: String(entity.subtype) });
+    }
+    if (Array.isArray(entity.params)) {
+      for (const p of entity.params) {
+        props.push({ label: p.label || p.key, value: `${p.value}${p.unit ? ` ${p.unit}` : ''}` });
+      }
+    }
+    return props;
+  }
+
   switch (classification) {
     case 'body': {
       if (entity.volume_mm3 != null) {
@@ -256,34 +479,43 @@ export function getSelectionReadout(entity: TopologyEntity | null | undefined): 
         props.push({ label: 'Normal', value: norm });
       }
 
-      // If circular planar face (has radius)
-      if (entity.radius != null && entity.radius > 0) {
+      // Check if bounding box exists
+      const bbox = entity.bounding_box;
+      const dx = bbox?.min && bbox?.max ? Math.abs(bbox.max[0] - bbox.min[0]) : null;
+      const dy = bbox?.min && bbox?.max ? Math.abs(bbox.max[1] - bbox.min[1]) : null;
+      const dz = bbox?.min && bbox?.max ? Math.abs(bbox.max[2] - bbox.min[2]) : null;
+      const nonZeroDims = [dx, dy, dz].filter((d): d is number => d != null && d > 0.05).sort((a, b) => b - a);
+
+      // Only show diameter if face is genuinely circular (e.g. circle wire or explicit circular flag)
+      // When width and height or bounding box are available for square/rectangle/polygon, show Width x Length
+      const isExplicitCircular = entity.is_circular === true || (entity.radius != null && entity.radius > 0 && entity.is_circular !== false && (!nonZeroDims.length || Math.abs((entity.radius * 2) - nonZeroDims[0]) < 0.2 && Math.abs(nonZeroDims[0] - nonZeroDims[1]) < 0.2));
+
+      if (isExplicitCircular && entity.radius != null && entity.radius > 0) {
         props.push({
           label: 'Diameter',
           value: `⌀${(entity.radius * 2).toFixed(1)} mm`,
         });
+        props.push({
+          label: 'Circumference',
+          value: `${(2 * Math.PI * entity.radius).toFixed(1)} mm`,
+        });
       } else {
-        // Rectangular or general planar face: show Width x Height
+        // Square, rectangular or planar boundary face: show Length, Width or Size
         if (entity.width != null && entity.height != null) {
-          props.push({
-            label: 'Size',
-            value: `${entity.width.toFixed(1)} × ${entity.height.toFixed(1)} mm`,
-          });
-        } else if (entity.bounding_box?.min && entity.bounding_box?.max) {
-          const bbox = entity.bounding_box;
-          const dx = Math.abs(bbox.max![0] - bbox.min![0]);
-          const dy = Math.abs(bbox.max![1] - bbox.min![1]);
-          const dz = Math.abs(bbox.max![2] - bbox.min![2]);
-          // In a plane, take the two non-zero / dominant dimensions
-          const dims = [dx, dy, dz].filter((d) => d > 0.05).sort((a, b) => b - a);
-          if (dims.length >= 2) {
-            props.push({
-              label: 'Width × Height',
-              value: `${dims[0].toFixed(1)} × ${dims[1].toFixed(1)} mm`,
-            });
-          } else if (dims.length === 1) {
-            props.push({ label: 'Span', value: `${dims[0].toFixed(1)} mm` });
+          props.push({ label: 'Size', value: `${entity.width.toFixed(1)} × ${entity.height.toFixed(1)} mm` });
+        } else if (nonZeroDims.length >= 2) {
+          props.push({ label: 'Length', value: `${nonZeroDims[0].toFixed(1)} mm` });
+          props.push({ label: 'Width', value: `${nonZeroDims[1].toFixed(1)} mm` });
+          if (nonZeroDims.length >= 3 && nonZeroDims[2] > 0.1) {
+            props.push({ label: 'Height', value: `${nonZeroDims[2].toFixed(1)} mm` });
           }
+        } else if (nonZeroDims.length === 1) {
+          props.push({ label: 'Span', value: `${nonZeroDims[0].toFixed(1)} mm` });
+        } else if (entity.radius != null && entity.radius > 0) {
+          props.push({
+            label: 'Span',
+            value: `${(entity.radius * 2).toFixed(1)} mm`,
+          });
         }
       }
       break;
@@ -296,6 +528,10 @@ export function getSelectionReadout(entity: TopologyEntity | null | undefined): 
         props.push({
           label: 'Diameter',
           value: `⌀${(radius * 2).toFixed(2)} mm`,
+        });
+        props.push({
+          label: 'Circumference',
+          value: `${(2 * Math.PI * radius).toFixed(2)} mm`,
         });
       }
       // Length of cylinder

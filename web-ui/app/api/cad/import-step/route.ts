@@ -57,9 +57,12 @@ export async function POST(request: NextRequest): Promise<Response> {
     const filenameOnDisk = `cad_${sessionId}.step`;
     const buffer = Buffer.from(await file.arrayBuffer());
     const outputsDir = resolveOutputsDir();
-
     if (outputsDir) {
-      await writeFile(join(outputsDir, filenameOnDisk), buffer);
+      try {
+        await writeFile(join(outputsDir, filenameOnDisk), buffer);
+      } catch (writeErr) {
+        console.warn('Direct file write to outputs directory failed:', writeErr);
+      }
     } else {
       // Host-side local development fallback
       const devDirs = [
@@ -81,6 +84,11 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     const stepUrl = `/api/outputs/${filenameOnDisk}`;
     let stlUrl: string | null = null;
+
+    let extractedParams: Record<string, any> = {};
+    let extractedMetadata: Record<string, any> = {};
+    let extractedFeatures: any[] = [];
+    let extractedTopology: any = null;
 
     // Trigger AI engine to initialize the B-Rep session and tessellate STL for viewport
     try {
@@ -106,8 +114,21 @@ export async function POST(request: NextRequest): Promise<Response> {
         if (aiData.stl_url) {
           stlUrl = aiData.stl_url;
         }
+        if (aiData.parameters) {
+          extractedParams = aiData.parameters;
+        }
+        if (aiData.parameter_metadata) {
+          extractedMetadata = aiData.parameter_metadata;
+        }
+        if (aiData.features) {
+          extractedFeatures = aiData.features;
+        }
+        if (aiData.topology) {
+          extractedTopology = aiData.topology;
+        }
       } else {
-        console.warn('AI engine import-step error:', aiRes.status, await aiRes.text());
+        const errText = await aiRes.text().catch(() => '');
+        console.warn('AI engine import-step error:', aiRes.status, errText);
       }
     } catch (engineErr) {
       console.warn('AI engine B-Rep preprocessing skipped or failed:', engineErr);
@@ -140,7 +161,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         stepUrl: stepUrl,
         stlUrl: stlUrl || `/api/outputs/cad_${sessionId}.stl`,
         userId: authSession.userId,
-        parameters: {},
+        parameters: extractedParams,
       },
     });
 
@@ -150,6 +171,10 @@ export async function POST(request: NextRequest): Promise<Response> {
       stepUrl: cadSession.stepUrl,
       stlUrl: cadSession.stlUrl,
       fileName: fileName,
+      parameters: extractedParams,
+      parameterMetadata: extractedMetadata,
+      features: extractedFeatures,
+      topology: extractedTopology,
     });
   } catch (error: any) {
     console.error('Error importing STEP:', error);

@@ -5,7 +5,7 @@ import {
 	Bot, LogOut, Loader2, SendHorizontal, Zap, Upload, FileImage, 
 	Settings, BrainCircuit, Cuboid, Trash2, Crosshair, Sparkles, 
 	ChevronDown, ChevronRight, Check, SlidersHorizontal, Wrench, Layers, Tag, X,
-	Target, PlusCircle, RefreshCw, Paperclip, Send, Plus
+	Target, PlusCircle, RefreshCw, Paperclip, Send, Plus, Ruler, Square
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -57,6 +57,8 @@ type ChatPanelProps = {
 	fileInputRef?: React.RefObject<HTMLInputElement | null>;
 	selectionContext?: [number, number, number] | null;
 	onClearSelectionContext?: () => void;
+	selectedFace?: any | null;
+	onClearSelectedFace?: () => void;
 	hasActiveModel?: boolean;
 	parameters?: Record<string, unknown>;
 	parameterEntries?: [string, unknown][];
@@ -91,6 +93,8 @@ export function ChatPanel({
 	fileInputRef,
 	selectionContext,
 	onClearSelectionContext,
+	selectedFace,
+	onClearSelectedFace,
 	hasActiveModel = false,
 	parameters = {},
 	parameterEntries = [],
@@ -107,6 +111,7 @@ export function ChatPanel({
 	onDeleteRevision,
 }: ChatPanelProps) {
 	const scrollRef = useRef<HTMLDivElement | null>(null);
+	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const router = useRouter();
 	const [isLoggingOut, setIsLoggingOut] = useState(false);
 	const [user, setUser] = useState<{name?: string; email?: string} | null>(null);
@@ -172,21 +177,18 @@ export function ChatPanel({
 
 	return (
 		<>
-			<div className="flex h-full flex-col bg-card dark:bg-[#070b14]/95 backdrop-blur-2xl border-r border-border dark:border-white/[0.08] select-none text-foreground">
-				{/* Top Ambient Highlight */}
-				<div className="h-[1px] w-full bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent" />
-
+			<div className="flex h-full min-h-0 flex-col bg-[var(--ui-panel)] select-none text-[var(--ui-text-primary)] overflow-hidden">
 				{/* Header */}
-				<div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-white/[0.06] bg-muted/30 dark:bg-white/[0.01]">
+				<div className="flex h-12 shrink-0 items-center justify-between px-4 border-b border-[var(--ui-border)] bg-[var(--ui-panel)]">
 					<div className="flex items-center gap-2.5">
-						<div className="flex size-7 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.2)]">
+						<div className="flex size-7 items-center justify-center rounded-lg bg-[var(--ui-input)] border border-[var(--ui-border-ctrl)] text-[var(--ui-accent)]">
 							<Cuboid className="size-4" />
 						</div>
 						<div className="flex items-center gap-2">
-							<span className="text-sm font-extrabold tracking-wider text-foreground dark:text-white font-mono">
+							<span className="text-sm font-bold tracking-wider text-[var(--ui-text-primary)] font-mono">
 								VEXCAD
 							</span>
-							<span className="text-[9px] text-cyan-700 dark:text-cyan-300 font-mono font-bold bg-cyan-500/10 px-1.5 py-0.5 rounded-md border border-cyan-500/25">
+							<span className="text-[9px] text-[var(--ui-text-muted)] font-mono font-bold bg-[var(--ui-input)] px-1.5 py-0.5 rounded border border-[var(--ui-border-ctrl)]">
 								v0.1.0
 							</span>
 						</div>
@@ -196,15 +198,15 @@ export function ChatPanel({
 					<div className="flex items-center gap-1">
 						<button
 							onClick={onClear}
-							className="flex size-7 items-center justify-center rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-all cursor-pointer shadow-sm"
+							className="ui-btn ui-btn--ghost !h-7 !px-2"
 							title="New Blueprint CAD Project"
 						>
-							<PlusCircle className="size-3.5" />
+							<PlusCircle className="size-3.5 text-emerald-400" />
 						</button>
 						{messages.length > 0 && (
 							<button
 								onClick={onClear}
-								className="flex size-7 items-center justify-center rounded-lg bg-muted/60 hover:bg-muted dark:bg-white/[0.03] dark:hover:bg-white/[0.08] border border-border dark:border-white/10 text-muted-foreground hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+								className="ui-btn ui-btn--ghost !h-7 !px-2"
 								title="Clear active workspace"
 							>
 								<Trash2 className="size-3.5" />
@@ -212,7 +214,7 @@ export function ChatPanel({
 						)}
 						<button
 							onClick={() => setIsSettingsOpen(true)}
-							className="flex size-7 items-center justify-center rounded-lg bg-muted/60 hover:bg-muted dark:bg-white/[0.03] dark:hover:bg-white/[0.08] border border-border dark:border-white/10 text-muted-foreground hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+							className="ui-btn ui-btn--ghost !h-7 !px-2"
 							title="Settings"
 						>
 							<Settings className="size-3.5" />
@@ -220,11 +222,11 @@ export function ChatPanel({
 						<button
 							onClick={handleLogout}
 							disabled={isLoggingOut}
-							className="flex size-7 items-center justify-center rounded-lg bg-muted/60 hover:bg-muted dark:bg-white/[0.03] dark:hover:bg-white/[0.08] border border-border dark:border-white/10 text-muted-foreground hover:text-rose-500 dark:hover:text-rose-400 transition-colors disabled:opacity-50 cursor-pointer"
+							className="ui-btn ui-btn--ghost !h-7 !px-2 text-rose-400 hover:text-rose-300"
 							title="Logout"
 						>
 							{isLoggingOut ? (
-								<Loader2 className="size-3.5 animate-spin text-cyan-500" />
+								<Loader2 className="size-3.5 animate-spin" />
 							) : (
 								<LogOut className="size-3.5" />
 							)}
@@ -239,22 +241,19 @@ export function ChatPanel({
 				/>
 
 				{/* Chat Messages Stream */}
-				<div className="flex-1 overflow-y-auto px-4 py-4 space-y-3.5 no-scrollbar">
+				<div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3.5 no-scrollbar">
 					{messages.length === 0 ? (
 						<div className="flex flex-col items-center justify-center h-full text-center px-4 space-y-5 max-w-xs mx-auto animate-in fade-in duration-300">
-							<div className="relative flex items-center justify-center">
-								<div className="absolute -inset-3 rounded-full bg-cyan-500/10 blur-xl" />
-								<div className="relative flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.2)]">
-									<Cuboid className="size-6" />
-								</div>
+							<div className="flex size-12 items-center justify-center rounded-2xl bg-[var(--ui-input)] border border-[var(--ui-border-ctrl)] text-[var(--ui-accent)] shadow-sm">
+								<Cuboid className="size-6" />
 							</div>
 
 							<div className="space-y-1">
-								<h3 className="text-xs font-bold uppercase tracking-wider text-foreground dark:text-white font-mono">
+								<h3 className="text-xs font-bold uppercase tracking-wider text-[var(--ui-text-primary)] font-mono">
 									Parametric CAD Copilot
 								</h3>
-								<p className="text-[11px] text-muted-foreground leading-relaxed">
-									Upload a 2D engineering blueprint or enter parametric CAD prompts below.
+								<p className="text-[11px] text-[var(--ui-text-muted)] leading-relaxed">
+									Describe your mechanical part in natural language or attach a 3D STEP solid model to modify.
 								</p>
 							</div>
 
@@ -263,29 +262,33 @@ export function ChatPanel({
 								<button
 									type="button"
 									onClick={() => setPrompt('Design a stepped shaft with dual O-ring seal grooves and internal bore.')}
-									className="w-full px-3.5 py-2.5 rounded-xl border border-border/80 dark:border-white/10 bg-gradient-to-r from-blue-500/[0.04] to-cyan-500/[0.02] dark:bg-white/[0.02] hover:bg-muted/80 dark:hover:bg-white/[0.06] hover:border-cyan-500/50 hover:shadow-md text-left text-xs text-foreground dark:text-muted-foreground dark:hover:text-white transition-all flex items-center justify-between gap-2 cursor-pointer group shadow-sm hover:-translate-y-0.5"
+									className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-input)] hover:border-[var(--ui-border-strong)] text-left text-xs transition-all flex items-center justify-between gap-2 cursor-pointer group shadow-sm"
 								>
 									<div className="flex items-center gap-2.5 min-w-0">
-										<div className="size-6 rounded-lg bg-cyan-500/10 dark:bg-cyan-400/15 text-cyan-600 dark:text-cyan-400 flex items-center justify-center text-xs shrink-0 group-hover:scale-110 transition-transform">
-											⚡
+										<div className="size-6 rounded-lg bg-[var(--ui-panel)] border border-[var(--ui-border-ctrl)] text-[var(--ui-accent)] flex items-center justify-center shrink-0">
+											<Zap className="size-3.5" />
 										</div>
-										<span className="truncate font-medium text-[11.5px]">Stepped Shaft with Grooves</span>
+										<span className="truncate font-medium text-[11.5px] text-[var(--ui-text-primary)]">
+											Stepped Shaft with Grooves
+										</span>
 									</div>
-									<ChevronRight className="size-3.5 text-muted-foreground/40 group-hover:text-cyan-500 group-hover:translate-x-0.5 transition-all shrink-0" />
+									<ChevronRight className="size-3.5 text-[var(--ui-text-muted)] group-hover:text-[var(--ui-text-primary)] shrink-0" />
 								</button>
 
 								<button
 									type="button"
-									onClick={() => setPrompt('Convert attached 2D blueprint drawing into a fully parametric 3D model.')}
-									className="w-full px-3.5 py-2.5 rounded-xl border border-border/80 dark:border-white/10 bg-gradient-to-r from-emerald-500/[0.04] to-teal-500/[0.02] dark:bg-white/[0.02] hover:bg-muted/80 dark:hover:bg-white/[0.06] hover:border-emerald-500/50 hover:shadow-md text-left text-xs text-foreground dark:text-muted-foreground dark:hover:text-white transition-all flex items-center justify-between gap-2 cursor-pointer group shadow-sm hover:-translate-y-0.5"
+									onClick={() => setPrompt('Design a mounting bracket with 4 counterbore holes and center cut-out.')}
+									className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-input)] hover:border-[var(--ui-border-strong)] text-left text-xs transition-all flex items-center justify-between gap-2 cursor-pointer group shadow-sm"
 								>
 									<div className="flex items-center gap-2.5 min-w-0">
-										<div className="size-6 rounded-lg bg-emerald-500/10 dark:bg-emerald-400/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs shrink-0 group-hover:scale-110 transition-transform">
-											📐
+										<div className="size-6 rounded-lg bg-[var(--ui-panel)] border border-[var(--ui-border-ctrl)] text-[var(--ui-accent)] flex items-center justify-center shrink-0">
+											<Ruler className="size-3.5" />
 										</div>
-										<span className="truncate font-medium text-[11.5px]">Convert Blueprint to 3D CAD</span>
+										<span className="truncate font-medium text-[11.5px] text-[var(--ui-text-primary)]">
+											Mounting Bracket with Holes
+										</span>
 									</div>
-									<ChevronRight className="size-3.5 text-muted-foreground/40 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all shrink-0" />
+									<ChevronRight className="size-3.5 text-[var(--ui-text-muted)] group-hover:text-[var(--ui-text-primary)] shrink-0" />
 								</button>
 							</div>
 						</div>
@@ -313,8 +316,8 @@ export function ChatPanel({
 							))}
 
 							{isGenerating && (
-								<div className="flex items-center gap-2.5 p-3 rounded-2xl bg-cyan-500/[0.05] border border-cyan-500/20 text-cyan-300 text-xs animate-pulse">
-									<RefreshCw className="size-3.5 animate-spin text-cyan-400" />
+								<div className="flex items-center gap-2.5 p-3 rounded-xl bg-[var(--ui-input)] border border-[var(--ui-border)] text-[var(--ui-text-secondary)] text-xs">
+									<RefreshCw className="size-3.5 animate-spin text-[var(--ui-accent)]" />
 									<span>Computing CAD Geometry & B-Rep Topology...</span>
 								</div>
 							)}
@@ -324,158 +327,149 @@ export function ChatPanel({
 				</div>
 
 				{/* Floating Command Input Dock */}
-				<div className="px-3.5 pb-3.5 pt-1.5 border-t border-border dark:border-white/[0.06] bg-card dark:bg-[#070b14]">
-					<form onSubmit={onSubmit} className="relative flex flex-col gap-1.5">
+				<div className="shrink-0 p-3 border-t border-[var(--ui-border)] bg-[var(--ui-panel)]">
+					<form onSubmit={onSubmit} className="flex flex-col gap-2">
 						{/* Target Feature Pill (When Model Active) */}
 						{hasActiveModel && (
-							<div className="flex flex-col gap-1">
-								<div className="flex items-center justify-between gap-2">
-									<div className="relative">
-										<button
-											type="button"
-											onClick={() => setIsPortionPickerOpen(!isPortionPickerOpen)}
-											className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold transition-all border cursor-pointer ${
-												targetPortion
- 													? targetPortion.isExistingGeometry === false
- 														? 'bg-amber-500/15 border-amber-500/40 text-amber-600 dark:text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
- 														: 'bg-cyan-500/15 border-cyan-500/40 text-cyan-600 dark:text-cyan-300 shadow-[0_0_12px_rgba(34,211,238,0.2)]'
- 													: 'bg-muted/60 dark:bg-white/[0.03] border-border dark:border-white/10 text-muted-foreground hover:text-foreground dark:hover:text-white hover:border-cyan-500/40'
-											}`}
-											title="Target specific CAD feature"
-										>
-											<Target className={`size-3 ${
-												targetPortion 
- 													? targetPortion.isExistingGeometry === false 
- 														? 'text-amber-500 dark:text-amber-400' 
- 														: 'text-cyan-500 dark:text-cyan-400' 
- 													: 'text-muted-foreground'
-											}`} />
-											<span className="truncate max-w-[150px]">
-												{targetPortion ? targetPortion.name : 'Target: Whole Model'}
-											</span>
-											<ChevronDown className="size-2.5 opacity-60 ml-0.5" />
-										</button>
+							<div className="flex items-center justify-between gap-2">
+								<div className="relative">
+									<button
+										type="button"
+										onClick={() => setIsPortionPickerOpen(!isPortionPickerOpen)}
+										className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold transition-all border cursor-pointer ${
+											targetPortion
+												? 'bg-[var(--ui-input)] border-[var(--ui-accent)] text-[var(--ui-accent)]'
+												: 'bg-[var(--ui-input)] border-[var(--ui-border-ctrl)] text-[var(--ui-text-secondary)] hover:text-[var(--ui-text-primary)]'
+										}`}
+										title="Target specific CAD feature"
+									>
+										<Target className={`size-3 ${targetPortion ? 'text-[var(--ui-accent)]' : 'text-[var(--ui-text-muted)]'}`} />
+										<span className="truncate max-w-[150px]">
+											{targetPortion ? targetPortion.name : 'Target: Whole Model'}
+										</span>
+										<ChevronDown className="size-2.5 opacity-60 ml-0.5" />
+									</button>
 
-										{/* Dropdown Menu for CAD Portions */}
-										{isPortionPickerOpen && (
-											<div className="absolute bottom-full left-0 mb-2 w-80 rounded-2xl border border-border dark:border-white/10 bg-popover dark:bg-[#0c1222]/95 backdrop-blur-2xl shadow-2xl p-2 z-50 space-y-1.5 animate-in fade-in zoom-in-95 duration-150 text-foreground">
-												<div className="flex items-center justify-between px-2 py-1 border-b border-border dark:border-white/[0.06] text-[10px] font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400 font-mono">
-													<span>Select CAD Feature Focus</span>
-													<button
-														type="button"
-														onClick={() => setIsPortionPickerOpen(false)}
-														className="text-muted-foreground hover:text-foreground dark:hover:text-white p-0.5 cursor-pointer"
-													>
-														<X className="size-3" />
-													</button>
-												</div>
-
+									{/* Dropdown Menu for CAD Portions */}
+									{isPortionPickerOpen && (
+										<div className="absolute bottom-full left-0 mb-2 w-80 rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-panel)] shadow-2xl p-2 z-50 space-y-1.5 animate-in fade-in zoom-in-95 duration-150 text-[var(--ui-text-primary)]">
+											<div className="flex items-center justify-between px-2 py-1 border-b border-[var(--ui-border)] text-[10px] font-bold uppercase tracking-wider text-[var(--ui-text-muted)] font-mono">
+												<span>Select CAD Feature Focus</span>
 												<button
 													type="button"
-													onClick={() => {
-														if (setTargetPortion) setTargetPortion(null);
-														setIsPortionPickerOpen(false);
-													}}
-													className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-muted dark:hover:bg-white/10 text-foreground dark:text-white flex items-center justify-between cursor-pointer"
+													onClick={() => setIsPortionPickerOpen(false)}
+													className="text-[var(--ui-text-muted)] hover:text-[var(--ui-text-primary)] p-0.5 cursor-pointer"
 												>
-													<div className="flex items-center gap-1.5">
-														<Cuboid className="size-3.5 text-cyan-500 dark:text-cyan-400" />
-														<span className="font-semibold">Whole Model (Default)</span>
-													</div>
-													{!targetPortion && <Check className="size-3 text-cyan-500 dark:text-cyan-400" />}
+													<X className="size-3" />
 												</button>
+											</div>
 
-												<div className="max-h-60 overflow-y-auto space-y-2 no-scrollbar pr-0.5">
-													{/* 1. Recognized Model Features */}
-													<div>
-														<div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-mono flex items-center gap-1">
-															<span className="size-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
-															<span>Active Model Features ({existingPortions.length})</span>
-														</div>
-														<div className="mt-1 space-y-0.5">
-															{existingPortions.map((p) => (
-																<button
-																	key={p.id}
-																	type="button"
-																	onClick={() => handleSelectPortion(p)}
-																	className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
-																		targetPortion?.id === p.id
-																			? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-bold border border-cyan-500/30'
-																			: 'hover:bg-muted dark:hover:bg-white/[0.06] text-muted-foreground hover:text-foreground dark:hover:text-white'
-																	}`}
-																>
-																	<div className="flex flex-col truncate pr-2">
-																		<span className="truncate font-medium text-foreground dark:text-white">{p.name}</span>
-																		{p.description && (
-																			<span className="text-[10px] text-muted-foreground dark:text-zinc-400 truncate">{p.description}</span>
-																		)}
-																	</div>
-																	{targetPortion?.id === p.id && <Check className="size-3 text-cyan-500 dark:text-cyan-400 shrink-0" />}
-																</button>
-															))}
-														</div>
+											<button
+												type="button"
+												onClick={() => {
+													if (setTargetPortion) setTargetPortion(null);
+													setIsPortionPickerOpen(false);
+												}}
+												className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-[var(--ui-hover)] text-[var(--ui-text-primary)] flex items-center justify-between cursor-pointer"
+											>
+												<div className="flex items-center gap-1.5">
+													<Cuboid className="size-3.5 text-[var(--ui-accent)]" />
+													<span className="font-semibold">Whole Model (Default)</span>
+												</div>
+												{!targetPortion && <Check className="size-3 text-[var(--ui-accent)]" />}
+											</button>
+
+											<div className="max-h-60 overflow-y-auto space-y-2 no-scrollbar pr-0.5">
+												{/* 1. Recognized Model Features */}
+												<div>
+													<div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--ui-text-muted)] font-mono flex items-center gap-1">
+														<span className="size-1.5 rounded-full bg-[var(--ui-accent)]" />
+														<span>Active Model Features ({existingPortions.length})</span>
 													</div>
+													<div className="mt-1 space-y-0.5">
+														{existingPortions.map((p) => (
+															<button
+																key={p.id}
+																type="button"
+																onClick={() => handleSelectPortion(p)}
+																className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
+																	targetPortion?.id === p.id
+																		? 'bg-[var(--ui-input)] text-[var(--ui-accent)] font-bold border border-[var(--ui-accent)]'
+																		: 'hover:bg-[var(--ui-hover)] text-[var(--ui-text-secondary)] hover:text-[var(--ui-text-primary)]'
+																}`}
+															>
+																<div className="flex flex-col truncate pr-2">
+																	<span className="truncate font-medium text-[var(--ui-text-primary)]">{p.name}</span>
+																	{p.description && (
+																		<span className="text-[10px] text-[var(--ui-text-muted)] truncate">{p.description}</span>
+																	)}
+																</div>
+																{targetPortion?.id === p.id && <Check className="size-3 text-[var(--ui-accent)] shrink-0" />}
+															</button>
+														))}
+													</div>
+												</div>
 
-													{/* 2. Add New Feature Templates */}
-													<div className="pt-1 border-t border-border dark:border-white/[0.06]">
-														<div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 font-mono flex items-center gap-1">
-															<Plus className="size-2.5 text-amber-500 dark:text-amber-400" />
-															<span>Add Missing Feature</span>
-														</div>
-														<div className="mt-1 space-y-0.5">
-															{newFeaturePortions.map((p) => (
-																<button
-																	key={p.id}
-																	type="button"
-																	onClick={() => handleSelectPortion(p)}
-																	className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
-																		targetPortion?.id === p.id
-																			? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold border border-amber-500/30'
-																			: 'hover:bg-muted dark:hover:bg-white/[0.06] text-muted-foreground hover:text-foreground dark:hover:text-white'
-																	}`}
-																>
-																	<div className="flex flex-col truncate pr-2">
-																		<span className="truncate font-medium text-amber-700 dark:text-amber-200">{p.name}</span>
-																		{p.description && (
-																			<span className="text-[10px] text-muted-foreground dark:text-zinc-400 truncate">{p.description}</span>
-																		)}
-																	</div>
-																	{targetPortion?.id === p.id && <Check className="size-3 text-amber-500 dark:text-amber-400 shrink-0" />}
-																</button>
-															))}
-														</div>
+												{/* 2. Add New Feature Templates */}
+												<div className="pt-1 border-t border-[var(--ui-border)]">
+													<div className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--ui-text-muted)] font-mono flex items-center gap-1">
+														<Plus className="size-2.5 text-[var(--ui-accent)]" />
+														<span>Add Missing Feature</span>
+													</div>
+													<div className="mt-1 space-y-0.5">
+														{newFeaturePortions.map((p) => (
+															<button
+																key={p.id}
+																type="button"
+																onClick={() => handleSelectPortion(p)}
+																className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
+																	targetPortion?.id === p.id
+																		? 'bg-[var(--ui-input)] text-[var(--ui-accent)] font-bold border border-[var(--ui-accent)]'
+																		: 'hover:bg-[var(--ui-hover)] text-[var(--ui-text-secondary)] hover:text-[var(--ui-text-primary)]'
+																}`}
+															>
+																<div className="flex flex-col truncate pr-2">
+																	<span className="truncate font-medium text-[var(--ui-text-primary)]">{p.name}</span>
+																	{p.description && (
+																		<span className="text-[10px] text-[var(--ui-text-muted)] truncate">{p.description}</span>
+																	)}
+																</div>
+																{targetPortion?.id === p.id && <Check className="size-3 text-[var(--ui-accent)] shrink-0" />}
+															</button>
+														))}
 													</div>
 												</div>
 											</div>
-										)}
-									</div>
-
-									{targetPortion && (
-										<button
-											type="button"
-											onClick={() => {
-												if (setTargetPortion) setTargetPortion(null);
-											}}
-											className="text-[10px] text-muted-foreground hover:text-rose-500 dark:hover:text-rose-400 flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded cursor-pointer"
-											title="Clear targeted portion"
-										>
-											<X className="size-3" />
-											<span>Clear</span>
-										</button>
+										</div>
 									)}
 								</div>
+
+								{targetPortion && (
+									<button
+										type="button"
+										onClick={() => {
+											if (setTargetPortion) setTargetPortion(null);
+										}}
+										className="text-[10px] text-[var(--ui-text-muted)] hover:text-rose-400 flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded cursor-pointer"
+										title="Clear targeted portion"
+									>
+										<X className="size-3" />
+										<span>Clear</span>
+									</button>
+								)}
 							</div>
 						)}
 
 						{/* Attached File Preview */}
 						{selectedFile && (
-							<div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-700 dark:text-emerald-300 font-mono">
-								<Upload className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-								<span className="truncate flex-1 font-semibold">{selectedFile.name}</span>
+							<div className="flex items-center gap-2 rounded-lg border border-[var(--ui-border-ctrl)] bg-[var(--ui-input)] px-2.5 py-1 text-xs text-[var(--ui-text-primary)] font-mono">
+								<FileImage className="size-3.5 shrink-0 text-[var(--ui-accent)]" />
+								<span className="truncate flex-1 font-medium">{selectedFile.name}</span>
 								<button
 									type="button"
 									onClick={() => handleFileChange(null)}
-									className="p-0.5 hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+									className="p-0.5 hover:text-rose-400 transition-colors cursor-pointer"
+									title="Remove attached image"
 								>
 									<X className="size-3.5" />
 								</button>
@@ -484,106 +478,148 @@ export function ChatPanel({
 
 						{/* 3D Coordinate Targeting Chip */}
 						{selectionContext && (
-							<div className="flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-700 dark:text-rose-300 font-mono">
-								<Crosshair className="size-3.5 shrink-0 text-rose-600 dark:text-rose-400" />
+							<div className="flex items-center gap-2 rounded-lg border border-[var(--ui-border-ctrl)] bg-[var(--ui-input)] px-2.5 py-1 text-xs text-[var(--ui-text-primary)] font-mono">
+								<Crosshair className="size-3.5 shrink-0 text-rose-400" />
 								<span className="truncate flex-1">
 									Target [{selectionContext[0].toFixed(1)}, {selectionContext[1].toFixed(1)}, {selectionContext[2].toFixed(1)}]
 								</span>
 								<button
 									type="button"
 									onClick={onClearSelectionContext}
-									className="p-0.5 hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+									className="p-0.5 hover:text-rose-400 transition-colors cursor-pointer"
 								>
 									<X className="size-3.5" />
 								</button>
 							</div>
 						)}
 
-						{/* Main Floating Glass Input Bar */}
-						<div className="relative flex flex-col rounded-2xl bg-muted/40 dark:bg-white/[0.03] border border-border dark:border-white/10 focus-within:border-cyan-500 dark:focus-within:border-cyan-400/60 focus-within:bg-card dark:focus-within:bg-white/[0.05] shadow-sm dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-all duration-200">
+						{/* 3D Face Targeting Chip */}
+						{selectedFace && (
+							<div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs font-mono text-amber-400 animate-in fade-in duration-150">
+								<Square className="size-3.5 shrink-0 text-amber-400" />
+								<div className="flex flex-col flex-1 min-w-0">
+									<div className="flex items-center gap-1.5">
+										<span className="font-bold">Target Face #{selectedFace.transient_id}</span>
+										{selectedFace.surface_type && (
+											<span className="text-[10px] text-amber-300/80 uppercase">
+												({selectedFace.surface_type})
+											</span>
+										)}
+									</div>
+									<span className="text-[10px] text-[var(--ui-text-muted)] truncate">
+										Prompt will edit only this selected face
+									</span>
+								</div>
+								{onClearSelectedFace && (
+									<button
+										type="button"
+										onClick={onClearSelectedFace}
+										className="p-1 hover:text-rose-400 transition-colors cursor-pointer text-amber-400/80 hover:bg-amber-500/20 rounded"
+										title="Clear face target"
+									>
+										<X className="size-3.5" />
+									</button>
+								)}
+							</div>
+						)}
+
+						{/* Secondary bar: model select + file attach */}
+						<div className="flex items-center justify-between gap-2 px-1">
+							<div className="flex items-center gap-1.5">
+								<Select value={selectedModel} onValueChange={(val: string | null) => val && setSelectedModel(val)}>
+									<SelectTrigger className="ui-btn ui-btn--ghost !h-7 !px-2 text-[11px] font-mono gap-1.5 cursor-pointer">
+										<Sparkles className="size-3 text-[var(--ui-accent)]" />
+										<SelectValue placeholder="Model" />
+									</SelectTrigger>
+									<SelectContent className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-panel)] text-xs z-50 text-[var(--ui-text-primary)]">
+										{modelOptions.map((opt) => (
+											<SelectItem key={opt.value} value={opt.value} className="text-xs font-mono">
+												{opt.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+
+								<label
+									className={`ui-btn ui-btn--ghost !h-7 !w-7 !p-0 cursor-pointer flex items-center justify-center ${
+										selectedFile ? 'border-[var(--ui-accent)] text-[var(--ui-accent)]' : ''
+									}`}
+									title="Attach blueprint image or drawing (PNG, JPG, WEBP, PDF)"
+								>
+									<Paperclip className="size-3.5" />
+									<input
+										ref={fileInputRef}
+										type="file"
+										accept="image/png,image/jpeg,image/webp,image/jpg,application/pdf,.png,.jpg,.jpeg,.webp,.pdf"
+										className="hidden"
+										onChange={(e) => {
+											const file = e.target.files?.[0] || null;
+											if (file) {
+												const validExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.pdf'];
+												const hasValidExt = validExtensions.some((ext) => file.name.toLowerCase().endsWith(ext));
+												const hasValidType = file.type.startsWith('image/') || file.type === 'application/pdf';
+												if (!hasValidExt && !hasValidType) {
+													alert('Please select a valid blueprint image (PNG, JPG, WEBP) or PDF drawing.');
+													e.target.value = '';
+													return;
+												}
+												const maxLimit = 10 * 1024 * 1024;
+												if (file.size > maxLimit) {
+													alert('File size exceeds the 10MB limit. Please select a smaller blueprint file.');
+													e.target.value = '';
+													return;
+												}
+											}
+											handleFileChange(file);
+											e.target.value = '';
+										}}
+									/>
+								</label>
+							</div>
+						</div>
+
+						{/* Main Rounded Prompt Box */}
+						<div className="ui-prompt">
 							<textarea
+								ref={textareaRef}
 								value={prompt}
-								onChange={(e) => setPrompt(e.target.value)}
+								onChange={(e) => {
+									setPrompt(e.target.value);
+									if (textareaRef.current) {
+										textareaRef.current.style.height = 'auto';
+										textareaRef.current.style.height = `${Math.min(120, textareaRef.current.scrollHeight)}px`;
+									}
+								}}
 								onKeyDown={(e) => {
 									if (e.key === 'Enter' && !e.shiftKey) {
 										e.preventDefault();
-										onSubmit(e as any);
+										if ((prompt.trim() || selectedFile) && !isGenerating) {
+											onSubmit(e as any);
+										}
 									}
 								}}
-								rows={2}
+								rows={1}
 								placeholder={
 									targetPortion
 										? `Describe revisions for ${targetPortion.name}...`
 										: hasActiveModel
-											? "Iterate on geometry (e.g. increase boss height, add 4x holes)..."
+											? "Iterate on geometry..."
 											: "Ask VEXCAD AI or describe your part..."
 								}
-								className="w-full resize-none bg-transparent px-3.5 pt-3 pb-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none font-sans leading-relaxed"
 							/>
 
-							<div className="flex items-center justify-between px-3 pb-2.5 pt-1 border-t border-border/50 dark:border-white/[0.04]">
-								<div className="flex items-center gap-1.5">
-									{/* Attach File Button */}
-									<label
-										className={`flex size-7 cursor-pointer items-center justify-center rounded-xl transition-all duration-200 ${
-											selectedFile
-												? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/40'
-												: 'text-muted-foreground hover:bg-muted dark:hover:bg-white/10 hover:text-foreground dark:hover:text-white'
-										}`}
-										title="Attach blueprint (PDF/PNG/JPG) or 3D solid model (.STEP, .STP)"
-									>
-										<Paperclip className="size-3.5" />
-										<input
-											ref={fileInputRef}
-											type="file"
-											accept="image/*,.pdf,.step,.stp"
-											className="hidden"
-											onChange={(e) => {
-												const file = e.target.files?.[0] || null;
-												if (file) {
-													const isStep = file.name.toLowerCase().endsWith('.step') || file.name.toLowerCase().endsWith('.stp');
-													const maxLimit = isStep ? 50 * 1024 * 1024 : 10 * 1024 * 1024;
-													if (file.size > maxLimit) {
-														alert(`File size exceeds the ${isStep ? '50MB' : '10MB'} limit.`);
-														e.target.value = '';
-														return;
-													}
-												}
-												handleFileChange(file);
-											}}
-										/>
-									</label>
-
-									{/* Model Selector Dropdown */}
-									<Select value={selectedModel} onValueChange={(val: string | null) => val && setSelectedModel(val)}>
-										<SelectTrigger className="h-7 px-2 border-0 bg-transparent hover:bg-muted dark:hover:bg-white/5 text-[10.5px] font-mono font-semibold text-muted-foreground hover:text-foreground dark:hover:text-white rounded-lg focus:ring-0 gap-1">
-											<Sparkles className="size-3 text-cyan-600 dark:text-cyan-400" />
-											<SelectValue placeholder="Model" />
-										</SelectTrigger>
-										<SelectContent className="rounded-xl border border-border dark:border-white/10 bg-popover dark:bg-[#090e1a]/95 backdrop-blur-xl text-xs z-50 text-foreground">
-											{modelOptions.map((opt) => (
-												<SelectItem key={opt.value} value={opt.value} className="text-xs font-mono">
-													{opt.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-
-								{/* High-Emphasis Send Button */}
-								<button
-									type="submit"
-									disabled={isGenerating || (!prompt.trim() && !selectedFile)}
-									className="size-7.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 dark:bg-cyan-400 dark:hover:bg-cyan-300 disabled:opacity-30 text-white dark:text-black flex items-center justify-center transition-all shadow-sm dark:shadow-[0_0_12px_rgba(34,211,238,0.3)] shrink-0 cursor-pointer font-bold"
-									title="Generate CAD Model (Enter)"
-								>
-									{isGenerating ? (
-										<Loader2 className="size-3.5 animate-spin" />
-									) : (
-										<Send className="size-3.5" />
-									)}
-								</button>
-							</div>
+							<button
+								type="submit"
+								disabled={isGenerating || (!prompt.trim() && !selectedFile)}
+								className="ui-prompt-send"
+								title="Send instruction to AI CAD (Enter)"
+							>
+								{isGenerating ? (
+									<Loader2 size={15} className="animate-spin" />
+								) : (
+									<SendHorizontal size={15} />
+								)}
+							</button>
 						</div>
 					</form>
 				</div>

@@ -825,7 +825,8 @@ export function SetupSection({ setup, onChange, parameters, setupMetadata, recom
                                 if (usableLength !== null && usableLength <= 0) {
                                     return (
                                         <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded-lg text-[10px] text-red-400 font-mono flex items-center gap-2">
-                                            <span>⚠️ Grip ({toDisplay(grip)}{isInch ? "in" : "mm"}) + clearance ({toDisplay(clearance)}{isInch ? "in" : "mm"}) exceeds total stock length ({toDisplay(stockLength)}{isInch ? "in" : "mm"}).</span>
+                                            <AlertTriangle className="size-3.5 text-red-400 shrink-0" />
+                                            <span>Grip ({toDisplay(grip)}{isInch ? "in" : "mm"}) + clearance ({toDisplay(clearance)}{isInch ? "in" : "mm"}) exceeds total stock length ({toDisplay(stockLength)}{isInch ? "in" : "mm"}).</span>
                                         </div>
                                     );
                                 }

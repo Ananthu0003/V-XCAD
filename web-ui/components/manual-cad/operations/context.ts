@@ -24,6 +24,11 @@ export interface PlanarFaceContext {
   material_depth: number | null;
   is_through_clear: boolean | null;
   existing_features: FeatureOnFace[];
+  rect_length?: number | null;
+  rect_width?: number | null;
+  corner_radius?: number | null;
+  feature_kind?: string | null;
+  is_pad_or_pocket?: boolean | null;
 }
 
 export interface CylFaceContext {
@@ -82,11 +87,14 @@ export function useGeometryContext(
 
   const cacheRef = useRef<Record<string, GeometryContext>>({});
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const abortCtrlRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (!selection || !sessionId || !revision) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+    const rawRef = selection?.transient_id || selection?.id;
+    const refId = typeof rawRef === 'string' ? rawRef : (rawRef ? String(rawRef) : '');
+    if (!refId || !sessionId || !revision) {
       setCtx(null);
+      setLoading(false);
       return;
     }
 
@@ -94,7 +102,7 @@ export function useGeometryContext(
       const u = position?.u;
       const v = position?.v;
       
-      const key = `${revision}_${selection.id}_${u}_${v}`;
+      const key = `${revision}_${refId}_${u}_${v}`;
       if (cacheRef.current[key]) {
         setCtx(cacheRef.current[key]);
         setError(null);
@@ -102,15 +110,21 @@ export function useGeometryContext(
         return;
       }
 
+      if (abortCtrlRef.current) {
+        abortCtrlRef.current.abort();
+      }
+      const abortCtrl = new AbortController();
+      abortCtrlRef.current = abortCtrl;
+
       setLoading(true);
       setError(null);
       try {
-        let url = `/api/v1/cad/modify/context/${sessionId}?revision=${revision}&ref=${selection.id}`;
+        let url = `/api/cad/modify/context/${encodeURIComponent(sessionId)}?revision=${encodeURIComponent(revision)}&ref=${encodeURIComponent(refId)}`;
         if (u !== undefined && v !== undefined) {
           url += `&u=${u}&v=${v}`;
         }
         
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: abortCtrl.signal });
         if (!res.ok) {
           throw new Error(`Failed to fetch context: ${res.statusText}`);
         }
@@ -118,19 +132,22 @@ export function useGeometryContext(
         cacheRef.current[key] = data;
         setCtx(data);
       } catch (err: any) {
-        setError(err);
+        if (err.name !== 'AbortError') {
+          setError(err);
+        }
       } finally {
         setLoading(false);
       }
     };
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(fetchContext, 250);
+    debounceRef.current = setTimeout(fetchContext, 200);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (abortCtrlRef.current) abortCtrlRef.current.abort();
     };
-  }, [sessionId, revision, selection, position?.u, position?.v, retryCount]);
+  }, [sessionId, revision, selection?.transient_id, selection?.id, position?.u, position?.v, retryCount]);
 
   const retry = useCallback(() => {
     setRetryCount((c) => c + 1);

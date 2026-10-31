@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect, useRef } from 'react';
-import { FileImage, Cpu, Sliders, Box, Activity } from 'lucide-react';
+import { FileImage, Cpu, Sliders, Box, Activity, Terminal } from 'lucide-react';
 
 const PROMPTS = [
   { text: 'Generate a mounting bracket with 4 bolt holes, 80mm × 60mm base, 3mm wall thickness', tag: 'Mechanical Part' },
@@ -175,7 +175,7 @@ export function LandingClient() {
 
               <div className="flex-1 rounded-2xl bg-[#040608] border border-white/10 p-5 shadow-[inset_0_4px_20px_rgba(0,0,0,0.25)] overflow-y-auto">
                 <div className="flex items-start gap-3">
-                  <span className="text-blue-500 font-mono text-sm mt-0.5 flex-shrink-0">❯</span>
+                  <Terminal className="size-4 text-primary mt-0.5 shrink-0" />
                   <div className="font-mono text-sm text-gray-300 leading-relaxed">
                     <AnimatePresence mode="wait">
                       <motion.span

@@ -50,7 +50,7 @@ function buildPillLabel(op: HistoryOperation): string {
       return `Pocket ${w}×${h} d${p.depth ?? '?'}`;
     }
     case 'pad': return `Pad +${p.height ?? p.length ?? '?'}mm`;
-    default: return op.operation_type.charAt(0).toUpperCase() + op.operation_type.slice(1);
+    default: return op.operation_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }
 
@@ -119,12 +119,12 @@ export function HistoryTimelineBar({
                 display: 'flex', alignItems: 'center', gap: 0,
                 borderRadius: 999, flexShrink: 0,
                 border: isActive
-                  ? '1.5px solid var(--mcad-teal)'
+                  ? '1.5px solid var(--mcad-accent)'
                   : hasFail
                     ? '1.5px solid var(--mcad-amber)'
                     : '1px solid var(--mcad-border-ctrl)',
                 background: isActive
-                  ? 'var(--mcad-teal-tint)'
+                  ? 'var(--mcad-accent-tint)'
                   : hasFail
                     ? 'rgba(245,165,36,0.08)'
                     : 'var(--mcad-input)',
@@ -146,7 +146,7 @@ export function HistoryTimelineBar({
                   fontFamily: 'var(--font-sans)',
                   fontWeight: isActive ? 600 : 400,
                   color: isActive
-                    ? 'var(--mcad-teal)'
+                    ? 'var(--mcad-accent)'
                     : hasFail
                       ? 'var(--mcad-amber)'
                       : 'var(--mcad-text-secondary)',
@@ -156,7 +156,7 @@ export function HistoryTimelineBar({
                 </span>
                 <span style={{
                   fontSize: 9, fontFamily: 'var(--font-mono)',
-                  color: isActive ? 'rgba(45,212,191,0.6)' : 'var(--mcad-text-muted)',
+                  color: isActive ? 'var(--mcad-accent)' : 'var(--mcad-text-muted)',
                 }}>
                   {revId}
                 </span>
@@ -195,10 +195,10 @@ export function HistoryTimelineBar({
           <div style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
             borderRadius: 999, flexShrink: 0,
-            border: '1.5px dashed var(--mcad-teal)',
-            background: 'var(--mcad-teal-tint)',
+            border: '1.5px dashed var(--mcad-accent)',
+            background: 'var(--mcad-accent-tint)',
           }}>
-            <span style={{ fontSize: 11, fontFamily: 'var(--font-sans)', color: 'var(--mcad-teal)', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-sans)', color: 'var(--mcad-accent)', whiteSpace: 'nowrap' }}>
               {previewLabel} · preview
             </span>
           </div>

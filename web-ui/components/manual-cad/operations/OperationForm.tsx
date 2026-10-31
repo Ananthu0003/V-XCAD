@@ -9,12 +9,14 @@ import {
 } from '../shared';
 import type { OperationDefinition, OperationField } from './registry';
 import type { TopologyEntity } from './capabilities';
+import type { GeometryContext } from './context';
 
 export interface OperationFormProps {
   definition: OperationDefinition;
   values: Record<string, unknown>;
   onChange: (key: string, val: unknown) => void;
   entity?: TopologyEntity | null;
+  ctx?: GeometryContext | null;
 }
 
 export function OperationForm({
@@ -22,6 +24,7 @@ export function OperationForm({
   values,
   onChange,
   entity,
+  ctx,
 }: OperationFormProps) {
   const [moreExpanded, setMoreExpanded] = useState(false);
 
@@ -30,6 +33,57 @@ export function OperationForm({
     const Custom = definition.customForm;
     return <Custom params={values} onChange={onChange} entity={entity} />;
   }
+
+  // Dimension edit linking: length / width / area / aspect ratio
+  const handleFieldChange = (key: string, val: unknown) => {
+    onChange(key, val);
+
+    if (definition.id === 'edit_feature') {
+      const lockAspect = values.lock_aspect_ratio !== false;
+      const curL = Number(values.length ?? 20);
+      const curW = Number(values.width ?? 20);
+
+      if (key === 'length') {
+        const newL = Number(val);
+        if (newL > 0) {
+          if (lockAspect && curL > 0 && curW > 0) {
+            const ratio = curW / curL;
+            const newW = parseFloat((newL * ratio).toFixed(2));
+            onChange('width', newW);
+            onChange('area', parseFloat((newL * newW).toFixed(2)));
+          } else if (curW > 0) {
+            onChange('area', parseFloat((newL * curW).toFixed(2)));
+          }
+        }
+      } else if (key === 'width') {
+        const newW = Number(val);
+        if (newW > 0) {
+          if (lockAspect && curL > 0 && curW > 0) {
+            const ratio = curL / curW;
+            const newL = parseFloat((newW * ratio).toFixed(2));
+            onChange('length', newL);
+            onChange('area', parseFloat((newL * newW).toFixed(2)));
+          } else if (curL > 0) {
+            onChange('area', parseFloat((curL * newW).toFixed(2)));
+          }
+        }
+      } else if (key === 'area') {
+        const newArea = Number(val);
+        if (newArea > 0) {
+          if (lockAspect && curL > 0 && curW > 0) {
+            const aspect = curL / curW;
+            const newL = parseFloat(Math.sqrt(newArea * aspect).toFixed(2));
+            const newW = parseFloat((newL / aspect).toFixed(2));
+            onChange('length', newL);
+            onChange('width', newW);
+          } else if (curL > 0) {
+            const newW = parseFloat((newArea / curL).toFixed(2));
+            onChange('width', newW);
+          }
+        }
+      }
+    }
+  };
 
   // Filter visible fields
   const isFieldVisible = (f: OperationField) => {
@@ -56,27 +110,41 @@ export function OperationForm({
             <SegControl
               options={field.options || []}
               value={currentVal}
-              onChange={(val) => onChange(field.key, val)}
+              onChange={(val) => handleFieldChange(field.key, val)}
             />
           </div>
         );
       }
 
       case 'number': {
+        const bounds = (field.bounds && ctx) ? field.bounds(ctx, values) : {};
+        const minVal = bounds.min ?? field.min;
+        const maxVal = bounds.max ?? field.max;
+        const stepVal = bounds.step ?? field.step;
+        const currentNum = typeof values[field.key] === 'number' ? (values[field.key] as number) : (field.default as number);
+        const isOutOfUpper = maxVal !== undefined && currentNum > maxVal;
+        const isOutOfLower = minVal !== undefined && currentNum < minVal;
+
         return (
-          <div key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div key={field.key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <NumInput
               label={field.label}
               paramKey={field.key}
-              step={field.step}
-              min={field.min}
+              step={stepVal}
+              min={minVal}
+              max={maxVal}
               defaultVal={field.default as number}
               unit={field.unit}
               params={values}
-              onChange={onChange}
+              onChange={handleFieldChange}
             />
+            {(isOutOfUpper || isOutOfLower) && (
+              <span style={{ fontSize: 10.5, color: 'var(--mcad-warning, #f59e0b)', fontFamily: 'var(--font-sans)', paddingLeft: 4 }}>
+                {isOutOfUpper ? `⚠️ Exceeds max (${maxVal}${field.unit || 'mm'})` : `⚠️ Below min (${minVal}${field.unit || 'mm'})`}
+              </span>
+            )}
             {field.quickPresets && field.quickPresets.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: -2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                 <span
                   style={{
                     fontSize: 11,
@@ -99,18 +167,18 @@ export function OperationForm({
                       <button
                         key={qp}
                         type="button"
-                        onClick={() => onChange(field.key, qp)}
+                        onClick={() => handleFieldChange(field.key, qp)}
                         style={{
                           ...presetBtnStyle,
                           background: isSelected
-                            ? 'var(--mcad-teal-tint)'
+                            ? 'var(--mcad-accent-tint)'
                             : 'var(--mcad-input)',
                           color: isSelected
-                            ? 'var(--mcad-teal)'
+                            ? 'var(--mcad-accent)'
                             : 'var(--mcad-text-muted)',
                           border: `1px solid ${
                             isSelected
-                              ? 'var(--mcad-teal)'
+                              ? 'var(--mcad-accent)'
                               : 'var(--mcad-border-ctrl)'
                           }`,
                         }}
@@ -221,7 +289,7 @@ export function OperationForm({
               type="checkbox"
               checked={checked}
               onChange={(e) => onChange(field.key, e.target.checked)}
-              style={{ accentColor: 'var(--mcad-teal)', cursor: 'pointer' }}
+              style={{ accentColor: 'var(--mcad-accent)', cursor: 'pointer' }}
             />
           </label>
         );

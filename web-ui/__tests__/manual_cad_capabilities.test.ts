@@ -5,10 +5,12 @@ import {
   getSelectionReadout,
   humanEntityLabel,
   OPERATION_REQUIREMENTS,
+  getSelectionHelpers,
 } from '../components/manual-cad/operations/capabilities';
 import {
   OPERATION_REGISTRY,
   getOperationDefinition,
+  getDefaultParams,
 } from '../components/manual-cad/operations/registry';
 
 describe('Manual CAD Step 1: Capabilities & Classification', () => {
@@ -69,14 +71,38 @@ describe('Manual CAD Step 1: Capabilities & Classification', () => {
     const edge = { entity_type: 'edge', curve_type: 'line' };
     const cylFace = { entity_type: 'face', surface_type: 'cylinder' };
 
-    // Acceptance: selecting a planar face offers hole/pocket/pad only
-    expect(getApplicableOperations(planarFace)).toEqual(['hole', 'pocket', 'pad']);
+    // A planar face offers feature tools plus the face-aware body tools
+    const planarOps = getApplicableOperations(planarFace);
+    expect(planarOps).toEqual(expect.arrayContaining(['hole', 'pocket', 'pad', 'shell', 'split', 'mirror', 'align', 'primitive', 'measure']));
+    expect(planarOps).not.toContain('fillet');
+    expect(planarOps).not.toContain('move');
 
-    // Acceptance: an edge offers fillet/chamfer/measure
+    // An edge offers fillet/chamfer/measure
     expect(getApplicableOperations(edge)).toEqual(['fillet', 'chamfer', 'measure']);
 
-    // Other face offers measure
-    expect(getApplicableOperations(cylFace)).toEqual(['measure']);
+    // A cylindrical face can be edited as a feature, deleted, and measured
+    expect(getApplicableOperations(cylFace)).toEqual(['edit_feature', 'delete_feature', 'measure']);
+  });
+
+  it('whole-model selection offers every body-level editing tool', () => {
+    const body = { entity_type: 'body' };
+    const ops = getApplicableOperations(body);
+    ['move', 'rotate', 'scale', 'mirror', 'align', 'primitive', 'shell', 'offset', 'split',
+      'linear_pattern', 'polar_pattern', 'heal', 'measure'].forEach((id) => expect(ops).toContain(id));
+    expect(ops).not.toContain('fillet');
+    expect(isOperationApplicable('move', body)).toBe(true);
+    expect(isOperationApplicable('move', { entity_type: 'edge', curve_type: 'line' })).toBe(false);
+    // Optional-face tools also accept a planar face
+    expect(isOperationApplicable('mirror', { entity_type: 'face', surface_type: 'plane' })).toBe(true);
+  });
+
+  it('every tool has a registry definition, requirement text and backend-aligned defaults', () => {
+    Object.keys(OPERATION_REGISTRY).forEach((id) => {
+      expect(OPERATION_REQUIREMENTS[id as keyof typeof OPERATION_REQUIREMENTS]).toBeTruthy();
+    });
+    expect(getDefaultParams('shell')).toEqual({ thickness: 2, direction: 'inside' });
+    expect(getDefaultParams('rotate')).toEqual({ axis: 'z', angle: 90, pivot: 'center' });
+    expect(getDefaultParams('heal')).toEqual({ fix: true, clean: true, keep_largest: true });
   });
 
   it('selection readout adapts to the class using existing topology data only', () => {
@@ -252,4 +278,41 @@ describe('Manual CAD Step 2: Operation Registry & Schemas', () => {
     const chamfer = getOperationDefinition('chamfer');
     expect(chamfer.fields.filter((f) => !f.advanced).length).toBeLessThanOrEqual(4);
   });
+
+  it('classifies detected features and provides relevant actions and selection helpers', () => {
+    const holeFeature = { entity_type: 'feature', kind: 'hole', feature_id: 'feat_1', face_ids: ['face_1'] };
+    const bossFeature = { entity_type: 'feature', kind: 'boss', feature_id: 'feat_2', face_ids: ['face_2'] };
+    const pocketFeature = { entity_type: 'feature', kind: 'pocket', feature_id: 'feat_3', face_ids: ['face_3'] };
+    const slotFeature = { entity_type: 'feature', kind: 'slot', feature_id: 'feat_4', face_ids: ['face_4'] };
+    const filletFeature = { entity_type: 'feature', kind: 'fillet', feature_id: 'feat_5', face_ids: ['face_5'] };
+    const chamferFeature = { entity_type: 'feature', kind: 'chamfer', feature_id: 'feat_6', face_ids: ['face_6'] };
+
+    expect(classifyEntity(holeFeature)).toBe('feature.hole');
+    expect(classifyEntity(bossFeature)).toBe('feature.boss');
+    expect(classifyEntity(pocketFeature)).toBe('feature.pocket');
+    expect(classifyEntity(slotFeature)).toBe('feature.slot');
+    expect(classifyEntity(filletFeature)).toBe('feature.fillet');
+    expect(classifyEntity(chamferFeature)).toBe('feature.chamfer');
+
+    // Applicable operations for feature
+    const featOps = getApplicableOperations(holeFeature);
+    expect(featOps).toEqual(['edit_feature', 'delete_feature', 'move_feature', 'pattern_feature', 'measure']);
+
+    // Selection helpers
+    const planarHelpers = getSelectionHelpers({ entity_type: 'face', surface_type: 'plane' });
+    expect(planarHelpers.map((h) => h.id)).toEqual(['adjacent', 'coplanar', 'same_area']);
+
+    const cylHelpers = getSelectionHelpers({ entity_type: 'face', surface_type: 'cylinder' });
+    expect(cylHelpers.map((h) => h.id)).toEqual(['same_diameter', 'coaxial']);
+
+    const featHelpers = getSelectionHelpers(holeFeature);
+    expect(featHelpers.map((h) => h.id)).toEqual(['same_kind', 'same_size']);
+
+    const linearEdgeHelpers = getSelectionHelpers({ entity_type: 'edge', curve_type: 'line' });
+    expect(linearEdgeHelpers.map((h) => h.id)).toEqual(['tangent_chain', 'edge_loop', 'parallel']);
+
+    const circularEdgeHelpers = getSelectionHelpers({ entity_type: 'edge', curve_type: 'circle' });
+    expect(circularEdgeHelpers.map((h) => h.id)).toEqual(['edge_loop', 'same_radius']);
+  });
 });
+

@@ -16,7 +16,7 @@ from OCP.GeomAbs import (
     GeomAbs_BezierCurve,
 )
 from OCP.TopExp import TopExp
-from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_IndexedMapOfShape
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
 from OCP.BRepTools import BRepTools_WireExplorer
 from OCP.BRep import BRep_Tool
@@ -54,6 +54,11 @@ class TopologyExtractor:
         self._edge_obj_map: Dict[str, bd.Edge] = {}
         self._occ_to_stable_face: Dict[int, str] = {}
         self._occ_to_stable_edge: Dict[int, str] = {}
+
+        self._face_map = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(self.shape.wrapped, TopAbs_FACE, self._face_map)
+        self._edge_map = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(self.shape.wrapped, TopAbs_EDGE, self._edge_map)
 
     # ------------------------------------------------------------------
     # Public API
@@ -146,9 +151,10 @@ class TopologyExtractor:
             if hasattr(f, "wires"):
                 for wi, w in enumerate(f.wires()):
                     try:
+                        w_len = sum(e.length for e in w.edges()) if hasattr(w, "edges") else 0.0
                         wires_meta.append({
                             "id": f"{fid}_wire_{wi}",
-                            "length": round(w.length, 6),
+                            "length": round(w_len, 6),
                         })
                     except Exception:
                         pass
@@ -202,12 +208,14 @@ class TopologyExtractor:
             f2 = bd.Face(faces_ocp.Last())
             edge = bd.Edge(edge_occ)
 
-            fid1 = self._occ_to_stable_face.get(self._occ_hash(f1))
-            fid2 = self._occ_to_stable_face.get(self._occ_hash(f2))
-            eid = self._occ_to_stable_edge.get(self._occ_hash(edge))
-
-            if not fid1 or not fid2:
+            idx1 = self._face_map.FindIndex(faces_ocp.First())
+            idx2 = self._face_map.FindIndex(faces_ocp.Last())
+            if idx1 <= 0 or idx2 <= 0:
                 continue
+            fid1 = f"face_{idx1 - 1}"
+            fid2 = f"face_{idx2 - 1}"
+            e_idx = self._edge_map.FindIndex(edge_occ)
+            eid = f"edge_{e_idx - 1}" if e_idx > 0 else f"edge_adj_{i}"
 
             # Convexity
             transition = "unknown"

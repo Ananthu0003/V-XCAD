@@ -1,26 +1,41 @@
 """VEXCAD Manual CAD Refinement Router — /api/v1/cad/modify."""
 from __future__ import annotations
 
+import asyncio
+import base64
 import os
 import re
 import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel
 
 from app.models.cad_modification import (
+    AiPlanRequest,
+    AiPlanResult,
     CADOperation,
     CommitRequest,
     CommitResult,
+    CoplanarQueryRequest,
+    CoplanarQueryResult,
+    DetectedFeature,
+    DfmAnalysisRequest,
+    DfmAnalysisResult,
     MeasureRequest,
     MeasureResult,
+    ModelParametersResponse,
     PreviewRequest,
     PreviewResult,
     RecomputeRequest,
     RecomputeResult,
     RollbackRequest,
     RollbackResult,
+    SelectMoreRequest,
+    SelectMoreResponse,
+    SimilarQueryRequest,
+    SimilarQueryResult,
     TopologyDataResponse,
     GeometryContext,
 )
@@ -39,8 +54,17 @@ def _validate_session_id(session_id: str) -> str:
     return session_id
 
 
+class ImportStepRequest(BaseModel):
+    session_id: str
+    filename: Optional[str] = None
+    step_base64: Optional[str] = None
+    step_content_b64: Optional[str] = None
+    source_step: Optional[str] = None
+
+
 router = APIRouter(prefix="/cad/modify", tags=["manual-cad"])
 cad_service = ManualCADService()
+
 
 
 @router.post("/recompute", response_model=RecomputeResult)
@@ -58,7 +82,7 @@ async def recompute_history(request: RecomputeRequest) -> RecomputeResult:
 async def get_topology(
     session_id: str,
     revision_id: str = Query("rev_000", description="Target revision ID"),
-    source_step: str = Query(None, description="Optional path to source STEP model"),
+    source_step: Optional[str] = Query(None, description="Optional path to source STEP model"),
     force_sync: bool = Query(False, description="Force re-syncing from source STEP")
 ) -> TopologyDataResponse:
     """Retrieve geometric references and topology map for 3D viewport raycast selection."""
@@ -72,6 +96,7 @@ async def get_topology(
             else:
                 filename = p.name
                 for candidate_dir in [
+                    Path("/app/outputs"),
                     Path(__file__).resolve().parents[3] / "outputs",
                     Path(__file__).resolve().parents[2] / "outputs",
                     Path("outputs"),
@@ -159,6 +184,30 @@ async def get_history(session_id: str) -> list[CADOperation]:
         raise HTTPException(status_code=500, detail=f"Failed to fetch history: {exc}")
 
 
+@router.get("/export/{session_id}")
+async def export_model(
+    session_id: str,
+    fmt: str = Query("stl", description="stl | step | obj | 3mf"),
+    revision_id: Optional[str] = Query(None, description="Defaults to the active revision"),
+) -> Response:
+    """Download the current (or a chosen) revision as STL, STEP, OBJ or 3MF."""
+    try:
+        data, media_type, filename = await asyncio.to_thread(
+            cad_service.export_revision, session_id, revision_id, fmt
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Export failed: {exc}")
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/file/{session_id}/{path:path}")
 async def get_session_file(session_id: str, path: str):
     """Serve session artifacts (STEP / STL / DXF) securely with path traversal guards."""
@@ -185,17 +234,6 @@ async def get_session_file(session_id: str, path: str):
     }
     media_type = media_types.get(target_file.suffix.lower(), "application/octet-stream")
     return FileResponse(target_file, media_type=media_type)
-
-
-from pydantic import BaseModel
-
-
-class ImportStepRequest(BaseModel):
-    session_id: str
-    filename: Optional[str] = None
-    step_content_b64: Optional[str] = None
-
-
 @router.post("/import-step")
 async def import_step_model(request: Request):
     """
@@ -208,6 +246,7 @@ async def import_step_model(request: Request):
         session_id: Optional[str] = None
         filename: Optional[str] = None
         file_bytes: Optional[bytes] = None
+        source_step: Optional[str] = None
 
         if "multipart/form-data" in content_type:
             form = await request.form()
@@ -222,14 +261,21 @@ async def import_step_model(request: Request):
             body = await request.json()
             session_id = body.get("session_id")
             filename = body.get("filename")
-            if "step_content_b64" in body and body["step_content_b64"]:
-                import base64
+            source_step = body.get("source_step")
+            if "step_base64" in body and body["step_base64"]:
+                file_bytes = base64.b64decode(body["step_base64"])
+            elif "step_content_b64" in body and body["step_content_b64"]:
                 file_bytes = base64.b64decode(body["step_content_b64"])
         else:
             try:
                 body = await request.json()
                 session_id = body.get("session_id")
                 filename = body.get("filename")
+                source_step = body.get("source_step")
+                if "step_base64" in body and body["step_base64"]:
+                    file_bytes = base64.b64decode(body["step_base64"])
+                elif "step_content_b64" in body and body["step_content_b64"]:
+                    file_bytes = base64.b64decode(body["step_content_b64"])
             except Exception:
                 pass
 
@@ -244,10 +290,10 @@ async def import_step_model(request: Request):
         rev0_step = rev_dir / "rev_000.step"
 
         possible_outputs_dirs = [
+            Path("/app/outputs"),
             Path(__file__).resolve().parents[3] / "outputs",
             Path(__file__).resolve().parents[2] / "outputs",
             Path("outputs"),
-            Path("/app/outputs"),
         ]
         valid_outputs_dirs: list[Path] = []
         for od in possible_outputs_dirs:
@@ -269,12 +315,16 @@ async def import_step_model(request: Request):
                 except Exception:
                     pass
         else:
-            candidate_paths = [
+            candidate_paths: list[Path] = []
+            if source_step:
+                candidate_paths.append(Path(source_step))
+            candidate_paths.extend([
                 rev0_step,
                 BASE_STORAGE_DIR / session_id / f"{session_id}.step",
-            ]
+            ])
             for od in valid_outputs_dirs:
                 candidate_paths.append(od / f"cad_{session_id}.step")
+                candidate_paths.append(od / f"cad_{session_id}.stp")
                 candidate_paths.append(od / f"{session_id}.step")
 
             for p in candidate_paths:
@@ -299,6 +349,8 @@ async def import_step_model(request: Request):
                 except Exception:
                     pass
 
+        topo = cad_service.get_topology(session_id, rev)
+
         return {
             "success": True,
             "session_id": session_id,
@@ -306,9 +358,136 @@ async def import_step_model(request: Request):
             "step_url": f"/api/outputs/cad_{session_id}.step",
             "stl_url": f"/api/outputs/cad_{session_id}.stl",
             "preview_stl_url": f"/api/cad/modify/file/{session_id}/revisions/{rev}.stl",
+            "parameters": topo.parameters,
+            "parameter_metadata": topo.parameter_metadata,
+            "features": [f.model_dump() for f in topo.features],
+            "topology": topo.model_dump(),
         }
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to process imported STEP model: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# AI Geometry Planner
+# ---------------------------------------------------------------------------
+
+@router.post("/ai-plan", response_model=AiPlanResult)
+async def ai_geometry_plan(request: AiPlanRequest) -> AiPlanResult:
+    """
+    Convert a natural-language CAD editing command into a structured, validated CADOperationPlan.
+    The plan can then be used with /preview and /commit.
+    Never modifies geometry directly — returns a plan for user review.
+    """
+    try:
+        from app.services.agents.ai_geometry_planner import AiGeometryPlanner
+        planner = AiGeometryPlanner()
+        return planner.plan(request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"AI geometry planning failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Non-mutating geometry query endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/coplanar", response_model=CoplanarQueryResult)
+async def select_coplanar_faces(request: CoplanarQueryRequest) -> CoplanarQueryResult:
+    """
+    Find all faces coplanar with the reference face within a geometric tolerance.
+    Returns a list of transient face IDs. Does NOT modify the model.
+    """
+    try:
+        cad_service.initialize_session_if_needed(request.session_id)
+        return cad_service.coplanar_faces(request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Coplanar query failed: {exc}")
+
+
+@router.post("/similar", response_model=SimilarQueryResult)
+async def select_similar_entities(request: SimilarQueryRequest) -> SimilarQueryResult:
+    """
+    Find geometrically similar entities (bores, faces, edges) relative to a reference entity.
+    For cylindrical bores: matches by radius ± tolerance and axis direction.
+    For planar faces: matches by normal direction and area.
+    Returns a list of transient entity IDs. Does NOT modify the model.
+    """
+    try:
+        cad_service.initialize_session_if_needed(request.session_id)
+        return cad_service.similar_entities(request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Similar entity query failed: {exc}")
+
+
+@router.post("/dfm", response_model=DfmAnalysisResult)
+async def dfm_analysis(request: DfmAnalysisRequest) -> DfmAnalysisResult:
+    """
+    Generate Design for Manufacturing suggestions from measured geometry.
+    Checks bore diameters against ISO metric clearance hole standards,
+    detects inconsistent features, and identifies non-standard dimensions.
+    Returns actionable DFM suggestions with proposed operations.
+    Does NOT modify geometry.
+    """
+    try:
+        cad_service.initialize_session_if_needed(request.session_id)
+        return cad_service.dfm_analysis(request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"DFM analysis failed: {exc}")
+
+
+@router.post("/measure", response_model=MeasureResult)
+async def measure_entity(request: MeasureRequest) -> MeasureResult:
+    """
+    Measure entity dimensions or distance between entities, returning constituent shape
+    parameters and AI CAD feature naming.
+    """
+    try:
+        cad_service.initialize_session_if_needed(request.session_id)
+        return cad_service.measure(request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Measure query failed: {exc}")
+
+
+@router.get("/features/{session_id}", response_model=List[DetectedFeature])
+async def get_detected_features(
+    session_id: str,
+    revision_id: str = Query("rev_000", description="Target revision ID"),
+) -> List[DetectedFeature]:
+    """
+    Detect B-Rep features (holes, bosses, pockets, slots, fillets, chamfers)
+    with editable parameter schemas.
+    """
+    try:
+        cad_service.initialize_session_if_needed(session_id)
+        return await asyncio.to_thread(cad_service.get_detected_features, session_id, revision_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Feature extraction failed: {exc}")
+
+
+@router.post("/select-more", response_model=SelectMoreResponse)
+async def select_more_entities(request: SelectMoreRequest) -> SelectMoreResponse:
+    """
+    Topological selection expansion: adjacent, coplanar, tangent chain, edge loop, same type/size, invert, clear.
+    """
+    try:
+        cad_service.initialize_session_if_needed(request.session_id)
+        return await asyncio.to_thread(cad_service.select_more, request)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Selection expansion failed: {exc}")
+
+
+@router.get("/parameters/{session_id}", response_model=ModelParametersResponse)
+async def get_parameters(
+    session_id: str,
+    revision: Optional[str] = Query(None, description="Target revision ID (defaults to active)"),
+) -> ModelParametersResponse:
+    """
+    Extract base solid classification, parametric feature tree, and mass properties.
+    """
+    try:
+        cad_service.initialize_session_if_needed(session_id)
+        return await asyncio.to_thread(cad_service.get_parameters, session_id, revision)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to extract parameters: {exc}")
 

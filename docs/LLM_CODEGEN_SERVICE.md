@@ -65,7 +65,7 @@ Normalized build123d Code
 Initialize the LLM Codegen Service.
 
 **Parameters:**
-- `model`: Model name (e.g., "gemini-3.1-flash-lite"). Defaults to env var `GENAI_MODEL`.
+- `model`: Model name (e.g., "gemini-3.5-flash-lite"). Defaults to env var `GENAI_MODEL`.
 
 **Raises:**
 - `RuntimeError`: If google-genai is not installed or API key is missing.
@@ -155,7 +155,7 @@ delay = min(delay, max_retry_delay)
 
 | Setting | Environment Variable | Default |
 |---------|---------------------|---------|
-| Model | `GENAI_MODEL` | `gemini-3.1-flash-lite` |
+| Model | `GENAI_MODEL` | `gemini-3.5-flash-lite` |
 | Max Retries | `GENAI_MAX_RETRIES` | `5` |
 | Max Prompt Tokens | `MAX_PROMPT_TOKENS` | `12000` |
 | Max Output Tokens | `MAX_OUTPUT_TOKENS` | `2048` |
@@ -168,7 +168,7 @@ delay = min(delay, max_retry_delay)
 from app.services.llm_codegen import LLMCodegenService
 
 # Initialize service
-service = LLMCodegenService(model="gemini-3.1-flash-lite")
+service = LLMCodegenService(model="gemini-3.5-flash-lite")
 
 # Load image
 with open("drawing.png", "rb") as f:
@@ -200,7 +200,7 @@ Log files are written to `logs/cad_gen_<timestamp>_<uuid>.json`:
 ```json
 {
     "timestamp": "2024-01-01T12:00:00.000000",
-    "model": "gemini-3.1-flash-lite",
+    "model": "gemini-3.5-flash-lite",
     "prompt": "Generate a part...",
     "raw_output": "```python...",
     "cleaned_output": "from build123d import *...",

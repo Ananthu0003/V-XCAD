@@ -1,5 +1,8 @@
 'use client';
 
+import React from 'react';
+import { Minus, Plus, Check } from 'lucide-react';
+
 type ParameterInputProps = {
 	label: string;
 	value: unknown;
@@ -8,36 +11,84 @@ type ParameterInputProps = {
 	description?: string;
 };
 
-export function ParameterInput({ label, value, onChange, isActive = false, description }: ParameterInputProps) {
-	const inputBase = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary/50 focus:outline-none transition-all group-hover:border-primary/30";
+const stepperBtnStyle: React.CSSProperties = {
+	width: 22,
+	height: 28,
+	borderRadius: 8,
+	background: 'var(--ui-input)',
+	border: '1px solid var(--ui-border-ctrl)',
+	color: 'var(--ui-text-secondary)',
+	fontSize: 13,
+	cursor: 'pointer',
+	display: 'flex',
+	alignItems: 'center',
+	justifyContent: 'center',
+	flexShrink: 0,
+	userSelect: 'none',
+};
 
+export function ParameterInput({ label, value, onChange, isActive = false, description }: ParameterInputProps) {
 	const renderInput = () => {
 		if (typeof value === 'number') {
+			const numVal = Number.isFinite(value) ? value : 0;
 			return (
-				<input
-					type="number"
-					value={Number.isFinite(value) ? value : 0}
-					onChange={(e) => onChange(Number(e.target.value))}
-					className={inputBase}
-				/>
+				<div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+					<button
+						type="button"
+						onClick={(e) => {
+							e.stopPropagation();
+							onChange(parseFloat((numVal - 1).toFixed(3)));
+						}}
+						style={stepperBtnStyle}
+						title="Decrease"
+					>
+						<Minus size={11} />
+					</button>
+					<input
+						type="number"
+						value={numVal}
+						onClick={(e) => e.stopPropagation()}
+						onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+						style={{
+							width: 58,
+							height: 28,
+							borderRadius: 8,
+							background: 'var(--ui-input)',
+							border: '1px solid var(--ui-border-ctrl)',
+							color: 'var(--ui-text-primary)',
+							fontSize: 12,
+							fontFamily: 'var(--font-mono)',
+							fontVariantNumeric: 'tabular-nums',
+							textAlign: 'right',
+							padding: '0 6px',
+							outline: 'none',
+						}}
+					/>
+					<button
+						type="button"
+						onClick={(e) => {
+							e.stopPropagation();
+							onChange(parseFloat((numVal + 1).toFixed(3)));
+						}}
+						style={stepperBtnStyle}
+						title="Increase"
+					>
+						<Plus size={11} />
+					</button>
+				</div>
 			);
 		}
 
 		if (typeof value === 'boolean') {
 			return (
-				<label className="flex items-center gap-3 cursor-pointer group">
-					<div className="relative flex size-5 items-center justify-center">
-						<input
-							type="checkbox"
-							checked={value}
-							onChange={(e) => onChange(e.target.checked)}
-							className="peer size-full cursor-pointer appearance-none rounded border border-border bg-background transition-all checked:bg-primary checked:border-primary"
-						/>
-						<div className="pointer-events-none absolute scale-0 opacity-0 peer-checked:scale-100 peer-checked:opacity-100 transition-all text-primary-foreground font-bold text-[10px]">
-							✓
-						</div>
-					</div>
-					<span className="text-xs font-medium text-foreground transition-colors">Enabled</span>
+				<label className="flex items-center gap-2 cursor-pointer" onClick={(e) => e.stopPropagation()}>
+					<input
+						type="checkbox"
+						checked={value}
+						onChange={(e) => onChange(e.target.checked)}
+						className="size-4 rounded border-[var(--ui-border-ctrl)] bg-[var(--ui-input)] accent-[var(--ui-accent)] cursor-pointer"
+					/>
+					<span className="text-xs text-[var(--ui-text-secondary)] font-medium">Enabled</span>
 				</label>
 			);
 		}
@@ -47,8 +98,20 @@ export function ParameterInput({ label, value, onChange, isActive = false, descr
 				<input
 					type="text"
 					value={value}
+					onClick={(e) => e.stopPropagation()}
 					onChange={(e) => onChange(e.target.value)}
-					className={inputBase}
+					style={{
+						height: 28,
+						borderRadius: 8,
+						background: 'var(--ui-input)',
+						border: '1px solid var(--ui-border-ctrl)',
+						color: 'var(--ui-text-primary)',
+						fontSize: 12,
+						fontFamily: 'var(--font-mono)',
+						padding: '0 8px',
+						outline: 'none',
+						width: 120,
+					}}
 				/>
 			);
 		}
@@ -57,6 +120,7 @@ export function ParameterInput({ label, value, onChange, isActive = false, descr
 		return (
 			<textarea
 				value={serialized}
+				onClick={(e) => e.stopPropagation()}
 				onChange={(e) => {
 					try {
 						onChange(JSON.parse(e.target.value));
@@ -64,30 +128,43 @@ export function ParameterInput({ label, value, onChange, isActive = false, descr
 						// Ignore incomplete JSON edits
 					}
 				}}
-				rows={4}
-				className={`${inputBase} font-mono text-[11px] resize-none`}
+				rows={3}
+				style={{
+					borderRadius: 8,
+					background: 'var(--ui-input)',
+					border: '1px solid var(--ui-border-ctrl)',
+					color: 'var(--ui-text-primary)',
+					fontSize: 11,
+					fontFamily: 'var(--font-mono)',
+					padding: '4px 8px',
+					outline: 'none',
+					width: '100%',
+					resize: 'none',
+				}}
 			/>
 		);
 	};
 
 	return (
-		<div className={`space-y-1.5 rounded-xl px-3 py-2.5 transition-all duration-200 group border ${
-			isActive
-				? 'bg-blue-500/5 border-blue-500/30 shadow-[0_0_12px_rgba(59,130,246,0.05)]'
-				: 'border-transparent hover:bg-black/5 dark:hover:bg-white/5 hover:border-border dark:hover:border-white/10'
-		}`}>
-			<div className="flex items-center justify-between pl-1">
-				<label className={`block text-[10px] font-bold uppercase tracking-wider transition-colors ${
-					isActive ? 'text-blue-500' : 'text-muted-foreground group-hover:text-foreground'
+		<div
+			className={`rounded-xl px-3 py-2 transition-all flex items-center justify-between gap-3 ${
+				isActive
+					? 'bg-[var(--ui-raised)] border border-[var(--ui-accent)]'
+					: 'border border-transparent hover:bg-[var(--ui-hover)]'
+			}`}
+		>
+			<div className="flex-1 min-w-0">
+				<label className={`block text-xs font-medium truncate transition-colors ${
+					isActive ? 'text-[var(--ui-accent)] font-semibold' : 'text-[var(--ui-text-secondary)]'
 				}`}>
 					{label.replace(/_/g, ' ')}
 				</label>
+				{description && (
+					<p className="text-[10px] text-[var(--ui-text-muted)] truncate leading-snug mt-0.5">
+						{description}
+					</p>
+				)}
 			</div>
-			{description && (
-				<p className="text-[10px] text-muted-foreground/70 pl-1 leading-snug">
-					{description}
-				</p>
-			)}
 			{renderInput()}
 		</div>
 	);

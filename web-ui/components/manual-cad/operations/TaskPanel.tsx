@@ -8,7 +8,8 @@ import {
   Activity,
 } from 'lucide-react';
 import type { OperationDefinition } from './registry';
-import type { TopologyEntity } from './capabilities';
+import { TopologyEntity, isOperationApplicable, OPERATION_REQUIREMENTS } from './capabilities';
+import type { GeometryContext } from './context';
 import { OperationForm } from './OperationForm';
 
 export interface TaskPanelProps {
@@ -26,6 +27,7 @@ export interface TaskPanelProps {
   setLivePreview: (live: boolean) => void;
   validationReport?: { is_valid?: boolean; volume_mm3?: number } | null;
   errorDiagnostic?: { code?: string; message?: string } | null;
+  ctx?: GeometryContext | null;
 }
 
 export function TaskPanel({
@@ -43,12 +45,16 @@ export function TaskPanel({
   setLivePreview,
   validationReport,
   errorDiagnostic,
+  ctx,
 }: TaskPanelProps) {
   const Icon = definition.icon;
+
+  const isApplicable = !definition.requiresSelection || isOperationApplicable(definition.id, selectedEntity, ctx);
 
   // Validation: ensure numeric values are valid (> 0)
   const isFormValid = (): boolean => {
     if (!selectedEntity && definition.requiresSelection) return false;
+    if (selectedEntity && !isOperationApplicable(definition.id, selectedEntity, ctx)) return false;
 
     const getNum = (key: string, def: number) => {
       const val = params[key];
@@ -95,11 +101,8 @@ export function TaskPanel({
         display: 'flex',
         flexDirection: 'column',
         flexShrink: 0,
-        borderRadius: 10,
-        background: 'var(--mcad-input)',
-        border: '1px solid var(--mcad-border-ctrl)',
+        background: 'transparent',
         overflow: 'hidden',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
       }}
     >
       {/* ─── 1. Title bar ─── */}
@@ -108,8 +111,7 @@ export function TaskPanel({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '8px 12px',
-          background: 'var(--mcad-panel)',
+          padding: '8px 0',
           borderBottom: '1px solid var(--mcad-border)',
         }}
       >
@@ -119,8 +121,8 @@ export function TaskPanel({
               width: 24,
               height: 24,
               borderRadius: 6,
-              background: 'var(--mcad-teal-tint)',
-              color: 'var(--mcad-teal)',
+              background: 'var(--mcad-accent-tint)',
+              color: 'var(--mcad-accent)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -175,6 +177,7 @@ export function TaskPanel({
           values={params}
           onChange={onChangeParam}
           entity={selectedEntity}
+          ctx={ctx}
         />
       </div>
 
@@ -217,10 +220,10 @@ export function TaskPanel({
             margin: '0 12px 10px 12px',
             padding: '6px 10px',
             borderRadius: 8,
-            background: 'var(--mcad-teal-tint)',
-            border: '1px solid rgba(45,212,191,0.3)',
+            background: 'var(--mcad-accent-tint)',
+            border: '1px solid var(--mcad-accent-line)',
             fontSize: 11,
-            color: 'var(--mcad-teal)',
+            color: 'var(--mcad-accent)',
             display: 'flex',
             alignItems: 'center',
             gap: 6,
@@ -236,12 +239,12 @@ export function TaskPanel({
       {/* ─── 4. Footer ─── */}
       <div
         style={{
-          padding: '10px 12px',
-          background: 'var(--mcad-panel)',
+          padding: '12px 0 0 0',
+          background: 'transparent',
           borderTop: '1px solid var(--mcad-border)',
           display: 'flex',
           flexDirection: 'column',
-          gap: 8,
+          gap: 10,
         }}
       >
         {/* Live preview row (if previewable) */}
@@ -270,7 +273,7 @@ export function TaskPanel({
                 checked={livePreview}
                 onChange={(e) => setLivePreview(e.target.checked)}
                 style={{
-                  accentColor: 'var(--mcad-teal)',
+                  accentColor: 'var(--mcad-accent)',
                   cursor: 'pointer',
                   width: 14,
                   height: 14,
@@ -282,90 +285,41 @@ export function TaskPanel({
             {!livePreview && (
               <button
                 type="button"
-                onClick={onPreview}
+                className="mcad-btn mcad-btn--ghost"
+                onClick={() => onPreview?.()}
                 disabled={isLoading || !selectedEntity}
-                style={{
-                  height: 26,
-                  padding: '0 10px',
-                  borderRadius: 8,
-                  background: 'var(--mcad-input)',
-                  border: '1px solid var(--mcad-teal)',
-                  color: 'var(--mcad-teal)',
-                  fontSize: 11,
-                  fontFamily: 'var(--font-sans)',
-                  cursor: isLoading || !selectedEntity ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  opacity: isLoading || !selectedEntity ? 0.45 : 1,
-                }}
               >
-                {isLoading ? (
-                  <Loader2 size={12} className="animate-spin" />
-                ) : (
-                  <Eye size={12} />
-                )}
+                {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
                 Preview
               </button>
             )}
           </div>
         )}
 
-        {/* Buttons: Cancel (secondary) | OK (primary teal) */}
+        {/* Buttons: Cancel (secondary) | Apply (primary) */}
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             type="button"
+            className="mcad-btn"
+            style={{ flex: 1 }}
             onClick={isPreviewActive ? onCancelPreview : onClose}
             disabled={isLoading}
-            style={{
-              height: 34,
-              flex: 1,
-              borderRadius: 8,
-              background: 'var(--mcad-input)',
-              border: '1px solid var(--mcad-border-ctrl)',
-              color: 'var(--mcad-text-secondary)',
-              fontSize: 12,
-              fontFamily: 'var(--font-sans)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-              transition: 'all 0.15s',
-            }}
           >
             <X size={14} /> Cancel
           </button>
 
           <button
             type="button"
-            onClick={onCommit}
+            className="mcad-btn mcad-btn--primary"
+            style={{ flex: 2 }}
+            onClick={() => onCommit?.()}
             disabled={okDisabled}
-            style={{
-              height: 34,
-              flex: 2,
-              borderRadius: 8,
-              background: 'var(--mcad-teal)',
-              border: 'none',
-              color: '#04201c',
-              fontSize: 12,
-              fontFamily: 'var(--font-sans)',
-              fontWeight: 600,
-              cursor: okDisabled ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-              opacity: okDisabled ? 0.45 : 1,
-              transition: 'opacity 0.15s',
-            }}
+            title={!isApplicable ? (OPERATION_REQUIREMENTS[definition.id] || 'Target not applicable') : undefined}
           >
-            {isLoading ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Check size={14} />
-            )}
-            Apply {definition.id}
+            {isLoading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            {!isApplicable
+              ? (OPERATION_REQUIREMENTS[definition.id] || 'Select valid target')
+              : `Apply ${definition.label}`}
           </button>
         </div>
       </div>

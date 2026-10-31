@@ -19,26 +19,24 @@ export default async function LandingPage() {
   const isLoggedIn = Boolean(session);
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-[#080c10] text-zinc-900 dark:text-white selection:bg-blue-500/30 overflow-hidden relative font-sans">
+    <div className="min-h-screen bg-zinc-50 dark:bg-[#090b0f] text-zinc-900 dark:text-foreground selection:bg-primary/20 selection:text-primary overflow-hidden relative font-sans">
 
       {/* ── Ambient background glows ── */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        {/* Ambient background glows removed for a cleaner CAD look */}
-        {/* Grid overlay */}
+        {/* Subtle grid overlay */}
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:48px_48px]" />
       </div>
 
       {/* ── Navigation ── */}
-      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-black/10 dark:border-white/5">
-        <div className="flex items-center justify-between px-6 py-5 max-w-7xl mx-auto w-full">
+      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border/80 dark:border-white/[0.08] bg-background/80 backdrop-blur-xl">
+        <div className="flex items-center justify-between px-6 py-4 max-w-7xl mx-auto w-full">
           
           {/* Targets #home at the top of your page content wrapper */}
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="relative w-12 h-12 flex items-center justify-center">
-              <div className="absolute inset-0 bg-blue-500 rounded-xl transform rotate-45 opacity-20 group-hover:opacity-30 transition-opacity"></div>
-              <Cuboid className="w-7 h-7 text-blue-400 relative z-10" />
+            <div className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-primary/10 border border-primary/30 shadow-[0_0_12px_rgba(6,182,212,0.25)]">
+              <Cuboid className="w-5 h-5 text-primary relative z-10" />
             </div>
-            <span className="text-3xl font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-500 dark:from-gray-100 dark:to-gray-500">
+            <span className="text-2xl font-bold tracking-widest bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-500 dark:from-white dark:to-gray-400">
               VΞXCAD
             </span>
           </Link>
@@ -50,14 +48,14 @@ export default async function LandingPage() {
 
           <div className="flex items-center gap-4">
             {isLoggedIn ? (
-              <Link href="/workspace" className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-zinc-900 dark:bg-blue-600 hover:bg-zinc-800 dark:hover:bg-blue-500 rounded-xl transition-all duration-200 shadow-[0_0_20px_rgba(37,99,235,0.4)]">
+              <Link href="/workspace" className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-primary-foreground bg-primary hover:brightness-110 rounded-xl transition-all duration-200 shadow-[0_0_20px_rgba(6,182,212,0.35)]">
                 Open Workspace
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
             ) : (
               <>
                 <Link href="/login" className="text-sm text-zinc-600 dark:text-gray-400 hover:text-zinc-900 dark:text-white transition-colors font-medium">Sign in</Link>
-                <Link href="/register" className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-zinc-900 dark:bg-blue-600 hover:bg-zinc-800 dark:hover:bg-blue-500 rounded-xl transition-all duration-200 shadow-[0_0_20px_rgba(37,99,235,0.35)]">
+                <Link href="/register" className="group inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold text-primary-foreground bg-primary hover:brightness-110 rounded-xl transition-all duration-200 shadow-[0_0_20px_rgba(6,182,212,0.35)]">
                   Get Started
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </Link>
@@ -71,10 +69,10 @@ export default async function LandingPage() {
       {/* ── Hero ── */}
       <main className="relative z-10 px-6 pt-24 pb-12 max-w-5xl mx-auto text-center">
         <AnimatedSection delay={0} direction="down" duration={0.6}>
-          <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/25 text-blue-400 text-xs font-semibold tracking-widest mb-8 uppercase">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-primary/10 border border-primary/25 text-primary text-xs font-semibold tracking-widest mb-8 uppercase">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary shadow-[0_0_8px_rgba(6,182,212,0.8)]" />
             </span>
             AI-Powered CAM & Quoting
           </div>
@@ -83,7 +81,7 @@ export default async function LandingPage() {
         <AnimatedSection delay={0.1} direction="up" duration={0.9}>
           <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight leading-[1.05] mb-6">
             <span className="block text-zinc-900 dark:text-white mb-1">From Sketch to Spindle.</span>
-            <span className="block text-primary">In Seconds.</span>
+            <span className="block text-gradient-primary">In Seconds.</span>
             <span className="block text-zinc-900 dark:text-white mt-1">Powered by AI.</span>
           </h1>
         </AnimatedSection>
@@ -98,15 +96,15 @@ export default async function LandingPage() {
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
               href={isLoggedIn ? '/workspace' : '/register'}
-              className="group relative inline-flex items-center gap-2 px-8 py-4 text-base font-bold text-white bg-gradient-to-b from-zinc-800 to-zinc-950 dark:from-blue-500 dark:to-blue-700 border border-blue-400/20 rounded-2xl hover:from-zinc-700 dark:hover:from-blue-400 hover:to-zinc-900 dark:hover:to-blue-600 shadow-[0_0_50px_rgba(37,99,235,0.45)] transition-all duration-200 overflow-hidden"
+              className="group relative inline-flex items-center gap-2 px-8 py-3.5 text-base font-bold text-primary-foreground bg-primary hover:brightness-110 rounded-xl shadow-[0_0_35px_rgba(6,182,212,0.4)] transition-all duration-200 overflow-hidden"
             >
-              <div className="absolute inset-0 -ml-16 bg-gradient-to-r from-transparent via-white/15 to-transparent skew-x-[20deg] group-hover:translate-x-[300%] transition-transform duration-700 ease-in-out" />
+              <div className="absolute inset-0 -ml-16 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-[20deg] group-hover:translate-x-[300%] transition-transform duration-700 ease-in-out" />
               {isLoggedIn ? 'Open Workspace' : 'Start Designing for Free'}
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Link>
             <a
               href="#how-it-works"
-              className="inline-flex items-center gap-2 px-8 py-4 text-base font-medium text-zinc-700 dark:text-gray-300 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-2xl hover:bg-black/10 dark:bg-white/8 hover:text-zinc-900 dark:text-white hover:border-white/20 transition-all duration-200 backdrop-blur-sm"
+              className="inline-flex items-center gap-2 px-8 py-3.5 text-base font-medium text-zinc-700 dark:text-gray-300 bg-black/5 dark:bg-card/60 border border-black/10 dark:border-white/[0.08] rounded-xl hover:bg-black/10 dark:hover:bg-card hover:text-zinc-900 dark:text-white transition-all duration-200 backdrop-blur-sm"
             >
               See how it works
               <ChevronRight className="w-4 h-4" />
@@ -119,11 +117,11 @@ export default async function LandingPage() {
       <AnimatedSection delay={0.5} direction="up" duration={1.0} amount={0.05} className="relative z-10 w-full px-4 pb-24">
         <div className="relative w-full max-w-5xl mx-auto" style={{ perspective: '2000px' }}>
           {/* Bottom fade */}
-          <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-zinc-50 dark:from-[#080c10] to-transparent z-20 pointer-events-none rounded-b-3xl" />
+          <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-zinc-50 dark:from-[#090b0f] to-transparent z-20 pointer-events-none rounded-b-3xl" />
           {/* Glow */}
-          <div className="absolute -inset-px rounded-3xl bg-gradient-to-b from-blue-500/20 to-transparent pointer-events-none z-20" />
+          <div className="absolute -inset-px rounded-2xl bg-gradient-to-b from-primary/20 to-transparent pointer-events-none z-20" />
 
-          <div className="relative w-full rounded-2xl border border-black/10 dark:border-white/8 bg-white dark:bg-[#0d1117]/90 backdrop-blur-xl overflow-hidden shadow-[0_40px_120px_rgba(0,0,0,0.8),0_0_60px_rgba(37,99,235,0.12)]">
+          <div className="relative w-full rounded-2xl border border-border/80 dark:border-white/[0.08] bg-card/90 backdrop-blur-xl overflow-hidden shadow-[0_40px_120px_rgba(0,0,0,0.8),0_0_60px_rgba(6,182,212,0.12)]">
             {/* Window chrome */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-black/5 dark:border-white/6 bg-black/5 dark:bg-white/3">
               <div className="flex gap-2">

@@ -56,7 +56,7 @@ The CAD Copilot AI Engine is a Python backend service that converts engineering 
             ▼                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Google GenAI SDK                             │
-│              gemini-3.1-flash-lite model                        │
+│              gemini-3.5-flash-lite model                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -192,7 +192,7 @@ Render the generated script to 3D model files.
 ```bash
 # Google AI
 GOOGLE_API_KEY=your_api_key_here
-GENAI_MODEL=gemini-3.1-flash-lite
+GENAI_MODEL=gemini-3.5-flash-lite
 
 # LLM Codegen
 GENAI_MAX_RETRIES=5
@@ -210,7 +210,7 @@ OUTPUT_DIR=./outputs
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GOOGLE_API_KEY` | Google AI API key | Required |
-| `GENAI_MODEL` | Gemini model to use | `gemini-3.1-flash-lite` |
+| `GENAI_MODEL` | Gemini model to use | `gemini-3.5-flash-lite` |
 | `GENAI_MAX_RETRIES` | Max retry attempts | `5` |
 | `MAX_PROMPT_TOKENS` | Token budget | `12000` |
 | `MAX_OUTPUT_TOKENS` | Max output tokens | `2048` |

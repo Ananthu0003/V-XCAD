@@ -1,7 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { MACHINE_MATRIX, MachineProfile, MachineRecommendationResponse } from "@/lib/cam/machineProfiles"
-import { Settings2, Cpu, Wrench, Search, BoxSelect, Sparkles, CheckCircle2, AlertCircle } from "lucide-react"
+import { Settings2, Cpu, Wrench, Search, BoxSelect, Sparkles, CheckCircle2, AlertCircle, Lightbulb } from "lucide-react"
 import { useState, useMemo } from "react"
 
 const CATEGORIES = [
@@ -244,8 +244,9 @@ export function MachineSelectionModal({
                                         </div>
 
                                         {rec?.reason && (
-                                            <div className="mt-2 pt-2 border-t border-border/30 text-[10px] text-muted-foreground/90 line-clamp-2 leading-relaxed">
-                                                💡 {rec.reason}
+                                            <div className="mt-2 pt-2 border-t border-border/30 text-[10px] text-muted-foreground/90 line-clamp-2 leading-relaxed flex items-start gap-1.5">
+                                                <Lightbulb className="size-3 text-amber-500 shrink-0 mt-0.5" />
+                                                <span>{rec.reason}</span>
                                             </div>
                                         )}
                                     </button>

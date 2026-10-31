@@ -46,7 +46,7 @@ The ai-engine backend processes engineering drawings (PDF/image) and generates p
             ▼                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Google GenAI SDK                             │
-│              gemini-3.1-flash-lite model                        │
+│              gemini-3.5-flash-lite model                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -161,7 +161,7 @@ The ai-engine backend processes engineering drawings (PDF/image) and generates p
 ```bash
 # Google AI
 GOOGLE_API_KEY=your_api_key_here
-GENAI_MODEL=gemini-3.1-flash-lite
+GENAI_MODEL=gemini-3.5-flash-lite
 
 # LLM Codegen
 GENAI_MAX_RETRIES=5

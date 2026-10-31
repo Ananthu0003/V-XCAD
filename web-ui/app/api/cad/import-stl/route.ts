@@ -62,7 +62,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     const outputsDir = resolveOutputsDir();
 
     if (outputsDir) {
-      await writeFile(join(outputsDir, filenameOnDisk), buffer);
+      try {
+        await writeFile(join(outputsDir, filenameOnDisk), buffer);
+      } catch (writeErr) {
+        console.warn('Direct file write to outputs directory failed:', writeErr);
+      }
     } else {
       // Host-side local development fallback
       const devDirs = [

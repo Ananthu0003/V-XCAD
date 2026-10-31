@@ -1,7 +1,42 @@
 import { SetupSettings, Tool, CamOperation, CamFeature, CamSetupPlan, CostEstimateResult } from '@/types/cam';
-import { Target, Layers, Settings2, Scissors, Activity, FileCode, CircleDollarSign, AlertTriangle } from 'lucide-react';
+import { Target, Layers, Settings2, Scissors, Activity, FileCode, CircleDollarSign, AlertTriangle, CheckCircle2, RefreshCw, Ban, AlertCircle, RotateCw } from 'lucide-react';
 import { MACHINE_MATRIX } from '@/lib/cam/machineProfiles';
 import { getMaterialLabel } from '@/lib/cam/materialProfiles';
+
+function renderFeatureStatus(status: string) {
+    if (status === 'machinable_in_secondary_setup') {
+        return <span className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-400 font-medium"><RefreshCw className="size-3" /> Secondary setup</span>;
+    }
+    if (status === 'requires_turning') {
+        return <span className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-400 font-medium"><RotateCw className="size-3" /> Requires turning</span>;
+    }
+    if (status === 'requires_4axis_indexing') {
+        return <span className="inline-flex items-center gap-1 text-cyan-600 dark:text-cyan-400 font-medium"><RotateCw className="size-3" /> 4-axis indexing</span>;
+    }
+    if (status === 'unsupported' || status !== 'machinable_in_active_setup') {
+        return <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400 font-semibold"><Ban className="size-3" /> Blocked</span>;
+    }
+    return <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold"><CheckCircle2 className="size-3" /> Machinable</span>;
+}
+
+function renderOperationStatus(status?: string) {
+    if (status === 'ready' || status === 'planned' || !status) {
+        return <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold"><CheckCircle2 className="size-3" /> OK</span>;
+    }
+    if (status === 'error') {
+        return <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400 font-semibold"><AlertCircle className="size-3" /> Error</span>;
+    }
+    if (status === 'blocked' || status === 'blocked_requires_reorientation') {
+        return <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold"><Ban className="size-3" /> Blocked</span>;
+    }
+    if (status === 'missing_tool') {
+        return <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold"><AlertTriangle className="size-3" /> No Tool</span>;
+    }
+    if (status === 'requires_regeneration' || status === 'outdated') {
+        return <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold"><RefreshCw className="size-3" /> Needs Regen</span>;
+    }
+    return <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold"><CheckCircle2 className="size-3" /> {status}</span>;
+}
 
 function fmt(currency: string, value?: number): string {
     if (value == null || isNaN(value)) return '—';
@@ -137,7 +172,10 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                             {costEstimate.warnings && costEstimate.warnings.length > 0 && (
                                 <div className="text-[9px] text-amber-600 dark:text-amber-400 flex flex-col gap-0.5 mt-1">
                                     {costEstimate.warnings.map((w, i) => (
-                                        <span key={i}>⚠ {w.message}</span>
+                                        <span key={i} className="inline-flex items-center gap-1">
+                                            <AlertTriangle className="size-3 shrink-0" />
+                                            <span>{w.message}</span>
+                                        </span>
                                     ))}
                                 </div>
                             )}
@@ -185,29 +223,14 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                     <div className="flex flex-col gap-1 mt-1">
                                         {setupFeatures.map(f => {
                                             const status = f.machining_info?.status || 'machinable_in_active_setup';
-                                            let statusLabel = '✅ Machinable';
-                                            let isBlocked = false;
-
-                                            if (status === 'machinable_in_secondary_setup') {
-                                                statusLabel = '🔄 Assigned to secondary setup';
-                                            } else if (status === 'requires_turning') {
-                                                statusLabel = '🔄 Requires turning';
-                                            } else if (status === 'requires_4axis_indexing') {
-                                                statusLabel = '🔄 Requires 4-axis indexing';
-                                            } else if (status === 'unsupported') {
-                                                statusLabel = '🛑 Blocked';
-                                                isBlocked = true;
-                                            } else if (status !== 'machinable_in_active_setup') {
-                                                statusLabel = `🛑 Blocked (${status})`;
-                                                isBlocked = true;
-                                            }
+                                            const isBlocked = status === 'unsupported' || (status !== 'machinable_in_active_setup' && status !== 'machinable_in_secondary_setup' && status !== 'requires_turning' && status !== 'requires_4axis_indexing');
 
                                             return (
                                                 <div key={f.id} className="text-[11px] flex flex-col gap-0.5 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
                                                     <div className="flex justify-between items-start">
                                                         <span className="text-foreground font-medium capitalize">{f.name || f.type?.replace('_', ' ')}</span>
                                                         <span className="text-[10px] whitespace-nowrap">
-                                                            {statusLabel}
+                                                            {renderFeatureStatus(status)}
                                                         </span>
                                                     </div>
                                                     {isBlocked && f.machining_info?.reason && (
@@ -234,7 +257,7 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                                     <div className="flex justify-between items-start">
                                                         <span className="text-foreground font-medium capitalize">{op.name || op.type?.replace('_', ' ')}</span>
                                                         <span className="text-[10px] whitespace-nowrap">
-                                                            {op.status === 'ready' || op.status === 'planned' ? '🟢 OK' : op.status === 'error' ? '🔴 Error' : op.status === 'blocked' || op.status === 'blocked_requires_reorientation' ? '🚧 Blocked' : op.status === 'missing_tool' ? '⚠️ No Tool' : op.status === 'requires_regeneration' ? '⚠️ Needs Regen' : op.status || '🟢 OK'}
+                                                            {renderOperationStatus(op.status)}
                                                         </span>
                                                     </div>
                                                     <div className="flex flex-col gap-0.5 text-[9px] text-muted-foreground font-mono ml-1 border-l border-border/50 pl-2">
@@ -307,29 +330,14 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                 ) : (
                                     features.map(f => {
                                         const status = f.machining_info?.status || 'machinable_in_active_setup';
-                                        let statusLabel = '✅ Machinable';
-                                        let isBlocked = false;
-
-                                        if (status === 'machinable_in_secondary_setup') {
-                                            statusLabel = '🔄 Assigned to secondary setup';
-                                        } else if (status === 'requires_turning') {
-                                            statusLabel = '🔄 Requires turning';
-                                        } else if (status === 'requires_4axis_indexing') {
-                                            statusLabel = '🔄 Requires 4-axis indexing';
-                                        } else if (status === 'unsupported') {
-                                            statusLabel = '🛑 Blocked';
-                                            isBlocked = true;
-                                        } else if (status !== 'machinable_in_active_setup') {
-                                            statusLabel = `🛑 Blocked (${status})`;
-                                            isBlocked = true;
-                                        }
+                                        const isBlocked = status === 'unsupported' || (status !== 'machinable_in_active_setup' && status !== 'machinable_in_secondary_setup' && status !== 'requires_turning' && status !== 'requires_4axis_indexing');
 
                                         return (
                                             <div key={f.id} className="text-[11px] flex flex-col gap-0.5 pb-2 mb-2 border-b border-border/40 last:border-0 last:pb-0 last:mb-0">
                                                 <div className="flex justify-between items-start">
                                                     <span className="text-foreground font-medium capitalize">{f.name || f.type?.replace('_', ' ')}</span>
                                                     <span className="text-[10px] whitespace-nowrap">
-                                                        {statusLabel}
+                                                        {renderFeatureStatus(status)}
                                                     </span>
                                                 </div>
                                                 <div className="flex flex-col gap-0.5 text-[9px] text-muted-foreground font-mono ml-1 border-l border-border/50 pl-2">
@@ -372,7 +380,7 @@ export function CamSummaryPanel({ setup, setups = [], tools, operations, feature
                                                 <div className="flex justify-between items-start">
                                                     <span className="text-foreground font-medium capitalize">{op.name || op.type?.replace('_', ' ')}</span>
                                                     <span className="text-[10px] whitespace-nowrap">
-                                                        {displayStatus === 'ready' || displayStatus === 'planned' ? '🟢 OK' : displayStatus === 'error' ? '🔴 Error' : displayStatus === 'blocked' || displayStatus === 'blocked_requires_reorientation' ? '🚧 Blocked' : displayStatus === 'missing_tool' ? '⚠️ No Tool' : displayStatus === 'requires_regeneration' || displayStatus === 'outdated' ? '⚠️ Needs Regen' : displayStatus || '🟢 OK'}
+                                                        {renderOperationStatus(displayStatus)}
                                                     </span>
                                                 </div>
                                                 <div className="flex flex-col gap-0.5 text-[9px] text-muted-foreground font-mono ml-1 border-l border-border/50 pl-2">
